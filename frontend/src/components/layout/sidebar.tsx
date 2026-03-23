@@ -10,6 +10,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Zap,
+  User,
+  Plug,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useUIStore } from "@/store/ui-store"
@@ -23,7 +25,9 @@ const navItems = [
 ] as const
 
 const settingsItems = [
+  { href: "/configuracoes/conta", label: "Conta", icon: User },
   { href: "/configuracoes/llm", label: "Modelos LLM", icon: Zap },
+  { href: "/configuracoes/unipile", label: "Unipile", icon: Plug },
   { href: "/configuracoes/integracoes", label: "Integrações", icon: Settings },
 ] as const
 
@@ -36,22 +40,22 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "group relative flex h-full flex-col border-r border-[var(--border-default)] bg-[var(--bg-surface)] transition-[width] duration-200",
+        "group relative flex h-full flex-col border-r border-(--border-default) bg-(--bg-surface) transition-[width] duration-200",
         sidebarCollapsed ? "w-14" : "w-56",
       )}
     >
       {/* Logo */}
       <div
         className={cn(
-          "flex h-14 items-center border-b border-[var(--border-default)] px-3",
+          "flex h-14 items-center border-b border-(--border-default) px-3",
           sidebarCollapsed ? "justify-center" : "gap-2",
         )}
       >
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-[var(--accent)]">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-(--accent)">
           <span className="text-[10px] font-bold text-white">P</span>
         </div>
         {!sidebarCollapsed && (
-          <span className="text-sm font-semibold text-[var(--text-primary)]">Prospector</span>
+          <span className="text-sm font-semibold text-(--text-primary)">Prospector</span>
         )}
       </div>
 
@@ -65,10 +69,10 @@ export function Sidebar() {
               href={href}
               title={sidebarCollapsed ? label : undefined}
               className={cn(
-                "flex items-center gap-2.5 rounded-[var(--radius-md)] px-2.5 py-2 text-sm transition-colors",
+                "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors",
                 active
-                  ? "bg-[var(--accent-subtle)] text-[var(--accent-subtle-fg)] font-medium"
-                  : "text-[var(--text-secondary)] hover:bg-[var(--bg-overlay)] hover:text-[var(--text-primary)]",
+                  ? "bg-(--accent-subtle) text-(--accent-subtle-fg) font-medium"
+                  : "text-(--text-secondary) hover:bg-(--bg-overlay) hover:text-(--text-primary)",
                 sidebarCollapsed && "justify-center",
               )}
             >
@@ -79,11 +83,11 @@ export function Sidebar() {
         })}
 
         {/* Separador */}
-        <div className="my-2 border-t border-[var(--border-subtle)]" />
+        <div className="my-2 border-t border-(--border-subtle)" />
 
         {/* Configurações */}
         {!sidebarCollapsed && (
-          <p className="mb-1 px-2.5 text-[11px] font-medium uppercase tracking-wider text-[var(--text-tertiary)]">
+          <p className="mb-1 px-2.5 text-[11px] font-medium uppercase tracking-wider text-(--text-tertiary)">
             Configurações
           </p>
         )}
@@ -95,10 +99,10 @@ export function Sidebar() {
               href={href}
               title={sidebarCollapsed ? label : undefined}
               className={cn(
-                "flex items-center gap-2.5 rounded-[var(--radius-md)] px-2.5 py-2 text-sm transition-colors",
+                "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors",
                 active
-                  ? "bg-[var(--accent-subtle)] text-[var(--accent-subtle-fg)] font-medium"
-                  : "text-[var(--text-secondary)] hover:bg-[var(--bg-overlay)] hover:text-[var(--text-primary)]",
+                  ? "bg-(--accent-subtle) text-(--accent-subtle-fg) font-medium"
+                  : "text-(--text-secondary) hover:bg-(--bg-overlay) hover:text-(--text-primary)",
                 sidebarCollapsed && "justify-center",
               )}
             >
@@ -114,7 +118,7 @@ export function Sidebar() {
         type="button"
         onClick={toggleSidebar}
         aria-label={sidebarCollapsed ? "Expandir menu" : "Recolher menu"}
-        className="m-2 flex items-center justify-center rounded-[var(--radius-md)] border border-[var(--border-default)] py-1.5 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-overlay)] hover:text-[var(--text-secondary)]"
+        className="m-2 flex items-center justify-center rounded-md border border-(--border-default) py-1.5 text-(--text-tertiary) transition-colors hover:bg-(--bg-overlay) hover:text-(--text-secondary)"
       >
         {sidebarCollapsed ? (
           <ChevronRight size={14} aria-hidden="true" />
