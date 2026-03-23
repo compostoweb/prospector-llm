@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { Users, GitBranch, CheckCircle, Send, MessageSquare } from "lucide-react"
 import { StatCard } from "@/components/dashboard/stat-card"
@@ -18,8 +18,8 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-lg font-semibold text-[var(--text-primary)]">Dashboard</h1>
-        <p className="text-sm text-[var(--text-secondary)]">Visão geral da prospecção</p>
+        <h1 className="text-lg font-semibold text-(--text-primary)">Dashboard</h1>
+        <p className="text-sm text-(--text-secondary)">Visão geral da prospecção</p>
       </div>
 
       {/* Stats */}
@@ -50,15 +50,15 @@ export default function DashboardPage() {
 
       {/* Gráfico + Respostas recentes */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-5 shadow-[var(--shadow-sm)]">
-          <h2 className="mb-4 text-sm font-semibold text-[var(--text-primary)]">
+        <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-5 shadow-(--shadow-sm)">
+          <h2 className="mb-4 text-sm font-semibold text-(--text-primary)">
             Atividade por canal — últimos 30 dias
           </h2>
           <ChannelChart data={channels ?? []} isLoading={loadingChannels} />
         </div>
 
-        <div className="rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-5 shadow-[var(--shadow-sm)]">
-          <h2 className="mb-4 flex items-center gap-1.5 text-sm font-semibold text-[var(--text-primary)]">
+        <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-5 shadow-(--shadow-sm)">
+          <h2 className="mb-4 flex items-center gap-1.5 text-sm font-semibold text-(--text-primary)">
             <MessageSquare size={15} aria-hidden="true" />
             Respostas recentes
           </h2>

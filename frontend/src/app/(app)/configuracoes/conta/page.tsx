@@ -1,1 +1,1 @@
-export { default } from "./conta-page"
+﻿export { default } from "./conta-page"

@@ -1,4 +1,4 @@
-import Link from "next/link"
+﻿import Link from "next/link"
 import { truncate } from "@/lib/utils"
 import { LeadScore } from "@/components/leads/lead-score"
 import { BadgeIntent } from "@/components/shared/badge-intent"
@@ -15,11 +15,11 @@ const statusLabel: Record<Lead["status"], string> = {
 }
 
 const statusClass: Record<Lead["status"], string> = {
-  raw: "bg-[var(--neutral-subtle)] text-[var(--neutral-subtle-fg)]",
-  enriched: "bg-[var(--info-subtle)] text-[var(--info-subtle-fg)]",
-  in_cadence: "bg-[var(--accent-subtle)] text-[var(--accent-subtle-fg)]",
-  converted: "bg-[var(--success-subtle)] text-[var(--success-subtle-fg)]",
-  archived: "bg-[var(--neutral-subtle)] text-[var(--text-disabled)]",
+  raw: "bg-(--neutral-subtle) text-(--neutral-subtle-fg)",
+  enriched: "bg-(--info-subtle) text-(--info-subtle-fg)",
+  in_cadence: "bg-(--accent-subtle) text-(--accent-subtle-fg)",
+  converted: "bg-(--success-subtle) text-(--success-subtle-fg)",
+  archived: "bg-(--neutral-subtle) text-(--text-disabled)",
 }
 
 interface LeadTableProps {
@@ -34,7 +34,7 @@ export function LeadTable({ leads, isLoading }: LeadTableProps) {
         {Array.from({ length: 6 }).map((_, i) => (
           <div
             key={i}
-            className="h-14 animate-pulse rounded-[var(--radius-md)] bg-[var(--bg-overlay)]"
+            className="h-14 animate-pulse rounded-md bg-(--bg-overlay)"
           />
         ))}
       </div>
@@ -52,46 +52,46 @@ export function LeadTable({ leads, isLoading }: LeadTableProps) {
   }
 
   return (
-    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-default)]">
+    <div className="overflow-hidden rounded-lg border border-(--border-default)">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-[var(--border-default)] bg-[var(--bg-overlay)]">
-            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--text-tertiary)]">
+          <tr className="border-b border-(--border-default) bg-(--bg-overlay)">
+            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
               Lead
             </th>
-            <th className="hidden px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--text-tertiary)] md:table-cell">
+            <th className="hidden px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-tertiary) md:table-cell">
               Empresa
             </th>
-            <th className="hidden px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--text-tertiary)] lg:table-cell">
+            <th className="hidden px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-tertiary) lg:table-cell">
               Status
             </th>
-            <th className="hidden px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--text-tertiary)] lg:table-cell">
+            <th className="hidden px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-tertiary) lg:table-cell">
               Intenção
             </th>
-            <th className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-[var(--text-tertiary)]">
+            <th className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
               Score
             </th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-[var(--border-subtle)] bg-[var(--bg-surface)]">
+        <tbody className="divide-y divide-(--border-subtle) bg-(--bg-surface)">
           {leads.map((lead) => (
-            <tr key={lead.id} className="transition-colors hover:bg-[var(--bg-overlay)]">
+            <tr key={lead.id} className="transition-colors hover:bg-(--bg-overlay)">
               <td className="px-4 py-3">
                 <Link href={`/leads/${lead.id}`} className="block hover:underline">
-                  <p className="font-medium text-[var(--text-primary)]">{lead.full_name}</p>
+                  <p className="font-medium text-(--text-primary)">{lead.full_name}</p>
                   {lead.job_title && (
-                    <p className="text-xs text-[var(--text-tertiary)]">
+                    <p className="text-xs text-(--text-tertiary)">
                       {truncate(lead.job_title, 40)}
                     </p>
                   )}
                 </Link>
               </td>
-              <td className="hidden px-4 py-3 text-[var(--text-secondary)] md:table-cell">
+              <td className="hidden px-4 py-3 text-(--text-secondary) md:table-cell">
                 {lead.company_name ?? "—"}
               </td>
               <td className="hidden px-4 py-3 lg:table-cell">
                 <span
-                  className={`inline-flex rounded-[var(--radius-full)] px-2 py-0.5 text-xs font-medium ${statusClass[lead.status]}`}
+                  className={`inline-flex rounded-(--radius-full) px-2 py-0.5 text-xs font-medium ${statusClass[lead.status]}`}
                 >
                   {statusLabel[lead.status]}
                 </span>
@@ -100,7 +100,7 @@ export function LeadTable({ leads, isLoading }: LeadTableProps) {
                 {lead.last_intent ? (
                   <BadgeIntent intent={lead.last_intent} />
                 ) : (
-                  <span className="text-[var(--text-disabled)]">—</span>
+                  <span className="text-(--text-disabled)">—</span>
                 )}
               </td>
               <td className="px-4 py-3 text-center">

@@ -84,11 +84,14 @@ const url = process.env.NEXT_PUBLIC_API_URL;
 ### Cores — sempre via tokens CSS do design-system
 
 ```typescript
-// CORRETO
-className="bg-[var(--bg-surface)] text-[var(--text-primary)]"
+// CORRETO — sintaxe Tailwind v4 (CSS variable shorthand)
+className="bg-(--bg-surface) text-(--text-primary)"
 style={{ color: "var(--accent)" }}
 
-// ERRADO
+// ERRADO — sintaxe antiga (Tailwind v3), gera warnings no linter
+className="bg-[var(--bg-surface)] text-[var(--text-primary)]"
+
+// ERRADO — nunca hardcodar cores Tailwind padrão
 className="bg-white text-gray-900 text-blue-600"
 ```
 

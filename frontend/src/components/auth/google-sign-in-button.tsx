@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useState } from "react"
 import { env } from "@/env"
@@ -17,7 +17,7 @@ export function GoogleSignInButton() {
       type="button"
       onClick={handleSignIn}
       disabled={loading}
-      className="flex w-full items-center justify-center gap-3 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-2.5 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-overlay)] disabled:cursor-not-allowed disabled:opacity-60"
+      className="flex w-full items-center justify-center gap-3 rounded-md border border-(--border-default) bg-(--bg-surface) px-4 py-2.5 text-sm font-medium text-(--text-primary) transition-colors hover:bg-(--bg-overlay) disabled:cursor-not-allowed disabled:opacity-60"
     >
       {loading ? (
         <>

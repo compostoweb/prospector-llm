@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { Plus, Trash2, GripVertical } from "lucide-react"
 import type { CadenceStep } from "@/lib/api/hooks/use-cadences"
@@ -42,12 +42,12 @@ export function CadenceSteps({ value, onChange }: CadenceStepsProps) {
       {value.map((step, index) => (
         <div
           key={index}
-          className="rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-4"
+          className="rounded-md border border-(--border-default) bg-(--bg-surface) p-4"
         >
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <GripVertical size={14} className="text-[var(--text-disabled)]" aria-hidden="true" />
-              <span className="text-xs font-semibold text-[var(--text-tertiary)]">
+              <GripVertical size={14} className="text-(--text-disabled)" aria-hidden="true" />
+              <span className="text-xs font-semibold text-(--text-tertiary)">
                 PASSO {step.step_number}
               </span>
             </div>
@@ -55,7 +55,7 @@ export function CadenceSteps({ value, onChange }: CadenceStepsProps) {
               type="button"
               onClick={() => removeStep(index)}
               aria-label={`Remover passo ${step.step_number}`}
-              className="text-[var(--text-tertiary)] transition-colors hover:text-[var(--danger)]"
+              className="text-(--text-tertiary) transition-colors hover:text-(--danger)"
             >
               <Trash2 size={14} aria-hidden="true" />
             </button>
@@ -64,13 +64,13 @@ export function CadenceSteps({ value, onChange }: CadenceStepsProps) {
           <div className="grid grid-cols-2 gap-3">
             {/* Canal */}
             <div>
-              <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
+              <label className="mb-1 block text-xs font-medium text-(--text-secondary)">
                 Canal
               </label>
               <select
                 value={step.channel}
                 onChange={(e) => updateStep(index, "channel", e.target.value)}
-                className="w-full rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
+                className="w-full rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-sm text-(--text-primary) focus:border-(--accent) focus:outline-none"
               >
                 {CHANNEL_OPTIONS.map(({ value: v, label }) => (
                   <option key={v} value={v}>
@@ -82,7 +82,7 @@ export function CadenceSteps({ value, onChange }: CadenceStepsProps) {
 
             {/* Delay */}
             <div>
-              <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
+              <label className="mb-1 block text-xs font-medium text-(--text-secondary)">
                 Dias de espera
               </label>
               <input
@@ -91,16 +91,16 @@ export function CadenceSteps({ value, onChange }: CadenceStepsProps) {
                 max={90}
                 value={step.delay_days}
                 onChange={(e) => updateStep(index, "delay_days", Number(e.target.value))}
-                className="w-full rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
+                className="w-full rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-sm text-(--text-primary) focus:border-(--accent) focus:outline-none"
               />
             </div>
           </div>
 
           {/* Template da mensagem */}
           <div className="mt-3">
-            <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
+            <label className="mb-1 block text-xs font-medium text-(--text-secondary)">
               Template da mensagem
-              <span className="ml-1 text-[var(--text-tertiary)]">
+              <span className="ml-1 text-(--text-tertiary)">
                 (use {"{lead_name}"}, {"{company}"}, {"{job_title}"})
               </span>
             </label>
@@ -109,7 +109,7 @@ export function CadenceSteps({ value, onChange }: CadenceStepsProps) {
               onChange={(e) => updateStep(index, "message_template", e.target.value)}
               rows={3}
               placeholder="Olá {lead_name}, vi que você trabalha na {company}…"
-              className="w-full resize-none rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:border-[var(--accent)] focus:outline-none"
+              className="w-full resize-none rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-sm text-(--text-primary) placeholder:text-(--text-tertiary) focus:border-(--accent) focus:outline-none"
             />
           </div>
         </div>
@@ -118,7 +118,7 @@ export function CadenceSteps({ value, onChange }: CadenceStepsProps) {
       <button
         type="button"
         onClick={addStep}
-        className="flex w-full items-center justify-center gap-2 rounded-[var(--radius-md)] border border-dashed border-[var(--border-default)] py-3 text-sm text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+        className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-(--border-default) py-3 text-sm text-(--text-secondary) transition-colors hover:border-(--accent) hover:text-(--accent)"
       >
         <Plus size={14} aria-hidden="true" />
         Adicionar passo

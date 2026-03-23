@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest"
+﻿import { describe, it, expect, beforeEach } from "vitest"
 import { useNotificationsStore } from "@/store/notifications-store"
 import type { NotificationKind } from "@/store/notifications-store"
 

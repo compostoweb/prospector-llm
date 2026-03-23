@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth/config"
+﻿import { auth } from "@/lib/auth/config"
 
 export default auth((req) => {
   // Usuário não autenticado → redireciona para /login

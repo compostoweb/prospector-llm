@@ -1,3 +1,1 @@
-import { handlers } from "@/lib/auth/config"
-
-export const { GET, POST } = handlers
+﻿export { default } from "./login-page"

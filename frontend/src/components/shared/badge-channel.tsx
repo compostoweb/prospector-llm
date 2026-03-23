@@ -1,4 +1,4 @@
-import { cn, channelLabel } from "@/lib/utils"
+﻿import { cn, channelLabel } from "@/lib/utils"
 import { Mail, Linkedin, UserPlus } from "lucide-react"
 
 interface BadgeChannelProps {
@@ -16,7 +16,7 @@ export function BadgeChannel({ channel, className }: BadgeChannelProps) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-[var(--radius-full)] border border-[var(--border-default)] bg-[var(--bg-overlay)] px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)]",
+        "inline-flex items-center gap-1 rounded-(--radius-full) border border-(--border-default) bg-(--bg-overlay) px-2 py-0.5 text-xs font-medium text-(--text-secondary)",
         className,
       )}
     >

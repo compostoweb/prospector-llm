@@ -1,4 +1,4 @@
-import type { Metadata } from "next"
+﻿import type { Metadata } from "next"
 import { DM_Sans } from "next/font/google"
 import { SessionProvider } from "next-auth/react"
 import { ThemeProvider } from "next-themes"

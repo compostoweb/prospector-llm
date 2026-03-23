@@ -1,4 +1,4 @@
-import "@testing-library/jest-dom"
+﻿import "@testing-library/jest-dom"
 
 // Mock localStorage — jsdom neste ambiente não implementa Web Storage direito
 // (o persist do Zustand precisa de getItem/setItem/removeItem/clear funcionais)

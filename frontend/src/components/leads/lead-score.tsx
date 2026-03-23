@@ -1,4 +1,4 @@
-import { cn, scoreVariant } from "@/lib/utils"
+﻿import { cn, scoreVariant } from "@/lib/utils"
 
 interface LeadScoreProps {
   score: number
@@ -8,15 +8,15 @@ interface LeadScoreProps {
 }
 
 const variantColors: Record<ReturnType<typeof scoreVariant>, string> = {
-  success: "text-[var(--success)] bg-[var(--success-subtle)]",
-  warning: "text-[var(--warning)] bg-[var(--warning-subtle)]",
-  danger: "text-[var(--danger)] bg-[var(--danger-subtle)]",
+  success: "text-(--success) bg-(--success-subtle)",
+  warning: "text-(--warning) bg-(--warning-subtle)",
+  danger: "text-(--danger) bg-(--danger-subtle)",
 }
 
 const ringColors: Record<ReturnType<typeof scoreVariant>, string> = {
-  success: "stroke-[var(--success)]",
-  warning: "stroke-[var(--warning)]",
-  danger: "stroke-[var(--danger)]",
+  success: "stroke-(--success)",
+  warning: "stroke-(--warning)",
+  danger: "stroke-(--danger)",
 }
 
 export function LeadScore({ score, size = "md", showLabel = false, className }: LeadScoreProps) {
@@ -74,7 +74,7 @@ export function LeadScore({ score, size = "md", showLabel = false, className }: 
         </span>
       </div>
 
-      {showLabel && <span className="text-xs text-[var(--text-secondary)]">score</span>}
+      {showLabel && <span className="text-xs text-(--text-secondary)">score</span>}
     </div>
   )
 }

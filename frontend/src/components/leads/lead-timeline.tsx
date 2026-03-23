@@ -1,4 +1,4 @@
-import { formatRelativeTime } from "@/lib/utils"
+﻿import { formatRelativeTime } from "@/lib/utils"
 import { BadgeIntent } from "@/components/shared/badge-intent"
 import { BadgeChannel } from "@/components/shared/badge-channel"
 import { EmptyState } from "@/components/shared/empty-state"
@@ -14,11 +14,11 @@ const stepStatusLabel: Record<LeadStep["status"], string> = {
 }
 
 const stepStatusClass: Record<LeadStep["status"], string> = {
-  pending: "bg-[var(--neutral-subtle)] text-[var(--neutral-subtle-fg)]",
-  sent: "bg-[var(--info-subtle)] text-[var(--info-subtle-fg)]",
-  replied: "bg-[var(--success-subtle)] text-[var(--success-subtle-fg)]",
-  skipped: "bg-[var(--neutral-subtle)] text-[var(--text-disabled)]",
-  failed: "bg-[var(--danger-subtle)] text-[var(--danger-subtle-fg)]",
+  pending: "bg-(--neutral-subtle) text-(--neutral-subtle-fg)",
+  sent: "bg-(--info-subtle) text-(--info-subtle-fg)",
+  replied: "bg-(--success-subtle) text-(--success-subtle-fg)",
+  skipped: "bg-(--neutral-subtle) text-(--text-disabled)",
+  failed: "bg-(--danger-subtle) text-(--danger-subtle-fg)",
 }
 
 interface LeadTimelineProps {
@@ -32,10 +32,10 @@ export function LeadTimeline({ steps, isLoading }: LeadTimelineProps) {
       <div className="space-y-4">
         {Array.from({ length: 3 }).map((_, i) => (
           <div key={i} className="flex gap-3">
-            <div className="h-8 w-8 animate-pulse rounded-full bg-[var(--bg-overlay)]" />
+            <div className="h-8 w-8 animate-pulse rounded-full bg-(--bg-overlay)" />
             <div className="flex-1 space-y-2">
-              <div className="h-4 w-32 animate-pulse rounded bg-[var(--bg-overlay)]" />
-              <div className="h-12 animate-pulse rounded bg-[var(--bg-overlay)]" />
+              <div className="h-4 w-32 animate-pulse rounded bg-(--bg-overlay)" />
+              <div className="h-12 animate-pulse rounded bg-(--bg-overlay)" />
             </div>
           </div>
         ))}
@@ -65,7 +65,7 @@ export function LeadTimeline({ steps, isLoading }: LeadTimelineProps) {
               {step.step_number}
             </div>
             {index < steps.length - 1 && (
-              <div className="mt-1 h-full w-px bg-[var(--border-subtle)]" />
+              <div className="mt-1 h-full w-px bg-(--border-subtle)" />
             )}
           </div>
 
@@ -74,31 +74,31 @@ export function LeadTimeline({ steps, isLoading }: LeadTimelineProps) {
             <div className="flex flex-wrap items-center gap-2">
               <BadgeChannel channel={step.channel} />
               <span
-                className={`inline-flex rounded-[var(--radius-full)] px-2 py-0.5 text-xs font-medium ${stepStatusClass[step.status]}`}
+                className={`inline-flex rounded-(--radius-full) px-2 py-0.5 text-xs font-medium ${stepStatusClass[step.status]}`}
               >
                 {stepStatusLabel[step.status]}
               </span>
               {step.sent_at && (
-                <time dateTime={step.sent_at} className="text-xs text-[var(--text-tertiary)]">
+                <time dateTime={step.sent_at} className="text-xs text-(--text-tertiary)">
                   {formatRelativeTime(step.sent_at)}
                 </time>
               )}
             </div>
 
             {step.message_content && (
-              <div className="mt-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-overlay)] px-3 py-2">
-                <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
+              <div className="mt-2 rounded-md border border-(--border-subtle) bg-(--bg-overlay) px-3 py-2">
+                <p className="text-xs leading-relaxed text-(--text-secondary)">
                   {step.message_content}
                 </p>
               </div>
             )}
 
             {step.reply_content && (
-              <div className="mt-2 rounded-[var(--radius-md)] border border-[var(--success-subtle)] bg-[var(--success-subtle)] px-3 py-2">
-                <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-[var(--success-subtle-fg)]">
+              <div className="mt-2 rounded-md border border-(--success-subtle) bg-(--success-subtle) px-3 py-2">
+                <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-(--success-subtle-fg)">
                   Resposta
                 </p>
-                <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
+                <p className="text-xs leading-relaxed text-(--text-secondary)">
                   {step.reply_content}
                 </p>
                 {step.intent && (

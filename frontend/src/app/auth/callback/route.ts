@@ -1,4 +1,4 @@
-import { signIn } from "@/lib/auth/config"
+﻿import { signIn } from "@/lib/auth/config"
 import { AuthError } from "next-auth"
 
 export async function GET(request: Request): Promise<Response> {

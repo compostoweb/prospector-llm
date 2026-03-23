@@ -1,4 +1,4 @@
-import Link from "next/link"
+﻿import Link from "next/link"
 import { formatRelativeTime } from "@/lib/utils"
 import { BadgeIntent } from "@/components/shared/badge-intent"
 import { BadgeChannel } from "@/components/shared/badge-channel"
@@ -18,7 +18,7 @@ export function RecentReplies({ replies, isLoading }: RecentRepliesProps) {
         {Array.from({ length: 4 }).map((_, i) => (
           <div
             key={i}
-            className="h-14 animate-pulse rounded-[var(--radius-md)] bg-[var(--bg-overlay)]"
+            className="h-14 animate-pulse rounded-md bg-(--bg-overlay)"
           />
         ))}
       </div>
@@ -41,14 +41,14 @@ export function RecentReplies({ replies, isLoading }: RecentRepliesProps) {
         <li key={`${reply.lead_id}-${reply.replied_at}`}>
           <Link
             href={`/leads/${reply.lead_id}`}
-            className="flex items-center justify-between gap-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2.5 transition-colors hover:border-[var(--border-default)] hover:bg-[var(--bg-overlay)]"
+            className="flex items-center justify-between gap-3 rounded-md border border-(--border-subtle) bg-(--bg-surface) px-3 py-2.5 transition-colors hover:border-(--border-default) hover:bg-(--bg-overlay)"
           >
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-[var(--text-primary)]">
+              <p className="truncate text-sm font-medium text-(--text-primary)">
                 {reply.lead_name}
               </p>
               {reply.company_name && (
-                <p className="truncate text-xs text-[var(--text-tertiary)]">{reply.company_name}</p>
+                <p className="truncate text-xs text-(--text-tertiary)">{reply.company_name}</p>
               )}
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -56,7 +56,7 @@ export function RecentReplies({ replies, isLoading }: RecentRepliesProps) {
               <BadgeIntent intent={reply.intent} />
               <time
                 dateTime={reply.replied_at}
-                className="whitespace-nowrap text-xs text-[var(--text-tertiary)]"
+                className="whitespace-nowrap text-xs text-(--text-tertiary)"
               >
                 {formatRelativeTime(reply.replied_at)}
               </time>

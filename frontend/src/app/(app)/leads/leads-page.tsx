@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useState } from "react"
 import { useLeads } from "@/lib/api/hooks/use-leads"
@@ -40,8 +40,8 @@ export default function LeadsPage() {
       {/* Cabeçalho */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-[var(--text-primary)]">Leads</h1>
-          <p className="text-sm text-[var(--text-secondary)]">
+          <h1 className="text-lg font-semibold text-(--text-primary)">Leads</h1>
+          <p className="text-sm text-(--text-secondary)">
             {data ? `${data.total} lead${data.total !== 1 ? "s" : ""}` : "Carregando…"}
           </p>
         </div>
@@ -53,7 +53,7 @@ export default function LeadsPage() {
         <form onSubmit={handleSearch} className="relative flex-1 min-w-[200px] max-w-sm">
           <Search
             size={14}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]"
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-(--text-tertiary)"
             aria-hidden="true"
           />
           <input
@@ -64,7 +64,7 @@ export default function LeadsPage() {
               setPage(1)
             }}
             placeholder="Buscar por nome, empresa ou cargo…"
-            className="w-full rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] py-2 pl-8 pr-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:border-[var(--accent)] focus:outline-none"
+            className="w-full rounded-md border border-(--border-default) bg-(--bg-surface) py-2 pl-8 pr-3 text-sm text-(--text-primary) placeholder:text-(--text-tertiary) focus:border-(--accent) focus:outline-none"
           />
         </form>
 
@@ -79,10 +79,10 @@ export default function LeadsPage() {
                 setPage(1)
               }}
               className={cn(
-                "rounded-[var(--radius-full)] px-3 py-1.5 text-xs font-medium transition-colors",
+                "rounded-(--radius-full) px-3 py-1.5 text-xs font-medium transition-colors",
                 (activeFilters.status?.[0] ?? "") === value
-                  ? "bg-[var(--accent)] text-white"
-                  : "bg-[var(--bg-overlay)] text-[var(--text-secondary)] hover:bg-[var(--bg-sunken)]",
+                  ? "bg-(--accent) text-white"
+                  : "bg-(--bg-overlay) text-(--text-secondary) hover:bg-(--bg-sunken)",
               )}
             >
               {label}
@@ -99,7 +99,7 @@ export default function LeadsPage() {
               setSearch("")
               setPage(1)
             }}
-            className="flex items-center gap-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--danger)]"
+            className="flex items-center gap-1 text-xs text-(--text-tertiary) hover:text-(--danger)"
           >
             <X size={12} aria-hidden="true" />
             Limpar
@@ -113,7 +113,7 @@ export default function LeadsPage() {
       {/* Paginação */}
       {data && data.pages > 1 && (
         <div className="flex items-center justify-between text-sm">
-          <p className="text-[var(--text-secondary)]">
+          <p className="text-(--text-secondary)">
             Página {data.page} de {data.pages}
           </p>
           <div className="flex gap-2">
@@ -121,7 +121,7 @@ export default function LeadsPage() {
               type="button"
               disabled={data.page <= 1}
               onClick={() => setPage((p) => p - 1)}
-              className="rounded-[var(--radius-md)] border border-[var(--border-default)] px-3 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-overlay)] disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-md border border-(--border-default) px-3 py-1.5 text-xs text-(--text-secondary) transition-colors hover:bg-(--bg-overlay) disabled:cursor-not-allowed disabled:opacity-40"
             >
               Anterior
             </button>
@@ -129,7 +129,7 @@ export default function LeadsPage() {
               type="button"
               disabled={data.page >= data.pages}
               onClick={() => setPage((p) => p + 1)}
-              className="rounded-[var(--radius-md)] border border-[var(--border-default)] px-3 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-overlay)] disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-md border border-(--border-default) px-3 py-1.5 text-xs text-(--text-secondary) transition-colors hover:bg-(--bg-overlay) disabled:cursor-not-allowed disabled:opacity-40"
             >
               Próxima
             </button>

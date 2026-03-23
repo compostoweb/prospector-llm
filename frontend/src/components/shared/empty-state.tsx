@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils"
+﻿import { cn } from "@/lib/utils"
 import type { LucideIcon } from "lucide-react"
 
 interface EmptyStateProps {
@@ -13,18 +13,18 @@ export function EmptyState({ icon: Icon, title, description, action, className }
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center gap-3 rounded-[var(--radius-lg)] border border-dashed border-[var(--border-default)] bg-[var(--bg-surface)] px-6 py-16 text-center",
+        "flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-(--border-default) bg-(--bg-surface) px-6 py-16 text-center",
         className,
       )}
     >
       {Icon && (
-        <div className="flex h-12 w-12 items-center justify-center rounded-[var(--radius-lg)] bg-[var(--bg-overlay)]">
-          <Icon size={24} className="text-[var(--text-tertiary)]" aria-hidden="true" />
+        <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-(--bg-overlay)">
+          <Icon size={24} className="text-(--text-tertiary)" aria-hidden="true" />
         </div>
       )}
       <div>
-        <p className="text-sm font-medium text-[var(--text-primary)]">{title}</p>
-        {description && <p className="mt-1 text-sm text-[var(--text-secondary)]">{description}</p>}
+        <p className="text-sm font-medium text-(--text-primary)">{title}</p>
+        {description && <p className="mt-1 text-sm text-(--text-secondary)">{description}</p>}
       </div>
       {action && <div className="mt-1">{action}</div>}
     </div>

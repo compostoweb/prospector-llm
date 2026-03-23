@@ -1,1 +1,1 @@
-export { default } from "./integracoes-page"
+﻿export { default } from "./integracoes-page"

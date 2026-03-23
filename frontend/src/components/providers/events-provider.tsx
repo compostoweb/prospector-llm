@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useEvents } from "@/lib/ws/use-events"
 

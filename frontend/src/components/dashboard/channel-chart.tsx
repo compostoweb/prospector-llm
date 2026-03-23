@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import {
   BarChart,
@@ -28,7 +28,7 @@ export function ChannelChart({ data, isLoading }: ChannelChartProps) {
   if (isLoading) {
     return (
       <div className="flex h-60 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--border-default)] border-t-[var(--accent)]" />
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-(--border-default) border-t-(--accent)" />
       </div>
     )
   }

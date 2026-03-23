@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth/config"
+﻿import { auth } from "@/lib/auth/config"
 import { redirect } from "next/navigation"
 import { GoogleSignInButton } from "@/components/auth/google-sign-in-button"
 
@@ -21,19 +21,19 @@ export default async function LoginPage({ searchParams }: Props) {
   const errorMessage = error ? (ERROR_MESSAGES[error] ?? ERROR_MESSAGES.default) : null
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[var(--bg-page)] px-4">
-      <div className="w-full max-w-sm rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-8 shadow-[var(--shadow-md)]">
+    <main className="flex min-h-screen items-center justify-center bg-(--bg-page) px-4">
+      <div className="w-full max-w-sm rounded-lg border border-(--border-default) bg-(--bg-surface) p-8 shadow-(--shadow-md)">
         {/* Logo / Título */}
         <div className="mb-8 text-center">
-          <h1 className="text-2xl font-semibold text-[var(--text-primary)]">Prospector</h1>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">Sistema de prospecção B2B</p>
+          <h1 className="text-2xl font-semibold text-(--text-primary)">Prospector</h1>
+          <p className="mt-1 text-sm text-(--text-secondary)">Sistema de prospecção B2B</p>
         </div>
 
         {/* Mensagem de erro */}
         {errorMessage && (
           <div
             role="alert"
-            className="mb-6 rounded-[var(--radius-md)] bg-[var(--danger-subtle)] px-4 py-3 text-sm text-[var(--danger-subtle-fg)]"
+            className="mb-6 rounded-md bg-(--danger-subtle) px-4 py-3 text-sm text-(--danger-subtle-fg)"
           >
             {errorMessage}
           </div>
@@ -42,7 +42,7 @@ export default async function LoginPage({ searchParams }: Props) {
         {/* Botão Google */}
         <GoogleSignInButton />
 
-        <p className="mt-6 text-center text-xs text-[var(--text-tertiary)]">
+        <p className="mt-6 text-center text-xs text-(--text-tertiary)">
           Acesso restrito à equipe Composto Web
         </p>
       </div>

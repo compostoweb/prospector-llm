@@ -1,1 +1,1 @@
-export { default } from "./lead-detail-page"
+﻿export { default } from "./dashboard-page"

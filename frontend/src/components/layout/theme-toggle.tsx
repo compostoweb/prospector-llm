@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useTheme } from "next-themes"
 import { Sun, Moon, Monitor } from "lucide-react"
@@ -18,7 +18,7 @@ export function ThemeToggle({ className }: { className?: string }) {
       role="radiogroup"
       aria-label="Tema de cores"
       className={cn(
-        "flex items-center gap-0.5 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-overlay)] p-0.5",
+        "flex items-center gap-0.5 rounded-md border border-(--border-default) bg-(--bg-overlay) p-0.5",
         className,
       )}
     >
@@ -26,14 +26,14 @@ export function ThemeToggle({ className }: { className?: string }) {
         <button
           key={value}
           role="radio"
-          aria-checked={theme === value}
+          aria-checked={theme === value ? "true" : "false"}
           aria-label={label}
           onClick={() => setTheme(value)}
           className={cn(
-            "flex h-7 w-7 items-center justify-center rounded-[var(--radius-sm)] transition-colors",
+            "flex h-7 w-7 items-center justify-center rounded-sm transition-colors",
             theme === value
-              ? "bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-[var(--shadow-sm)]"
-              : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
+              ? "bg-(--bg-surface) text-(--text-primary) shadow-(--shadow-sm)"
+              : "text-(--text-tertiary) hover:text-(--text-secondary)",
           )}
         >
           <Icon size={14} aria-hidden="true" />

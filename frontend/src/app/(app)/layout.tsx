@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth/config"
+﻿import { auth } from "@/lib/auth/config"
 import { redirect } from "next/navigation"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Topbar } from "@/components/layout/topbar"
@@ -10,7 +10,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <EventsProvider>
-      <div className="flex h-screen overflow-hidden bg-[var(--bg-page)]">
+      <div className="flex h-screen overflow-hidden bg-(--bg-page)">
         <Sidebar />
         <div className="flex flex-1 flex-col overflow-hidden">
           <Topbar />

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test"
+﻿import { test, expect } from "@playwright/test"
 
 /**
  * Testes E2E da página de login e comportamento de auth.

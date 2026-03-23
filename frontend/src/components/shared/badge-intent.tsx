@@ -1,4 +1,4 @@
-import { cn, intentConfig } from "@/lib/utils"
+﻿import { cn, intentConfig } from "@/lib/utils"
 
 interface BadgeIntentProps {
   intent: string
@@ -7,13 +7,13 @@ interface BadgeIntentProps {
 
 const variantClasses: Record<string, string> = {
   success:
-    "bg-[var(--success-subtle)] text-[var(--success-subtle-fg)] border-[var(--success-subtle)]",
+    "bg-(--success-subtle) text-(--success-subtle-fg) border-(--success-subtle)",
   warning:
-    "bg-[var(--warning-subtle)] text-[var(--warning-subtle-fg)] border-[var(--warning-subtle)]",
-  danger: "bg-[var(--danger-subtle)] text-[var(--danger-subtle-fg)] border-[var(--danger-subtle)]",
+    "bg-(--warning-subtle) text-(--warning-subtle-fg) border-(--warning-subtle)",
+  danger: "bg-(--danger-subtle) text-(--danger-subtle-fg) border-(--danger-subtle)",
   neutral:
-    "bg-[var(--neutral-subtle)] text-[var(--neutral-subtle-fg)] border-[var(--neutral-subtle)]",
-  info: "bg-[var(--info-subtle)] text-[var(--info-subtle-fg)] border-[var(--info-subtle)]",
+    "bg-(--neutral-subtle) text-(--neutral-subtle-fg) border-(--neutral-subtle)",
+  info: "bg-(--info-subtle) text-(--info-subtle-fg) border-(--info-subtle)",
 }
 
 export function BadgeIntent({ intent, className }: BadgeIntentProps) {
@@ -22,7 +22,7 @@ export function BadgeIntent({ intent, className }: BadgeIntentProps) {
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-[var(--radius-full)] border px-2 py-0.5 text-xs font-medium",
+        "inline-flex items-center rounded-(--radius-full) border px-2 py-0.5 text-xs font-medium",
         variantClasses[config.variant] ?? variantClasses["neutral"],
         className,
       )}

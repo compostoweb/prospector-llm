@@ -1,1 +1,1 @@
-export { default } from "./cadencia-detail-page"
+﻿export { default } from "./nova-cadencia-page"

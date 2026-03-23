@@ -1,4 +1,4 @@
-import Link from "next/link"
+﻿import Link from "next/link"
 import { truncate } from "@/lib/utils"
 import { LeadScore } from "@/components/leads/lead-score"
 import { BadgeIntent } from "@/components/shared/badge-intent"
@@ -13,13 +13,13 @@ export function LeadCard({ lead }: LeadCardProps) {
   return (
     <Link
       href={`/leads/${lead.id}`}
-      className="block rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 shadow-[var(--shadow-sm)] transition-shadow hover:shadow-[var(--shadow-md)]"
+      className="block rounded-lg border border-(--border-default) bg-(--bg-surface) p-4 shadow-(--shadow-sm) transition-shadow hover:shadow-(--shadow-md)"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate font-semibold text-[var(--text-primary)]">{lead.full_name}</p>
+          <p className="truncate font-semibold text-(--text-primary)">{lead.full_name}</p>
           {lead.job_title && (
-            <p className="mt-0.5 truncate text-sm text-[var(--text-secondary)]">
+            <p className="mt-0.5 truncate text-sm text-(--text-secondary)">
               {truncate(lead.job_title, 50)}
             </p>
           )}
@@ -29,25 +29,25 @@ export function LeadCard({ lead }: LeadCardProps) {
 
       <div className="mt-3 space-y-1.5">
         {lead.company_name && (
-          <p className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)]">
+          <p className="flex items-center gap-1.5 text-xs text-(--text-secondary)">
             <Building2 size={12} aria-hidden="true" />
             {lead.company_name}
           </p>
         )}
         {lead.location && (
-          <p className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)]">
+          <p className="flex items-center gap-1.5 text-xs text-(--text-secondary)">
             <MapPin size={12} aria-hidden="true" />
             {lead.location}
           </p>
         )}
         {lead.email && (
-          <p className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)]">
+          <p className="flex items-center gap-1.5 text-xs text-(--text-secondary)">
             <Mail size={12} aria-hidden="true" />
             <span className="truncate">{lead.email}</span>
           </p>
         )}
         {lead.linkedin_url && (
-          <p className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)]">
+          <p className="flex items-center gap-1.5 text-xs text-(--text-secondary)">
             <Linkedin size={12} aria-hidden="true" />
             <span className="truncate">{lead.linkedin_url}</span>
           </p>

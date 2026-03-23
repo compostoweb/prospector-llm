@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useState } from "react"
 import { CheckCircle2, XCircle, ExternalLink, RefreshCw, Info } from "lucide-react"
@@ -48,39 +48,39 @@ export default function IntegracoesPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-xl font-semibold text-[var(--text-primary)]">Integrações</h1>
-        <p className="mt-1 text-sm text-[var(--text-secondary)]">
+        <h1 className="text-xl font-semibold text-(--text-primary)">Integrações</h1>
+        <p className="mt-1 text-sm text-(--text-secondary)">
           Canais de comunicação e serviços externos conectados ao Prospector.
         </p>
       </div>
 
       {/* Tenant */}
       {session?.user && (
-        <div className="flex items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--accent-subtle)] text-sm font-semibold text-[var(--accent-subtle-fg)]">
+        <div className="flex items-center gap-3 rounded-lg border border-(--border-default) bg-(--bg-surface) px-4 py-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-(--accent-subtle) text-sm font-semibold text-(--accent-subtle-fg)">
             {(session.user.name ?? session.user.email ?? "U")[0]?.toUpperCase()}
           </div>
           <div>
-            <p className="text-sm font-medium text-[var(--text-primary)]">
+            <p className="text-sm font-medium text-(--text-primary)">
               {session.user.name ?? session.user.email}
             </p>
-            <p className="text-xs text-[var(--text-tertiary)]">Conta ativa</p>
+            <p className="text-xs text-(--text-tertiary)">Conta ativa</p>
           </div>
         </div>
       )}
 
       {/* Integrações */}
       <section>
-        <h2 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">Canais</h2>
+        <h2 className="mb-3 text-sm font-semibold text-(--text-primary)">Canais</h2>
         <div className="space-y-3">
           {INTEGRATIONS.map((integration) => (
             <div
               key={integration.id}
-              className="flex items-start justify-between gap-4 rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-4"
+              className="flex items-start justify-between gap-4 rounded-lg border border-(--border-default) bg-(--bg-surface) px-4 py-4"
             >
               <div className="flex-1">
                 <div className="flex items-center gap-2">
-                  <p className="text-sm font-medium text-[var(--text-primary)]">
+                  <p className="text-sm font-medium text-(--text-primary)">
                     {integration.name}
                   </p>
                   {integration.docsUrl && (
@@ -88,18 +88,18 @@ export default function IntegracoesPage() {
                       href={integration.docsUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+                      className="text-(--text-tertiary) hover:text-(--text-secondary)"
                       aria-label={`Documentação ${integration.name}`}
                     >
                       <ExternalLink size={12} aria-hidden="true" />
                     </a>
                   )}
                 </div>
-                <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
+                <p className="mt-0.5 text-xs text-(--text-secondary)">
                   {integration.description}
                 </p>
                 {integration.accountLabel && (
-                  <p className="mt-1 text-xs font-mono text-[var(--text-tertiary)]">
+                  <p className="mt-1 text-xs font-mono text-(--text-tertiary)">
                     {integration.accountLabel}
                   </p>
                 )}
@@ -111,7 +111,7 @@ export default function IntegracoesPage() {
                   onClick={() => void handleRefresh(integration.id)}
                   disabled={refreshing === integration.id}
                   aria-label={`Atualizar status ${integration.name}`}
-                  className="rounded-[var(--radius-md)] p-1.5 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-overlay)] hover:text-[var(--text-secondary)] disabled:opacity-50"
+                  className="rounded-md p-1.5 text-(--text-tertiary) transition-colors hover:bg-(--bg-overlay) hover:text-(--text-secondary) disabled:opacity-50"
                 >
                   <RefreshCw
                     size={13}
@@ -121,12 +121,12 @@ export default function IntegracoesPage() {
                 </button>
 
                 {integration.connected ? (
-                  <span className="flex items-center gap-1 rounded-full bg-[var(--success-subtle)] px-2.5 py-1 text-xs font-medium text-[var(--success-subtle-fg)]">
+                  <span className="flex items-center gap-1 rounded-full bg-(--success-subtle) px-2.5 py-1 text-xs font-medium text-(--success-subtle-fg)">
                     <CheckCircle2 size={11} aria-hidden="true" />
                     Conectado
                   </span>
                 ) : (
-                  <span className="flex items-center gap-1 rounded-full bg-[var(--bg-overlay)] px-2.5 py-1 text-xs text-[var(--text-tertiary)]">
+                  <span className="flex items-center gap-1 rounded-full bg-(--bg-overlay) px-2.5 py-1 text-xs text-(--text-tertiary)">
                     <XCircle size={11} aria-hidden="true" />
                     Não conectado
                   </span>
@@ -137,7 +137,7 @@ export default function IntegracoesPage() {
         </div>
       </section>
 
-      <div className="flex items-start gap-2 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-overlay)] px-4 py-3 text-xs text-[var(--text-secondary)]">
+      <div className="flex items-start gap-2 rounded-md border border-(--border-default) bg-(--bg-overlay) px-4 py-3 text-xs text-(--text-secondary)">
         <Info size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
         <span>
           Para conectar uma conta LinkedIn ou Gmail, configure as credenciais{" "}

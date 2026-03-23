@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import Link from "next/link"
 import { useCadences, useToggleCadence } from "@/lib/api/hooks/use-cadences"
@@ -19,14 +19,14 @@ export default function CadenciasPage() {
       {/* Cabeçalho */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-[var(--text-primary)]">Cadências</h1>
-          <p className="text-sm text-[var(--text-secondary)]">
+          <h1 className="text-lg font-semibold text-(--text-primary)">Cadências</h1>
+          <p className="text-sm text-(--text-secondary)">
             Sequências de mensagens automatizadas
           </p>
         </div>
         <Link
           href="/cadencias/nova"
-          className="flex items-center gap-1.5 rounded-[var(--radius-md)] bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)]"
+          className="flex items-center gap-1.5 rounded-md bg-(--accent) px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-(--accent-hover)"
         >
           <Plus size={14} aria-hidden="true" />
           Nova cadência
@@ -39,7 +39,7 @@ export default function CadenciasPage() {
           {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
-              className="h-40 animate-pulse rounded-[var(--radius-lg)] bg-[var(--bg-overlay)]"
+              className="h-40 animate-pulse rounded-lg bg-(--bg-overlay)"
             />
           ))}
         </div>
@@ -48,16 +48,16 @@ export default function CadenciasPage() {
           {cadences.map((cadence) => (
             <div
               key={cadence.id}
-              className="relative flex flex-col rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-5 shadow-[var(--shadow-sm)]"
+              className="relative flex flex-col rounded-lg border border-(--border-default) bg-(--bg-surface) p-5 shadow-(--shadow-sm)"
             >
               {/* Header do card */}
               <div className="flex items-start justify-between gap-2">
                 <Link href={`/cadencias/${cadence.id}`} className="min-w-0">
-                  <p className="truncate font-semibold text-[var(--text-primary)] hover:underline">
+                  <p className="truncate font-semibold text-(--text-primary) hover:underline">
                     {cadence.name}
                   </p>
                   {cadence.description && (
-                    <p className="mt-0.5 line-clamp-2 text-xs text-[var(--text-secondary)]">
+                    <p className="mt-0.5 line-clamp-2 text-xs text-(--text-secondary)">
                       {cadence.description}
                     </p>
                   )}
@@ -68,11 +68,11 @@ export default function CadenciasPage() {
                   type="button"
                   onClick={() => handleToggle(cadence.id, cadence.is_active)}
                   aria-label={cadence.is_active ? "Desativar cadência" : "Ativar cadência"}
-                  aria-pressed={cadence.is_active}
+                  aria-pressed={cadence.is_active ? "true" : "false"}
                   disabled={toggleCadence.isPending}
                   className={cn(
                     "shrink-0 transition-colors disabled:opacity-50",
-                    cadence.is_active ? "text-[var(--success)]" : "text-[var(--text-disabled)]",
+                    cadence.is_active ? "text-(--success)" : "text-(--text-disabled)",
                   )}
                 >
                   <Power size={16} aria-hidden="true" />
@@ -80,14 +80,14 @@ export default function CadenciasPage() {
               </div>
 
               {/* Stats */}
-              <div className="mt-4 grid grid-cols-3 divide-x divide-[var(--border-subtle)]">
+              <div className="mt-4 grid grid-cols-3 divide-x divide-(--border-subtle)">
                 <Stat icon={Users} label="Total" value={cadence.leads_total} />
                 <Stat icon={GitBranch} label="Em andamento" value={cadence.leads_in_progress} />
                 <Stat icon={CheckCircle} label="Convertidos" value={cadence.leads_converted} />
               </div>
 
               {/* LLM info */}
-              <p className="mt-4 text-xs text-[var(--text-tertiary)]">
+              <p className="mt-4 text-xs text-(--text-tertiary)">
                 {cadence.llm_provider === "openai" ? "OpenAI" : "Gemini"} · {cadence.llm_model} ·{" "}
                 {cadence.steps.length} passo
                 {cadence.steps.length !== 1 ? "s" : ""}
@@ -103,7 +103,7 @@ export default function CadenciasPage() {
           action={
             <Link
               href="/cadencias/nova"
-              className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-hover)]"
+              className="inline-flex items-center gap-1.5 rounded-md bg-(--accent) px-4 py-2 text-sm font-medium text-white hover:bg-(--accent-hover)"
             >
               <Plus size={14} aria-hidden="true" />
               Nova cadência
@@ -126,9 +126,9 @@ function Stat({
 }) {
   return (
     <div className="flex flex-col items-center gap-0.5 px-2">
-      <Icon size={13} className="text-[var(--text-tertiary)]" aria-hidden="true" />
-      <span className="text-sm font-semibold text-[var(--text-primary)]">{value}</span>
-      <span className="text-[10px] text-[var(--text-tertiary)]">{label}</span>
+      <Icon size={13} className="text-(--text-tertiary)" aria-hidden="true" />
+      <span className="text-sm font-semibold text-(--text-primary)">{value}</span>
+      <span className="text-[10px] text-(--text-tertiary)">{label}</span>
     </div>
   )
 }

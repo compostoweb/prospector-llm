@@ -1,4 +1,4 @@
-import createClient, { type Middleware } from "openapi-fetch"
+﻿import createClient, { type Middleware } from "openapi-fetch"
 import { auth } from "@/lib/auth/config"
 import { env } from "@/env"
 import type { paths } from "./schema"
