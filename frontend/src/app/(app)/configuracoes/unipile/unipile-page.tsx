@@ -16,13 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 
 export default function UnipolePage() {
   const { data: tenant, isLoading } = useTenant()
-  const {
-    mutate: saveIntegrations,
-    isPending,
-    isSuccess,
-    isError,
-    error,
-  } = useUpdateIntegrations()
+  const { mutate: saveIntegrations, isPending, isSuccess, isError, error } = useUpdateIntegrations()
 
   const integration = tenant?.integration
 
@@ -48,7 +42,11 @@ export default function UnipolePage() {
   if (isLoading) {
     return (
       <div className="flex h-40 items-center justify-center">
-        <Loader2 size={20} className="animate-spin text-(--text-tertiary)" aria-label="Carregando" />
+        <Loader2
+          size={20}
+          className="animate-spin text-(--text-tertiary)"
+          aria-label="Carregando"
+        />
       </div>
     )
   }
@@ -68,8 +66,7 @@ export default function UnipolePage() {
         <div className="space-y-1 text-sm text-(--info-subtle-fg)">
           <p className="font-medium">Como encontrar os IDs de conta</p>
           <p>
-            No painel da Unipile, acesse{" "}
-            <strong>Accounts</strong> e copie o{" "}
+            No painel da Unipile, acesse <strong>Accounts</strong> e copie o{" "}
             <code className="rounded bg-(--accent-subtle) px-1 font-mono text-xs text-(--accent-subtle-fg)">
               account_id
             </code>{" "}
@@ -132,12 +129,18 @@ export default function UnipolePage() {
 
         {/* Feedback do save */}
         {isError && (
-          <p role="alert" className="rounded-md bg-(--danger-subtle) px-3 py-2 text-sm text-(--danger-subtle-fg)">
+          <p
+            role="alert"
+            className="rounded-md bg-(--danger-subtle) px-3 py-2 text-sm text-(--danger-subtle-fg)"
+          >
             {error instanceof Error ? error.message : "Erro ao salvar configurações."}
           </p>
         )}
         {isSuccess && (
-          <p role="status" className="rounded-md bg-(--success-subtle) px-3 py-2 text-sm text-(--success-subtle-fg)">
+          <p
+            role="status"
+            className="rounded-md bg-(--success-subtle) px-3 py-2 text-sm text-(--success-subtle-fg)"
+          >
             Configurações salvas com sucesso.
           </p>
         )}

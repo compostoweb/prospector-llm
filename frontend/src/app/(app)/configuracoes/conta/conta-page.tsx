@@ -46,13 +46,7 @@ function CheckboxRow({ id, label, checked, onChange }: CheckboxRowProps) {
 
 export default function ContaPage() {
   const { data: tenant, isLoading } = useTenant()
-  const {
-    mutate: saveIntegrations,
-    isPending,
-    isSuccess,
-    isError,
-    error,
-  } = useUpdateIntegrations()
+  const { mutate: saveIntegrations, isPending, isSuccess, isError, error } = useUpdateIntegrations()
 
   const integration = tenant?.integration
 
@@ -93,7 +87,11 @@ export default function ContaPage() {
   if (isLoading) {
     return (
       <div className="flex h-40 items-center justify-center">
-        <Loader2 size={20} className="animate-spin text-(--text-tertiary)" aria-label="Carregando" />
+        <Loader2
+          size={20}
+          className="animate-spin text-(--text-tertiary)"
+          aria-label="Carregando"
+        />
       </div>
     )
   }
@@ -130,9 +128,7 @@ export default function ContaPage() {
         <Card>
           <CardHeader>
             <CardTitle>Notificações</CardTitle>
-            <CardDescription>
-              Configure o e-mail e os eventos que disparam alertas.
-            </CardDescription>
+            <CardDescription>Configure o e-mail e os eventos que disparam alertas.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-1.5">
@@ -228,12 +224,18 @@ export default function ContaPage() {
 
         {/* Feedback do save */}
         {isError && (
-          <p role="alert" className="rounded-md bg-(--danger-subtle) px-3 py-2 text-sm text-(--danger-subtle-fg)">
+          <p
+            role="alert"
+            className="rounded-md bg-(--danger-subtle) px-3 py-2 text-sm text-(--danger-subtle-fg)"
+          >
             {error instanceof Error ? error.message : "Erro ao salvar configurações."}
           </p>
         )}
         {isSuccess && (
-          <p role="status" className="rounded-md bg-(--success-subtle) px-3 py-2 text-sm text-(--success-subtle-fg)">
+          <p
+            role="status"
+            className="rounded-md bg-(--success-subtle) px-3 py-2 text-sm text-(--success-subtle-fg)"
+          >
             Configurações salvas com sucesso.
           </p>
         )}

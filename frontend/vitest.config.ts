@@ -8,6 +8,8 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/tests/setup.ts"],
+    // Exclui testes E2E do Playwright para que o Vitest não os execute
+    exclude: ["src/tests/e2e/**", "**/node_modules/**"],
   },
   resolve: {
     alias: {
