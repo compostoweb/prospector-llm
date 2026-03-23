@@ -76,11 +76,32 @@ class CadenceManager:
 
         Lança ValueError se o lead não tiver nenhum canal disponível.
         """
+        # Idempotência: verifica se lead já tem steps PENDING nesta cadência
+        existing = await db.execute(
+            select(CadenceStep.id)
+            .where(
+                CadenceStep.lead_id == lead.id,
+                CadenceStep.cadence_id == cadence.id,
+                CadenceStep.status == StepStatus.PENDING,
+            )
+            .limit(1)
+        )
+        if existing.scalar_one_or_none() is not None:
+            logger.warning(
+                "cadence_manager.already_enrolled",
+                lead_id=str(lead.id),
+                cadence_id=str(cadence.id),
+            )
+            return []
+
         now = _utcnow()
         steps: list[CadenceStep] = []
 
+        # Usa template customizado da cadência ou o padrão
+        template = _resolve_template(cadence)
+
         for step_number, (channel, day_offset, use_voice) in enumerate(
-            _DEFAULT_TEMPLATE, start=1
+            template, start=1
         ):
             # Verifica se o lead tem os dados para o canal
             if not _lead_has_channel(lead, channel, cadence):
@@ -183,6 +204,16 @@ class CadenceManager:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
+
+def _resolve_template(cadence: Cadence) -> list[tuple[Channel, int, bool]]:
+    """Retorna o template de steps: customizado (JSONB) ou o padrão."""
+    if not cadence.steps_template:
+        return _DEFAULT_TEMPLATE
+    return [
+        (Channel(item["channel"]), item["day_offset"], item.get("use_voice", False))
+        for item in cadence.steps_template
+    ]
+
 
 def _lead_has_channel(lead: Lead, channel: Channel, cadence: Cadence) -> bool:
     """Verifica se o lead tem os dados necessários para o canal."""

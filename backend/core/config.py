@@ -93,10 +93,14 @@ class Settings(BaseSettings):
     REPLY_PARSER_PROVIDER: str = "openai"
     REPLY_PARSER_MODEL: str = "gpt-4o-mini"
 
-    # ── Voz ───────────────────────────────────────────────────────────
+    # ── Voz / TTS ────────────────────────────────────────────────────
     VOICE_PROVIDER: str = "speechify"
     SPEECHIFY_API_KEY: str | None = None
     SPEECHIFY_VOICE_ID: str = "henry"
+
+    # ── Voicebox (self-hosted TTS) ────────────────────────────────────
+    VOICEBOX_BASE_URL: str = "http://localhost:17493"
+    VOICEBOX_ENABLED: bool = False
 
     # ── Unipile ───────────────────────────────────────────────────────
     UNIPILE_API_KEY: str | None = None

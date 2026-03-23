@@ -21,7 +21,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.dependencies import get_current_tenant, get_current_tenant_id, get_session
+from api.dependencies import (
+    get_current_tenant_flexible,
+    get_effective_tenant_id,
+    get_session_flexible,
+)
 from api.routes.auth import hash_api_key
 from core.database import AsyncSessionLocal
 from models.tenant import Tenant, TenantIntegration
@@ -104,7 +108,7 @@ async def create_tenant(
 
 @router.get("/me", response_model=TenantResponse)
 async def get_me(
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(get_current_tenant_flexible),
 ) -> TenantResponse:
     return TenantResponse.model_validate(tenant)
 
@@ -114,8 +118,8 @@ async def get_me(
 @router.put("/me/integrations", response_model=TenantIntegrationResponse)
 async def update_integrations(
     body: TenantIntegrationUpdate,
-    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
-    db: AsyncSession = Depends(get_session),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
 ) -> TenantIntegrationResponse:
     """Atualiza as configurações de integração do tenant (parcial)."""
     result = await db.execute(

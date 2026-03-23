@@ -86,9 +86,14 @@ class LLMRegistry:
         """
         Retorna todos os modelos disponíveis de todos os providers configurados.
         Usa Redis como cache com TTL de 1h para não chamar as APIs a cada request.
+        Degrada gracefully se o Redis estiver indisponível.
         """
         if not force_refresh:
-            cached = await self._redis.get(_MODELS_CACHE_KEY)
+            try:
+                cached = await self._redis.get(_MODELS_CACHE_KEY)
+            except Exception as exc:
+                logger.warning("llm.models.cache_read_error", error=str(exc))
+                cached = None
             if cached:
                 raw: list[dict] = json.loads(cached)
                 return [ModelInfo(**item) for item in raw]
@@ -115,7 +120,10 @@ class LLMRegistry:
             }
             for m in all_models
         ]
-        await self._redis.set(_MODELS_CACHE_KEY, json.dumps(cache_data), ex=_MODELS_CACHE_TTL)
+        try:
+            await self._redis.set(_MODELS_CACHE_KEY, json.dumps(cache_data), ex=_MODELS_CACHE_TTL)
+        except Exception as exc:
+            logger.warning("llm.models.cache_write_error", error=str(exc))
 
         return all_models
 

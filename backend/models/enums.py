@@ -60,3 +60,9 @@ class EmailType(str, Enum):
     CORPORATE = "corporate"
     PERSONAL = "personal"
     UNKNOWN = "unknown"
+
+
+class InteractionDirection(str, Enum):
+    """Direção da mensagem na interação."""
+    OUTBOUND = "outbound"
+    INBOUND = "inbound"

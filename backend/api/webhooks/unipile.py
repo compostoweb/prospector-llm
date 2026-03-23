@@ -40,7 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.dependencies import get_current_tenant_id, get_llm_registry, get_session
 from core.config import settings
 from integrations.llm import LLMRegistry
-from models.enums import Channel, Intent, LeadStatus
+from models.enums import Channel, Intent, InteractionDirection, LeadStatus
 from models.interaction import Interaction
 from models.lead import Lead
 from services.reply_parser import ReplyParser
@@ -120,6 +120,20 @@ async def _handle_message_received(
         logger.debug("webhook.unipile.empty_message", message_id=unipile_message_id)
         return
 
+    # ── Idempotência: ignora mensagem já processada ────────────────
+    if unipile_message_id:
+        existing = await db.execute(
+            select(Interaction.id).where(
+                Interaction.unipile_message_id == unipile_message_id
+            ).limit(1)
+        )
+        if existing.scalar_one_or_none() is not None:
+            logger.debug(
+                "webhook.unipile.duplicate_message",
+                message_id=unipile_message_id,
+            )
+            return
+
     # Tenta encontrar o lead pelo sender_id (linkedin_profile_id ou e-mail)
     lead = await _find_lead_by_sender(sender_id, db)
     if not lead:
@@ -156,7 +170,7 @@ async def _handle_message_received(
         tenant_id=lead.tenant_id,
         lead_id=lead.id,
         channel=channel,
-        direction="inbound",
+        direction=InteractionDirection.INBOUND,
         content_text=text_content,
         intent=intent,
         unipile_message_id=unipile_message_id or None,
@@ -200,7 +214,9 @@ def _verify_signature(body: bytes, signature_header: str) -> bool:
     """
     secret = settings.UNIPILE_WEBHOOK_SECRET or ""
     if not secret:
-        # Secret não configurado — aceita mas loga aviso
+        if settings.ENV == "prod":
+            logger.error("webhook.unipile.no_secret_in_prod")
+            return False
         logger.warning("webhook.unipile.no_secret_configured")
         return True
 
@@ -226,25 +242,29 @@ async def _find_lead_by_sender(sender_id: str, db: AsyncSession) -> Lead | None:
     if not sender_id:
         return None
 
+    # Normaliza para comparar corretamente (case-insensitive)
+    sender_normalized = sender_id.strip()
+
     # Tenta como linkedin_profile_id
     result = await db.execute(
-        select(Lead).where(Lead.linkedin_profile_id == sender_id)
+        select(Lead).where(Lead.linkedin_profile_id == sender_normalized)
     )
     lead = result.scalar_one_or_none()
     if lead:
         return lead
 
     # Tenta como e-mail (formato sender para Gmail)
-    if "@" in sender_id:
+    if "@" in sender_normalized:
+        sender_lower = sender_normalized.lower()
         result = await db.execute(
-            select(Lead).where(Lead.email_corporate == sender_id)
+            select(Lead).where(Lead.email_corporate == sender_lower)
         )
         lead = result.scalar_one_or_none()
         if lead:
             return lead
 
         result = await db.execute(
-            select(Lead).where(Lead.email_personal == sender_id)
+            select(Lead).where(Lead.email_personal == sender_lower)
         )
         return result.scalar_one_or_none()
 

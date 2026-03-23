@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from api.dependencies import get_llm_registry
+from core.security import UserPayload, get_current_user_payload
 from integrations.llm import LLMMessage, LLMRegistry, ModelInfo
 
 router = APIRouter(prefix="/llm", tags=["LLM"])
@@ -126,6 +127,7 @@ async def get_models_by_provider(
 )
 async def test_model(
     body: TestRequest,
+    _user: UserPayload = Depends(get_current_user_payload),
     registry: LLMRegistry = Depends(get_llm_registry),
 ) -> TestResponse:
     """

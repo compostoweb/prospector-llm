@@ -32,7 +32,7 @@ async def test_create_tenant_returns_201_and_api_key(
     from api.routes.auth import _get_raw_session
     from api.main import app
 
-    app.dependency_overrides[_get_raw_session] = lambda: _yield_db(db)
+    app.dependency_overrides[_get_raw_session] = _make_db_override(db)
 
     resp = await raw_client.post(
         "/tenants",
@@ -59,7 +59,7 @@ async def test_create_tenant_duplicate_slug_returns_409(
     from api.routes.tenants import _get_raw_session
     from api.main import app
 
-    app.dependency_overrides[_get_raw_session] = lambda: _yield_db(db)
+    app.dependency_overrides[_get_raw_session] = _make_db_override(db)
 
     # Cria o primeiro
     await raw_post_tenant(client, db, slug="dup-slug-test")
@@ -216,8 +216,11 @@ async def test_update_integrations_unipile_accounts(
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
-async def _yield_db(db):
-    yield db
+def _make_db_override(db):
+    """Retorna async gen function que FastAPI reconhece como dependency generator."""
+    async def _dep():
+        yield db
+    return _dep
 
 
 async def raw_post_tenant(client: AsyncClient, db, slug: str):
@@ -225,7 +228,7 @@ async def raw_post_tenant(client: AsyncClient, db, slug: str):
     from api.routes.tenants import _get_raw_session
     from api.main import app
 
-    app.dependency_overrides[_get_raw_session] = lambda: _yield_db(db)
+    app.dependency_overrides[_get_raw_session] = _make_db_override(db)
     resp = await client.post(
         "/tenants",
         json={"name": "Empresa Teste", "slug": slug},

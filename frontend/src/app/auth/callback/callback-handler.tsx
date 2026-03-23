@@ -33,16 +33,18 @@ export function CallbackHandler({ token }: Props) {
     signIn("backend-google", {
       access_token: token,
       redirect: false,
-    }).then((result) => {
-      if (!result || result.error) {
-        router.replace("/login?error=auth_failed")
-      } else {
-        // Força reload completo para hidratar a sessão no Server Component (layout)
-        window.location.href = "/dashboard"
-      }
-    }).catch(() => {
-      router.replace("/login?error=auth_failed")
     })
+      .then((result) => {
+        if (!result || result.error) {
+          router.replace("/login?error=auth_failed")
+        } else {
+          // Força reload completo para hidratar a sessão no Server Component (layout)
+          window.location.href = "/dashboard"
+        }
+      })
+      .catch(() => {
+        router.replace("/login?error=auth_failed")
+      })
   }, [token, router])
 
   return (

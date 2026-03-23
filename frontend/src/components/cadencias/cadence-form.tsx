@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useCreateCadence, useUpdateCadence } from "@/lib/api/hooks/use-cadences"
 import { CadenceSteps } from "@/components/cadencias/cadence-steps"
 import { LLMConfigForm } from "@/components/cadencias/llm-config-form"
+import { TTSConfigForm, type TTSConfig } from "@/components/cadencias/tts-config-form"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -35,7 +36,11 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
     llm_temperature: cadence?.llm_temperature ?? DEFAULT_LLM.llm_temperature,
     llm_max_tokens: cadence?.llm_max_tokens ?? DEFAULT_LLM.llm_max_tokens,
   })
-  const [steps, setSteps] = useState<CadenceStep[]>(cadence?.steps ?? [])
+  const [steps, setSteps] = useState<CadenceStep[]>(cadence?.steps_template ?? [])
+  const [ttsConfig, setTtsConfig] = useState<TTSConfig>({
+    tts_provider: cadence?.tts_provider ?? null,
+    tts_voice_id: cadence?.tts_voice_id ?? null,
+  })
   const [error, setError] = useState<string | null>(null)
 
   const isLoading = createCadence.isPending || updateCadence.isPending
@@ -57,8 +62,15 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
     const body: CreateCadenceBody = {
       name: name.trim(),
       ...(description.trim() ? { description: description.trim() } : {}),
-      ...llmConfig,
-      steps,
+      llm: {
+        provider: llmConfig.llm_provider,
+        model: llmConfig.llm_model,
+        temperature: llmConfig.llm_temperature,
+        max_tokens: llmConfig.llm_max_tokens,
+      },
+      tts_provider: ttsConfig.tts_provider,
+      tts_voice_id: ttsConfig.tts_voice_id,
+      steps_template: steps,
     }
 
     try {
@@ -112,6 +124,13 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
 
       {/* LLM Config */}
       <LLMConfigForm value={llmConfig} onChange={setLlmConfig} />
+
+      {/* TTS Config — só aparece se houver steps com use_voice */}
+      <TTSConfigForm
+        value={ttsConfig}
+        onChange={setTtsConfig}
+        hasVoiceSteps={steps.some((s) => s.use_voice)}
+      />
 
       {/* Passos */}
       <div>

@@ -177,17 +177,18 @@ export default function LeadCard(props: any) {}
 
 ## Rotas
 
-| Rota                         | Tipo      | Descrição                            |
-| ---------------------------- | --------- | ------------------------------------ |
-| `/login`                     | pública   | Botão "Entrar com Google"            |
-| `/auth/callback`             | API route | Recebe token do backend, cria sessão |
-| `/dashboard`                 | protegida | Métricas, respostas, notificações    |
-| `/leads`                     | protegida | Lista com filtros                    |
-| `/leads/[id]`                | protegida | Perfil, timeline, cadência, score    |
-| `/cadencias`                 | protegida | Lista e criação                      |
-| `/cadencias/[id]`            | protegida | Editor + config LLM                  |
-| `/configuracoes/llm`         | protegida | Provider/modelo + teste              |
-| `/configuracoes/integracoes` | protegida | Unipile, Pipedrive                   |
+| Rota                         | Tipo      | Descrição                                           |
+| ---------------------------- | --------- | --------------------------------------------------- |
+| `/login`                     | pública   | Botão "Entrar com Google"                           |
+| `/auth/callback`             | API route | Recebe token do backend, cria sessão                |
+| `/dashboard`                 | protegida | Métricas, respostas, notificações                   |
+| `/leads`                     | protegida | Lista com filtros                                   |
+| `/leads/[id]`                | protegida | Perfil, timeline, cadência, score                   |
+| `/cadencias`                 | protegida | Lista e criação                                     |
+| `/cadencias/[id]`            | protegida | Editor + config LLM                                 |
+| `/configuracoes/llm`         | protegida | Provider/modelo + teste                             |
+| `/configuracoes/integracoes` | protegida | Unipile, Pipedrive                                  |
+| `/configuracoes/conta`       | protegida | Informações da conta, notificações, limites diários |
 
 ---
 

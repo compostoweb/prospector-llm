@@ -108,3 +108,4 @@ services:
 
 # Nota: NÃO há serviço postgres aqui.
 # O banco é remoto (Neon ou Supabase) configurado em .env.dev
+# Voicebox roda como projeto separado no EasyPanel (ver ../voicebox-server/)

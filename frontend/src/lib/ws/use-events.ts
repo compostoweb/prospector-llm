@@ -86,7 +86,7 @@ export function useEvents() {
   const connect = useCallback(() => {
     if (!session?.accessToken || unmountedRef.current) return
 
-    const wsUrl = `${env.NEXT_PUBLIC_WS_URL}/ws/events?token=${session.accessToken}`
+    const wsUrl = `${env.NEXT_PUBLIC_WS_URL}?token=${session.accessToken}`
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
 

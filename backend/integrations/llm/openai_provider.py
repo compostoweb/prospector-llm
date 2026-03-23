@@ -29,8 +29,9 @@ _CHAT_PREFIXES = (
     "o4",
 )
 
-# Preços aproximados USD/1M tokens (input / output) — usados como referência
-# na UI de seleção. Atualizar conforme https://openai.com/api/pricing
+# Preços ESTIMADOS USD/1M tokens (input / output) — usados apenas como
+# referência na UI. Podem estar desatualizados. Fonte oficial:
+# https://openai.com/api/pricing  → price_is_estimated=True em ModelInfo
 _KNOWN_PRICES: dict[str, tuple[float, float]] = {
     "gpt-4o":                (2.50,  10.00),
     "gpt-4o-mini":           (0.15,   0.60),

@@ -30,7 +30,7 @@ logger = structlog.get_logger()
 # Engine assíncrono — pool padrão do SQLAlchemy (5 conns, max_overflow=10)
 engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=settings.DEBUG,
+    echo=False,
     pool_pre_ping=True,
 )
 
@@ -54,11 +54,11 @@ async def get_session(tenant_id: uuid.UUID) -> AsyncGenerator[AsyncSession, None
     """
     async with AsyncSessionLocal() as session:
         try:
-            # Injeta o tenant_id no contexto da transação para o RLS do PostgreSQL
-            await session.execute(
-                text("SET LOCAL app.current_tenant_id = :tid"),
-                {"tid": str(tenant_id)},
-            )
+            # Injeta o tenant_id no contexto da transação para o RLS do PostgreSQL.
+            # SET LOCAL não aceita parâmetros bind ($1) no asyncpg — interpolamos
+            # diretamente. Seguro: tenant_id é uuid.UUID validado (só hex + hifens).
+            tid = str(tenant_id)
+            await session.execute(text(f"SET LOCAL app.current_tenant_id = '{tid}'"))
             yield session
             await session.commit()
         except Exception:

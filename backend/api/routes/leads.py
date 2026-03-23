@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.dependencies import get_current_tenant_id, get_session
+from api.dependencies import get_effective_tenant_id, get_session_flexible
 from models.cadence import Cadence
 from models.enums import LeadSource, LeadStatus
 from models.interaction import Interaction
@@ -55,8 +55,8 @@ async def list_leads(
     status_filter: Annotated[LeadStatus | None, Query(alias="status")] = None,
     source_filter: Annotated[LeadSource | None, Query(alias="source")] = None,
     min_score: Annotated[float | None, Query(ge=0.0, le=1.0)] = None,
-    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
-    db: AsyncSession = Depends(get_session),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
 ) -> LeadListResponse:
     query = select(Lead).where(Lead.tenant_id == tenant_id)
 
@@ -88,8 +88,8 @@ async def list_leads(
 async def create_lead(
     body: LeadCreateRequest,
     enrich: Annotated[bool, Query()] = False,
-    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
-    db: AsyncSession = Depends(get_session),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
 ) -> LeadResponse:
     # Verifica duplicidade por linkedin_url se fornecido
     if body.linkedin_url:
@@ -137,8 +137,8 @@ async def create_lead(
 @router.get("/{lead_id}", response_model=LeadResponse)
 async def get_lead(
     lead_id: uuid.UUID,
-    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
-    db: AsyncSession = Depends(get_session),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
 ) -> LeadResponse:
     lead = await _get_lead_or_404(lead_id, tenant_id, db)
     return LeadResponse.model_validate(lead)
@@ -150,8 +150,8 @@ async def get_lead(
 async def update_lead(
     lead_id: uuid.UUID,
     body: LeadUpdateRequest,
-    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
-    db: AsyncSession = Depends(get_session),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
 ) -> LeadResponse:
     lead = await _get_lead_or_404(lead_id, tenant_id, db)
 
@@ -171,8 +171,8 @@ async def update_lead(
 @router.delete("/{lead_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def archive_lead(
     lead_id: uuid.UUID,
-    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
-    db: AsyncSession = Depends(get_session),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
 ) -> None:
     lead = await _get_lead_or_404(lead_id, tenant_id, db)
     lead.status = LeadStatus.ARCHIVED
@@ -186,8 +186,8 @@ async def archive_lead(
 async def enroll_lead(
     lead_id: uuid.UUID,
     body: LeadEnrollRequest,
-    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
-    db: AsyncSession = Depends(get_session),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
 ) -> dict[str, Any]:
     lead = await _get_lead_or_404(lead_id, tenant_id, db)
 
@@ -236,8 +236,8 @@ async def list_lead_interactions(
     lead_id: uuid.UUID,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
-    db: AsyncSession = Depends(get_session),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
 ) -> InteractionListResponse:
     await _get_lead_or_404(lead_id, tenant_id, db)  # garante 404 se não existir
 

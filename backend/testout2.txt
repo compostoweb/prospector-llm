@@ -1,0 +1,11 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-8.3.4, pluggy-1.6.0
+rootdir: d:\DEV com IA\prospector-llm\backend
+configfile: pyproject.toml
+plugins: anyio-4.12.1, asyncio-0.25.0
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=session
+collected 61 items
+
+tests\test_services\test_ai_composer.py .....                            [  8%]
+tests\test_services\test_cadence_manager.py EEEEEEE                      [ 19%]
+tests\test_workers\test_cadence.py EEEE^C

@@ -20,7 +20,7 @@ from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, String, Te
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base, TenantMixin
-from models.enums import Channel, Intent
+from models.enums import Channel, Intent, InteractionDirection
 
 
 def _utcnow() -> datetime:
@@ -54,8 +54,8 @@ class Interaction(Base, TenantMixin):
         nullable=False,
         index=True,
     )
-    direction: Mapped[str] = mapped_column(
-        String(10),   # "outbound" | "inbound"
+    direction: Mapped[InteractionDirection] = mapped_column(
+        SAEnum(InteractionDirection, name="interaction_direction"),
         nullable=False,
     )
 

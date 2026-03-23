@@ -62,11 +62,11 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
     from core.database import get_session
     from integrations.context_fetcher import context_fetcher
     from integrations.llm import LLMRegistry
-    from integrations.speechify_client import speechify_client
+    from integrations.tts import TTSRegistry
     from integrations.unipile_client import unipile_client
     from models.cadence import Cadence
     from models.cadence_step import CadenceStep
-    from models.enums import Channel, StepStatus
+    from models.enums import Channel, InteractionDirection, StepStatus
     from models.interaction import Interaction
     from models.lead import Lead
     from services.ai_composer import AIComposer
@@ -145,8 +145,15 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
 
             elif step.channel == Channel.LINKEDIN_DM:
                 if step.use_voice:
-                    # Gera voice note MP3 via Speechify, armazena no Redis e passa URL para Unipile
-                    audio_bytes = await speechify_client.synthesize(message_text)
+                    # Gera voice note MP3 via TTSRegistry, armazena no Redis e passa URL para Unipile
+                    tts_registry = TTSRegistry(settings=settings, redis=redis_client)
+                    tts_provider = cadence.tts_provider or settings.VOICE_PROVIDER
+                    tts_voice_id = cadence.tts_voice_id or settings.SPEECHIFY_VOICE_ID
+                    audio_bytes = await tts_registry.synthesize(
+                        provider=tts_provider,
+                        voice_id=tts_voice_id,
+                        text=message_text,
+                    )
                     audio_key = str(uuid.uuid4())
                     await redis_client.set_bytes(f"audio:{audio_key}", audio_bytes, ttl=3600)
                     audio_url = f"{settings.API_PUBLIC_URL}/audio/{audio_key}"
@@ -188,7 +195,7 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                 tenant_id=tid,
                 lead_id=lead.id,
                 channel=step.channel,
-                direction="outbound",
+                direction=InteractionDirection.OUTBOUND,
                 content_text=message_text,
                 content_audio_url=content_audio_url,
                 unipile_message_id=result.message_id if result.success else None,

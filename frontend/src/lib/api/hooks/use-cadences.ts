@@ -7,10 +7,10 @@ import { createBrowserClient } from "@/lib/api/client"
 // ── Tipos ─────────────────────────────────────────────────────────────
 
 export interface CadenceStep {
-  step_number: number
   channel: "linkedin_connect" | "linkedin_dm" | "email"
-  delay_days: number
+  day_offset: number
   message_template: string
+  use_voice: boolean
 }
 
 export interface Cadence {
@@ -23,10 +23,9 @@ export interface Cadence {
   llm_model: string
   llm_temperature: number
   llm_max_tokens: number
-  steps: CadenceStep[]
-  leads_total: number
-  leads_in_progress: number
-  leads_converted: number
+  tts_provider: string | null
+  tts_voice_id: string | null
+  steps_template: CadenceStep[] | null
   created_at: string
   updated_at: string
 }
@@ -34,11 +33,15 @@ export interface Cadence {
 export interface CreateCadenceBody {
   name: string
   description?: string
-  llm_provider: "openai" | "gemini"
-  llm_model: string
-  llm_temperature: number
-  llm_max_tokens: number
-  steps: CadenceStep[]
+  llm: {
+    provider: "openai" | "gemini"
+    model: string
+    temperature: number
+    max_tokens: number
+  }
+  tts_provider?: string | null
+  tts_voice_id?: string | null
+  steps_template: CadenceStep[]
 }
 
 // ── Hooks de query ────────────────────────────────────────────────────

@@ -20,9 +20,7 @@ export default function CadenciasPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold text-(--text-primary)">Cadências</h1>
-          <p className="text-sm text-(--text-secondary)">
-            Sequências de mensagens automatizadas
-          </p>
+          <p className="text-sm text-(--text-secondary)">Sequências de mensagens automatizadas</p>
         </div>
         <Link
           href="/cadencias/nova"
@@ -37,10 +35,7 @@ export default function CadenciasPage() {
       {isLoading ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div
-              key={i}
-              className="h-40 animate-pulse rounded-lg bg-(--bg-overlay)"
-            />
+            <div key={i} className="h-40 animate-pulse rounded-lg bg-(--bg-overlay)" />
           ))}
         </div>
       ) : cadences && cadences.length > 0 ? (
@@ -81,16 +76,16 @@ export default function CadenciasPage() {
 
               {/* Stats */}
               <div className="mt-4 grid grid-cols-3 divide-x divide-(--border-subtle)">
-                <Stat icon={Users} label="Total" value={cadence.leads_total} />
-                <Stat icon={GitBranch} label="Em andamento" value={cadence.leads_in_progress} />
-                <Stat icon={CheckCircle} label="Convertidos" value={cadence.leads_converted} />
+                <Stat icon={Users} label="Total" value={0} />
+                <Stat icon={GitBranch} label="Em andamento" value={0} />
+                <Stat icon={CheckCircle} label="Convertidos" value={0} />
               </div>
 
               {/* LLM info */}
               <p className="mt-4 text-xs text-(--text-tertiary)">
                 {cadence.llm_provider === "openai" ? "OpenAI" : "Gemini"} · {cadence.llm_model} ·{" "}
-                {cadence.steps.length} passo
-                {cadence.steps.length !== 1 ? "s" : ""}
+                {cadence.steps_template?.length ?? 0} passo
+                {(cadence.steps_template?.length ?? 0) !== 1 ? "s" : ""}
               </p>
             </div>
           ))}

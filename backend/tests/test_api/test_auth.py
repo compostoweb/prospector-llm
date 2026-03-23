@@ -15,7 +15,6 @@ Cobre:
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncGenerator
 from datetime import timedelta
 
 import pytest
@@ -91,7 +90,7 @@ async def test_login_returns_bearer_token(
     from api.routes.auth import _get_raw_session
 
     # Override a session de auth para usar o db de teste
-    app.dependency_overrides[_get_raw_session] = lambda: _override_db(db)
+    app.dependency_overrides[_get_raw_session] = _make_db_override(db)
 
     resp = await raw_client.post(
         "/auth/token",
@@ -119,7 +118,7 @@ async def test_login_token_contains_tenant_id(
     from api.routes.auth import _get_raw_session
     from core.security import decode_token
 
-    app.dependency_overrides[_get_raw_session] = lambda: _override_db(db)
+    app.dependency_overrides[_get_raw_session] = _make_db_override(db)
 
     resp = await raw_client.post(
         "/auth/token",
@@ -144,7 +143,7 @@ async def test_login_wrong_slug_returns_401(
     """Slug inexistente → 401 (sem revelar qual campo está errado)."""
     from api.routes.auth import _get_raw_session
 
-    app.dependency_overrides[_get_raw_session] = lambda: _override_db(db)
+    app.dependency_overrides[_get_raw_session] = _make_db_override(db)
 
     resp = await raw_client.post(
         "/auth/token",
@@ -164,7 +163,7 @@ async def test_login_wrong_api_key_returns_401(
     """Api_key errada → 401."""
     from api.routes.auth import _get_raw_session
 
-    app.dependency_overrides[_get_raw_session] = lambda: _override_db(db)
+    app.dependency_overrides[_get_raw_session] = _make_db_override(db)
 
     resp = await raw_client.post(
         "/auth/token",
@@ -183,7 +182,7 @@ async def test_login_inactive_tenant_returns_401(
     """Tenant inativo → 401 mesmo com credenciais corretas."""
     from api.routes.auth import _get_raw_session
 
-    app.dependency_overrides[_get_raw_session] = lambda: _override_db(db)
+    app.dependency_overrides[_get_raw_session] = _make_db_override(db)
 
     resp = await raw_client.post(
         "/auth/token",
@@ -222,6 +221,8 @@ async def test_invalid_token_returns_401(raw_client: AsyncClient) -> None:
 
 # ── Helper ────────────────────────────────────────────────────────────
 
-async def _override_db(db: AsyncSession):
-    """Gerador que entrega o db de teste para o override de _get_raw_session."""
-    yield db
+def _make_db_override(db: AsyncSession):
+    """Retorna async gen function que FastAPI reconhece como dependency generator."""
+    async def _dep():
+        yield db
+    return _dep

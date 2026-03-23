@@ -25,8 +25,9 @@ from integrations.llm.base import LLMMessage, LLMProvider, LLMResponse, ModelInf
 
 logger = structlog.get_logger()
 
-# Preços aproximados USD/1M tokens (input / output)
-# Fonte: https://ai.google.dev/gemini-api/docs/pricing
+# Preços ESTIMADOS USD/1M tokens (input / output) — podem estar desatualizados.
+# Fonte oficial: https://ai.google.dev/gemini-api/docs/pricing
+# → price_is_estimated=True em ModelInfo
 _GEMINI_PRICES: dict[str, tuple[float, float]] = {
     "gemini-2.5-pro":         (1.25,  10.00),   # até 200k tokens; acima 2.50/15.00
     "gemini-2.5-flash":       (0.30,   2.50),   # com thinking; sem: 0.15/0.60

@@ -12,6 +12,7 @@ import {
   Zap,
   User,
   Plug,
+  Volume2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useUIStore } from "@/store/ui-store"
@@ -27,6 +28,7 @@ const navItems = [
 const settingsItems = [
   { href: "/configuracoes/conta", label: "Conta", icon: User },
   { href: "/configuracoes/llm", label: "Modelos LLM", icon: Zap },
+  { href: "/configuracoes/voz", label: "Vozes TTS", icon: Volume2 },
   { href: "/configuracoes/unipile", label: "Unipile", icon: Plug },
   { href: "/configuracoes/integracoes", label: "Integrações", icon: Settings },
 ] as const

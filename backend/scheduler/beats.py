@@ -14,7 +14,7 @@ from celery.schedules import crontab
 CELERY_BEAT_SCHEDULE: dict = {
     # Tick da cadência — verifica e dispara steps a cada minuto
     "cadence-tick": {
-        "task": "workers.cadence.tick",
+        "task": "workers.cadence.cadence_tick",
         "schedule": crontab(minute="*"),
     },
     # Captura de leads via Google Maps (Apify) — 1x por dia às 8h

@@ -13,10 +13,12 @@ cadência de alto valor usa gpt-4o ou gemini-2.5-pro.
 """
 
 import uuid
-from datetime import datetime
-from sqlalchemy import String, Float, Integer, Boolean, DateTime, ForeignKey, text
+
+from sqlalchemy import Boolean, Float, Integer, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
-from models.base import Base, TenantMixin
+
+from models.base import Base, TenantMixin, TimestampMixin
 
 
 # Defaults globais — usados quando cadência não sobrescreve
@@ -26,7 +28,7 @@ DEFAULT_TEMPERATURE = 0.7
 DEFAULT_MAX_TOKENS = 1024
 
 
-class Cadence(Base, TenantMixin):
+class Cadence(Base, TenantMixin, TimestampMixin):
     __tablename__ = "cadences"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -63,7 +65,30 @@ class Cadence(Base, TenantMixin):
         comment="Máximo de tokens de saída por geração",
     )
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    # -------------------------------------------------------
+    # Template de steps customizável (JSONB)
+    # -------------------------------------------------------
+    # Formato: [{"channel": "linkedin_connect", "day_offset": 0, "use_voice": false}, ...]
+    # Se NULL, usa _DEFAULT_TEMPLATE do cadence_manager.
+    steps_template: Mapped[list[dict] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        default=None,
+        comment="Template de steps customizado (JSON). NULL = template padrão.",
+    )
+
+    # -------------------------------------------------------
+    # Configuração TTS por cadência (opcional)
+    # -------------------------------------------------------
+    tts_provider: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        default=None,
+        comment="Provedor TTS: speechify | voicebox. NULL = usa VOICE_PROVIDER global.",
+    )
+    tts_voice_id: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+        default=None,
+        comment="ID da voz/profile TTS. NULL = usa default do provider.",
     )

@@ -14,50 +14,27 @@ Endpoints:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.dependencies import get_current_tenant_id, get_session
+from api.dependencies import get_effective_tenant_id, get_session_flexible
 from models.cadence import Cadence
-from schemas.cadence import CadenceCreateRequest, CadenceUpdateRequest
+from schemas.cadence import CadenceCreateRequest, CadenceResponse, CadenceUpdateRequest
 
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/cadences", tags=["Cadences"])
 
 
-# ── Schema de resposta (definido aqui pois é acoplado às rotas) ───────
-
-class CadenceResponse(BaseModel):
-    """Representação completa de uma cadência na API."""
-
-    model_config = {"from_attributes": True}
-
-    id: uuid.UUID
-    tenant_id: uuid.UUID
-    name: str
-    description: str | None
-    is_active: bool
-    allow_personal_email: bool
-    llm_provider: str
-    llm_model: str
-    llm_temperature: float
-    llm_max_tokens: int
-    created_at: datetime
-    updated_at: datetime
-
-
 # ── Listagem ──────────────────────────────────────────────────────────
 
 @router.get("", response_model=list[CadenceResponse])
 async def list_cadences(
-    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
-    db: AsyncSession = Depends(get_session),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
 ) -> list[CadenceResponse]:
     result = await db.execute(
         select(Cadence)
@@ -73,8 +50,8 @@ async def list_cadences(
 @router.post("", response_model=CadenceResponse, status_code=status.HTTP_201_CREATED)
 async def create_cadence(
     body: CadenceCreateRequest,
-    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
-    db: AsyncSession = Depends(get_session),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
 ) -> CadenceResponse:
     cadence = Cadence(
         tenant_id=tenant_id,
@@ -85,6 +62,13 @@ async def create_cadence(
         llm_model=body.llm.model,
         llm_temperature=body.llm.temperature,
         llm_max_tokens=body.llm.max_tokens,
+        tts_provider=body.tts_provider,
+        tts_voice_id=body.tts_voice_id,
+        steps_template=(
+            [s.model_dump(mode="json") for s in body.steps_template]
+            if body.steps_template
+            else None
+        ),
     )
     db.add(cadence)
     await db.commit()
@@ -99,8 +83,8 @@ async def create_cadence(
 @router.get("/{cadence_id}", response_model=CadenceResponse)
 async def get_cadence(
     cadence_id: uuid.UUID,
-    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
-    db: AsyncSession = Depends(get_session),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
 ) -> CadenceResponse:
     cadence = await _get_cadence_or_404(cadence_id, tenant_id, db)
     return CadenceResponse.model_validate(cadence)
@@ -112,20 +96,30 @@ async def get_cadence(
 async def update_cadence(
     cadence_id: uuid.UUID,
     body: CadenceUpdateRequest,
-    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
-    db: AsyncSession = Depends(get_session),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
 ) -> CadenceResponse:
     cadence = await _get_cadence_or_404(cadence_id, tenant_id, db)
 
-    updates = body.model_dump(exclude_unset=True, exclude={"llm"})
+    updates = body.model_dump(exclude_unset=True, exclude={"llm", "steps_template", "tts_provider", "tts_voice_id"})
     for field, value in updates.items():
         setattr(cadence, field, value)
+
+    if body.steps_template is not None:
+        cadence.steps_template = [s.model_dump(mode="json") for s in body.steps_template]
 
     if body.llm is not None:
         cadence.llm_provider = body.llm.provider
         cadence.llm_model = body.llm.model
         cadence.llm_temperature = body.llm.temperature
         cadence.llm_max_tokens = body.llm.max_tokens
+
+    # TTS fields — atualiza se informado (mesmo que None para limpar)
+    raw = body.model_dump(exclude_unset=True)
+    if "tts_provider" in raw:
+        cadence.tts_provider = body.tts_provider
+    if "tts_voice_id" in raw:
+        cadence.tts_voice_id = body.tts_voice_id
 
     await db.commit()
     await db.refresh(cadence)
@@ -139,8 +133,8 @@ async def update_cadence(
 @router.delete("/{cadence_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def deactivate_cadence(
     cadence_id: uuid.UUID,
-    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
-    db: AsyncSession = Depends(get_session),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
 ) -> None:
     cadence = await _get_cadence_or_404(cadence_id, tenant_id, db)
     cadence.is_active = False

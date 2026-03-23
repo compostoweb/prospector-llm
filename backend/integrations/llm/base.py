@@ -39,6 +39,7 @@ class ModelInfo:
     supports_json_mode: bool = True
     price_input_per_mtok: float = 0.0   # USD por 1M tokens de input
     price_output_per_mtok: float = 0.0  # USD por 1M tokens de output
+    price_is_estimated: bool = True     # Preços são aproximados — conferir site do provider
 
 
 class LLMProvider(ABC):

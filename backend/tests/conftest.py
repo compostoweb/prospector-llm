@@ -56,7 +56,12 @@ def event_loop():
 @pytest_asyncio.fixture(scope="session")
 async def test_engine():
     """Cria o engine, inicializa as tabelas e destrói no final da sessão."""
-    engine = create_async_engine(_TEST_DB_URL, echo=False, pool_pre_ping=True)
+    engine = create_async_engine(
+        _TEST_DB_URL,
+        echo=False,
+        pool_pre_ping=True,
+        connect_args={"timeout": 10},
+    )
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield engine

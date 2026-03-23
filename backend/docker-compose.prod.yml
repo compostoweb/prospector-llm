@@ -123,3 +123,4 @@ volumes:
 
 # Nota: NÃO há serviço postgres aqui.
 # O banco é remoto (Neon ou Supabase) configurado em .env.prod
+# Voicebox roda como projeto separado no EasyPanel (ver ../voicebox-server/)

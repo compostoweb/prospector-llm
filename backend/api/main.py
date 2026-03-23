@@ -22,12 +22,15 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import auth as auth_router
+from api.routes import analytics as analytics_router
 from api.routes import audio as audio_router
 from api.routes import cadences as cadences_router
 from api.routes import leads as leads_router
 from api.routes import llm as llm_router
+from api.routes import tts as tts_router
 from api.routes import tenants as tenants_router
 from api.routes import admin_users as admin_users_router
+from api.routes import ws as ws_router
 from api.webhooks import unipile as unipile_webhook
 from core.config import settings
 from core.database import AsyncSessionLocal, init_db
@@ -125,12 +128,15 @@ async def log_requests(
 # ── Routers ───────────────────────────────────────────────────────────
 
 app.include_router(auth_router.router)
+app.include_router(analytics_router.router)
 app.include_router(audio_router.router)
 app.include_router(llm_router.router)
+app.include_router(tts_router.router)
 app.include_router(leads_router.router)
 app.include_router(cadences_router.router)
 app.include_router(tenants_router.router)
 app.include_router(admin_users_router.router)
+app.include_router(ws_router.router)
 app.include_router(unipile_webhook.router)
 
 

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from models.enums import Channel
+
 # Combinações válidas: provider → lista de prefixos de model aceitos
 # Serve para validação básica — a lista completa vem da API dos providers
 _VALID_PROVIDERS = {"openai", "gemini"}
@@ -61,6 +63,21 @@ class LLMConfigSchema(BaseModel):
         return self
 
 
+class StepTemplateItem(BaseModel):
+    """Um step dentro do template customizado de cadência."""
+
+    channel: Channel
+    day_offset: int = Field(..., ge=0, le=90, description="Dias após enrollment")
+    message_template: str | None = Field(default=None, description="Template de mensagem com variáveis")
+    use_voice: bool = Field(default=False, description="Enviar voice note (só linkedin_dm)")
+
+    @model_validator(mode="after")
+    def voice_only_for_dm(self) -> "StepTemplateItem":
+        if self.use_voice and self.channel != Channel.LINKEDIN_DM:
+            raise ValueError("use_voice só é permitido para linkedin_dm")
+        return self
+
+
 class CadenceCreateRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=200)
     description: str | None = None
@@ -69,6 +86,29 @@ class CadenceCreateRequest(BaseModel):
     # Configuração LLM — se não informado, usa defaults globais
     llm: LLMConfigSchema = Field(default_factory=LLMConfigSchema)
 
+    # Configuração TTS — se não informado, usa fallback global (VOICE_PROVIDER)
+    tts_provider: str | None = Field(
+        default=None,
+        description="Provedor TTS: speechify | voicebox. NULL = default global.",
+    )
+    tts_voice_id: str | None = Field(
+        default=None,
+        description="ID da voz/profile TTS. NULL = default do provider.",
+    )
+
+    # Template de steps customizado — se não informado, usa template padrão
+    steps_template: list[StepTemplateItem] | None = Field(
+        default=None,
+        description="Template customizado de steps. NULL = template padrão (5 steps).",
+    )
+
+    @field_validator("steps_template")
+    @classmethod
+    def validate_steps_not_empty(cls, v: list[StepTemplateItem] | None) -> list[StepTemplateItem] | None:
+        if v is not None and len(v) == 0:
+            raise ValueError("steps_template não pode ser uma lista vazia")
+        return v
+
 
 class CadenceUpdateRequest(BaseModel):
     name: str | None = None
@@ -76,10 +116,18 @@ class CadenceUpdateRequest(BaseModel):
     is_active: bool | None = None
     allow_personal_email: bool | None = None
     llm: LLMConfigSchema | None = None
+    tts_provider: str | None = None
+    tts_voice_id: str | None = None
+    steps_template: list[StepTemplateItem] | None = None
 
 
 class CadenceResponse(BaseModel):
+    """Representação completa de uma cadência na API."""
+
+    model_config = {"from_attributes": True}
+
     id: str
+    tenant_id: str
     name: str
     description: str | None
     is_active: bool
@@ -88,5 +136,8 @@ class CadenceResponse(BaseModel):
     llm_model: str
     llm_temperature: float
     llm_max_tokens: int
-
-    model_config = {"from_attributes": True}
+    tts_provider: str | None = None
+    tts_voice_id: str | None = None
+    steps_template: list[dict] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
