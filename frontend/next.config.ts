@@ -3,9 +3,7 @@ import type { NextConfig } from "next"
 const nextConfig: NextConfig = {
   reactStrictMode: true,
 
-  experimental: {
-    typedRoutes: true,
-  },
+  typedRoutes: true,
 
   // Evita warning de múltiplos lockfiles no monorepo (raiz + frontend)
   turbopack: {
