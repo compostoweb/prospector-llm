@@ -53,4 +53,10 @@ logs/
 # Node.js (monorepo root + frontend)
 node_modules/
 package-lock.json
+
+# Arquivos temporários de debug/diagnóstico
 *.tmp
+alembic_status.txt
+alembic_upgrade.txt
+reset_alembic.txt
+uvicorn_out.txt
