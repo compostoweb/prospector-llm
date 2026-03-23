@@ -1,0 +1,63 @@
+# ── Stage 1: builder ─────────────────────────────────────────────────
+# Instala as dependências em uma venv isolada usando ferramentas de
+# compilação (gcc, etc.). Nada disso entrará na imagem final.
+FROM python:3.12-slim AS builder
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m venv /venv
+ENV PATH="/venv/bin:$PATH"
+
+COPY pyproject.toml .
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir .
+
+
+# ── Stage 2: runtime ─────────────────────────────────────────────────
+# Imagem final limpa: sem build-essential, sem gcc, sem nada inseguro.
+FROM python:3.12-slim AS runtime
+
+# tini: init system leve — PID 1 correto, forwarding de sinais e reap
+# curl:  necessário para o HEALTHCHECK
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tini curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copia venv compilada no stage anterior
+COPY --from=builder /venv /venv
+
+# PATH → executáveis da venv (uvicorn, etc.)
+# PYTHONPATH → /app tem prioridade sobre site-packages (hot-reload amigável)
+# PYTHONUNBUFFERED → logs em tempo real
+ENV PATH="/venv/bin:$PATH" \
+    PYTHONPATH="/app" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Usuário não-root — princípio do menor privilégio
+RUN useradd --create-home --shell /bin/bash --uid 1001 appuser
+
+WORKDIR /app
+
+# Copia código com a propriedade correta antes de mudar o USER
+COPY --chown=appuser:appuser . .
+
+USER appuser
+
+EXPOSE 8000
+
+# Verifica saúde da API — /health deve retornar 200
+HEALTHCHECK \
+    --interval=30s \
+    --timeout=10s \
+    --start-period=20s \
+    --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# tini como PID 1: garante forwarding correto de SIGTERM ao uvicorn
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

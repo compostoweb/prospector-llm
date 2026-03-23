@@ -1,0 +1,62 @@
+"""
+integrations/llm/base.py
+
+Contrato base para todos os provedores de LLM.
+Cada provedor implementa esta interface — o restante do sistema
+nunca importa OpenAI ou Gemini diretamente, só usa LLMProvider.
+"""
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import Any
+
+
+@dataclass
+class LLMMessage:
+    """Mensagem no formato agnóstico ao provedor."""
+    role: str   # "system" | "user" | "assistant"
+    content: str
+
+
+@dataclass
+class LLMResponse:
+    """Resposta normalizada de qualquer provedor."""
+    text: str
+    model: str
+    provider: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ModelInfo:
+    """Informações de um modelo disponível."""
+    id: str
+    name: str
+    provider: str                   # "openai" | "gemini"
+    context_window: int = 0
+    supports_json_mode: bool = True
+    price_input_per_mtok: float = 0.0   # USD por 1M tokens de input
+    price_output_per_mtok: float = 0.0  # USD por 1M tokens de output
+
+
+class LLMProvider(ABC):
+    """Interface base para provedores de LLM."""
+
+    @property
+    @abstractmethod
+    def provider_name(self) -> str: ...
+
+    @abstractmethod
+    async def complete(
+        self,
+        messages: list[LLMMessage],
+        model: str,
+        temperature: float = 0.7,
+        max_tokens: int = 1024,
+        json_mode: bool = False,
+    ) -> LLMResponse: ...
+
+    @abstractmethod
+    async def list_models(self) -> list[ModelInfo]: ...

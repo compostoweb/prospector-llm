@@ -1,0 +1,12 @@
+.env.local
+.env.production.local
+.next/
+out/
+node_modules/
+src/lib/api/schema.d.ts
+.turbo/
+coverage/
+playwright-report/
+test-results/
+*.log
+.DS_Store

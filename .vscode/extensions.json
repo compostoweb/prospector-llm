@@ -1,0 +1,26 @@
+{
+  "recommendations": [
+    // --- Copilot ---
+    "github.copilot",
+    "github.copilot-chat",
+    // --- Python / Backend ---
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "charliermarsh.ruff",
+    "ms-python.mypy-type-checker",
+    "ms-azuretools.vscode-docker",
+    "mtxr.sqltools",
+    "mtxr.sqltools-driver-pg",
+    "ms-vscode-remote.remote-containers",
+    // --- TypeScript / Frontend ---
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "bradlc.vscode-tailwindcss",
+    "ms-vscode.vscode-typescript-next",
+    "formulahendry.auto-rename-tag",
+    "ms-playwright.playwright",
+    // --- Geral ---
+    "eamodio.gitlens",
+    "usernamehw.errorlens"
+  ]
+}

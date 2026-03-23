@@ -1,0 +1,110 @@
+services:
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    ports:
+      - "8000:8000"
+    env_file: .env.dev
+    environment:
+      - ENV=dev
+    volumes:
+      - .:/app          # hot reload no dev
+    depends_on:
+      - redis
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+
+  worker-capture:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    env_file: .env.dev
+    environment:
+      - ENV=dev
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+    command: celery -A workers.celery_app worker -Q capture -c 2 --loglevel=info
+    restart: unless-stopped
+
+  worker-dispatch:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    env_file: .env.dev
+    environment:
+      - ENV=dev
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+    command: celery -A workers.celery_app worker -Q dispatch -c 2 --loglevel=info
+    restart: unless-stopped
+
+  worker-cadence:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    env_file: .env.dev
+    environment:
+      - ENV=dev
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+    command: celery -A workers.celery_app worker -Q cadence -c 1 --loglevel=info
+    restart: unless-stopped
+
+  worker-enrich:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    env_file: .env.dev
+    environment:
+      - ENV=dev
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+    command: celery -A workers.celery_app worker -Q enrich -c 2 --loglevel=info
+    restart: unless-stopped
+
+  beat:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    env_file: .env.dev
+    environment:
+      - ENV=dev
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+    command: celery -A workers.celery_app beat --loglevel=info
+    restart: unless-stopped
+
+  flower:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    ports:
+      - "5555:5555"
+    env_file: .env.dev
+    environment:
+      - ENV=dev
+    depends_on:
+      - redis
+    command: celery -A workers.celery_app flower --port=5555
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+# Nota: NÃO há serviço postgres aqui.
+# O banco é remoto (Neon ou Supabase) configurado em .env.dev

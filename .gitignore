@@ -1,0 +1,51 @@
+# Ambientes — NUNCA commitar
+.env.dev
+.env.prod
+.env.local
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Mypy
+.mypy_cache/
+
+# Ruff
+.ruff_cache/
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Docker
+.dockerignore
+
+# Logs
+*.log
+logs/
+
+# Alembic (gerados automaticamente, manter apenas o env.py)
+# alembic/versions/*.py  ← não ignorar, commitar migrations
+
+# Arquivos temporários de áudio gerados pelo voice.py
+/tmp/audio/
