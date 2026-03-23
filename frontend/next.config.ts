@@ -7,6 +7,11 @@ const nextConfig: NextConfig = {
     typedRoutes: true,
   },
 
+  // Evita warning de múltiplos lockfiles no monorepo (raiz + frontend)
+  turbopack: {
+    root: __dirname,
+  },
+
   // Proxy para o backend no dev (evita CORS)
   async rewrites() {
     if (process.env.NODE_ENV !== "development") return []

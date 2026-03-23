@@ -1,0 +1,16 @@
+{
+  "name": "prospector",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prospector — monorepo scripts (frontend Next.js + backend FastAPI)",
+  "scripts": {
+    "frontend": "npm run dev --prefix frontend",
+    "backend:redis": "docker compose -f backend/docker-compose.dev.yml up redis --detach",
+    "backend:api": "cd backend && python -m uvicorn api.main:app --reload --port 8000",
+    "backend": "npm run backend:redis && npm run backend:api",
+    "dev": "npm run backend:redis && concurrently --kill-others-on-fail --names \"API,WEB\" --prefix-colors \"cyan,magenta\" \"npm run backend:api\" \"npm run frontend\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
