@@ -2,6 +2,15 @@
 
 import { useState } from "react"
 import { useLLMModels } from "@/lib/api/hooks/use-llm-models"
+import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 
 interface LLMConfig {
@@ -33,17 +42,15 @@ export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
   }
 
   return (
-    <div className="space-y-4 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-overlay)] p-4">
-      <p className="text-xs font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
+    <div className="space-y-4 rounded-md border border-(--border-default) bg-(--bg-overlay) p-4">
+      <p className="text-xs font-semibold uppercase tracking-wider text-(--text-tertiary)">
         Configuração LLM
       </p>
 
       {/* Provider */}
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
-            Provider
-          </label>
+          <label className="mb-1 block text-xs font-medium text-(--text-secondary)">Provider</label>
           <div className="flex gap-2">
             {["openai", "gemini"].map((p) => (
               <button
@@ -51,10 +58,10 @@ export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
                 type="button"
                 onClick={() => update("llm_provider", p as "openai" | "gemini")}
                 className={cn(
-                  "flex-1 rounded-[var(--radius-md)] border py-2 text-xs font-medium transition-colors",
+                  "flex-1 rounded-md border py-2 text-xs font-medium transition-colors",
                   value.llm_provider === p
-                    ? "border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent-subtle-fg)]"
-                    : "border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-overlay)]",
+                    ? "border-(--accent) bg-(--accent-subtle) text-(--accent-subtle-fg)"
+                    : "border-(--border-default) bg-(--bg-surface) text-(--text-secondary) hover:bg-(--bg-overlay)",
                 )}
               >
                 {p === "openai" ? "OpenAI" : "Gemini"}
@@ -65,33 +72,31 @@ export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
 
         {/* Modelo */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
-            Modelo
-          </label>
-          <select
+          <Label className="mb-1 block text-xs">Modelo</Label>
+          <Select
             value={value.llm_model}
-            onChange={(e) => update("llm_model", e.target.value)}
+            onValueChange={(v) => update("llm_model", v)}
             disabled={isLoading || currentProviderModels.length === 0}
-            className="w-full rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none disabled:opacity-50"
           >
-            {isLoading ? (
-              <option>Carregando…</option>
-            ) : (
-              currentProviderModels.map((m) => (
-                <option key={m.id} value={m.id}>
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue placeholder={isLoading ? "Carregando…" : "Selecione"} />
+            </SelectTrigger>
+            <SelectContent>
+              {currentProviderModels.map((m) => (
+                <SelectItem key={m.id} value={m.id} className="text-xs">
                   {m.name}
-                </option>
-              ))
-            )}
-          </select>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
       {/* Temperature */}
       <div>
         <div className="mb-1 flex items-center justify-between">
-          <label className="text-xs font-medium text-[var(--text-secondary)]">Temperature</label>
-          <span className="text-xs tabular-nums text-[var(--text-tertiary)]">
+          <Label className="text-xs">Temperature</Label>
+          <span className="text-xs tabular-nums text-(--text-tertiary)">
             {value.llm_temperature.toFixed(1)}
           </span>
         </div>
@@ -101,10 +106,11 @@ export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
           max={1}
           step={0.1}
           value={value.llm_temperature}
+          aria-label="Temperature"
           onChange={(e) => update("llm_temperature", Number(e.target.value))}
-          className="w-full accent-[var(--accent)]"
+          className="w-full accent-(--accent)"
         />
-        <div className="mt-0.5 flex justify-between text-[10px] text-[var(--text-disabled)]">
+        <div className="mt-0.5 flex justify-between text-[10px] text-(--text-disabled)">
           <span>Preciso</span>
           <span>Criativo</span>
         </div>
@@ -112,17 +118,15 @@ export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
 
       {/* Max tokens */}
       <div>
-        <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
-          Máx. tokens de saída
-        </label>
-        <input
+        <Label className="mb-1 block text-xs">Máx. tokens de saída</Label>
+        <Input
           type="number"
           min={64}
           max={8192}
           step={64}
           value={value.llm_max_tokens}
           onChange={(e) => update("llm_max_tokens", Number(e.target.value))}
-          className="w-full rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
+          className="h-8 text-xs"
         />
       </div>
     </div>

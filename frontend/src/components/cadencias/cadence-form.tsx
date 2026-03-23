@@ -4,6 +4,10 @@ import { useState } from "react"
 import { useCreateCadence, useUpdateCadence } from "@/lib/api/hooks/use-cadences"
 import { CadenceSteps } from "@/components/cadencias/cadence-steps"
 import { LLMConfigForm } from "@/components/cadencias/llm-config-form"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
 import { useRouter } from "next/navigation"
 import type { Cadence, CreateCadenceBody, CadenceStep } from "@/lib/api/hooks/use-cadences"
 
@@ -75,46 +79,34 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
       {error && (
         <div
           role="alert"
-          className="rounded-[var(--radius-md)] bg-[var(--danger-subtle)] px-4 py-3 text-sm text-[var(--danger-subtle-fg)]"
+          className="rounded-md bg-(--danger-subtle) px-4 py-3 text-sm text-(--danger-subtle-fg)"
         >
           {error}
         </div>
       )}
 
       {/* Nome */}
-      <div>
-        <label
-          htmlFor="cadence-name"
-          className="mb-1.5 block text-sm font-medium text-[var(--text-primary)]"
-        >
-          Nome da cadência *
-        </label>
-        <input
+      <div className="space-y-1.5">
+        <Label htmlFor="cadence-name">Nome da cadência *</Label>
+        <Input
           id="cadence-name"
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Ex: Prospecção SaaS B2B"
           required
-          className="w-full rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:border-[var(--accent)] focus:outline-none"
         />
       </div>
 
       {/* Descrição */}
-      <div>
-        <label
-          htmlFor="cadence-desc"
-          className="mb-1.5 block text-sm font-medium text-[var(--text-primary)]"
-        >
-          Descrição
-        </label>
-        <textarea
+      <div className="space-y-1.5">
+        <Label htmlFor="cadence-desc">Descrição</Label>
+        <Textarea
           id="cadence-desc"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={2}
           placeholder="Descreva o público-alvo e objetivo desta cadência…"
-          className="w-full resize-none rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:border-[var(--accent)] focus:outline-none"
         />
       </div>
 
@@ -123,28 +115,18 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
 
       {/* Passos */}
       <div>
-        <h2 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">
-          Passos da cadência
-        </h2>
+        <h2 className="mb-3 text-sm font-semibold text-(--text-primary)">Passos da cadência</h2>
         <CadenceSteps value={steps} onChange={setSteps} />
       </div>
 
       {/* Ações */}
       <div className="flex gap-3 pt-2">
-        <button
-          type="button"
-          onClick={() => router.back()}
-          className="rounded-[var(--radius-md)] border border-[var(--border-default)] px-4 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-overlay)]"
-        >
+        <Button type="button" variant="outline" onClick={() => router.back()}>
           Cancelar
-        </button>
-        <button
-          type="submit"
-          disabled={isLoading}
-          className="rounded-[var(--radius-md)] bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
-        >
+        </Button>
+        <Button type="submit" disabled={isLoading}>
           {isLoading ? "Salvando…" : isEdit ? "Salvar alterações" : "Criar cadência"}
-        </button>
+        </Button>
       </div>
     </form>
   )
