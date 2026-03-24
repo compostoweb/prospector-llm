@@ -90,7 +90,7 @@ const TEMPLATE_EXAMPLE_ROW = [
   "51-200",
   "https://linkedin.com/in/joaosilva",
   "São Paulo",
-  "São Paulo, SP, Brasil",
+  "São Paulo - SP - Brasil",
   "Enterprise",
   "+5511999999999",
   "joao@acme.com",
@@ -98,8 +98,19 @@ const TEMPLATE_EXAMPLE_ROW = [
   "Lead quente via evento",
 ]
 
+/** Escapa valor CSV: envolve em aspas duplas se contiver vírgula, aspas ou quebra de linha */
+function csvEscape(value: string): string {
+  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
+    return `"${value.replace(/"/g, '""')}"`
+  }
+  return value
+}
+
 function downloadTemplate() {
-  const csv = [TEMPLATE_COLUMNS.join(","), TEMPLATE_EXAMPLE_ROW.join(",")].join("\n")
+  const csv = [
+    TEMPLATE_COLUMNS.map(csvEscape).join(","),
+    TEMPLATE_EXAMPLE_ROW.map(csvEscape).join(","),
+  ].join("\n")
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
@@ -109,13 +120,45 @@ function downloadTemplate() {
   URL.revokeObjectURL(url)
 }
 
+/** Divide uma linha CSV respeitando campos entre aspas duplas */
+function splitCSVLine(line: string): string[] {
+  const result: string[] = []
+  let current = ""
+  let inQuotes = false
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (inQuotes) {
+      if (ch === '"' && line[i + 1] === '"') {
+        current += '"'
+        i++ // pula aspas escapada
+      } else if (ch === '"') {
+        inQuotes = false
+      } else {
+        current += ch
+      }
+    } else {
+      if (ch === '"') {
+        inQuotes = true
+      } else if (ch === ",") {
+        result.push(current.trim())
+        current = ""
+      } else {
+        current += ch
+      }
+    }
+  }
+  result.push(current.trim())
+  return result
+}
+
 function parseCSV(text: string): ImportLeadItem[] {
   const lines = text.split(/\r?\n/).filter((l) => l.trim())
   if (lines.length < 2) return []
 
   const firstLine = lines[0]
   if (!firstLine) return []
-  const headers = firstLine.split(",").map((h) => h.trim().toLowerCase())
+  const headers = splitCSVLine(firstLine).map((h) => h.toLowerCase())
 
   // Mapeia índice da coluna → campo
   const colMapping: { idx: number; field: keyof ImportLeadItem }[] = []
@@ -131,7 +174,7 @@ function parseCSV(text: string): ImportLeadItem[] {
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i]
     if (!line) continue
-    const cols = line.split(",").map((c) => c.trim())
+    const cols = splitCSVLine(line)
     const item: Record<string, string | null> = {}
 
     for (const { idx, field } of colMapping) {

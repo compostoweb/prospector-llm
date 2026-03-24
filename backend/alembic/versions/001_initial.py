@@ -24,7 +24,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 
-revision = "001_initial"
+revision = "001"
 down_revision = None
 branch_labels = None
 depends_on = None

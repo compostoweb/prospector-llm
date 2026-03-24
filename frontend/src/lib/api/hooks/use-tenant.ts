@@ -10,6 +10,7 @@ export interface TenantIntegration {
   tenant_id: string
   unipile_linkedin_account_id: string | null
   unipile_gmail_account_id: string | null
+  pipedrive_api_token_set: boolean
   pipedrive_domain: string | null
   pipedrive_owner_id: number | null
   pipedrive_stage_interest: number | null

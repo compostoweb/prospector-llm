@@ -1,10 +1,11 @@
 """
 integrations/email_finders/prospeo.py
 
-Cliente HTTP assíncrono para Prospeo — email finder por nome + domínio.
+Cliente HTTP assíncrono para Prospeo — Enrich Person API (v2, mar/2026).
 
-Base URL: https://api.prospeo.io/v1
+Base URL: https://api.prospeo.io
 Auth:     X-KEY header
+Docs:     https://prospeo.io/api-docs/enrich-person
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from core.config import settings
 
 logger = structlog.get_logger()
 
-_BASE_URL = "https://api.prospeo.io/v1"
+_BASE_URL = "https://api.prospeo.io"
 _TIMEOUT = 20.0
 
 
@@ -24,7 +25,10 @@ class ProspeoClient:
     def __init__(self) -> None:
         self._client = httpx.AsyncClient(
             base_url=_BASE_URL,
-            headers={"X-KEY": settings.PROSPEO_API_KEY or ""},
+            headers={
+                "X-KEY": settings.PROSPEO_API_KEY or "",
+                "Content-Type": "application/json",
+            },
             timeout=_TIMEOUT,
         )
 
@@ -35,28 +39,46 @@ class ProspeoClient:
         domain: str,
     ) -> tuple[str, float] | None:
         """
-        Busca o e-mail corporativo pelo nome e domínio da empresa.
+        Busca o e-mail corporativo via Enrich Person (POST /enrich-person).
 
         Retorna (email, confidence) ou None se não encontrado.
-        confidence está entre 0.0 e 1.0 (Prospeo retorna score 0-100).
+        confidence: 1.0 se VERIFIED, 0.5 caso contrário.
         """
         try:
             resp = await self._client.post(
-                "/email-finder",
+                "/enrich-person",
                 json={
-                    "first_name": first_name,
-                    "last_name": last_name,
-                    "company": domain,
+                    "only_verified_email": False,
+                    "enrich_mobile": False,
+                    "data": {
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "company_website": domain,
+                    },
                 },
             )
             resp.raise_for_status()
             data = resp.json()
-            email: str | None = data.get("response", {}).get("email")
-            score: int = int(data.get("response", {}).get("accept_all_score", 0) or 0)
-            if not email:
+            if data.get("error"):
+                error_code = data.get("error_code", "UNKNOWN")
+                logger.info("prospeo.no_match", error_code=error_code, domain=domain)
                 return None
-            logger.info("prospeo.found", email=email, domain=domain, score=score)
-            return email, score / 100.0
+            person = data.get("person") or {}
+            email_obj = person.get("email") or {}
+            email: str | None = email_obj.get("email")
+            status: str = email_obj.get("status", "")
+            revealed: bool = email_obj.get("revealed", False)
+            if not email or not revealed:
+                return None
+            confidence = 1.0 if status == "VERIFIED" else 0.5
+            logger.info(
+                "prospeo.found",
+                email=email,
+                domain=domain,
+                status=status,
+                confidence=confidence,
+            )
+            return email, confidence
         except httpx.HTTPStatusError as exc:
             logger.warning("prospeo.error", status=exc.response.status_code, domain=domain)
             return None

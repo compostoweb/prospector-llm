@@ -14,8 +14,8 @@ cadência de alto valor usa gpt-4o ou gemini-2.5-pro.
 
 import uuid
 
-from sqlalchemy import Boolean, Float, Integer, String
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base, TenantMixin, TimestampMixin
@@ -91,4 +91,15 @@ class Cadence(Base, TenantMixin, TimestampMixin):
         nullable=True,
         default=None,
         comment="ID da voz/profile TTS. NULL = usa default do provider.",
+    )
+
+    # -------------------------------------------------------
+    # Lista de leads associada (opcional)
+    # -------------------------------------------------------
+    lead_list_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("lead_lists.id", ondelete="SET NULL"),
+        nullable=True,
+        default=None,
+        comment="Lista de leads vinculada. NULL = sem lista.",
     )

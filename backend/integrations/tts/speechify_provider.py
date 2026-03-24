@@ -72,17 +72,20 @@ class SpeechifyProvider(TTSProvider):
     async def list_voices(self) -> list[TTSVoice]:
         resp = await self._client.get("/voices")
         resp.raise_for_status()
-        raw_voices: list[dict] = resp.json().get("voices", [])
+        data = resp.json()
+
+        # API returns a plain list (not {voices: [...]})
+        raw_voices: list[dict] = data if isinstance(data, list) else data.get("voices", [])
 
         voices: list[TTSVoice] = []
         for v in raw_voices:
             voices.append(
                 TTSVoice(
                     id=v.get("id", v.get("voice_id", "")),
-                    name=v.get("name", v.get("display_name", "")),
-                    language=v.get("language", "en-US"),
+                    name=v.get("display_name", v.get("name", "")),
+                    language=v.get("locale", v.get("language", "en-US")),
                     provider="speechify",
-                    is_cloned=v.get("is_cloned", False),
+                    is_cloned=v.get("type") == "cloned",
                 )
             )
         return voices

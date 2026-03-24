@@ -28,6 +28,7 @@ from api.routes import cadences as cadences_router
 from api.routes import lead_lists as lead_lists_router
 from api.routes import leads as leads_router
 from api.routes import llm as llm_router
+from api.routes import pipedrive as pipedrive_router
 from api.routes import tts as tts_router
 from api.routes import tenants as tenants_router
 from api.routes import admin_users as admin_users_router
@@ -132,6 +133,7 @@ app.include_router(auth_router.router)
 app.include_router(analytics_router.router)
 app.include_router(audio_router.router)
 app.include_router(llm_router.router)
+app.include_router(pipedrive_router.router)
 app.include_router(tts_router.router)
 app.include_router(leads_router.router)
 app.include_router(lead_lists_router.router)

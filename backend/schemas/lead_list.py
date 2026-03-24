@@ -34,6 +34,33 @@ class LeadListResponse(BaseModel):
     updated_at: datetime
 
 
+class LeadListLeadItem(BaseModel):
+    """Representação resumida de um lead dentro de uma lista."""
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    name: str
+    job_title: str | None = None
+    company: str | None = None
+    email_corporate: str | None = None
+    linkedin_url: str | None = None
+    status: str = "raw"
+
+
+class LeadListDetailResponse(BaseModel):
+    """Resposta detalhada de uma lista — inclui os leads membros."""
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    name: str
+    description: str | None
+    lead_count: int = 0
+    leads: list[LeadListLeadItem] = []
+    created_at: datetime
+    updated_at: datetime
+
+
 class LeadListMembersRequest(BaseModel):
     """Adicionar ou remover leads de uma lista."""
     lead_ids: list[uuid.UUID] = Field(..., min_length=1)

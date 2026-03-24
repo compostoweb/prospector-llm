@@ -154,8 +154,12 @@ async def get_current_tenant_flexible(
     Busca o Tenant ativo — aceita tanto tenant tokens quanto user tokens.
     Usa get_effective_tenant_id para resolver o tenant_id.
     """
+    from sqlalchemy.orm import selectinload
+
     result = await db.execute(
-        select(Tenant).where(Tenant.id == tenant_id, Tenant.is_active.is_(True))
+        select(Tenant)
+        .where(Tenant.id == tenant_id, Tenant.is_active.is_(True))
+        .options(selectinload(Tenant.integration))
     )
     tenant = result.scalar_one_or_none()
     if tenant is None:

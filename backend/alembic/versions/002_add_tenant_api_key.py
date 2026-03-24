@@ -9,8 +9,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "002_add_tenant_api_key"
-down_revision = "001_initial"
+revision = "002"
+down_revision = "001"
 branch_labels = None
 depends_on = None
 

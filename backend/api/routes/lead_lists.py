@@ -14,11 +14,13 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from api.dependencies import get_current_tenant, get_session
+from api.dependencies import get_current_tenant_flexible as get_current_tenant, get_session_flexible as get_session
 from models.lead_list import LeadList, lead_list_members
 from models.tenant import Tenant
 from schemas.lead_list import (
     LeadListCreateRequest,
+    LeadListDetailResponse,
+    LeadListLeadItem,
     LeadListMembersRequest,
     LeadListResponse,
     LeadListUpdateRequest,
@@ -30,11 +32,9 @@ router = APIRouter(prefix="/lead-lists", tags=["lead-lists"])
 
 
 def _to_response(ll: LeadList) -> LeadListResponse:
-    return LeadListResponse.model_validate(
-        ll,
-        from_attributes=True,
-        update={"lead_count": len(ll.leads) if ll.leads else 0},
-    )
+    data = LeadListResponse.model_validate(ll, from_attributes=True)
+    data.lead_count = len(ll.leads) if ll.leads else 0
+    return data
 
 
 @router.get("", response_model=list[LeadListResponse])
@@ -70,12 +70,12 @@ async def create_lead_list(
     return _to_response(ll)
 
 
-@router.get("/{list_id}", response_model=LeadListResponse)
+@router.get("/{list_id}", response_model=LeadListDetailResponse)
 async def get_lead_list(
     list_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
     tenant: Tenant = Depends(get_current_tenant),
-) -> LeadListResponse:
+) -> LeadListDetailResponse:
     result = await db.execute(
         select(LeadList)
         .where(LeadList.id == list_id, LeadList.tenant_id == tenant.id)
@@ -84,7 +84,11 @@ async def get_lead_list(
     ll = result.scalar_one_or_none()
     if not ll:
         raise HTTPException(status_code=404, detail="Lista não encontrada")
-    return _to_response(ll)
+    leads_items = [LeadListLeadItem.model_validate(lead) for lead in (ll.leads or [])]
+    data = LeadListDetailResponse.model_validate(ll, from_attributes=True)
+    data.lead_count = len(leads_items)
+    data.leads = leads_items
+    return data
 
 
 @router.put("/{list_id}", response_model=LeadListResponse)

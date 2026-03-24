@@ -28,6 +28,7 @@ class TenantResponse(BaseModel):
     slug: str
     is_active: bool
     created_at: datetime
+    integration: "TenantIntegrationResponse | None" = None
 
 
 class TenantCreateResponse(TenantResponse):
@@ -77,6 +78,7 @@ class TenantIntegrationResponse(BaseModel):
     tenant_id: uuid.UUID
     unipile_linkedin_account_id: str | None
     unipile_gmail_account_id: str | None
+    pipedrive_api_token_set: bool = False
     pipedrive_domain: str | None
     pipedrive_owner_id: int | None
     pipedrive_stage_interest: int | None

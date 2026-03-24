@@ -28,9 +28,9 @@ class ModelResponse(BaseModel):
     name: str
     provider: str
     context_window: int
-    supports_json_mode: bool
-    price_input_per_mtok: float
-    price_output_per_mtok: float
+    supports_json: bool
+    input_cost_per_mtok: float
+    output_cost_per_mtok: float
 
     @classmethod
     def from_model_info(cls, m: ModelInfo) -> "ModelResponse":
@@ -39,16 +39,16 @@ class ModelResponse(BaseModel):
             name=m.name,
             provider=m.provider,
             context_window=m.context_window,
-            supports_json_mode=m.supports_json_mode,
-            price_input_per_mtok=m.price_input_per_mtok,
-            price_output_per_mtok=m.price_output_per_mtok,
+            supports_json=m.supports_json_mode,
+            input_cost_per_mtok=m.price_input_per_mtok,
+            output_cost_per_mtok=m.price_output_per_mtok,
         )
 
 
-class ModelsListResponse(BaseModel):
-    providers: list[str]
-    total: int
-    models: list[ModelResponse]
+class ProviderResponse(BaseModel):
+    provider: str
+    configured: bool
+    models_count: int
 
 
 class TestRequest(BaseModel):
@@ -60,11 +60,11 @@ class TestRequest(BaseModel):
 
 
 class TestResponse(BaseModel):
-    text: str
+    response: str
     provider: str
     model: str
-    input_tokens: int
-    output_tokens: int
+    tokens_used: int
+    latency_ms: float
     ok: bool
 
 
@@ -73,51 +73,49 @@ class TestResponse(BaseModel):
 @router.get("/providers", summary="Lista provedores configurados")
 async def get_providers(
     registry: LLMRegistry = Depends(get_llm_registry),
-) -> dict:
-    return {"providers": registry.available_providers()}
+) -> list[ProviderResponse]:
+    """Retorna lista de providers com status de configuração e contagem de modelos."""
+    providers = registry.available_providers()
+    result: list[ProviderResponse] = []
+    for p in providers:
+        models = await registry.list_models_by_provider(p)
+        result.append(ProviderResponse(provider=p, configured=True, models_count=len(models)))
+    return result
 
 
 @router.get(
     "/models",
-    response_model=ModelsListResponse,
+    response_model=list[ModelResponse],
     summary="Lista todos os modelos de chat disponíveis (todos os providers)",
 )
 async def get_all_models(
     force_refresh: bool = Query(False, description="Força atualização ignorando cache"),
     registry: LLMRegistry = Depends(get_llm_registry),
-) -> ModelsListResponse:
+) -> list[ModelResponse]:
     """
     Retorna a lista agregada de modelos de todos os providers configurados.
     Os modelos são cacheados por 1h no Redis — use force_refresh=true para forçar.
     """
     models = await registry.list_all_models(force_refresh=force_refresh)
-    return ModelsListResponse(
-        providers=registry.available_providers(),
-        total=len(models),
-        models=[ModelResponse.from_model_info(m) for m in models],
-    )
+    return [ModelResponse.from_model_info(m) for m in models]
 
 
 @router.get(
     "/models/{provider}",
-    response_model=ModelsListResponse,
+    response_model=list[ModelResponse],
     summary="Lista modelos de um provider específico",
 )
 async def get_models_by_provider(
     provider: str,
     registry: LLMRegistry = Depends(get_llm_registry),
-) -> ModelsListResponse:
+) -> list[ModelResponse]:
     if provider not in registry.available_providers():
         raise HTTPException(
             status_code=404,
             detail=f"Provider '{provider}' não encontrado. Disponíveis: {registry.available_providers()}",
         )
     models = await registry.list_models_by_provider(provider)
-    return ModelsListResponse(
-        providers=[provider],
-        total=len(models),
-        models=[ModelResponse.from_model_info(m) for m in models],
-    )
+    return [ModelResponse.from_model_info(m) for m in models]
 
 
 @router.post(
@@ -134,7 +132,10 @@ async def test_model(
     Endpoint de diagnóstico — envia uma mensagem simples para verificar
     se o provider e modelo estão funcionando corretamente.
     """
+    import time
+
     try:
+        t0 = time.monotonic()
         response = await registry.complete(
             messages=[LLMMessage(role="user", content=body.prompt)],
             provider=body.provider,
@@ -142,12 +143,13 @@ async def test_model(
             temperature=body.temperature,
             max_tokens=body.max_tokens,
         )
+        latency = (time.monotonic() - t0) * 1000
         return TestResponse(
-            text=response.text,
+            response=response.text,
             provider=response.provider,
             model=response.model,
-            input_tokens=response.input_tokens,
-            output_tokens=response.output_tokens,
+            tokens_used=response.input_tokens + response.output_tokens,
+            latency_ms=round(latency, 1),
             ok=True,
         )
     except ValueError as exc:

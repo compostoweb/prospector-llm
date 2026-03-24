@@ -20,8 +20,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "003_add_users"
-down_revision = "002_add_tenant_api_key"
+revision = "003"
+down_revision = "002"
 branch_labels = None
 depends_on = None
 

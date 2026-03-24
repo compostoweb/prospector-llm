@@ -3,10 +3,22 @@
 import { useState } from "react"
 import { CheckCircle2, XCircle, ExternalLink, Info, Loader2, Save } from "lucide-react"
 import { useTenant, useUpdateIntegrations } from "@/lib/api/hooks/use-tenant"
+import {
+  usePipedrivePipelines,
+  usePipedriveStages,
+  usePipedriveUsers,
+} from "@/lib/api/hooks/use-pipedrive"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 function StatusBadge({ connected }: { connected: boolean }) {
   return connected ? (
@@ -31,10 +43,21 @@ export default function IntegracoesPage() {
   // Pipedrive form state
   const [pdToken, setPdToken] = useState("")
   const [pdDomain, setPdDomain] = useState("")
+  const [pdPipelineId, setPdPipelineId] = useState<number | null>(null)
   const [pdStageInterest, setPdStageInterest] = useState("")
   const [pdStageObjection, setPdStageObjection] = useState("")
   const [pdOwnerId, setPdOwnerId] = useState("")
   const [pdInitialized, setPdInitialized] = useState(false)
+
+  const pipedriveConnected = !!integration?.pipedrive_api_token_set
+
+  // Pipedrive metadata hooks — only fetch when connected
+  const { data: pipelines, isLoading: loadingPipelines } = usePipedrivePipelines(pipedriveConnected)
+  const { data: stages, isLoading: loadingStages } = usePipedriveStages(
+    pdPipelineId,
+    pipedriveConnected,
+  )
+  const { data: users, isLoading: loadingUsers } = usePipedriveUsers(pipedriveConnected)
 
   // Sync form with loaded data (once)
   if (integration && !pdInitialized) {
@@ -46,20 +69,29 @@ export default function IntegracoesPage() {
     setPdInitialized(true)
   }
 
+  // Auto-detect pipeline from existing stage values when stages load
+  if (stages && stages.length > 0 && pdPipelineId === null && pdStageInterest) {
+    const match = stages.find((s) => s.id === Number(pdStageInterest))
+    if (match) setPdPipelineId(match.pipeline_id)
+  }
+
   function handleSavePipedrive(e: React.FormEvent) {
     e.preventDefault()
-    updateIntegrations({
-      pipedrive_api_token: pdToken || null,
+    const body: Record<string, unknown> = {
       pipedrive_domain: pdDomain || null,
       pipedrive_stage_interest: pdStageInterest ? Number(pdStageInterest) : null,
       pipedrive_stage_objection: pdStageObjection ? Number(pdStageObjection) : null,
       pipedrive_owner_id: pdOwnerId ? Number(pdOwnerId) : null,
-    })
+    }
+    // Only send token when user typed a new one (avoid clearing existing)
+    if (pdToken) {
+      body.pipedrive_api_token = pdToken
+    }
+    updateIntegrations(body)
   }
 
   const linkedinConnected = !!integration?.unipile_linkedin_account_id
   const gmailConnected = !!integration?.unipile_gmail_account_id
-  const pipedriveConnected = !!integration?.pipedrive_api_token
 
   if (isLoading) {
     return (
@@ -160,32 +192,101 @@ export default function IntegracoesPage() {
                     Ex: suaempresa (.pipedrive.com)
                   </p>
                 </div>
+
+                {/* Pipeline selector — filtra os stages */}
                 <div className="space-y-1.5">
-                  <Label htmlFor="pd-stage-interest">Stage ID (Interesse)</Label>
-                  <Input
-                    id="pd-stage-interest"
+                  <Label>Pipeline</Label>
+                  <Select
+                    value={pdPipelineId?.toString() ?? ""}
+                    onValueChange={(v) => {
+                      setPdPipelineId(Number(v))
+                      setPdStageInterest("")
+                      setPdStageObjection("")
+                    }}
+                    disabled={!pipedriveConnected}
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={loadingPipelines ? "Carregando..." : "Selecione o pipeline"}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {pipelines?.map((p) => (
+                        <SelectItem key={p.id} value={p.id.toString()}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Stage — Interesse */}
+                <div className="space-y-1.5">
+                  <Label>Stage (Interesse)</Label>
+                  <Select
                     value={pdStageInterest}
-                    onChange={(e) => setPdStageInterest(e.target.value)}
-                    placeholder="ID do stage para leads com interesse"
-                  />
+                    onValueChange={setPdStageInterest}
+                    disabled={!pipedriveConnected || !pdPipelineId}
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={loadingStages ? "Carregando..." : "Selecione o stage"}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {stages?.map((s) => (
+                        <SelectItem key={s.id} value={s.id.toString()}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
+
+                {/* Stage — Objeção */}
                 <div className="space-y-1.5">
-                  <Label htmlFor="pd-stage-objection">Stage ID (Objeção)</Label>
-                  <Input
-                    id="pd-stage-objection"
+                  <Label>Stage (Objeção)</Label>
+                  <Select
                     value={pdStageObjection}
-                    onChange={(e) => setPdStageObjection(e.target.value)}
-                    placeholder="ID do stage para leads com objeção"
-                  />
+                    onValueChange={setPdStageObjection}
+                    disabled={!pipedriveConnected || !pdPipelineId}
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={loadingStages ? "Carregando..." : "Selecione o stage"}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {stages?.map((s) => (
+                        <SelectItem key={s.id} value={s.id.toString()}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
+
+                {/* Owner (usuário) */}
                 <div className="space-y-1.5">
-                  <Label htmlFor="pd-owner">Owner ID</Label>
-                  <Input
-                    id="pd-owner"
+                  <Label>Proprietário dos Deals</Label>
+                  <Select
                     value={pdOwnerId}
-                    onChange={(e) => setPdOwnerId(e.target.value)}
-                    placeholder="ID do proprietário padrão dos deals"
-                  />
+                    onValueChange={setPdOwnerId}
+                    disabled={!pipedriveConnected}
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={loadingUsers ? "Carregando..." : "Selecione o proprietário"}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {users?.map((u) => (
+                        <SelectItem key={u.id} value={u.id.toString()}>
+                          {u.name} ({u.email})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 

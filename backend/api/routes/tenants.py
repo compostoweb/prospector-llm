@@ -110,7 +110,12 @@ async def create_tenant(
 async def get_me(
     tenant: Tenant = Depends(get_current_tenant_flexible),
 ) -> TenantResponse:
-    return TenantResponse.model_validate(tenant)
+    resp = TenantResponse.model_validate(tenant)
+    if tenant.integration:
+        int_resp = TenantIntegrationResponse.model_validate(tenant.integration)
+        int_resp.pipedrive_api_token_set = bool(tenant.integration.pipedrive_api_token)
+        resp.integration = int_resp
+    return resp
 
 
 # ── Atualização de integrações ────────────────────────────────────────
@@ -140,4 +145,6 @@ async def update_integrations(
     await db.refresh(integration)
 
     logger.info("tenant.integrations_updated", tenant_id=str(tenant_id), fields=list(updates.keys()))
-    return TenantIntegrationResponse.model_validate(integration)
+    resp = TenantIntegrationResponse.model_validate(integration)
+    resp.pipedrive_api_token_set = bool(integration.pipedrive_api_token)
+    return resp

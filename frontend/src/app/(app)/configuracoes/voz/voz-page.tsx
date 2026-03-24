@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useMemo } from "react"
 import {
   useTTSProviders,
   useTTSVoices,
@@ -18,10 +18,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Volume2, Play, Trash2, Upload, Loader2, CheckCircle2, AlertCircle } from "lucide-react"
+import {
+  Volume2,
+  Play,
+  Trash2,
+  Upload,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+  Search,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
+const VOICES_PER_PAGE = 5
 
 export default function VozPage() {
   const { data: providersData } = useTTSProviders()
@@ -39,9 +49,48 @@ export default function VozPage() {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadSuccess, setUploadSuccess] = useState(false)
 
+  // Voice search/filter state
+  const [voiceSearch, setVoiceSearch] = useState("")
+  const [languageFilter, setLanguageFilter] = useState("all")
+  const [visibleCount, setVisibleCount] = useState(VOICES_PER_PAGE)
   const providers = providersData?.providers ?? []
   const allVoices = voicesData?.voices ?? []
   const providerVoices = allVoices.filter((v) => v.provider === selectedProvider)
+
+  // Extract unique languages for filter
+  const languages = useMemo(() => {
+    const langs = new Set(providerVoices.map((v) => v.language))
+    return Array.from(langs).sort()
+  }, [providerVoices])
+
+  // Filter + search
+  const filteredVoices = useMemo(() => {
+    let result = providerVoices
+    if (languageFilter !== "all") {
+      result = result.filter((v) => v.language === languageFilter)
+    }
+    if (voiceSearch.trim()) {
+      const q = voiceSearch.toLowerCase()
+      result = result.filter(
+        (v) => v.name.toLowerCase().includes(q) || v.id.toLowerCase().includes(q),
+      )
+    }
+    return result
+  }, [providerVoices, languageFilter, voiceSearch])
+
+  const visibleVoices = filteredVoices.slice(0, visibleCount)
+  const hasMore = visibleCount < filteredVoices.length
+
+  // Reset visible count when filters change
+  function handleSearchChange(value: string) {
+    setVoiceSearch(value)
+    setVisibleCount(VOICES_PER_PAGE)
+  }
+
+  function handleLanguageChange(value: string) {
+    setLanguageFilter(value)
+    setVisibleCount(VOICES_PER_PAGE)
+  }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -142,46 +191,102 @@ export default function VozPage() {
         ) : providerVoices.length === 0 ? (
           <p className="text-sm text-(--text-disabled)">Nenhuma voz encontrada.</p>
         ) : (
-          <div className="grid gap-2">
-            {providerVoices.map((v) => (
-              <div
-                key={v.id}
-                className="flex items-center justify-between rounded-md border border-(--border-default) bg-(--bg-surface) px-4 py-3"
-              >
-                <div className="flex items-center gap-3">
-                  <Volume2 className="h-4 w-4 text-(--text-tertiary)" />
-                  <div>
-                    <span className="text-sm font-medium text-(--text-primary)">{v.name}</span>
-                    <span className="ml-2 text-xs text-(--text-disabled)">
-                      {v.is_cloned ? "clone" : "built-in"}
-                    </span>
-                  </div>
-                  <span className="text-xs text-(--text-tertiary)">{v.language}</span>
-                </div>
-                <div className="flex gap-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleTest(v.provider, v.id)}
-                    disabled={testTTS.isPending}
-                    className="h-7 px-2"
-                  >
-                    <Play className="h-3.5 w-3.5" />
-                  </Button>
-                  {v.is_cloned && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleDelete(v.provider, v.id)}
-                      disabled={deleteVoice.isPending}
-                      className="h-7 px-2 text-(--danger-fg) hover:text-(--danger-fg)"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
-                </div>
+          <div className="space-y-3">
+            {/* Search + Language filter */}
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-(--text-tertiary)" />
+                <Input
+                  value={voiceSearch}
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                  placeholder="Buscar por nome ou ID…"
+                  className="h-8 pl-8 text-xs"
+                />
               </div>
-            ))}
+              <Select value={languageFilter} onValueChange={handleLanguageChange}>
+                <SelectTrigger className="h-8 w-full text-xs sm:w-44">
+                  <SelectValue placeholder="Idioma" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-xs">
+                    Todos os idiomas
+                  </SelectItem>
+                  {languages.map((lang) => (
+                    <SelectItem key={lang} value={lang} className="text-xs">
+                      {lang}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Counter */}
+            <p className="text-xs text-(--text-tertiary)">
+              {filteredVoices.length === providerVoices.length
+                ? `${providerVoices.length} vozes`
+                : `${filteredVoices.length} de ${providerVoices.length} vozes`}
+            </p>
+
+            {/* Voice list */}
+            {filteredVoices.length === 0 ? (
+              <p className="text-sm text-(--text-disabled)">Nenhuma voz corresponde à busca.</p>
+            ) : (
+              <>
+                <div className="grid gap-2">
+                  {visibleVoices.map((v) => (
+                    <div
+                      key={v.id}
+                      className="flex items-center justify-between rounded-md border border-(--border-default) bg-(--bg-surface) px-4 py-2.5"
+                    >
+                      <div className="flex items-center gap-3 overflow-hidden">
+                        <Volume2 className="h-4 w-4 shrink-0 text-(--text-tertiary)" />
+                        <div className="min-w-0">
+                          <span className="text-sm font-medium text-(--text-primary) truncate block">
+                            {v.name}
+                          </span>
+                          <span className="text-[11px] text-(--text-disabled)">
+                            {v.language} · {v.is_cloned ? "clone" : "built-in"}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleTest(v.provider, v.id)}
+                          disabled={testTTS.isPending}
+                          className="h-7 px-2"
+                        >
+                          <Play className="h-3.5 w-3.5" />
+                        </Button>
+                        {v.is_cloned && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDelete(v.provider, v.id)}
+                            disabled={deleteVoice.isPending}
+                            className="h-7 px-2 text-(--danger-fg) hover:text-(--danger-fg)"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {hasMore && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setVisibleCount((c) => c + VOICES_PER_PAGE)}
+                    className="w-full"
+                  >
+                    Carregar mais ({filteredVoices.length - visibleCount} restantes)
+                  </Button>
+                )}
+              </>
+            )}
           </div>
         )}
       </section>

@@ -16,11 +16,13 @@ import {
 } from "@/components/ui/dialog"
 import { Loader2, Plus, Trash2, List, Users, AlertTriangle } from "lucide-react"
 import { formatRelativeTime } from "@/lib/utils"
+import { useRouter } from "next/navigation"
 
 export default function LeadListsPage() {
   const { data: lists, isLoading, isError } = useLeadLists()
   const { mutate: createList, isPending: creating } = useCreateLeadList()
   const { mutate: deleteList } = useDeleteLeadList()
+  const router = useRouter()
 
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
@@ -134,12 +136,20 @@ export default function LeadListsPage() {
       {lists && lists.length > 0 && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {lists.map((list) => (
-            <Card key={list.id}>
+            <Card
+              key={list.id}
+              className="cursor-pointer transition-colors hover:border-(--accent)"
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              onClick={() => router.push(`/listas/${list.id}` as any)}
+            >
               <CardHeader className="flex-row items-start justify-between">
                 <CardTitle className="text-sm">{list.name}</CardTitle>
                 <button
                   type="button"
-                  onClick={() => deleteList(list.id)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    deleteList(list.id)
+                  }}
                   className="shrink-0 rounded-md p-1 text-(--text-tertiary) transition-colors hover:bg-(--bg-overlay) hover:text-(--danger)"
                   aria-label="Excluir lista"
                 >

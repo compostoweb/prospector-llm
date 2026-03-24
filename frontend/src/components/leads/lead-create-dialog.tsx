@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { useCreateLead, type CreateLeadBody } from "@/lib/api/hooks/use-leads"
+import { useLeadLists, useAddLeadListMembers } from "@/lib/api/hooks/use-lead-lists"
 import {
   Dialog,
   DialogContent,
@@ -32,7 +33,10 @@ export function LeadCreateDialog() {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<CreateLeadBody>({ ...empty })
   const [enrich, setEnrich] = useState(true)
+  const [selectedListId, setSelectedListId] = useState<string>("")
   const { mutate, isPending } = useCreateLead()
+  const { data: lists } = useLeadLists()
+  const { mutate: addToList } = useAddLeadListMembers()
 
   function set(field: keyof CreateLeadBody, value: string) {
     setForm((prev) => ({ ...prev, [field]: value || null }))
@@ -44,8 +48,12 @@ export function LeadCreateDialog() {
     mutate(
       { body: form, enrich },
       {
-        onSuccess: () => {
+        onSuccess: (lead) => {
+          if (selectedListId) {
+            addToList({ listId: selectedListId, leadIds: [lead.id] })
+          }
           setForm({ ...empty })
+          setSelectedListId("")
           setOpen(false)
         },
       },
@@ -162,6 +170,25 @@ export function LeadCreateDialog() {
               onChange={(e) => set("notes", e.target.value)}
               placeholder="Observações sobre o lead..."
             />
+          </div>
+
+          {/* Lista (opcional) */}
+          <div className="space-y-1.5">
+            <Label htmlFor="lead-list">Adicionar à lista</Label>
+            <select
+              id="lead-list"
+              value={selectedListId}
+              onChange={(e) => setSelectedListId(e.target.value)}
+              aria-label="Selecionar lista"
+              className="flex h-9 w-full rounded-md border border-(--border) bg-transparent px-3 py-1 text-sm text-(--text-primary) focus:outline-none focus:ring-1 focus:ring-(--ring)"
+            >
+              <option value="">Nenhuma lista</option>
+              {lists?.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Enriquecer checkbox */}

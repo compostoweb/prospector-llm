@@ -64,6 +64,7 @@ async def create_cadence(
         llm_max_tokens=body.llm.max_tokens,
         tts_provider=body.tts_provider,
         tts_voice_id=body.tts_voice_id,
+        lead_list_id=body.lead_list_id,
         steps_template=(
             [s.model_dump(mode="json") for s in body.steps_template]
             if body.steps_template
@@ -101,7 +102,7 @@ async def update_cadence(
 ) -> CadenceResponse:
     cadence = await _get_cadence_or_404(cadence_id, tenant_id, db)
 
-    updates = body.model_dump(exclude_unset=True, exclude={"llm", "steps_template", "tts_provider", "tts_voice_id"})
+    updates = body.model_dump(exclude_unset=True, exclude={"llm", "steps_template", "tts_provider", "tts_voice_id", "lead_list_id"})
     for field, value in updates.items():
         setattr(cadence, field, value)
 
@@ -120,6 +121,8 @@ async def update_cadence(
         cadence.tts_provider = body.tts_provider
     if "tts_voice_id" in raw:
         cadence.tts_voice_id = body.tts_voice_id
+    if "lead_list_id" in raw:
+        cadence.lead_list_id = body.lead_list_id
 
     await db.commit()
     await db.refresh(cadence)

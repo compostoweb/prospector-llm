@@ -25,6 +25,7 @@ export interface Cadence {
   llm_max_tokens: number
   tts_provider: string | null
   tts_voice_id: string | null
+  lead_list_id: string | null
   steps_template: CadenceStep[] | null
   created_at: string
   updated_at: string
@@ -41,6 +42,7 @@ export interface CreateCadenceBody {
   }
   tts_provider?: string | null
   tts_voice_id?: string | null
+  lead_list_id?: string | null
   steps_template: CadenceStep[]
 }
 

@@ -14,7 +14,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TYPE channel ADD VALUE IF NOT EXISTS 'manual_task'")
+    op.execute("ALTER TYPE cadence_step_channel ADD VALUE IF NOT EXISTS 'manual_task'")
+    op.execute("ALTER TYPE interaction_channel ADD VALUE IF NOT EXISTS 'manual_task'")
 
 
 def downgrade() -> None:

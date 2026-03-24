@@ -96,6 +96,12 @@ class CadenceCreateRequest(BaseModel):
         description="ID da voz/profile TTS. NULL = default do provider.",
     )
 
+    # Lista de leads vinculada (opcional)
+    lead_list_id: str | None = Field(
+        default=None,
+        description="ID da lista de leads a usar nesta cadência. NULL = nenhuma.",
+    )
+
     # Template de steps customizado — se não informado, usa template padrão
     steps_template: list[StepTemplateItem] | None = Field(
         default=None,
@@ -118,6 +124,7 @@ class CadenceUpdateRequest(BaseModel):
     llm: LLMConfigSchema | None = None
     tts_provider: str | None = None
     tts_voice_id: str | None = None
+    lead_list_id: str | None = None
     steps_template: list[StepTemplateItem] | None = None
 
 
@@ -138,6 +145,7 @@ class CadenceResponse(BaseModel):
     llm_max_tokens: int
     tts_provider: str | None = None
     tts_voice_id: str | None = None
+    lead_list_id: str | None = None
     steps_template: list[dict] | None = None
     created_at: str | None = None
     updated_at: str | None = None

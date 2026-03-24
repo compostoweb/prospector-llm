@@ -6,6 +6,16 @@ import { createBrowserClient } from "@/lib/api/client"
 
 // ── Tipos ─────────────────────────────────────────────────────────────
 
+export interface LeadListLeadItem {
+  id: string
+  name: string
+  job_title: string | null
+  company: string | null
+  email_corporate: string | null
+  linkedin_url: string | null
+  status: string
+}
+
 export interface LeadList {
   id: string
   tenant_id: string
@@ -14,6 +24,10 @@ export interface LeadList {
   lead_count: number
   created_at: string
   updated_at: string
+}
+
+export interface LeadListDetail extends LeadList {
+  leads: LeadListLeadItem[]
 }
 
 export interface CreateLeadListBody {
@@ -49,11 +63,11 @@ export function useLeadList(id: string) {
 
   return useQuery({
     queryKey: ["lead-lists", id],
-    queryFn: async (): Promise<LeadList> => {
+    queryFn: async (): Promise<LeadListDetail> => {
       const client = createBrowserClient(session?.accessToken)
       const { data, error } = await client.GET(`/lead-lists/${id}` as never)
       if (error) throw new Error("Falha ao carregar lista")
-      return data as LeadList
+      return data as LeadListDetail
     },
     staleTime: 30_000,
     enabled: !!session?.accessToken && !!id,
