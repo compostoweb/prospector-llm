@@ -17,6 +17,7 @@ class Channel(str, Enum):
     LINKEDIN_CONNECT = "linkedin_connect"
     LINKEDIN_DM = "linkedin_dm"
     EMAIL = "email"
+    MANUAL_TASK = "manual_task"
 
 
 class LeadSource(str, Enum):

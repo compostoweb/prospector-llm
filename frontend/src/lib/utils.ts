@@ -43,6 +43,7 @@ export function channelLabel(channel: string): string {
     linkedin_connect: "LinkedIn Connect",
     linkedin_dm: "LinkedIn DM",
     email: "E-mail",
+    manual_task: "Tarefa Manual",
   }
   return map[channel] ?? channel
 }

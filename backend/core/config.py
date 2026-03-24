@@ -131,6 +131,10 @@ class Settings(BaseSettings):
     PIPEDRIVE_OWNER_ID: int | None = None
     PIPEDRIVE_NOTIFY_EMAIL: str | None = None
 
+    # ── Resend (email transacional) ───────────────────────────────────
+    RESEND_API_KEY: str | None = None
+    RESEND_FROM_EMAIL: str = "Prospector <noreply@prospector.app>"
+
     # ── Rate limits por canal (por tenant/dia) ────────────────────────
     LIMIT_LINKEDIN_CONNECT: int = 20
     LIMIT_LINKEDIN_DM: int = 40

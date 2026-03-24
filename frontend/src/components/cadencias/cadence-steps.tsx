@@ -1,5 +1,6 @@
 ﻿"use client"
 
+import { useCallback, useRef } from "react"
 import { Plus, Trash2, GripVertical, Volume2 } from "lucide-react"
 import type { CadenceStep } from "@/lib/api/hooks/use-cadences"
 
@@ -7,6 +8,21 @@ const CHANNEL_OPTIONS = [
   { value: "linkedin_connect", label: "LinkedIn Connect" },
   { value: "linkedin_dm", label: "LinkedIn DM" },
   { value: "email", label: "E-mail" },
+  { value: "manual_task", label: "Tarefa Manual" },
+] as const
+
+const TEMPLATE_VARIABLES = [
+  { token: "{lead_name}", label: "Nome" },
+  { token: "{first_name}", label: "Primeiro nome" },
+  { token: "{last_name}", label: "Sobrenome" },
+  { token: "{company}", label: "Empresa" },
+  { token: "{job_title}", label: "Cargo" },
+  { token: "{industry}", label: "Setor" },
+  { token: "{city}", label: "Cidade" },
+  { token: "{location}", label: "Localização" },
+  { token: "{segment}", label: "Segmento" },
+  { token: "{company_domain}", label: "Domínio" },
+  { token: "{website}", label: "Website" },
 ] as const
 
 interface CadenceStepsProps {
@@ -15,6 +31,16 @@ interface CadenceStepsProps {
 }
 
 export function CadenceSteps({ value, onChange }: CadenceStepsProps) {
+  const textareaRefs = useRef<Map<number, HTMLTextAreaElement>>(new Map())
+
+  const setRef = useCallback(
+    (index: number) => (el: HTMLTextAreaElement | null) => {
+      if (el) textareaRefs.current.set(index, el)
+      else textareaRefs.current.delete(index)
+    },
+    [],
+  )
+
   function addStep() {
     const newStep: CadenceStep = {
       channel: "linkedin_dm",
@@ -41,6 +67,26 @@ export function CadenceSteps({ value, onChange }: CadenceStepsProps) {
       return next
     })
     onChange(updated)
+  }
+
+  function insertVariable(index: number, token: string) {
+    const ta = textareaRefs.current.get(index)
+    const current = value[index]?.message_template ?? ""
+
+    if (ta) {
+      const start = ta.selectionStart
+      const end = ta.selectionEnd
+      const newValue = current.slice(0, start) + token + current.slice(end)
+      updateStep(index, "message_template", newValue)
+      // Restaura cursor após o token inserido
+      requestAnimationFrame(() => {
+        ta.focus()
+        const pos = start + token.length
+        ta.setSelectionRange(pos, pos)
+      })
+    } else {
+      updateStep(index, "message_template", current + token)
+    }
   }
 
   return (
@@ -98,6 +144,7 @@ export function CadenceSteps({ value, onChange }: CadenceStepsProps) {
                 max={90}
                 value={step.day_offset}
                 onChange={(e) => updateStep(index, "day_offset", Number(e.target.value))}
+                aria-label={`Dias de espera do passo ${index + 1}`}
                 className="w-full rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-sm text-(--text-primary) focus:border-(--accent) focus:outline-none"
               />
             </div>
@@ -107,17 +154,29 @@ export function CadenceSteps({ value, onChange }: CadenceStepsProps) {
           <div className="mt-3">
             <label className="mb-1 block text-xs font-medium text-(--text-secondary)">
               Template da mensagem
-              <span className="ml-1 text-(--text-tertiary)">
-                (use {"{lead_name}"}, {"{company}"}, {"{job_title}"})
-              </span>
             </label>
             <textarea
+              ref={setRef(index)}
               value={step.message_template}
               onChange={(e) => updateStep(index, "message_template", e.target.value)}
               rows={3}
               placeholder="Olá {lead_name}, vi que você trabalha na {company}…"
               className="w-full resize-none rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-sm text-(--text-primary) placeholder:text-(--text-tertiary) focus:border-(--accent) focus:outline-none"
             />
+
+            {/* Variable pills */}
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {TEMPLATE_VARIABLES.map(({ token, label }) => (
+                <button
+                  key={token}
+                  type="button"
+                  onClick={() => insertVariable(index, token)}
+                  className="rounded-full border border-(--border-subtle) bg-(--bg-overlay) px-2 py-0.5 text-[11px] font-medium text-(--text-secondary) transition-colors hover:border-(--accent) hover:text-(--accent)"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Voice note toggle — só para LinkedIn DM */}

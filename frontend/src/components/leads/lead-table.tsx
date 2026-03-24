@@ -1,7 +1,6 @@
 ﻿import Link from "next/link"
 import { truncate } from "@/lib/utils"
 import { LeadScore } from "@/components/leads/lead-score"
-import { BadgeIntent } from "@/components/shared/badge-intent"
 import { EmptyState } from "@/components/shared/empty-state"
 import { Users } from "lucide-react"
 import type { Lead } from "@/lib/api/hooks/use-leads"
@@ -32,10 +31,7 @@ export function LeadTable({ leads, isLoading }: LeadTableProps) {
     return (
       <div className="space-y-2">
         {Array.from({ length: 6 }).map((_, i) => (
-          <div
-            key={i}
-            className="h-14 animate-pulse rounded-md bg-(--bg-overlay)"
-          />
+          <div key={i} className="h-14 animate-pulse rounded-md bg-(--bg-overlay)" />
         ))}
       </div>
     )
@@ -66,7 +62,7 @@ export function LeadTable({ leads, isLoading }: LeadTableProps) {
               Status
             </th>
             <th className="hidden px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-tertiary) lg:table-cell">
-              Intenção
+              Segmento
             </th>
             <th className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
               Score
@@ -78,16 +74,14 @@ export function LeadTable({ leads, isLoading }: LeadTableProps) {
             <tr key={lead.id} className="transition-colors hover:bg-(--bg-overlay)">
               <td className="px-4 py-3">
                 <Link href={`/leads/${lead.id}`} className="block hover:underline">
-                  <p className="font-medium text-(--text-primary)">{lead.full_name}</p>
+                  <p className="font-medium text-(--text-primary)">{lead.name}</p>
                   {lead.job_title && (
-                    <p className="text-xs text-(--text-tertiary)">
-                      {truncate(lead.job_title, 40)}
-                    </p>
+                    <p className="text-xs text-(--text-tertiary)">{truncate(lead.job_title, 40)}</p>
                   )}
                 </Link>
               </td>
               <td className="hidden px-4 py-3 text-(--text-secondary) md:table-cell">
-                {lead.company_name ?? "—"}
+                {lead.company ?? "—"}
               </td>
               <td className="hidden px-4 py-3 lg:table-cell">
                 <span
@@ -97,8 +91,8 @@ export function LeadTable({ leads, isLoading }: LeadTableProps) {
                 </span>
               </td>
               <td className="hidden px-4 py-3 lg:table-cell">
-                {lead.last_intent ? (
-                  <BadgeIntent intent={lead.last_intent} />
+                {lead.segment ? (
+                  <span className="text-xs text-(--text-secondary)">{lead.segment}</span>
                 ) : (
                   <span className="text-(--text-disabled)">—</span>
                 )}

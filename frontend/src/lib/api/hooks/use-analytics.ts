@@ -10,11 +10,19 @@ export interface DashboardStats {
   leads_total: number
   leads_in_cadence: number
   leads_converted: number
+  leads_archived: number
   steps_sent_today: number
   steps_sent_week: number
+  steps_sent_period: number
   replies_today: number
   replies_week: number
+  replies_period: number
   conversion_rate: number
+  leads_total_trend: number
+  leads_in_cadence_trend: number
+  leads_converted_trend: number
+  steps_sent_trend: number
+  replies_trend: number
 }
 
 export interface ChannelBreakdown {
@@ -39,21 +47,36 @@ export interface IntentBreakdown {
   percentage: number
 }
 
+export interface FunnelItem {
+  status: string
+  count: number
+  percentage: number
+}
+
+export interface CadencePerformance {
+  cadence_id: string
+  cadence_name: string
+  leads_active: number
+  steps_sent: number
+  replies: number
+  reply_rate: number
+}
+
 // ── Hooks ─────────────────────────────────────────────────────────────
 
-export function useDashboardStats() {
+export function useDashboardStats(days = 30) {
   const { data: session } = useSession()
 
   return useQuery({
-    queryKey: ["dashboard", "stats"],
+    queryKey: ["dashboard", "stats", days],
     queryFn: async (): Promise<DashboardStats> => {
       const client = createBrowserClient(session?.accessToken)
-      const { data, error } = await client.GET("/analytics/dashboard" as never)
+      const { data, error } = await client.GET(`/analytics/dashboard?days=${days}` as never)
       if (error) throw new Error("Falha ao carregar estatísticas")
       return data as DashboardStats
     },
-    staleTime: 60 * 1000, // 1min
-    refetchInterval: 5 * 60 * 1000, // revalida a cada 5min
+    staleTime: 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
     enabled: !!session?.accessToken,
   })
 }
@@ -100,6 +123,38 @@ export function useIntentBreakdown(days = 30) {
       const { data, error } = await client.GET(`/analytics/intents?days=${days}` as never)
       if (error) throw new Error("Falha ao carregar breakdown de intenções")
       return (data as IntentBreakdown[]) ?? []
+    },
+    staleTime: 5 * 60 * 1000,
+    enabled: !!session?.accessToken,
+  })
+}
+
+export function useFunnel() {
+  const { data: session } = useSession()
+
+  return useQuery({
+    queryKey: ["analytics", "funnel"],
+    queryFn: async (): Promise<FunnelItem[]> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.GET("/analytics/funnel" as never)
+      if (error) throw new Error("Falha ao carregar funil")
+      return (data as FunnelItem[]) ?? []
+    },
+    staleTime: 60 * 1000,
+    enabled: !!session?.accessToken,
+  })
+}
+
+export function useCadencePerformance(days = 30) {
+  const { data: session } = useSession()
+
+  return useQuery({
+    queryKey: ["analytics", "performance", days],
+    queryFn: async (): Promise<CadencePerformance[]> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.GET(`/analytics/performance?days=${days}` as never)
+      if (error) throw new Error("Falha ao carregar performance de cadências")
+      return (data as CadencePerformance[]) ?? []
     },
     staleTime: 5 * 60 * 1000,
     enabled: !!session?.accessToken,

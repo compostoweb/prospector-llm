@@ -87,65 +87,70 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
+    <form onSubmit={handleSubmit}>
       {error && (
         <div
           role="alert"
-          className="rounded-md bg-(--danger-subtle) px-4 py-3 text-sm text-(--danger-subtle-fg)"
+          className="mb-5 rounded-md bg-(--danger-subtle) px-4 py-3 text-sm text-(--danger-subtle-fg)"
         >
           {error}
         </div>
       )}
 
-      {/* Nome */}
-      <div className="space-y-1.5">
-        <Label htmlFor="cadence-name">Nome da cadência *</Label>
-        <Input
-          id="cadence-name"
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Ex: Prospecção SaaS B2B"
-          required
-        />
-      </div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* ── Coluna esquerda: Configurações ── */}
+        <div className="space-y-5">
+          {/* Nome */}
+          <div className="space-y-1.5">
+            <Label htmlFor="cadence-name">Nome da cadência *</Label>
+            <Input
+              id="cadence-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Ex: Prospecção SaaS B2B"
+              required
+            />
+          </div>
 
-      {/* Descrição */}
-      <div className="space-y-1.5">
-        <Label htmlFor="cadence-desc">Descrição</Label>
-        <Textarea
-          id="cadence-desc"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={2}
-          placeholder="Descreva o público-alvo e objetivo desta cadência…"
-        />
-      </div>
+          {/* Descrição */}
+          <div className="space-y-1.5">
+            <Label htmlFor="cadence-desc">Descrição</Label>
+            <Textarea
+              id="cadence-desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={2}
+              placeholder="Descreva o público-alvo e objetivo desta cadência…"
+            />
+          </div>
 
-      {/* LLM Config */}
-      <LLMConfigForm value={llmConfig} onChange={setLlmConfig} />
+          {/* LLM Config */}
+          <LLMConfigForm value={llmConfig} onChange={setLlmConfig} />
 
-      {/* TTS Config — só aparece se houver steps com use_voice */}
-      <TTSConfigForm
-        value={ttsConfig}
-        onChange={setTtsConfig}
-        hasVoiceSteps={steps.some((s) => s.use_voice)}
-      />
+          {/* TTS Config — só aparece se houver steps com use_voice */}
+          <TTSConfigForm
+            value={ttsConfig}
+            onChange={setTtsConfig}
+            hasVoiceSteps={steps.some((s) => s.use_voice)}
+          />
 
-      {/* Passos */}
-      <div>
-        <h2 className="mb-3 text-sm font-semibold text-(--text-primary)">Passos da cadência</h2>
-        <CadenceSteps value={steps} onChange={setSteps} />
-      </div>
+          {/* Ações */}
+          <div className="flex gap-3 pt-2">
+            <Button type="button" variant="outline" onClick={() => router.back()}>
+              Cancelar
+            </Button>
+            <Button type="submit" disabled={isLoading}>
+              {isLoading ? "Salvando…" : isEdit ? "Salvar alterações" : "Criar cadência"}
+            </Button>
+          </div>
+        </div>
 
-      {/* Ações */}
-      <div className="flex gap-3 pt-2">
-        <Button type="button" variant="outline" onClick={() => router.back()}>
-          Cancelar
-        </Button>
-        <Button type="submit" disabled={isLoading}>
-          {isLoading ? "Salvando…" : isEdit ? "Salvar alterações" : "Criar cadência"}
-        </Button>
+        {/* ── Coluna direita: Passos (sticky) ── */}
+        <div className="lg:sticky lg:top-6 lg:self-start">
+          <h2 className="mb-3 text-sm font-semibold text-(--text-primary)">Passos da cadência</h2>
+          <CadenceSteps value={steps} onChange={setSteps} />
+        </div>
       </div>
     </form>
   )

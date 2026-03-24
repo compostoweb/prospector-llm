@@ -9,21 +9,31 @@ import { createBrowserClient } from "@/lib/api/client"
 export interface Lead {
   id: string
   tenant_id: string
-  full_name: string
+  name: string
   first_name: string | null
   last_name: string | null
-  email: string | null
-  linkedin_url: string | null
   job_title: string | null
-  company_name: string | null
+  company: string | null
   company_domain: string | null
+  website: string | null
   company_size: string | null
   industry: string | null
+  linkedin_url: string | null
+  linkedin_profile_id: string | null
+  city: string | null
   location: string | null
-  score: number
+  segment: string | null
+  source: string
   status: "raw" | "enriched" | "in_cadence" | "converted" | "archived"
-  last_intent: string | null
-  current_cadence_id: string | null
+  score: number | null
+  email_corporate: string | null
+  email_corporate_source: string | null
+  email_corporate_verified: boolean
+  email_personal: string | null
+  email_personal_source: string | null
+  phone: string | null
+  enriched_at: string | null
+  notes: string | null
   created_at: string
   updated_at: string
 }
@@ -35,12 +45,59 @@ export interface LeadStep {
   step_number: number
   channel: string
   status: "pending" | "sent" | "replied" | "skipped" | "failed"
+  use_voice: boolean
+  day_offset: number
+  scheduled_at: string
   sent_at: string | null
-  replied_at: string | null
   message_content: string | null
   reply_content: string | null
   intent: string | null
-  created_at: string
+}
+
+export interface CreateLeadBody {
+  name: string
+  first_name?: string | null
+  last_name?: string | null
+  job_title?: string | null
+  company?: string | null
+  company_domain?: string | null
+  website?: string | null
+  industry?: string | null
+  company_size?: string | null
+  linkedin_url?: string | null
+  city?: string | null
+  location?: string | null
+  segment?: string | null
+  phone?: string | null
+  email_corporate?: string | null
+  email_personal?: string | null
+  notes?: string | null
+}
+
+export interface ImportLeadItem {
+  name: string
+  first_name?: string | null
+  last_name?: string | null
+  job_title?: string | null
+  company?: string | null
+  company_domain?: string | null
+  website?: string | null
+  industry?: string | null
+  company_size?: string | null
+  linkedin_url?: string | null
+  city?: string | null
+  location?: string | null
+  segment?: string | null
+  phone?: string | null
+  email_corporate?: string | null
+  email_personal?: string | null
+  notes?: string | null
+}
+
+export interface ImportLeadsResponse {
+  imported: number
+  duplicates: number
+  errors: string[]
 }
 
 export interface LeadListParams {
@@ -152,6 +209,74 @@ export function useArchiveLead() {
       if (error) throw new Error("Falha ao arquivar lead")
     },
     onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["leads"] })
+    },
+  })
+}
+
+export function useCreateLead() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      body,
+      enrich = false,
+    }: {
+      body: CreateLeadBody
+      enrich?: boolean
+    }): Promise<Lead> => {
+      const client = createBrowserClient(session?.accessToken)
+      const url = enrich ? "/leads?enrich=true" : "/leads"
+      const { data, error } = await client.POST(url as never, {
+        body: body as never,
+      })
+      if (error) throw new Error("Falha ao criar lead")
+      return data as Lead
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["leads"] })
+    },
+  })
+}
+
+export function useImportLeads() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (items: ImportLeadItem[]): Promise<ImportLeadsResponse> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.POST("/leads/import" as never, {
+        body: { items } as never,
+      })
+      if (error) throw new Error("Falha ao importar leads")
+      return data as ImportLeadsResponse
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["leads"] })
+    },
+  })
+}
+
+export function useEnrollLead() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ leadId, cadenceId }: { leadId: string; cadenceId: string }) => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.POST(`/leads/${leadId}/enroll` as never, {
+        body: { cadence_id: cadenceId } as never,
+      })
+      if (error) throw new Error("Falha ao inscrever lead na cadência")
+      return data as { enrolled: boolean; steps_created: number }
+    },
+    onSuccess: (_data, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ["leads", vars.leadId] })
+      void queryClient.invalidateQueries({
+        queryKey: ["leads", vars.leadId, "steps"],
+      })
       void queryClient.invalidateQueries({ queryKey: ["leads"] })
     },
   })

@@ -23,6 +23,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible
+from models.cadence import Cadence
 from models.cadence_step import CadenceStep
 from models.enums import InteractionDirection, LeadStatus, StepStatus
 from models.interaction import Interaction
@@ -40,11 +41,20 @@ class DashboardStatsResponse(BaseModel):
     leads_total: int = 0
     leads_in_cadence: int = 0
     leads_converted: int = 0
+    leads_archived: int = 0
     steps_sent_today: int = 0
     steps_sent_week: int = 0
+    steps_sent_period: int = 0
     replies_today: int = 0
     replies_week: int = 0
+    replies_period: int = 0
     conversion_rate: float = 0.0
+    # Trends (variação % vs período anterior)
+    leads_total_trend: float = 0.0
+    leads_in_cadence_trend: float = 0.0
+    leads_converted_trend: float = 0.0
+    steps_sent_trend: float = 0.0
+    replies_trend: float = 0.0
 
 
 class ChannelBreakdownItem(BaseModel):
@@ -69,6 +79,21 @@ class IntentBreakdownItem(BaseModel):
     percentage: float = 0.0
 
 
+class FunnelItem(BaseModel):
+    status: str
+    count: int = 0
+    percentage: float = 0.0
+
+
+class CadencePerformanceItem(BaseModel):
+    cadence_id: str
+    cadence_name: str
+    leads_active: int = 0
+    steps_sent: int = 0
+    replies: int = 0
+    reply_rate: float = 0.0
+
+
 # ── Helpers ───────────────────────────────────────────────────────────
 
 
@@ -86,12 +111,15 @@ def _utc_days_ago(days: int) -> datetime:
 
 @router.get("/dashboard", response_model=DashboardStatsResponse)
 async def get_dashboard_stats(
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
     db: AsyncSession = Depends(get_session_flexible),
     tenant_id: UUID = Depends(get_effective_tenant_id),
 ) -> DashboardStatsResponse:
-    """Retorna estatísticas gerais do dashboard."""
+    """Retorna estatísticas gerais do dashboard com trends."""
     today_start = _utc_start_of_today()
     week_ago = _utc_days_ago(7)
+    period_start = _utc_days_ago(days)
+    prev_period_start = _utc_days_ago(days * 2)
 
     # Lead counts via conditional aggregation (single query)
     lead_q = await db.execute(
@@ -99,18 +127,37 @@ async def get_dashboard_stats(
             func.count(Lead.id).label("total"),
             func.count(Lead.id).filter(Lead.status == LeadStatus.IN_CADENCE).label("in_cadence"),
             func.count(Lead.id).filter(Lead.status == LeadStatus.CONVERTED).label("converted"),
+            func.count(Lead.id).filter(Lead.status == LeadStatus.ARCHIVED).label("archived"),
         ).where(Lead.tenant_id == tenant_id)
     )
     lead_row = lead_q.one()
     leads_total = lead_row.total or 0
     leads_in_cadence = lead_row.in_cadence or 0
     leads_converted = lead_row.converted or 0
+    leads_archived = lead_row.archived or 0
 
-    # Steps sent counts (today + week)
+    # Leads created in current period vs previous (for trend)
+    lead_trend_q = await db.execute(
+        select(
+            func.count(Lead.id).filter(Lead.created_at >= period_start).label("current"),
+            func.count(Lead.id).filter(
+                Lead.created_at >= prev_period_start,
+                Lead.created_at < period_start,
+            ).label("previous"),
+        ).where(Lead.tenant_id == tenant_id)
+    )
+    lead_trend_row = lead_trend_q.one()
+
+    # Steps sent counts (today + week + period + prev period)
     step_q = await db.execute(
         select(
             func.count(CadenceStep.id).filter(CadenceStep.sent_at >= today_start).label("today"),
             func.count(CadenceStep.id).filter(CadenceStep.sent_at >= week_ago).label("week"),
+            func.count(CadenceStep.id).filter(CadenceStep.sent_at >= period_start).label("period"),
+            func.count(CadenceStep.id).filter(
+                CadenceStep.sent_at >= prev_period_start,
+                CadenceStep.sent_at < period_start,
+            ).label("prev_period"),
         ).where(
             CadenceStep.tenant_id == tenant_id,
             CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED]),
@@ -119,12 +166,19 @@ async def get_dashboard_stats(
     step_row = step_q.one()
     steps_sent_today = step_row.today or 0
     steps_sent_week = step_row.week or 0
+    steps_sent_period = step_row.period or 0
+    steps_prev_period = step_row.prev_period or 0
 
-    # Replies (inbound interactions) counts (today + week)
+    # Replies (inbound interactions) counts (today + week + period + prev)
     reply_q = await db.execute(
         select(
             func.count(Interaction.id).filter(Interaction.created_at >= today_start).label("today"),
             func.count(Interaction.id).filter(Interaction.created_at >= week_ago).label("week"),
+            func.count(Interaction.id).filter(Interaction.created_at >= period_start).label("period"),
+            func.count(Interaction.id).filter(
+                Interaction.created_at >= prev_period_start,
+                Interaction.created_at < period_start,
+            ).label("prev_period"),
         ).where(
             Interaction.tenant_id == tenant_id,
             Interaction.direction == InteractionDirection.INBOUND,
@@ -133,19 +187,34 @@ async def get_dashboard_stats(
     reply_row = reply_q.one()
     replies_today = reply_row.today or 0
     replies_week = reply_row.week or 0
+    replies_period = reply_row.period or 0
+    replies_prev_period = reply_row.prev_period or 0
 
     conversion_rate = round((leads_converted / leads_total) * 100, 1) if leads_total > 0 else 0.0
 
-    logger.debug("analytics.dashboard", tenant_id=str(tenant_id))
+    def _trend(current: int, previous: int) -> float:
+        if previous == 0:
+            return 100.0 if current > 0 else 0.0
+        return round(((current - previous) / previous) * 100, 1)
+
+    logger.debug("analytics.dashboard", tenant_id=str(tenant_id), days=days)
     return DashboardStatsResponse(
         leads_total=leads_total,
         leads_in_cadence=leads_in_cadence,
         leads_converted=leads_converted,
+        leads_archived=leads_archived,
         steps_sent_today=steps_sent_today,
         steps_sent_week=steps_sent_week,
+        steps_sent_period=steps_sent_period,
         replies_today=replies_today,
         replies_week=replies_week,
+        replies_period=replies_period,
         conversion_rate=conversion_rate,
+        leads_total_trend=_trend(lead_trend_row.current or 0, lead_trend_row.previous or 0),
+        leads_in_cadence_trend=0.0,  # Status snapshot, no period comparison
+        leads_converted_trend=0.0,
+        steps_sent_trend=_trend(steps_sent_period, steps_prev_period),
+        replies_trend=_trend(replies_period, replies_prev_period),
     )
 
 
@@ -284,4 +353,124 @@ async def get_intent_breakdown(
     ]
 
     logger.debug("analytics.intents", tenant_id=str(tenant_id), days=days)
+    return result
+
+
+# ── Funnel ────────────────────────────────────────────────────────────
+
+
+@router.get("/funnel", response_model=list[FunnelItem])
+async def get_funnel(
+    db: AsyncSession = Depends(get_session_flexible),
+    tenant_id: UUID = Depends(get_effective_tenant_id),
+) -> list[FunnelItem]:
+    """Retorna funil de conversão — contagem de leads por status."""
+    q = await db.execute(
+        select(
+            Lead.status,
+            func.count(Lead.id).label("cnt"),
+        )
+        .where(Lead.tenant_id == tenant_id)
+        .group_by(Lead.status)
+    )
+    rows = q.all()
+    total = sum(row.cnt for row in rows) or 1
+
+    # Ordem do funil
+    order = [
+        LeadStatus.RAW,
+        LeadStatus.ENRICHED,
+        LeadStatus.IN_CADENCE,
+        LeadStatus.CONVERTED,
+        LeadStatus.ARCHIVED,
+    ]
+    counts = {row.status: row.cnt for row in rows}
+
+    result = [
+        FunnelItem(
+            status=s.value,
+            count=counts.get(s, 0),
+            percentage=round((counts.get(s, 0) / total) * 100, 1),
+        )
+        for s in order
+    ]
+
+    logger.debug("analytics.funnel", tenant_id=str(tenant_id))
+    return result
+
+
+# ── Performance de cadências ──────────────────────────────────────────
+
+
+@router.get("/performance", response_model=list[CadencePerformanceItem])
+async def get_cadence_performance(
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
+    limit: Annotated[int, Query(ge=1, le=20)] = 5,
+    db: AsyncSession = Depends(get_session_flexible),
+    tenant_id: UUID = Depends(get_effective_tenant_id),
+) -> list[CadencePerformanceItem]:
+    """Retorna performance das cadências ativas (top N por steps enviados)."""
+    since = _utc_days_ago(days)
+
+    # Steps sent & replied per cadence
+    steps_q = await db.execute(
+        select(
+            CadenceStep.cadence_id,
+            func.count(CadenceStep.id).label("sent"),
+            func.count(CadenceStep.id).filter(
+                CadenceStep.status == StepStatus.REPLIED,
+            ).label("replied"),
+        )
+        .where(
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED]),
+            CadenceStep.sent_at >= since,
+        )
+        .group_by(CadenceStep.cadence_id)
+        .order_by(func.count(CadenceStep.id).desc())
+        .limit(limit)
+    )
+    step_rows = steps_q.all()
+    if not step_rows:
+        return []
+
+    cadence_ids = [row.cadence_id for row in step_rows]
+
+    # Get cadence names
+    cadences_q = await db.execute(
+        select(Cadence.id, Cadence.name).where(Cadence.id.in_(cadence_ids))
+    )
+    name_map = {row.id: row.name for row in cadences_q.all()}
+
+    # Active leads per cadence (leads currently IN_CADENCE with steps in this cadence)
+    active_q = await db.execute(
+        select(
+            CadenceStep.cadence_id,
+            func.count(func.distinct(CadenceStep.lead_id)).label("active"),
+        )
+        .join(Lead, CadenceStep.lead_id == Lead.id)
+        .where(
+            CadenceStep.cadence_id.in_(cadence_ids),
+            CadenceStep.tenant_id == tenant_id,
+            Lead.status == LeadStatus.IN_CADENCE,
+        )
+        .group_by(CadenceStep.cadence_id)
+    )
+    active_map = {row.cadence_id: row.active for row in active_q.all()}
+
+    result = []
+    for row in step_rows:
+        sent = row.sent or 0
+        replied = row.replied or 0
+        rate = round((replied / sent) * 100, 1) if sent > 0 else 0.0
+        result.append(CadencePerformanceItem(
+            cadence_id=str(row.cadence_id),
+            cadence_name=name_map.get(row.cadence_id, "—"),
+            leads_active=active_map.get(row.cadence_id, 0),
+            steps_sent=sent,
+            replies=replied,
+            reply_rate=rate,
+        ))
+
+    logger.debug("analytics.performance", tenant_id=str(tenant_id), days=days)
     return result

@@ -4,6 +4,8 @@ import { useState } from "react"
 import { useLeads } from "@/lib/api/hooks/use-leads"
 import { useUIStore } from "@/store/ui-store"
 import { LeadTable } from "@/components/leads/lead-table"
+import { LeadCreateDialog } from "@/components/leads/lead-create-dialog"
+import { LeadImportDialog } from "@/components/leads/lead-import-dialog"
 import { Search, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -44,6 +46,10 @@ export default function LeadsPage() {
           <p className="text-sm text-(--text-secondary)">
             {data ? `${data.total} lead${data.total !== 1 ? "s" : ""}` : "Carregando…"}
           </p>
+        </div>
+        <div className="flex gap-2">
+          <LeadImportDialog />
+          <LeadCreateDialog />
         </div>
       </div>
 

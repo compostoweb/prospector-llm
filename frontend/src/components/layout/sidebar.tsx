@@ -13,6 +13,7 @@ import {
   User,
   Plug,
   Volume2,
+  List,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useUIStore } from "@/store/ui-store"
@@ -22,6 +23,7 @@ import { useUIStore } from "@/store/ui-store"
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/leads", label: "Leads", icon: Users },
+  { href: "/listas", label: "Listas", icon: List },
   { href: "/cadencias", label: "Cadências", icon: GitBranch },
 ] as const
 

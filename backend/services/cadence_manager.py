@@ -230,6 +230,9 @@ def _lead_has_channel(lead: Lead, channel: Channel, cadence: Cadence) -> bool:
             return True
         return False
 
+    if channel == Channel.MANUAL_TASK:
+        return True  # sempre pode criar task manual
+
     return False
 
 

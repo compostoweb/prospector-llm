@@ -10,11 +10,10 @@ export interface TenantIntegration {
   tenant_id: string
   unipile_linkedin_account_id: string | null
   unipile_gmail_account_id: string | null
-  pipedrive_api_token: string | null
   pipedrive_domain: string | null
-  pipedrive_stage_interest: string | null
-  pipedrive_stage_objection: string | null
-  pipedrive_owner_id: string | null
+  pipedrive_owner_id: number | null
+  pipedrive_stage_interest: number | null
+  pipedrive_stage_objection: number | null
   notify_email: string | null
   notify_on_interest: boolean
   notify_on_objection: boolean
@@ -37,6 +36,11 @@ export interface Tenant {
 export interface UpdateIntegrationsBody {
   unipile_linkedin_account_id?: string | null
   unipile_gmail_account_id?: string | null
+  pipedrive_api_token?: string | null
+  pipedrive_domain?: string | null
+  pipedrive_stage_interest?: number | null
+  pipedrive_stage_objection?: number | null
+  pipedrive_owner_id?: number | null
   notify_email?: string | null
   notify_on_interest?: boolean
   notify_on_objection?: boolean

@@ -183,6 +183,24 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                     subject=_build_email_subject(lead, step.step_number),
                     body_html=message_text,
                 )
+
+            elif step.channel == Channel.MANUAL_TASK:
+                # MANUAL_TASK: não envia mensagem — notifica admin via email
+                from services.notification import send_manual_task_notification
+                await send_manual_task_notification(
+                    lead=lead,
+                    cadence_name=cadence.name,
+                    step_number=step.step_number,
+                    message=message_text,
+                    tenant_id=tid,
+                    db=db,
+                )
+                # Fake result para manter o fluxo
+                class _FakeResult:
+                    success = True
+                    message_id = None
+                result = _FakeResult()
+
             else:
                 step.status = StepStatus.SKIPPED
                 await db.commit()

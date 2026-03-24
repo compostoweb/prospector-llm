@@ -196,6 +196,17 @@ async def _handle_message_received(
 
     await db.commit()
 
+    # ── Notificação via Resend (interesse ou objeção) ─────────────
+    if intent in (Intent.INTEREST, Intent.OBJECTION):
+        from services.notification import send_reply_notification
+        await send_reply_notification(
+            lead=lead,
+            intent=intent.value,
+            reply_text=text_content,
+            tenant_id=lead.tenant_id,
+            db=db,
+        )
+
     logger.info(
         "webhook.unipile.processed",
         lead_id=str(lead.id),

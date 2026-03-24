@@ -1,7 +1,6 @@
 ﻿import Link from "next/link"
 import { truncate } from "@/lib/utils"
 import { LeadScore } from "@/components/leads/lead-score"
-import { BadgeIntent } from "@/components/shared/badge-intent"
 import { Building2, MapPin, Mail, Linkedin } from "lucide-react"
 import type { Lead } from "@/lib/api/hooks/use-leads"
 
@@ -17,7 +16,7 @@ export function LeadCard({ lead }: LeadCardProps) {
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate font-semibold text-(--text-primary)">{lead.full_name}</p>
+          <p className="truncate font-semibold text-(--text-primary)">{lead.name}</p>
           {lead.job_title && (
             <p className="mt-0.5 truncate text-sm text-(--text-secondary)">
               {truncate(lead.job_title, 50)}
@@ -28,10 +27,10 @@ export function LeadCard({ lead }: LeadCardProps) {
       </div>
 
       <div className="mt-3 space-y-1.5">
-        {lead.company_name && (
+        {lead.company && (
           <p className="flex items-center gap-1.5 text-xs text-(--text-secondary)">
             <Building2 size={12} aria-hidden="true" />
-            {lead.company_name}
+            {lead.company}
           </p>
         )}
         {lead.location && (
@@ -40,10 +39,10 @@ export function LeadCard({ lead }: LeadCardProps) {
             {lead.location}
           </p>
         )}
-        {lead.email && (
+        {lead.email_corporate && (
           <p className="flex items-center gap-1.5 text-xs text-(--text-secondary)">
             <Mail size={12} aria-hidden="true" />
-            <span className="truncate">{lead.email}</span>
+            <span className="truncate">{lead.email_corporate}</span>
           </p>
         )}
         {lead.linkedin_url && (
@@ -53,12 +52,6 @@ export function LeadCard({ lead }: LeadCardProps) {
           </p>
         )}
       </div>
-
-      {lead.last_intent && (
-        <div className="mt-3">
-          <BadgeIntent intent={lead.last_intent} />
-        </div>
-      )}
     </Link>
   )
 }
