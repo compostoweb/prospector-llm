@@ -36,8 +36,14 @@ class Lead(Base, TenantMixin, TimestampMixin):
 
     # ── Identificação ─────────────────────────────────────────────────
     name: Mapped[str] = mapped_column(String(300), nullable=False)
+    first_name: Mapped[str | None] = mapped_column(String(150))
+    last_name: Mapped[str | None] = mapped_column(String(150))
+    job_title: Mapped[str | None] = mapped_column(String(200))
     company: Mapped[str | None] = mapped_column(String(300))
+    company_domain: Mapped[str | None] = mapped_column(String(500))
     website: Mapped[str | None] = mapped_column(String(500))
+    industry: Mapped[str | None] = mapped_column(String(200))
+    company_size: Mapped[str | None] = mapped_column(String(50))
 
     # ── LinkedIn ──────────────────────────────────────────────────────
     linkedin_url: Mapped[str | None] = mapped_column(String(500), unique=True, index=True)
@@ -45,6 +51,7 @@ class Lead(Base, TenantMixin, TimestampMixin):
 
     # ── Localização / Segmentação ─────────────────────────────────────
     city: Mapped[str | None] = mapped_column(String(200))
+    location: Mapped[str | None] = mapped_column(String(300))
     segment: Mapped[str | None] = mapped_column(String(200))
 
     # ── Status e origem ───────────────────────────────────────────────
