@@ -70,11 +70,18 @@ class StepTemplateItem(BaseModel):
     day_offset: int = Field(..., ge=0, le=90, description="Dias após enrollment")
     message_template: str | None = Field(default=None, description="Template de mensagem com variáveis")
     use_voice: bool = Field(default=False, description="Enviar voice note (só linkedin_dm)")
+    audio_file_id: str | None = Field(
+        default=None,
+        description="ID do áudio pré-gravado (S3). Se preenchido, usa esse áudio ao invés de TTS.",
+    )
 
     @model_validator(mode="after")
     def voice_only_for_dm(self) -> "StepTemplateItem":
         if self.use_voice and self.channel != Channel.LINKEDIN_DM:
             raise ValueError("use_voice só é permitido para linkedin_dm")
+        if self.audio_file_id and not self.use_voice:
+            # Se tem audio_file_id, force use_voice=True
+            self.use_voice = True
         return self
 
 
@@ -95,8 +102,18 @@ class CadenceCreateRequest(BaseModel):
         default=None,
         description="ID da voz/profile TTS. NULL = default do provider.",
     )
-
-    # Lista de leads vinculada (opcional)
+    tts_speed: float = Field(
+        default=1.0,
+        ge=0.5,
+        le=2.0,
+        description="Velocidade da fala TTS (0.5–2.0). 1.0 = normal.",
+    )
+    tts_pitch: float = Field(
+        default=0.0,
+        ge=-50.0,
+        le=50.0,
+        description="Entonação/pitch TTS (-50 a +50%). 0 = normal.",
+    )
     lead_list_id: str | None = Field(
         default=None,
         description="ID da lista de leads a usar nesta cadência. NULL = nenhuma.",
@@ -124,6 +141,8 @@ class CadenceUpdateRequest(BaseModel):
     llm: LLMConfigSchema | None = None
     tts_provider: str | None = None
     tts_voice_id: str | None = None
+    tts_speed: float | None = Field(default=None, ge=0.5, le=2.0)
+    tts_pitch: float | None = Field(default=None, ge=-50.0, le=50.0)
     lead_list_id: str | None = None
     steps_template: list[StepTemplateItem] | None = None
 
@@ -145,6 +164,8 @@ class CadenceResponse(BaseModel):
     llm_max_tokens: int
     tts_provider: str | None = None
     tts_voice_id: str | None = None
+    tts_speed: float = 1.0
+    tts_pitch: float = 0.0
     lead_list_id: str | None = None
     steps_template: list[dict] | None = None
     created_at: str | None = None

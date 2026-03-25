@@ -41,13 +41,13 @@ from models.lead import Lead
 logger = structlog.get_logger()
 
 # Template padrão de cadência multi-canal
-# Cada entry: (channel, day_offset, use_voice)
-_DEFAULT_TEMPLATE: list[tuple[Channel, int, bool]] = [
-    (Channel.LINKEDIN_CONNECT, 0,  False),
-    (Channel.LINKEDIN_DM,      3,  False),
-    (Channel.EMAIL,            5,  False),
-    (Channel.LINKEDIN_DM,      10, True),   # follow-up com voz
-    (Channel.EMAIL,            14, False),  # follow-up final
+# Cada entry: (channel, day_offset, use_voice, audio_file_id)
+_DEFAULT_TEMPLATE: list[tuple[Channel, int, bool, str | None]] = [
+    (Channel.LINKEDIN_CONNECT, 0,  False, None),
+    (Channel.LINKEDIN_DM,      3,  False, None),
+    (Channel.EMAIL,            5,  False, None),
+    (Channel.LINKEDIN_DM,      10, True,  None),   # follow-up com voz
+    (Channel.EMAIL,            14, False, None),  # follow-up final
 ]
 
 
@@ -100,7 +100,7 @@ class CadenceManager:
         # Usa template customizado da cadência ou o padrão
         template = _resolve_template(cadence)
 
-        for step_number, (channel, day_offset, use_voice) in enumerate(
+        for step_number, (channel, day_offset, use_voice, audio_file_id) in enumerate(
             template, start=1
         ):
             # Verifica se o lead tem os dados para o canal
@@ -123,6 +123,7 @@ class CadenceManager:
                 step_number=step_number,
                 day_offset=day_offset,
                 use_voice=use_voice,
+                audio_file_id=uuid.UUID(audio_file_id) if audio_file_id else None,
                 status=StepStatus.PENDING,
                 scheduled_at=scheduled_at,
             )
@@ -205,12 +206,17 @@ class CadenceManager:
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
-def _resolve_template(cadence: Cadence) -> list[tuple[Channel, int, bool]]:
+def _resolve_template(cadence: Cadence) -> list[tuple[Channel, int, bool, str | None]]:
     """Retorna o template de steps: customizado (JSONB) ou o padrão."""
     if not cadence.steps_template:
         return _DEFAULT_TEMPLATE
     return [
-        (Channel(item["channel"]), item["day_offset"], item.get("use_voice", False))
+        (
+            Channel(item["channel"]),
+            item["day_offset"],
+            item.get("use_voice", False),
+            item.get("audio_file_id"),
+        )
         for item in cadence.steps_template
     ]
 

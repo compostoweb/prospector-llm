@@ -11,6 +11,7 @@ export interface CadenceStep {
   day_offset: number
   message_template: string
   use_voice: boolean
+  audio_file_id: string | null
 }
 
 export interface Cadence {
@@ -25,6 +26,8 @@ export interface Cadence {
   llm_max_tokens: number
   tts_provider: string | null
   tts_voice_id: string | null
+  tts_speed: number
+  tts_pitch: number
   lead_list_id: string | null
   steps_template: CadenceStep[] | null
   created_at: string
@@ -42,6 +45,8 @@ export interface CreateCadenceBody {
   }
   tts_provider?: string | null
   tts_voice_id?: string | null
+  tts_speed?: number
+  tts_pitch?: number
   lead_list_id?: string | null
   steps_template: CadenceStep[]
 }

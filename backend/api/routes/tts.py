@@ -64,6 +64,8 @@ class TestRequest(BaseModel):
         max_length=500,
     )
     language: str = "pt-BR"
+    speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    pitch: float = Field(default=0.0, ge=-50.0, le=50.0)
 
 
 # ── Rotas ─────────────────────────────────────────────────────────────
@@ -189,6 +191,8 @@ async def test_tts(
         voice_id=body.voice_id,
         text=body.text,
         language=body.language,
+        speed=body.speed,
+        pitch=body.pitch,
     )
     return Response(
         content=audio_bytes,

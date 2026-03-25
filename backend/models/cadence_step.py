@@ -20,7 +20,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, String
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base, TenantMixin
@@ -70,6 +71,15 @@ class CadenceStep(Base, TenantMixin):
         default=False,
         nullable=False,
         comment="Se True, gera audio MP3 via Speechify e envia como voice note",
+    )
+
+    # ── Áudio pré-gravado (alternativa ao TTS) ───────────────────────
+    audio_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("audio_files.id", ondelete="SET NULL"),
+        nullable=True,
+        default=None,
+        comment="Se preenchido, usa áudio pré-gravado ao invés de TTS",
     )
 
     # ── Status e agendamento ──────────────────────────────────────────

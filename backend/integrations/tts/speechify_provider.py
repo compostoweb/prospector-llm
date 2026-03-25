@@ -37,22 +37,43 @@ class SpeechifyProvider(TTSProvider):
     def provider_name(self) -> str:
         return "speechify"
 
+    @staticmethod
+    def _wrap_ssml(text: str, speed: float = 1.0, pitch: float = 0.0) -> str:
+        """Envolve texto em SSML <prosody> para controle de velocidade e entonação.
+
+        A API Speechify ignora o param JSON `speed` no modelo simba-multilingual,
+        mas respeita SSML <prosody rate="X%" pitch="+Y%">.
+        """
+        if speed == 1.0 and pitch == 0.0:
+            return text
+        attrs: list[str] = []
+        if speed != 1.0:
+            rate_pct = round(max(50, min(speed * 100, 200)))
+            attrs.append(f'rate="{rate_pct}%"')
+        if pitch != 0.0:
+            p = round(max(-50, min(pitch, 50)))
+            sign = "+" if p > 0 else ""
+            attrs.append(f'pitch="{sign}{p}%"')
+        return f'<speak><prosody {" ".join(attrs)}>{text}</prosody></speak>'
+
     async def synthesize(
         self,
         text: str,
         voice_id: str,
         language: str = "pt-BR",
+        speed: float = 1.0,
+        pitch: float = 0.0,
     ) -> bytes:
         vid = voice_id or self._default_voice_id
-        resp = await self._client.post(
-            "/audio/speech",
-            json={
-                "input": text,
-                "voice_id": vid,
-                "language": language,
-                "audio_format": "mp3",
-            },
-        )
+        ssml_text = self._wrap_ssml(text, speed, pitch)
+        payload: dict = {
+            "input": ssml_text,
+            "voice_id": vid,
+            "model": "simba-multilingual",
+            "language": language,
+            "audio_format": "mp3",
+        }
+        resp = await self._client.post("/audio/speech", json=payload)
         resp.raise_for_status()
 
         data = resp.json()

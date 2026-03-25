@@ -102,6 +102,10 @@ class Settings(BaseSettings):
     VOICEBOX_BASE_URL: str = "http://localhost:17493"
     VOICEBOX_ENABLED: bool = False
 
+    # ── Edge TTS (Microsoft Neural — gratuito) ───────────────────────
+    EDGE_TTS_ENABLED: bool = True
+    EDGE_TTS_DEFAULT_VOICE: str = "pt-BR-FranciscaNeural"
+
     # ── Unipile ───────────────────────────────────────────────────────
     UNIPILE_API_KEY: str | None = None
     UNIPILE_BASE_URL: str = "https://api2.unipile.com:13246/api/v1"
@@ -134,6 +138,13 @@ class Settings(BaseSettings):
     # ── Resend (email transacional) ───────────────────────────────────
     RESEND_API_KEY: str | None = None
     RESEND_FROM_EMAIL: str = "Prospector <noreply@prospector.app>"
+
+    # ── MinIO / S3 — armazenamento de arquivos ────────────────────────
+    S3_ENDPOINT_URL: str | None = None
+    S3_ACCESS_KEY: str | None = None
+    S3_SECRET_KEY: str | None = None
+    S3_BUCKET: str = "prospector"
+    S3_REGION: str = "us-east-1"
 
     # ── Rate limits por canal (por tenant/dia) ────────────────────────
     LIMIT_LINKEDIN_CONNECT: int = 20

@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useCreateCadence, useUpdateCadence } from "@/lib/api/hooks/use-cadences"
-import { useLeadLists } from "@/lib/api/hooks/use-lead-lists"
+import { useLeadLists, useLeadList } from "@/lib/api/hooks/use-lead-lists"
 import { CadenceSteps } from "@/components/cadencias/cadence-steps"
 import { LLMConfigForm } from "@/components/cadencias/llm-config-form"
 import { TTSConfigForm, type TTSConfig } from "@/components/cadencias/tts-config-form"
@@ -33,6 +33,7 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
   const [name, setName] = useState(cadence?.name ?? "")
   const [description, setDescription] = useState(cadence?.description ?? "")
   const [leadListId, setLeadListId] = useState(cadence?.lead_list_id ?? "")
+  const { data: leadListDetail } = useLeadList(leadListId)
   const [llmConfig, setLlmConfig] = useState({
     llm_provider: cadence?.llm_provider ?? DEFAULT_LLM.llm_provider,
     llm_model: cadence?.llm_model ?? DEFAULT_LLM.llm_model,
@@ -43,6 +44,8 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
   const [ttsConfig, setTtsConfig] = useState<TTSConfig>({
     tts_provider: cadence?.tts_provider ?? null,
     tts_voice_id: cadence?.tts_voice_id ?? null,
+    tts_speed: cadence?.tts_speed ?? 1.0,
+    tts_pitch: cadence?.tts_pitch ?? 0.0,
   })
   const [error, setError] = useState<string | null>(null)
 
@@ -73,6 +76,8 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
       },
       tts_provider: ttsConfig.tts_provider,
       tts_voice_id: ttsConfig.tts_voice_id,
+      tts_speed: ttsConfig.tts_speed,
+      tts_pitch: ttsConfig.tts_pitch,
       lead_list_id: leadListId || null,
       steps_template: steps,
     }
@@ -175,7 +180,15 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
         {/* ── Coluna direita: Passos (sticky) ── */}
         <div className="lg:sticky lg:top-6 lg:self-start">
           <h2 className="mb-3 text-sm font-semibold text-(--text-primary)">Passos da cadência</h2>
-          <CadenceSteps value={steps} onChange={setSteps} />
+          <CadenceSteps
+            value={steps}
+            onChange={setSteps}
+            ttsProvider={ttsConfig.tts_provider}
+            ttsVoiceId={ttsConfig.tts_voice_id}
+            ttsSpeed={ttsConfig.tts_speed}
+            ttsPitch={ttsConfig.tts_pitch}
+            leads={leadListDetail?.leads}
+          />
         </div>
       </div>
     </form>

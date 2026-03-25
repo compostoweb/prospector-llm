@@ -16,7 +16,7 @@ class TTSVoice:
     id: str
     name: str
     language: str
-    provider: str       # "speechify" | "voicebox"
+    provider: str       # "speechify" | "voicebox" | "edge"
     is_cloned: bool     # True se é um voice clone (não built-in)
 
 
@@ -33,6 +33,8 @@ class TTSProvider(ABC):
         text: str,
         voice_id: str,
         language: str = "pt-BR",
+        speed: float = 1.0,
+        pitch: float = 0.0,
     ) -> bytes:
         """Converte texto em áudio MP3. Retorna raw bytes."""
         ...

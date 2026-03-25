@@ -60,3 +60,10 @@ alembic_status.txt
 alembic_upgrade.txt
 reset_alembic.txt
 uvicorn_out.txt
+
+# Arquivos de teste soltos (fora de tests/)
+backend/_test_*.py
+backend/test_*.py
+backend/test_*.mp3
+backend/tts_*.mp3
+!backend/tests/

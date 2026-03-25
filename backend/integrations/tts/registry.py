@@ -54,6 +54,13 @@ class TTSRegistry:
             )
             logger.info("tts.registry.provider_loaded", provider="voicebox")
 
+        if settings.EDGE_TTS_ENABLED:
+            from integrations.tts.edge_provider import EdgeTTSProvider
+            self._providers["edge"] = EdgeTTSProvider(
+                default_voice_id=settings.EDGE_TTS_DEFAULT_VOICE,
+            )
+            logger.info("tts.registry.provider_loaded", provider="edge")
+
         if not self._providers:
             logger.warning("tts.registry.no_providers", msg="Nenhum provedor TTS configurado.")
 
@@ -67,10 +74,12 @@ class TTSRegistry:
         voice_id: str,
         text: str,
         language: str = "pt-BR",
+        speed: float = 1.0,
+        pitch: float = 0.0,
     ) -> bytes:
         """Sintetiza áudio com o provider e voz especificados."""
         tts = self._get_provider(provider)
-        return await tts.synthesize(text=text, voice_id=voice_id, language=language)
+        return await tts.synthesize(text=text, voice_id=voice_id, language=language, speed=speed, pitch=pitch)
 
     # ------------------------------------------------------------------
     # Listagem de vozes — com cache Redis 1h

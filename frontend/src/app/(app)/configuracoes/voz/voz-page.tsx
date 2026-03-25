@@ -33,15 +33,21 @@ import { cn } from "@/lib/utils"
 const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
 const VOICES_PER_PAGE = 5
 
+const PROVIDER_LABELS: Record<string, string> = {
+  edge: "Edge TTS",
+  speechify: "Speechify",
+  voicebox: "Voicebox",
+  xtts: "XTTS v2",
+}
+
 export default function VozPage() {
   const { data: providersData } = useTTSProviders()
-  const { data: voicesData, isLoading: loadingVoices } = useTTSVoices()
   const createVoice = useCreateVoice()
   const deleteVoice = useDeleteVoice()
   const testTTS = useTestTTS()
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
-  const [selectedProvider, setSelectedProvider] = useState<string>("speechify")
+  const [selectedProvider, setSelectedProvider] = useState<string>("edge")
   const [newName, setNewName] = useState("")
   const [newLanguage, setNewLanguage] = useState("pt-BR")
   const [audioFile, setAudioFile] = useState<File | null>(null)
@@ -53,9 +59,13 @@ export default function VozPage() {
   const [voiceSearch, setVoiceSearch] = useState("")
   const [languageFilter, setLanguageFilter] = useState("all")
   const [visibleCount, setVisibleCount] = useState(VOICES_PER_PAGE)
+
+  // Busca vozes do provider selecionado (só roda quando selectedProvider está definido)
+  const { data: voicesData, isLoading: loadingVoices } = useTTSVoices(selectedProvider)
+
   const providers = providersData?.providers ?? []
   const allVoices = voicesData?.voices ?? []
-  const providerVoices = allVoices.filter((v) => v.provider === selectedProvider)
+  const providerVoices = allVoices
 
   // Extract unique languages for filter
   const languages = useMemo(() => {
@@ -162,10 +172,15 @@ export default function VozPage() {
 
       {/* Provider tabs */}
       <div className="flex gap-2">
-        {(providers.length > 0 ? providers : ["speechify"]).map((p) => (
+        {(providers.length > 0 ? providers : ["edge", "speechify"]).map((p) => (
           <button
             key={p}
-            onClick={() => setSelectedProvider(p)}
+            onClick={() => {
+              setSelectedProvider(p)
+              setVisibleCount(VOICES_PER_PAGE)
+              setVoiceSearch("")
+              setLanguageFilter("all")
+            }}
             className={cn(
               "rounded-md border px-4 py-2 text-sm font-medium transition-colors",
               selectedProvider === p
@@ -173,7 +188,7 @@ export default function VozPage() {
                 : "border-(--border-default) bg-(--bg-surface) text-(--text-secondary) hover:bg-(--bg-overlay)",
             )}
           >
-            {p === "speechify" ? "Speechify" : p === "voicebox" ? "Voicebox" : p}
+            {PROVIDER_LABELS[p] ?? p}
           </button>
         ))}
       </div>
@@ -181,7 +196,7 @@ export default function VozPage() {
       {/* Vozes existentes */}
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-(--text-primary)">
-          Vozes disponíveis — {selectedProvider === "speechify" ? "Speechify" : "Voicebox"}
+          Vozes disponíveis — {PROVIDER_LABELS[selectedProvider] ?? selectedProvider}
         </h2>
 
         {loadingVoices ? (

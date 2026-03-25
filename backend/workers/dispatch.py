@@ -145,18 +145,31 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
 
             elif step.channel == Channel.LINKEDIN_DM:
                 if step.use_voice:
-                    # Gera voice note MP3 via TTSRegistry, armazena no Redis e passa URL para Unipile
-                    tts_registry = TTSRegistry(settings=settings, redis=redis_client)
-                    tts_provider = cadence.tts_provider or settings.VOICE_PROVIDER
-                    tts_voice_id = cadence.tts_voice_id or settings.SPEECHIFY_VOICE_ID
-                    audio_bytes = await tts_registry.synthesize(
-                        provider=tts_provider,
-                        voice_id=tts_voice_id,
-                        text=message_text,
-                    )
-                    audio_key = str(uuid.uuid4())
-                    await redis_client.set_bytes(f"audio:{audio_key}", audio_bytes, ttl=3600)
-                    audio_url = f"{settings.API_PUBLIC_URL}/audio/{audio_key}"
+                    # Voice note — pode ser áudio pré-gravado (S3) ou TTS gerado
+                    if step.audio_file_id:
+                        # Áudio pré-gravado no S3 — só passa a URL
+                        from models.audio_file import AudioFile
+                        af_result = await db.execute(
+                            select(AudioFile).where(AudioFile.id == step.audio_file_id)
+                        )
+                        audio_file = af_result.scalar_one_or_none()
+                        if audio_file:
+                            audio_url = audio_file.url
+                        else:
+                            logger.warning(
+                                "dispatch.audio_file_not_found",
+                                audio_file_id=str(step.audio_file_id),
+                            )
+                            # Fallback: gera via TTS
+                            audio_url = await _generate_tts_audio(
+                                cadence, message_text, settings, redis_client,
+                            )
+                    else:
+                        # Gera via TTS
+                        audio_url = await _generate_tts_audio(
+                            cadence, message_text, settings, redis_client,
+                        )
+
                     result = await unipile_client.send_linkedin_voice_note(
                         account_id=settings.UNIPILE_ACCOUNT_ID_LINKEDIN or "",
                         linkedin_profile_id=lead.linkedin_profile_id or "",
@@ -259,3 +272,29 @@ def _build_email_subject(lead: "Lead", step_number: int) -> str:
     if step_number == 1:
         return f"Uma ideia para {company}"
     return f"Re: Uma ideia para {company}"
+
+
+async def _generate_tts_audio(
+    cadence: "Cadence",  # type: ignore[name-defined]  # noqa: F821
+    text: str,
+    settings: "Settings",  # type: ignore[name-defined]  # noqa: F821
+    redis_client: "RedisClient",  # type: ignore[name-defined]  # noqa: F821
+) -> str:
+    """Gera áudio TTS, armazena no Redis e retorna a URL pública."""
+    from integrations.tts import TTSRegistry
+
+    tts_registry = TTSRegistry(settings=settings, redis=redis_client)
+    tts_provider = cadence.tts_provider or settings.VOICE_PROVIDER
+    tts_voice_id = cadence.tts_voice_id or settings.SPEECHIFY_VOICE_ID
+    tts_speed = getattr(cadence, "tts_speed", 1.0) or 1.0
+    tts_pitch = getattr(cadence, "tts_pitch", 0.0) or 0.0
+    audio_bytes = await tts_registry.synthesize(
+        provider=tts_provider,
+        voice_id=tts_voice_id,
+        text=text,
+        speed=tts_speed,
+        pitch=tts_pitch,
+    )
+    audio_key = str(uuid.uuid4())
+    await redis_client.set_bytes(f"audio:{audio_key}", audio_bytes, ttl=3600)
+    return f"{settings.API_PUBLIC_URL}/audio/{audio_key}"

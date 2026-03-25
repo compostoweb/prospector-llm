@@ -39,21 +39,21 @@ export function useTTSProviders() {
   })
 }
 
-/** Lista todas as vozes TTS (todos os providers) — staleTime 1h */
+/** Lista vozes TTS de um provider específico — staleTime 1h */
 export function useTTSVoices(provider?: string) {
   const { data: session } = useSession()
-  const url = provider ? `/tts/voices/${provider}` : "/tts/voices"
 
   return useQuery({
     queryKey: ["tts", "voices", provider ?? "all"],
     queryFn: async (): Promise<TTSVoicesResponse> => {
+      const url = provider ? `/tts/voices/${provider}` : "/tts/voices"
       const client = createBrowserClient(session?.accessToken)
       const { data, error } = await client.GET(url as never)
       if (error) throw new Error("Falha ao carregar vozes TTS")
       return data as TTSVoicesResponse
     },
     staleTime: 60 * 60 * 1000,
-    enabled: !!session?.accessToken,
+    enabled: !!session?.accessToken && !!provider,
     select: (data) => ({
       ...data,
       byProvider: data.voices.reduce<Record<string, TTSVoice[]>>((acc, v) => {
@@ -137,11 +137,15 @@ export function useTestTTS() {
       voice_id,
       text,
       language,
+      speed,
+      pitch,
     }: {
       provider: string
       voice_id: string
       text?: string
       language?: string
+      speed?: number
+      pitch?: number
     }): Promise<Blob> => {
       const token = session?.accessToken
       const baseUrl = process.env["NEXT_PUBLIC_API_URL"] ?? "http://localhost:8000"
@@ -157,6 +161,8 @@ export function useTestTTS() {
           voice_id,
           text: text ?? "Olá! Isso é um teste de voz do Prospector.",
           language: language ?? "pt-BR",
+          speed: speed ?? 1.0,
+          pitch: pitch ?? 0.0,
         }),
       })
       if (!resp.ok) throw new Error("Falha ao testar TTS")

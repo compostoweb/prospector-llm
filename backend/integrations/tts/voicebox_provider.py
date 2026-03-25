@@ -43,15 +43,19 @@ class VoiceboxProvider(TTSProvider):
         text: str,
         voice_id: str,
         language: str = "pt-BR",
+        speed: float = 1.0,
+        pitch: float = 0.0,
     ) -> bytes:
-        resp = await self._client.post(
-            "/generate",
-            json={
-                "text": text,
-                "profile_id": voice_id,
-                "language": language,
-            },
-        )
+        payload: dict = {
+            "text": text,
+            "profile_id": voice_id,
+            "language": language,
+        }
+        if speed != 1.0:
+            payload["speed"] = round(max(0.5, min(speed, 2.0)), 2)
+        if pitch != 0.0:
+            payload["pitch"] = round(max(-50.0, min(pitch, 50.0)), 1)
+        resp = await self._client.post("/generate", json=payload)
         resp.raise_for_status()
 
         # Voicebox retorna áudio binário diretamente

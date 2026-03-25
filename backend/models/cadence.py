@@ -92,6 +92,18 @@ class Cadence(Base, TenantMixin, TimestampMixin):
         default=None,
         comment="ID da voz/profile TTS. NULL = usa default do provider.",
     )
+    tts_speed: Mapped[float] = mapped_column(
+        Float,
+        default=1.0,
+        server_default="1.0",
+        comment="Velocidade da fala TTS (0.5–2.0). 1.0 = normal.",
+    )
+    tts_pitch: Mapped[float] = mapped_column(
+        Float,
+        default=0.0,
+        server_default="0",
+        comment="Entonação/pitch TTS (-50 a +50%). 0 = normal.",
+    )
 
     # -------------------------------------------------------
     # Lista de leads associada (opcional)
