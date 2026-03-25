@@ -61,7 +61,6 @@ def upgrade() -> None:
         "skipped",
         name="manual_task_status",
     )
-    manual_task_status_enum.create(op.get_bind(), checkfirst=True)
 
     # ── Tabela manual_tasks ───────────────────────────────────────────
     op.create_table(

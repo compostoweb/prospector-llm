@@ -10,6 +10,7 @@ export interface ChatAttendee {
   id: string
   name: string
   profile_url: string | null
+  profile_picture_url: string | null
 }
 
 export interface Conversation {
@@ -62,6 +63,11 @@ export interface ConversationLead {
   status: string | null
   notes: string | null
   pending_tasks_count: number
+  // Dados do contato Unipile (sempre preenchidos)
+  attendee_name: string | null
+  attendee_profile_url: string | null
+  attendee_profile_picture_url: string | null
+  attendee_id: string | null
 }
 
 export type SuggestTone = "formal" | "casual" | "objetiva" | "consultiva"
@@ -216,6 +222,63 @@ export function useSuggestReply() {
       )
       if (error) throw new Error("Falha ao gerar sugestão")
       return data as { suggested_text: string; tone: string }
+    },
+  })
+}
+
+export interface QuickCreateLeadBody {
+  name: string
+  linkedin_url?: string | undefined
+  linkedin_profile_id?: string | undefined
+  company?: string | undefined
+  job_title?: string | undefined
+}
+
+export function useQuickCreateLead() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      chatId,
+      body,
+    }: {
+      chatId: string
+      body: QuickCreateLeadBody
+    }): Promise<ConversationLead> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.POST(
+        `/inbox/conversations/${chatId}/create-lead` as never,
+        { body: body as never },
+      )
+      if (error) throw new Error("Falha ao criar lead")
+      return data as ConversationLead
+    },
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["inbox", "lead", variables.chatId],
+      })
+      void queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] })
+      void queryClient.invalidateQueries({ queryKey: ["leads"] })
+    },
+  })
+}
+
+export function useSendToCRM() {
+  const { data: session } = useSession()
+
+  return useMutation({
+    mutationFn: async ({
+      chatId,
+    }: {
+      chatId: string
+    }): Promise<{ person_id: number; deal_id: number | null; status: string }> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.POST(
+        `/inbox/conversations/${chatId}/send-crm` as never,
+      )
+      if (error) throw new Error("Falha ao enviar para CRM")
+      return data as { person_id: number; deal_id: number | null; status: string }
     },
   })
 }

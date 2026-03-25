@@ -19,6 +19,7 @@ class ChatAttendeeSchema(BaseModel):
     id: str
     name: str
     profile_url: str | None = None
+    profile_picture_url: str | None = None
 
 
 class ConversationSchema(BaseModel):
@@ -79,7 +80,7 @@ class SuggestReplyResponse(BaseModel):
 
 
 class ConversationLeadResponse(BaseModel):
-    """Dados do lead vinculado a uma conversa."""
+    """Dados do lead vinculado ou contato Unipile."""
     has_lead: bool = False
     lead_id: uuid.UUID | None = None
     name: str | None = None
@@ -97,3 +98,17 @@ class ConversationLeadResponse(BaseModel):
     notes: str | None = None
     # Tarefas pendentes do lead
     pending_tasks_count: int = 0
+    # Dados do contato Unipile (sempre preenchidos, mesmo sem lead)
+    attendee_name: str | None = None
+    attendee_profile_url: str | None = None
+    attendee_profile_picture_url: str | None = None
+    attendee_id: str | None = None
+
+
+class QuickCreateLeadRequest(BaseModel):
+    """Criar lead rápido a partir de contato do inbox."""
+    name: str = Field(..., min_length=1, max_length=300)
+    linkedin_url: str | None = None
+    linkedin_profile_id: str | None = None
+    company: str | None = None
+    job_title: str | None = None

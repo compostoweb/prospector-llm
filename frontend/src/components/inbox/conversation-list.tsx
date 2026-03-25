@@ -3,6 +3,7 @@
 import { cn } from "@/lib/utils"
 import type { Conversation } from "@/lib/api/hooks/use-inbox"
 import { MessageSquare, User } from "lucide-react"
+import Image from "next/image"
 
 interface ConversationListProps {
   conversations: Conversation[]
@@ -43,7 +44,10 @@ export function ConversationList({
           <div className="space-y-0.5 p-1">
             {conversations.map((conv) => {
               const otherAttendee = conv.attendees[0]
-              const displayName = conv.lead_name ?? otherAttendee?.name ?? "Desconhecido"
+              const attendeeName = otherAttendee?.name || null
+              const displayName = conv.lead_name || attendeeName || "Desconhecido"
+              const displayCompany = conv.lead_company
+              const avatarUrl = otherAttendee?.profile_picture_url
               const isSelected = conv.chat_id === selectedChatId
 
               return (
@@ -58,10 +62,21 @@ export function ConversationList({
                       : "text-(--text-primary) hover:bg-(--bg-overlay)",
                   )}
                 >
-                  {/* Avatar placeholder */}
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-(--bg-overlay)">
-                    <User size={14} className="text-(--text-tertiary)" aria-hidden="true" />
-                  </div>
+                  {/* Avatar */}
+                  {avatarUrl ? (
+                    <Image
+                      src={avatarUrl}
+                      alt={displayName}
+                      width={36}
+                      height={36}
+                      unoptimized
+                      className="h-9 w-9 shrink-0 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-(--bg-overlay)">
+                      <User size={14} className="text-(--text-tertiary)" aria-hidden="true" />
+                    </div>
+                  )}
 
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-1">
@@ -72,9 +87,9 @@ export function ConversationList({
                         </span>
                       )}
                     </div>
-                    {conv.lead_company && (
+                    {displayCompany && (
                       <p className="truncate text-[11px] text-(--text-secondary)">
-                        {conv.lead_company}
+                        {displayCompany}
                       </p>
                     )}
                     {conv.last_message_text && (

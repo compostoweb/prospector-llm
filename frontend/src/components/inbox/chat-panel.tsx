@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react"
 import {
   useChatMessages,
+  useConversations,
   useSendMessage,
   useSuggestReply,
   type SuggestTone,
@@ -10,6 +11,7 @@ import {
 import { ChatInput } from "@/components/inbox/chat-input"
 import { cn } from "@/lib/utils"
 import { User, PanelRightOpen, PanelRightClose, Loader2 } from "lucide-react"
+import Image from "next/image"
 
 interface ChatPanelProps {
   chatId: string
@@ -19,12 +21,19 @@ interface ChatPanelProps {
 
 export function ChatPanel({ chatId, onToggleContact, showContact }: ChatPanelProps) {
   const { data, isLoading } = useChatMessages(chatId)
+  const { data: convData } = useConversations()
   const sendMessage = useSendMessage()
   const suggestReply = useSuggestReply()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [inputText, setInputText] = useState("")
 
   const messages = data?.items ?? []
+
+  // Get attendee info for avatar
+  const conversation = convData?.items?.find((c) => c.chat_id === chatId)
+  const otherAttendee = conversation?.attendees[0]
+  const attendeeName = conversation?.lead_name || otherAttendee?.name || "Contato"
+  const attendeeAvatar = otherAttendee?.profile_picture_url
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -47,7 +56,19 @@ export function ChatPanel({ chatId, onToggleContact, showContact }: ChatPanelPro
     <div className="flex flex-1 flex-col bg-(--bg-page)">
       {/* Header */}
       <div className="flex h-12 items-center justify-between border-b border-(--border-default) bg-(--bg-surface) px-4">
-        <h3 className="text-sm font-semibold text-(--text-primary)">Conversa</h3>
+        <div className="flex items-center gap-2">
+          {attendeeAvatar ? (
+            <Image
+              src={attendeeAvatar}
+              alt={attendeeName}
+              width={24}
+              height={24}
+              unoptimized
+              className="h-6 w-6 rounded-full object-cover"
+            />
+          ) : null}
+          <h3 className="text-sm font-semibold text-(--text-primary)">{attendeeName}</h3>
+        </div>
         <button
           type="button"
           onClick={onToggleContact}
@@ -81,9 +102,20 @@ export function ChatPanel({ chatId, onToggleContact, showContact }: ChatPanelPro
               >
                 {/* Avatar */}
                 {!msg.is_own && (
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-(--bg-overlay)">
-                    <User size={12} className="text-(--text-tertiary)" aria-hidden="true" />
-                  </div>
+                  attendeeAvatar ? (
+                    <Image
+                      src={attendeeAvatar}
+                      alt={msg.sender_name}
+                      width={28}
+                      height={28}
+                      unoptimized
+                      className="h-7 w-7 shrink-0 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-(--bg-overlay)">
+                      <User size={12} className="text-(--text-tertiary)" aria-hidden="true" />
+                    </div>
+                  )
                 )}
 
                 {/* Bubble */}

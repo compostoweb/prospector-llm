@@ -29,7 +29,7 @@ from api.dependencies import get_effective_tenant_id, get_llm_registry, get_sess
 from core.config import settings
 from integrations.llm import LLMRegistry
 from integrations.unipile_client import unipile_client
-from models.enums import Channel, InteractionDirection, ManualTaskStatus
+from models.enums import Channel, InteractionDirection, LeadSource, LeadStatus, ManualTaskStatus
 from models.interaction import Interaction
 from models.lead import Lead
 from models.manual_task import ManualTask
@@ -40,6 +40,7 @@ from schemas.inbox import (
     ConversationLeadResponse,
     ConversationListResponse,
     ConversationSchema,
+    QuickCreateLeadRequest,
     SendMessageRequest,
     SuggestReplyRequest,
     SuggestReplyResponse,
@@ -81,7 +82,12 @@ async def list_conversations(
             ConversationSchema(
                 chat_id=chat.chat_id,
                 attendees=[
-                    ChatAttendeeSchema(id=a.id, name=a.name, profile_url=a.profile_url)
+                    ChatAttendeeSchema(
+                        id=a.id,
+                        name=a.name,
+                        profile_url=a.profile_url,
+                        profile_picture_url=a.profile_picture_url,
+                    )
                     for a in chat.attendees
                 ],
                 last_message_text=chat.last_message_text,
@@ -286,14 +292,27 @@ async def get_conversation_lead(
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> ConversationLeadResponse:
-    """Retorna dados do lead vinculado à conversa (se existir)."""
+    """Retorna dados do lead vinculado à conversa (se existir) + dados do contato Unipile."""
     chat = await unipile_client.get_chat(chat_id)
     if not chat:
         return ConversationLeadResponse(has_lead=False)
 
+    # Sempre extraímos dados do attendee (mesmo sem lead no sistema)
+    first_att = chat.attendees[0] if chat.attendees else None
+    attendee_name = first_att.name if first_att else None
+    attendee_profile_url = first_att.profile_url if first_att else None
+    attendee_profile_picture_url = first_att.profile_picture_url if first_att else None
+    attendee_id = first_att.id if first_att else None
+
     lead = await _find_lead_by_attendees(chat.attendees, tenant_id, db)
     if not lead:
-        return ConversationLeadResponse(has_lead=False)
+        return ConversationLeadResponse(
+            has_lead=False,
+            attendee_name=attendee_name,
+            attendee_profile_url=attendee_profile_url,
+            attendee_profile_picture_url=attendee_profile_picture_url,
+            attendee_id=attendee_id,
+        )
 
     # Conta tarefas pendentes do lead
     pending_count_result = await db.execute(
@@ -323,7 +342,131 @@ async def get_conversation_lead(
         status=lead.status,
         notes=lead.notes,
         pending_tasks_count=pending_count,
+        attendee_name=attendee_name,
+        attendee_profile_url=attendee_profile_url,
+        attendee_profile_picture_url=attendee_profile_picture_url,
+        attendee_id=attendee_id,
     )
+
+
+@router.post("/conversations/{chat_id}/create-lead", response_model=ConversationLeadResponse)
+async def quick_create_lead(
+    chat_id: str,
+    body: QuickCreateLeadRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> ConversationLeadResponse:
+    """Cria lead rápido a partir de contato do inbox."""
+    # Verifica se já existe lead vinculado
+    chat = await unipile_client.get_chat(chat_id)
+    if chat:
+        existing = await _find_lead_by_attendees(chat.attendees, tenant_id, db)
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Já existe um lead vinculado a este contato",
+            )
+
+    lead = Lead(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        name=body.name,
+        linkedin_url=body.linkedin_url,
+        linkedin_profile_id=body.linkedin_profile_id,
+        company=body.company,
+        job_title=body.job_title,
+        source=LeadSource.MANUAL,
+        status=LeadStatus.RAW,
+    )
+    db.add(lead)
+    await db.commit()
+    await db.refresh(lead)
+
+    logger.info(
+        "inbox.lead_created",
+        lead_id=str(lead.id),
+        chat_id=chat_id,
+        tenant_id=str(tenant_id),
+    )
+
+    first_att = chat.attendees[0] if chat and chat.attendees else None
+    return ConversationLeadResponse(
+        has_lead=True,
+        lead_id=lead.id,
+        name=lead.name,
+        company=lead.company,
+        job_title=lead.job_title,
+        linkedin_url=lead.linkedin_url,
+        status=lead.status,
+        pending_tasks_count=0,
+        attendee_name=first_att.name if first_att else None,
+        attendee_profile_url=first_att.profile_url if first_att else None,
+        attendee_profile_picture_url=first_att.profile_picture_url if first_att else None,
+        attendee_id=first_att.id if first_att else None,
+    )
+
+
+@router.post("/conversations/{chat_id}/send-crm")
+async def send_to_crm(
+    chat_id: str,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> dict:
+    """Envia contato/lead para o CRM (Pipedrive)."""
+    from integrations.pipedrive_client import PipedriveClient
+
+    if not settings.PIPEDRIVE_API_TOKEN or not settings.PIPEDRIVE_DOMAIN:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Pipedrive não configurado",
+        )
+
+    pipedrive = PipedriveClient(settings)
+
+    chat = await unipile_client.get_chat(chat_id)
+    if not chat or not chat.attendees:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat não encontrado",
+        )
+
+    # Tenta encontrar lead vinculado para dados mais ricos
+    lead = await _find_lead_by_attendees(chat.attendees, tenant_id, db)
+
+    name = lead.name if lead else (chat.attendees[0].name or "Contato LinkedIn")
+    email = (lead.email_corporate or lead.email_personal) if lead else None
+
+    person_id = await pipedrive.find_or_create_person(
+        name=name,
+        email=email,
+        linkedin_url=lead.linkedin_url if lead else chat.attendees[0].profile_url,
+    )
+
+    if not person_id:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao criar contato no Pipedrive",
+        )
+
+    deal_id = await pipedrive.create_deal(
+        title=f"Prospecção - {name}",
+        person_id=person_id,
+        stage_id=settings.PIPEDRIVE_STAGE_INTEREST if hasattr(settings, "PIPEDRIVE_STAGE_INTEREST") else None,
+    )
+
+    logger.info(
+        "inbox.sent_to_crm",
+        person_id=person_id,
+        deal_id=deal_id,
+        chat_id=chat_id,
+        tenant_id=str(tenant_id),
+    )
+
+    return {
+        "person_id": person_id,
+        "deal_id": deal_id,
+        "status": "sent",
+    }
 
 
 # ── Helpers ───────────────────────────────────────────────────────────

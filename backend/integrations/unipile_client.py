@@ -17,6 +17,8 @@ Documentação: https://developer.unipile.com
 
 from __future__ import annotations
 
+import asyncio
+import json
 from dataclasses import dataclass, field
 
 import httpx
@@ -28,6 +30,7 @@ logger = structlog.get_logger()
 
 _BASE_URL = settings.UNIPILE_BASE_URL
 _TIMEOUT = 30.0
+_PROFILE_CACHE_TTL = 86400  # 24h
 
 
 @dataclass
@@ -52,6 +55,7 @@ class ChatAttendee:
     id: str
     name: str
     profile_url: str | None = None
+    profile_picture_url: str | None = None
 
 
 @dataclass
@@ -260,6 +264,74 @@ class UnipileClient:
 
     # ── Chats (UniBox) ────────────────────────────────────────────────
 
+    async def _get_user_profile_cached(
+        self,
+        provider_id: str,
+        account_id: str,
+    ) -> dict:
+        """
+        Busca perfil de usuário Unipile com cache Redis.
+        Retorna dict com first_name, last_name, profile_picture_url, public_identifier.
+        """
+        from core.redis_client import redis_client
+
+        cache_key = f"unipile:profile:{provider_id}"
+        cached = await redis_client.get(cache_key)
+        if cached:
+            try:
+                return json.loads(cached)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        try:
+            response = await self._client.get(
+                f"/users/{provider_id}",
+                params={"account_id": account_id},
+            )
+            if response.status_code != 200:
+                logger.debug(
+                    "unipile.user_profile.not_found",
+                    provider_id=provider_id,
+                    status=response.status_code,
+                )
+                return {}
+            data = response.json()
+            profile = {
+                "first_name": data.get("first_name", ""),
+                "last_name": data.get("last_name", ""),
+                "profile_picture_url": data.get("profile_picture_url"),
+                "public_identifier": data.get("public_identifier", ""),
+            }
+            await redis_client.set(
+                cache_key,
+                json.dumps(profile),
+                ex=_PROFILE_CACHE_TTL,
+            )
+            return profile
+        except Exception:
+            logger.debug("unipile.user_profile.error", provider_id=provider_id)
+            return {}
+
+    async def _resolve_attendee(
+        self,
+        provider_id: str,
+        account_id: str,
+    ) -> ChatAttendee:
+        """Resolve dados de um attendee via /users/{id}."""
+        profile = await self._get_user_profile_cached(provider_id, account_id)
+        first = profile.get("first_name", "")
+        last = profile.get("last_name", "")
+        name = f"{first} {last}".strip() if (first or last) else ""
+        public_id = profile.get("public_identifier", "")
+        profile_url = f"https://www.linkedin.com/in/{public_id}" if public_id else None
+
+        return ChatAttendee(
+            id=provider_id,
+            name=name,
+            profile_url=profile_url,
+            profile_picture_url=profile.get("profile_picture_url"),
+        )
+
     async def list_chats(
         self,
         account_id: str,
@@ -278,22 +350,39 @@ class UnipileClient:
         response.raise_for_status()
         data = response.json()
 
+        raw_items = data.get("items", [])
+
+        # Collect unique attendee IDs and resolve profiles in parallel
+        attendee_ids = {
+            chat.get("attendee_provider_id", "")
+            for chat in raw_items
+            if chat.get("attendee_provider_id")
+        }
+        profiles: dict[str, ChatAttendee] = {}
+        if attendee_ids:
+            resolved = await asyncio.gather(
+                *(self._resolve_attendee(aid, account_id) for aid in attendee_ids),
+                return_exceptions=True,
+            )
+            for att in resolved:
+                if isinstance(att, ChatAttendee):
+                    profiles[att.id] = att
+
         items: list[ChatSummary] = []
-        for chat in data.get("items", []):
-            attendees = [
-                ChatAttendee(
-                    id=att.get("id", ""),
-                    name=att.get("name", ""),
-                    profile_url=att.get("profile_url"),
-                )
-                for att in chat.get("attendees", [])
-            ]
+        for chat in raw_items:
+            att_id = chat.get("attendee_provider_id", "")
+            attendee = profiles.get(att_id)
+            attendees = [attendee] if attendee else (
+                [ChatAttendee(id=att_id, name="")] if att_id else []
+            )
+
+            last_msg = chat.get("lastMessage") or chat.get("last_message") or {}
             items.append(
                 ChatSummary(
                     chat_id=chat.get("id", ""),
                     attendees=attendees,
-                    last_message_text=chat.get("last_message", {}).get("text"),
-                    last_message_at=chat.get("last_message", {}).get("timestamp"),
+                    last_message_text=last_msg.get("text") if isinstance(last_msg, dict) else None,
+                    last_message_at=last_msg.get("timestamp") if isinstance(last_msg, dict) else chat.get("timestamp"),
                     unread_count=chat.get("unread_count", 0),
                     account_id=account_id,
                 )
@@ -322,16 +411,45 @@ class UnipileClient:
         response.raise_for_status()
         data = response.json()
 
+        raw_msgs = data.get("items", [])
+
+        # Resolve sender names: collect unique sender_ids
+        account_id = ""
+        sender_ids: set[str] = set()
+        for msg in raw_msgs:
+            if not msg.get("account_id"):
+                continue
+            account_id = msg["account_id"]
+            sid = msg.get("sender_id", "")
+            if sid and not msg.get("is_sender", 0):
+                sender_ids.add(sid)
+
+        sender_names: dict[str, str] = {}
+        if sender_ids and account_id:
+            resolved = await asyncio.gather(
+                *(self._get_user_profile_cached(sid, account_id) for sid in sender_ids),
+                return_exceptions=True,
+            )
+            for sid, profile in zip(sender_ids, resolved):
+                if isinstance(profile, dict):
+                    first = profile.get("first_name", "")
+                    last = profile.get("last_name", "")
+                    sender_names[sid] = f"{first} {last}".strip() if (first or last) else ""
+
         items: list[ChatMessage] = []
-        for msg in data.get("items", []):
+        for msg in raw_msgs:
+            sid = msg.get("sender_id", "")
+            is_own = bool(msg.get("is_sender", 0))
+            name = "Eu" if is_own else (sender_names.get(sid) or msg.get("sender_name", ""))
+
             items.append(
                 ChatMessage(
                     id=msg.get("id", ""),
-                    sender_id=msg.get("sender_id", ""),
-                    sender_name=msg.get("sender_name", ""),
+                    sender_id=sid,
+                    sender_name=name,
                     text=msg.get("text", ""),
                     timestamp=msg.get("timestamp", ""),
-                    is_own=msg.get("is_own", False),
+                    is_own=is_own,
                     attachments=msg.get("attachments", []),
                 )
             )
@@ -349,18 +467,21 @@ class UnipileClient:
                 return None
             response.raise_for_status()
             data = response.json()
-            attendees = [
-                ChatAttendee(
-                    id=att.get("id", ""),
-                    name=att.get("name", ""),
-                    profile_url=att.get("profile_url"),
-                )
-                for att in data.get("attendees", [])
-            ]
+
+            account_id = data.get("account_id", "")
+            att_provider_id = data.get("attendee_provider_id", "")
+
+            attendees: list[ChatAttendee] = []
+            if att_provider_id and account_id:
+                attendee = await self._resolve_attendee(att_provider_id, account_id)
+                attendees.append(attendee)
+            elif att_provider_id:
+                attendees.append(ChatAttendee(id=att_provider_id, name=""))
+
             return ChatDetail(
                 chat_id=data.get("id", ""),
                 attendees=attendees,
-                account_id=data.get("account_id", ""),
+                account_id=account_id,
             )
         except httpx.HTTPError:
             logger.warning("unipile.get_chat.error", chat_id=chat_id)
