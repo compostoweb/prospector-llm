@@ -6,12 +6,25 @@ import { createBrowserClient } from "@/lib/api/client"
 
 // ── Tipos ─────────────────────────────────────────────────────────────
 
+export type StepType =
+  | "linkedin_connect"
+  | "linkedin_dm_first"
+  | "linkedin_dm_post_connect"
+  | "linkedin_dm_post_connect_voice"
+  | "linkedin_dm_voice"
+  | "linkedin_dm_followup"
+  | "linkedin_dm_breakup"
+  | "email_first"
+  | "email_followup"
+  | "email_breakup"
+
 export interface CadenceStep {
   channel: "linkedin_connect" | "linkedin_dm" | "email"
   day_offset: number
   message_template: string
   use_voice: boolean
   audio_file_id: string | null
+  step_type: StepType | null
 }
 
 export interface Cadence {

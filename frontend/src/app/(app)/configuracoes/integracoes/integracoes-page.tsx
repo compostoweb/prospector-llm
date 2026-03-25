@@ -172,13 +172,26 @@ export default function IntegracoesPage() {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="pd-token">API Token</Label>
-                  <Input
-                    id="pd-token"
-                    type="password"
-                    value={pdToken}
-                    onChange={(e) => setPdToken(e.target.value)}
-                    placeholder="Token da API do Pipedrive"
-                  />
+                  <div className="relative">
+                    <Input
+                      id="pd-token"
+                      type="password"
+                      value={pdToken}
+                      onChange={(e) => setPdToken(e.target.value)}
+                      placeholder={pipedriveConnected ? "••••••••••••••••" : "Token da API do Pipedrive"}
+                    />
+                    {pipedriveConnected && !pdToken && (
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[11px] text-emerald-600">
+                        <CheckCircle2 size={12} />
+                        Configurado
+                      </span>
+                    )}
+                  </div>
+                  {pipedriveConnected && (
+                    <p className="text-[11px] text-(--text-tertiary)">
+                      Deixe em branco para manter o token atual.
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="pd-domain">Domínio</Label>

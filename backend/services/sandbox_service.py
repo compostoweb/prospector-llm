@@ -30,6 +30,7 @@ from integrations.context_fetcher import ContextFetcher
 from integrations.llm import LLMMessage, LLMRegistry
 from integrations.pipedrive_client import PipedriveClient
 from models.cadence import Cadence
+from models.tenant import TenantIntegration
 from models.enums import (
     Channel,
     Intent,
@@ -39,6 +40,7 @@ from models.enums import (
     SandboxStepStatus,
 )
 from models.lead import Lead
+from models.lead_list import lead_list_members
 from models.sandbox import SandboxRun, SandboxStep
 from services.ai_composer import AIComposer, resolve_step_key, STEP_INSTRUCTIONS
 from services.cadence_manager import cadence_manager, _resolve_template
@@ -217,7 +219,7 @@ class SandboxService:
             lead_id = lead_data.get("lead_id")
             fictitious = lead_data.get("fictitious_data")
 
-            for step_number, (channel, day_offset, use_voice, _audio_file_id) in enumerate(
+            for step_number, (channel, day_offset, use_voice, _audio_file_id, step_type) in enumerate(
                 template, start=1
             ):
                 step = SandboxStep(
@@ -230,6 +232,7 @@ class SandboxService:
                     step_number=step_number,
                     day_offset=day_offset,
                     use_voice=use_voice,
+                    step_type=step_type,
                     scheduled_at_preview=now + timedelta(days=day_offset),
                     status=SandboxStepStatus.PENDING,
                 )
@@ -275,7 +278,7 @@ class SandboxService:
 
         # Mapa de canal anterior por step_number (do template)
         prev_channel_map: dict[int, str | None] = {}
-        for idx, (ch, _day, _voice, _audio) in enumerate(template):
+        for idx, (ch, _day, _voice, _audio, _stype) in enumerate(template):
             prev_channel_map[idx + 1] = template[idx - 1][0].value if idx > 0 else None
 
         # Ordena steps por lead + step_number para processamento sequencial
@@ -292,7 +295,7 @@ class SandboxService:
 
             try:
                 content, llm_info = await self._compose_step(
-                    step, cadence, composer, context_fetcher, registry,
+                    step, cadence, composer, context_fetcher, registry, db,
                     total_steps=total_steps,
                     previous_channel=previous_channel,
                 )
@@ -383,7 +386,7 @@ class SandboxService:
 
         try:
             content, llm_info = await self._compose_step(
-                step, cadence, composer, context_fetcher, registry,
+                step, cadence, composer, context_fetcher, registry, db,
                 total_steps=total_steps,
                 previous_channel=prev_channel,
             )
@@ -737,6 +740,134 @@ class SandboxService:
 
         return results
 
+    async def push_to_pipedrive(
+        self,
+        run_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        db: AsyncSession,
+    ) -> list[dict]:
+        """Envia leads relevantes do sandbox para o Pipedrive (person + deal + nota)."""
+        run = await self._get_run(run_id, tenant_id, db)
+
+        # Busca credenciais Pipedrive do tenant
+        result = await db.execute(
+            select(TenantIntegration).where(TenantIntegration.tenant_id == tenant_id)
+        )
+        integration = result.scalar_one_or_none()
+        if not integration or not integration.pipedrive_api_token:
+            raise ValueError("Pipedrive não configurado para este tenant.")
+
+        client = PipedriveClient(
+            token=integration.pipedrive_api_token,
+            domain=integration.pipedrive_domain,
+        )
+        stage_interest = integration.pipedrive_stage_interest
+        stage_objection = integration.pipedrive_stage_objection
+        owner_id = integration.pipedrive_owner_id
+
+        # Coleta leads com intent INTEREST ou OBJECTION
+        relevant_steps: dict[uuid.UUID | str, SandboxStep] = {}
+        for step in run.steps:
+            if step.simulated_intent in (Intent.INTEREST, Intent.OBJECTION):
+                key = step.lead_id or str(step.id)
+                if key not in relevant_steps:
+                    relevant_steps[key] = step
+
+        if not relevant_steps:
+            raise ValueError(
+                "Nenhum lead com intent INTEREST ou OBJECTION encontrado. "
+                "Simule replies antes de enviar ao Pipedrive."
+            )
+
+        results: list[dict] = []
+
+        for step in relevant_steps.values():
+            lead_info = await self._get_lead_info(step, db)
+            lead_name = lead_info["name"]
+            email = lead_info.get("email")
+            company = lead_info.get("company")
+
+            try:
+                # 1) Find or create organization
+                org_id: int | None = None
+                if company:
+                    org_id = await client.find_or_create_organization(name=company)
+
+                # 2) Find or create person (vinculado à org)
+                person_id = await client.find_or_create_person(
+                    name=lead_name,
+                    email=email,
+                    linkedin_url=lead_info.get("linkedin_url"),
+                    org_id=org_id,
+                )
+
+                # 3) Create deal (somente se person foi criado)
+                intent_label = step.simulated_intent.value if step.simulated_intent else "unknown"
+                deal_id: int | None = None
+                if person_id:
+                    stage_id = (
+                        stage_interest
+                        if step.simulated_intent == Intent.INTEREST
+                        else stage_objection
+                    )
+                    deal_title = f"[SANDBOX] Prospector - {company or 'N/A'}"
+
+                    deal_id = await client.create_deal(
+                        title=deal_title,
+                        person_id=person_id,
+                        stage_id=stage_id,
+                        owner_id=owner_id,
+                        org_id=org_id,
+                    )
+
+                # 3) Add note
+                note_added = False
+                if deal_id:
+                    note_content = (
+                        f"<b>Sandbox Test — Prospector</b><br>"
+                        f"Lead: {lead_name}<br>"
+                        f"Empresa: {lead_info.get('company', 'N/A')}<br>"
+                        f"Intent: {intent_label}<br>"
+                        f"Confiança: {step.simulated_confidence or 0:.0%}<br>"
+                        f"Resumo: {step.simulated_reply_summary or 'N/A'}<br><br>"
+                        f"<b>Mensagem enviada:</b><br>"
+                        f"{(step.message_content or 'N/A')[:500]}<br><br>"
+                        f"<b>Resposta simulada:</b><br>"
+                        f"{(step.simulated_reply or 'N/A')[:500]}"
+                    )
+                    note_added = await client.add_note(deal_id, note_content)
+
+                results.append({
+                    "lead_name": lead_name,
+                    "person_id": person_id,
+                    "deal_id": deal_id,
+                    "note_added": note_added,
+                    "error": None,
+                })
+
+                logger.info(
+                    "sandbox.pipedrive_pushed",
+                    lead_name=lead_name,
+                    person_id=person_id,
+                    deal_id=deal_id,
+                )
+
+            except Exception as exc:
+                logger.error(
+                    "sandbox.pipedrive_push_error",
+                    lead_name=lead_name,
+                    error=str(exc),
+                )
+                results.append({
+                    "lead_name": lead_name,
+                    "person_id": None,
+                    "deal_id": None,
+                    "note_added": False,
+                    "error": str(exc),
+                })
+
+        return results
+
     # ── Helpers privados ──────────────────────────────────────────────
 
     async def _get_run(
@@ -796,7 +927,11 @@ class SandboxService:
         query = select(Lead).where(Lead.tenant_id == tenant_id)
 
         if cadence.lead_list_id:
-            query = query.where(Lead.lead_list_id == cadence.lead_list_id)
+            query = query.join(
+                lead_list_members,
+                (lead_list_members.c.lead_id == Lead.id)
+                & (lead_list_members.c.lead_list_id == cadence.lead_list_id),
+            )
 
         query = query.order_by(func.random()).limit(count)
         result = await db.execute(query)
@@ -851,16 +986,20 @@ class SandboxService:
         composer: AIComposer,
         context_fetcher: ContextFetcher,
         registry: LLMRegistry,
+        db: AsyncSession,
         total_steps: int = 1,
         previous_channel: str | None = None,
     ) -> tuple[str, dict]:
         """Compõe mensagem para um step usando o mesmo pipeline do dispatch."""
 
         if step.lead_id:
-            # Lead real — busca contexto
-            from sqlalchemy.ext.asyncio import AsyncSession
+            # Lead real — busca via query async (não usar step.lead por lazy loading)
+            from sqlalchemy import select as sa_select
 
-            lead = step.lead  # loaded via relationship
+            result = await db.execute(
+                sa_select(Lead).where(Lead.id == step.lead_id)
+            )
+            lead = result.scalar_one_or_none()
             if not lead:
                 raise ValueError(f"Lead {step.lead_id} não encontrado.")
 
@@ -891,6 +1030,7 @@ class SandboxService:
                 company_size=lead.company_size,
                 location=lead.location or lead.city,
                 cadence=cadence,
+                step_type=step.step_type,
             )
         else:
             # Lead fictício
@@ -913,6 +1053,7 @@ class SandboxService:
                 company_size=fdata.get("company_size"),
                 location=fdata.get("city"),
                 cadence=cadence,
+                step_type=step.step_type,
             )
 
         from services.ai_composer import COMPOSER_SYSTEM_PROMPT
@@ -1109,10 +1250,13 @@ def _build_sandbox_user_prompt(
     company_size: str | None = None,
     location: str | None = None,
     cadence: Cadence | None = None,
+    step_type: str | None = None,
 ) -> str:
     site_summary = context.get("site_summary", "Não disponível")
 
-    step_key = resolve_step_key(channel, step_number, total_steps, use_voice, previous_channel)
+    step_key = resolve_step_key(
+        channel, step_number, total_steps, use_voice, previous_channel, step_type=step_type,
+    )
     step_instruction = STEP_INSTRUCTIONS.get(step_key, "")
 
     # Dados ricos do lead

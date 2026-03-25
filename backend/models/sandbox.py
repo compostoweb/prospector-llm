@@ -132,6 +132,9 @@ class SandboxStep(Base, TenantMixin, TimestampMixin):
     day_offset: Mapped[int] = mapped_column(Integer, nullable=False)
     use_voice: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # ── Tipo de instrução (override manual do template) ───────────────
+    step_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
     # ── Preview de timeline ───────────────────────────────────────────
     scheduled_at_preview: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

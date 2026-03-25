@@ -33,6 +33,7 @@ from integrations.llm.registry import LLMRegistry
 from models.sandbox import SandboxRun
 from schemas.sandbox import (
     PipedriveDryRunResponse,
+    PipedrivePushResponse,
     SandboxApproveResponse,
     SandboxCreateRequest,
     SandboxRegenerateRequest,
@@ -326,6 +327,28 @@ async def pipedrive_dry_run(
         return PipedriveDryRunResponse(
             sandbox_run_id=run_id,
             leads=results,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post("/sandbox/{run_id}/pipedrive-push", response_model=PipedrivePushResponse)
+async def pipedrive_push(
+    run_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> PipedrivePushResponse:
+    """Envia leads do sandbox para o Pipedrive de verdade (person + deal + nota)."""
+    try:
+        results = await sandbox_service.push_to_pipedrive(run_id, tenant_id, db)
+        await db.commit()
+        pushed = sum(1 for r in results if r.get("deal_id"))
+        errors = sum(1 for r in results if r.get("error"))
+        return PipedrivePushResponse(
+            sandbox_run_id=run_id,
+            pushed=pushed,
+            errors=errors,
+            results=results,
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

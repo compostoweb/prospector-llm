@@ -69,6 +69,20 @@ class InteractionDirection(str, Enum):
     INBOUND = "inbound"
 
 
+class StepType(str, Enum):
+    """Tipo de instrução para geração de conteúdo do step."""
+    LINKEDIN_CONNECT = "linkedin_connect"
+    LINKEDIN_DM_FIRST = "linkedin_dm_first"
+    LINKEDIN_DM_POST_CONNECT = "linkedin_dm_post_connect"
+    LINKEDIN_DM_POST_CONNECT_VOICE = "linkedin_dm_post_connect_voice"
+    LINKEDIN_DM_VOICE = "linkedin_dm_voice"
+    LINKEDIN_DM_FOLLOWUP = "linkedin_dm_followup"
+    LINKEDIN_DM_BREAKUP = "linkedin_dm_breakup"
+    EMAIL_FIRST = "email_first"
+    EMAIL_FOLLOWUP = "email_followup"
+    EMAIL_BREAKUP = "email_breakup"
+
+
 class SandboxRunStatus(str, Enum):
     """Status de um sandbox run de cadência."""
     RUNNING = "running"

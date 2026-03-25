@@ -101,6 +101,7 @@ class SandboxStepResponse(BaseModel):
     channel: Channel
     day_offset: int
     use_voice: bool
+    step_type: str | None = None
     scheduled_at_preview: datetime
     message_content: str | None
     audio_preview_url: str | None
@@ -207,3 +208,22 @@ class PipedriveDryRunResponse(BaseModel):
 
     sandbox_run_id: uuid.UUID
     leads: list[PipedriveLeadPreview]
+
+
+class PipedrivePushLeadResult(BaseModel):
+    """Resultado do push real de um lead no Pipedrive."""
+
+    lead_name: str
+    person_id: int | None = None
+    deal_id: int | None = None
+    note_added: bool = False
+    error: str | None = None
+
+
+class PipedrivePushResponse(BaseModel):
+    """Resultado do push real ao Pipedrive."""
+
+    sandbox_run_id: uuid.UUID
+    pushed: int = 0
+    errors: int = 0
+    results: list[PipedrivePushLeadResult] = []

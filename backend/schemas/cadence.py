@@ -12,7 +12,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from models.enums import Channel
+from models.enums import Channel, StepType
 
 # Combinações válidas: provider → lista de prefixos de model aceitos
 # Serve para validação básica — a lista completa vem da API dos providers
@@ -77,6 +77,13 @@ class StepTemplateItem(BaseModel):
         default=None,
         description="ID do áudio pré-gravado (S3). Se preenchido, usa esse áudio ao invés de TTS.",
     )
+    step_type: StepType | None = Field(
+        default=None,
+        description=(
+            "Tipo de instrução para geração de conteúdo. "
+            "NULL = inferência automática baseada no canal, posição e contexto."
+        ),
+    )
 
     @model_validator(mode="after")
     def voice_only_for_dm(self) -> "StepTemplateItem":
@@ -85,6 +92,37 @@ class StepTemplateItem(BaseModel):
         if self.audio_file_id and not self.use_voice:
             # Se tem audio_file_id, force use_voice=True
             self.use_voice = True
+        return self
+
+    @model_validator(mode="after")
+    def step_type_matches_channel(self) -> "StepTemplateItem":
+        """Valida que o step_type é compatível com o canal selecionado."""
+        if self.step_type is None:
+            return self
+
+        valid_by_channel: dict[Channel, set[StepType]] = {
+            Channel.LINKEDIN_CONNECT: {StepType.LINKEDIN_CONNECT},
+            Channel.LINKEDIN_DM: {
+                StepType.LINKEDIN_DM_FIRST,
+                StepType.LINKEDIN_DM_POST_CONNECT,
+                StepType.LINKEDIN_DM_POST_CONNECT_VOICE,
+                StepType.LINKEDIN_DM_VOICE,
+                StepType.LINKEDIN_DM_FOLLOWUP,
+                StepType.LINKEDIN_DM_BREAKUP,
+            },
+            Channel.EMAIL: {
+                StepType.EMAIL_FIRST,
+                StepType.EMAIL_FOLLOWUP,
+                StepType.EMAIL_BREAKUP,
+            },
+        }
+        allowed = valid_by_channel.get(self.channel, set())
+        if self.step_type not in allowed:
+            allowed_names = sorted(s.value for s in allowed) if allowed else ["nenhum"]
+            raise ValueError(
+                f"step_type '{self.step_type.value}' não é compatível com canal '{self.channel.value}'. "
+                f"Opções válidas: {allowed_names}"
+            )
         return self
 
 

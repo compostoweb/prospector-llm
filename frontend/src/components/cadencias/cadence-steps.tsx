@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react"
 import { Plus, Trash2, GripVertical, Volume2, Music, Play, Loader2 } from "lucide-react"
-import type { CadenceStep } from "@/lib/api/hooks/use-cadences"
+import type { CadenceStep, StepType } from "@/lib/api/hooks/use-cadences"
 import { useAudioFiles } from "@/lib/api/hooks/use-audio-files"
 import { useTestTTS } from "@/lib/api/hooks/use-tts"
 import type { LeadListLeadItem } from "@/lib/api/hooks/use-lead-lists"
@@ -13,6 +13,24 @@ const CHANNEL_OPTIONS = [
   { value: "email", label: "E-mail" },
   { value: "manual_task", label: "Tarefa Manual" },
 ] as const
+
+/** Tipos de step disponíveis por canal */
+const STEP_TYPE_OPTIONS: Record<string, { value: StepType; label: string }[]> = {
+  linkedin_connect: [{ value: "linkedin_connect", label: "Convite de Conexão" }],
+  linkedin_dm: [
+    { value: "linkedin_dm_first", label: "Primeira abordagem" },
+    { value: "linkedin_dm_post_connect", label: "Pós-conexão (agradecimento)" },
+    { value: "linkedin_dm_post_connect_voice", label: "Pós-conexão com áudio" },
+    { value: "linkedin_dm_voice", label: "DM com áudio" },
+    { value: "linkedin_dm_followup", label: "Follow-up" },
+    { value: "linkedin_dm_breakup", label: "Despedida / Breakup" },
+  ],
+  email: [
+    { value: "email_first", label: "Primeiro e-mail (cold mail)" },
+    { value: "email_followup", label: "Follow-up" },
+    { value: "email_breakup", label: "Despedida / Breakup" },
+  ],
+}
 
 const TEMPLATE_VARIABLES = [
   { token: "{lead_name}", label: "Nome" },
@@ -93,6 +111,7 @@ export function CadenceSteps({
       message_template: "",
       use_voice: false,
       audio_file_id: null,
+      step_type: null,
     }
     onChange([...value, newStep])
   }
@@ -106,10 +125,13 @@ export function CadenceSteps({
     const updated = value.map((s, i) => {
       if (i !== index) return s
       const next = { ...s, [field]: val }
-      // Limpa use_voice e audio_file_id se canal mudou para algo != linkedin_dm
-      if (field === "channel" && val !== "linkedin_dm") {
-        next.use_voice = false
-        next.audio_file_id = null
+      // Limpa use_voice, audio_file_id e step_type se canal mudou
+      if (field === "channel") {
+        if (val !== "linkedin_dm") {
+          next.use_voice = false
+          next.audio_file_id = null
+        }
+        next.step_type = null // reset ao trocar canal
       }
       // Limpa audio_file_id se desmarcou use_voice
       if (field === "use_voice" && val === false) {
@@ -228,6 +250,31 @@ export function CadenceSteps({
               />
             </div>
           </div>
+
+          {/* Tipo do passo — filtrado pelo canal */}
+          {STEP_TYPE_OPTIONS[step.channel] && STEP_TYPE_OPTIONS[step.channel].length > 1 && (
+            <div className="mt-3">
+              <label className="mb-1 block text-xs font-medium text-(--text-secondary)">
+                Tipo do passo
+              </label>
+              <select
+                value={step.step_type ?? ""}
+                onChange={(e) => updateStep(index, "step_type", e.target.value || null)}
+                aria-label={`Tipo do passo ${index + 1}`}
+                className="w-full rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-sm text-(--text-primary) focus:border-(--accent) focus:outline-none"
+              >
+                <option value="">Automático (inferir pela posição)</option>
+                {STEP_TYPE_OPTIONS[step.channel].map(({ value: v, label }) => (
+                  <option key={v} value={v}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[11px] text-(--text-tertiary)">
+                Define qual instrução a IA vai usar para gerar o conteúdo deste passo
+              </p>
+            </div>
+          )}
 
           {/* Template da mensagem */}
           <div className="mt-3">

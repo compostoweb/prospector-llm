@@ -26,6 +26,7 @@ export interface SandboxStep {
   channel: "linkedin_connect" | "linkedin_dm" | "email" | "manual_task"
   day_offset: number
   use_voice: boolean
+  step_type: string | null
   scheduled_at_preview: string
   message_content: string | null
   audio_preview_url: string | null
@@ -106,6 +107,21 @@ export interface PipedriveLeadPreview {
 export interface PipedriveDryRunResult {
   sandbox_run_id: string
   leads: PipedriveLeadPreview[]
+}
+
+export interface PipedrivePushLeadResult {
+  lead_name: string
+  person_id: number | null
+  deal_id: number | null
+  note_added: boolean
+  error: string | null
+}
+
+export interface PipedrivePushResult {
+  sandbox_run_id: string
+  pushed: number
+  errors: number
+  results: PipedrivePushLeadResult[]
 }
 
 // ── Queries ───────────────────────────────────────────────────────────
@@ -340,6 +356,25 @@ export function usePipedriveDryRun() {
       const { data, error } = await client.POST(`/sandbox/${runId}/pipedrive-dry-run` as never)
       if (error) throw new Error("Falha no dry-run Pipedrive")
       return data as PipedriveDryRunResult
+    },
+    onSuccess: (result) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sandbox-run", result.sandbox_run_id],
+      })
+    },
+  })
+}
+
+export function usePipedrivePush() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (runId: string): Promise<PipedrivePushResult> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.POST(`/sandbox/${runId}/pipedrive-push` as never)
+      if (error) throw new Error("Falha ao enviar para Pipedrive")
+      return data as PipedrivePushResult
     },
     onSuccess: (result) => {
       void queryClient.invalidateQueries({

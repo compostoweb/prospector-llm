@@ -46,6 +46,19 @@ const CHANNEL_ICON: Record<string, typeof Mail> = {
   email: Mail,
 }
 
+const STEP_TYPE_LABELS: Record<string, string> = {
+  linkedin_connect: "Convite de Conexão",
+  linkedin_dm_first: "Primeira abordagem",
+  linkedin_dm_post_connect: "Pós-conexão",
+  linkedin_dm_post_connect_voice: "Pós-conexão com áudio",
+  linkedin_dm_voice: "DM com áudio",
+  linkedin_dm_followup: "Follow-up",
+  linkedin_dm_breakup: "Despedida",
+  email_first: "Primeiro e-mail",
+  email_followup: "Follow-up",
+  email_breakup: "Despedida",
+}
+
 export function SandboxStepCard({ step }: SandboxStepCardProps) {
   const regenerate = useRegenerateStep()
   const approve = useApproveStep()
@@ -84,6 +97,14 @@ export function SandboxStepCard({ step }: SandboxStepCardProps) {
           </span>
           <span className="text-xs text-(--text-disabled)">·</span>
           <span className="text-xs text-(--text-secondary)">{channelLabel(step.channel)}</span>
+          {step.step_type && STEP_TYPE_LABELS[step.step_type] && (
+            <>
+              <span className="text-xs text-(--text-disabled)">·</span>
+              <Badge variant="info" className="text-[10px] px-1.5 py-0">
+                {STEP_TYPE_LABELS[step.step_type]}
+              </Badge>
+            </>
+          )}
           {step.use_voice && (
             <>
               <span className="text-xs text-(--text-disabled)">·</span>
