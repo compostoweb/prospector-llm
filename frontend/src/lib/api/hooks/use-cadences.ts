@@ -29,6 +29,10 @@ export interface Cadence {
   tts_speed: number
   tts_pitch: number
   lead_list_id: string | null
+  target_segment: string | null
+  persona_description: string | null
+  offer_description: string | null
+  tone_instructions: string | null
   steps_template: CadenceStep[] | null
   created_at: string
   updated_at: string
@@ -48,6 +52,10 @@ export interface CreateCadenceBody {
   tts_speed?: number
   tts_pitch?: number
   lead_list_id?: string | null
+  target_segment?: string | null
+  persona_description?: string | null
+  offer_description?: string | null
+  tone_instructions?: string | null
   steps_template: CadenceStep[]
 }
 

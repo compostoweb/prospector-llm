@@ -14,7 +14,7 @@ cadência de alto valor usa gpt-4o ou gemini-2.5-pro.
 
 import uuid
 
-from sqlalchemy import Boolean, Float, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -63,6 +63,34 @@ class Cadence(Base, TenantMixin, TimestampMixin):
         default=DEFAULT_MAX_TOKENS,
         server_default=str(DEFAULT_MAX_TOKENS),
         comment="Máximo de tokens de saída por geração",
+    )
+
+    # -------------------------------------------------------
+    # Contexto de prospecção (alimenta os prompts da IA)
+    # -------------------------------------------------------
+    target_segment: Mapped[str | None] = mapped_column(
+        String(300),
+        nullable=True,
+        default=None,
+        comment="Segmento-alvo ex: 'SaaS B2B', 'indústria farmacêutica', 'varejo premium'.",
+    )
+    persona_description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        default=None,
+        comment="Descrição da persona ideal: cargo, dores, prioridades.",
+    )
+    offer_description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        default=None,
+        comment="O que a empresa oferece — proposta de valor resumida para a IA.",
+    )
+    tone_instructions: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        default=None,
+        comment="Instruções extras de tom/voz que o usuário queira injetar no prompt.",
     )
 
     # -------------------------------------------------------

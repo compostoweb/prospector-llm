@@ -40,7 +40,7 @@ from models.enums import (
 )
 from models.lead import Lead
 from models.sandbox import SandboxRun, SandboxStep
-from services.ai_composer import AIComposer
+from services.ai_composer import AIComposer, resolve_step_key, STEP_INSTRUCTIONS
 from services.cadence_manager import cadence_manager, _resolve_template
 from services.reply_parser import ReplyParser
 
@@ -269,16 +269,32 @@ class SandboxService:
         composer = AIComposer(registry)
         context_fetcher = ContextFetcher()
 
-        for step in run.steps:
+        # Calcula total de steps por lead para instruções contextuais
+        template = _resolve_template(cadence)
+        total_steps = len(template)
+
+        # Mapa de canal anterior por step_number (do template)
+        prev_channel_map: dict[int, str | None] = {}
+        for idx, (ch, _day, _voice, _audio) in enumerate(template):
+            prev_channel_map[idx + 1] = template[idx - 1][0].value if idx > 0 else None
+
+        # Ordena steps por lead + step_number para processamento sequencial
+        sorted_steps = sorted(run.steps, key=lambda s: (str(s.lead_id or ""), s.step_number))
+
+        for step in sorted_steps:
             if step.status != SandboxStepStatus.PENDING:
                 continue
 
             step.status = SandboxStepStatus.GENERATING
             await db.flush()
 
+            previous_channel = prev_channel_map.get(step.step_number)
+
             try:
                 content, llm_info = await self._compose_step(
-                    step, cadence, composer, context_fetcher, registry
+                    step, cadence, composer, context_fetcher, registry,
+                    total_steps=total_steps,
+                    previous_channel=previous_channel,
                 )
                 step.message_content = content
                 step.llm_provider = llm_info.get("provider")
@@ -291,6 +307,20 @@ class SandboxService:
                     step.email_subject = await self._generate_email_subject(
                         step, cadence, registry
                     )
+
+                # Gera áudio TTS para steps com use_voice
+                if step.use_voice and step.message_content:
+                    try:
+                        audio_url = await self._generate_tts_preview(
+                            cadence, step.message_content
+                        )
+                        step.audio_preview_url = audio_url
+                    except Exception as tts_exc:
+                        logger.warning(
+                            "sandbox.tts_preview_error",
+                            step_id=str(step.id),
+                            error=str(tts_exc),
+                        )
 
                 step.status = SandboxStepStatus.GENERATED
             except Exception as exc:
@@ -339,12 +369,23 @@ class SandboxService:
         composer = AIComposer(registry)
         context_fetcher = ContextFetcher()
 
+        template = _resolve_template(cadence)
+        total_steps = len(template)
+
+        # Calcula previous_channel a partir do template
+        prev_channel: str | None = None
+        if step.step_number > 1 and len(template) >= step.step_number:
+            prev_ch_enum = template[step.step_number - 2][0]
+            prev_channel = prev_ch_enum.value if prev_ch_enum else None
+
         step.status = SandboxStepStatus.GENERATING
         await db.flush()
 
         try:
             content, llm_info = await self._compose_step(
-                step, cadence, composer, context_fetcher, registry
+                step, cadence, composer, context_fetcher, registry,
+                total_steps=total_steps,
+                previous_channel=prev_channel,
             )
             step.message_content = content
             step.llm_provider = llm_info.get("provider")
@@ -356,6 +397,20 @@ class SandboxService:
                 step.email_subject = await self._generate_email_subject(
                     step, cadence, registry
                 )
+
+            # Gera áudio TTS para steps com use_voice
+            if step.use_voice and step.message_content:
+                try:
+                    audio_url = await self._generate_tts_preview(
+                        cadence, step.message_content
+                    )
+                    step.audio_preview_url = audio_url
+                except Exception as tts_exc:
+                    logger.warning(
+                        "sandbox.tts_regen_error",
+                        step_id=str(step.id),
+                        error=str(tts_exc),
+                    )
 
             step.status = SandboxStepStatus.GENERATED
         finally:
@@ -796,6 +851,8 @@ class SandboxService:
         composer: AIComposer,
         context_fetcher: ContextFetcher,
         registry: LLMRegistry,
+        total_steps: int = 1,
+        previous_channel: str | None = None,
     ) -> tuple[str, dict]:
         """Compõe mensagem para um step usando o mesmo pipeline do dispatch."""
 
@@ -826,6 +883,14 @@ class SandboxService:
                 channel=step.channel.value,
                 step_number=step.step_number,
                 context=context,
+                total_steps=total_steps,
+                use_voice=step.use_voice,
+                previous_channel=previous_channel,
+                job_title=lead.job_title,
+                industry=lead.industry,
+                company_size=lead.company_size,
+                location=lead.location or lead.city,
+                cadence=cadence,
             )
         else:
             # Lead fictício
@@ -840,6 +905,14 @@ class SandboxService:
                 channel=step.channel.value,
                 step_number=step.step_number,
                 context=context,
+                total_steps=total_steps,
+                use_voice=step.use_voice,
+                previous_channel=previous_channel,
+                job_title=fdata.get("job_title"),
+                industry=fdata.get("industry"),
+                company_size=fdata.get("company_size"),
+                location=fdata.get("city"),
+                cadence=cadence,
             )
 
         from services.ai_composer import COMPOSER_SYSTEM_PROMPT
@@ -867,6 +940,42 @@ class SandboxService:
         }
 
         return response.text.strip(), llm_info
+
+    async def _generate_tts_preview(
+        self,
+        cadence: Cadence,
+        text: str,
+    ) -> str:
+        """Gera áudio TTS preview, armazena no Redis e retorna URL."""
+        from integrations.tts import TTSRegistry
+
+        tts_registry = TTSRegistry(settings=settings, redis=redis_client)
+        tts_provider = cadence.tts_provider or settings.VOICE_PROVIDER
+        tts_voice_id = cadence.tts_voice_id or settings.SPEECHIFY_VOICE_ID
+        tts_speed = getattr(cadence, "tts_speed", 1.0) or 1.0
+        tts_pitch = getattr(cadence, "tts_pitch", 0.0) or 0.0
+
+        # Fallback: se o provider configurado não estiver disponível, usa edge
+        available = list(tts_registry._providers.keys())
+        if tts_provider not in available and "edge" in available:
+            logger.info(
+                "sandbox.tts_fallback",
+                requested=tts_provider,
+                fallback="edge",
+            )
+            tts_provider = "edge"
+            tts_voice_id = settings.EDGE_TTS_DEFAULT_VOICE
+
+        audio_bytes = await tts_registry.synthesize(
+            provider=tts_provider,
+            voice_id=tts_voice_id,
+            text=text,
+            speed=tts_speed,
+            pitch=tts_pitch,
+        )
+        audio_key = str(uuid.uuid4())
+        await redis_client.set_bytes(f"audio:{audio_key}", audio_bytes, ttl=3600)
+        return f"{settings.API_PUBLIC_URL}/audio/{audio_key}"
 
     async def _generate_email_subject(
         self,
@@ -992,21 +1101,62 @@ def _build_sandbox_user_prompt(
     channel: str,
     step_number: int,
     context: dict,
+    total_steps: int = 1,
+    use_voice: bool = False,
+    previous_channel: str | None = None,
+    job_title: str | None = None,
+    industry: str | None = None,
+    company_size: str | None = None,
+    location: str | None = None,
+    cadence: Cadence | None = None,
 ) -> str:
     site_summary = context.get("site_summary", "Não disponível")
 
+    step_key = resolve_step_key(channel, step_number, total_steps, use_voice, previous_channel)
+    step_instruction = STEP_INSTRUCTIONS.get(step_key, "")
+
+    # Dados ricos do lead
+    lead_lines = [
+        f"Nome: {name}",
+        f"Cargo: {job_title or 'Não informado'}",
+        f"Empresa: {company or 'Não informado'}",
+        f"Setor/indústria: {industry or 'Não informado'}",
+        f"Porte da empresa: {company_size or 'Não informado'}",
+        f"Segmento: {segment or 'Não informado'}",
+        f"Localização: {location or 'Não informado'}",
+    ]
+    if linkedin_url:
+        lead_lines.append(f"LinkedIn: {linkedin_url}")
+
+    # Contexto da cadência (segmento-alvo, persona, oferta)
+    cadence_context_lines: list[str] = []
+    if cadence:
+        if cadence.target_segment:
+            cadence_context_lines.append(f"Segmento-alvo desta campanha: {cadence.target_segment}")
+        if cadence.persona_description:
+            cadence_context_lines.append(f"Persona ideal: {cadence.persona_description}")
+        if cadence.offer_description:
+            cadence_context_lines.append(f"O que oferecemos (use com sutileza, SÓ em steps avançados): {cadence.offer_description}")
+        if cadence.tone_instructions:
+            cadence_context_lines.append(f"Instruções extras de tom: {cadence.tone_instructions}")
+
+    cadence_block = "\n".join(cadence_context_lines) if cadence_context_lines else "Não configurado"
+
     return f"""
-Escreva uma mensagem de outreach para:
+{step_instruction}
 
-Canal: {channel}
-Step: {step_number} (1 = primeiro contato, 2+ = follow-up)
-Nome do lead: {name}
-Empresa: {company or "Não informado"}
-Cargo/segmento: {segment or "Não informado"}
-LinkedIn: {linkedin_url or "Não disponível"}
+---
 
-Contexto sobre a empresa:
+DADOS DO LEAD:
+{chr(10).join(lead_lines)}
+
+CONTEXTO DA CAMPANHA:
+{cadence_block}
+
+PESQUISA SOBRE A EMPRESA:
 {site_summary}
+
+POSIÇÃO NA CADÊNCIA: Step {step_number} de {total_steps}.
 
 Escreva a mensagem agora:
 """.strip()

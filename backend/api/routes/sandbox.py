@@ -333,7 +333,7 @@ async def pipedrive_dry_run(
 
 # ── Deletar sandbox run ─────────────────────────────────────────────
 
-@router.delete("/sandbox/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/sandbox/{run_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_sandbox_run(
     run_id: uuid.UUID,
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),

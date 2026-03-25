@@ -49,6 +49,10 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
     tts_speed: cadence?.tts_speed ?? 1.0,
     tts_pitch: cadence?.tts_pitch ?? 0.0,
   })
+  const [targetSegment, setTargetSegment] = useState(cadence?.target_segment ?? "")
+  const [personaDescription, setPersonaDescription] = useState(cadence?.persona_description ?? "")
+  const [offerDescription, setOfferDescription] = useState(cadence?.offer_description ?? "")
+  const [toneInstructions, setToneInstructions] = useState(cadence?.tone_instructions ?? "")
   const [error, setError] = useState<string | null>(null)
 
   const isLoading = createCadence.isPending || updateCadence.isPending
@@ -81,6 +85,10 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
       tts_speed: ttsConfig.tts_speed,
       tts_pitch: ttsConfig.tts_pitch,
       lead_list_id: leadListId || null,
+      target_segment: targetSegment.trim() || null,
+      persona_description: personaDescription.trim() || null,
+      offer_description: offerDescription.trim() || null,
+      tone_instructions: toneInstructions.trim() || null,
       steps_template: steps,
     }
 
@@ -135,6 +143,61 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
               placeholder="Descreva o público-alvo e objetivo desta cadência…"
             />
           </div>
+
+          {/* Contexto de prospecção (alimenta a IA) */}
+          <details className="group rounded-md border border-(--border) p-4">
+            <summary className="cursor-pointer text-sm font-semibold text-(--text-primary) select-none">
+              Contexto de prospecção
+              <span className="ml-2 text-xs font-normal text-(--text-tertiary)">
+                — alimenta a IA com informações do seu negócio
+              </span>
+            </summary>
+            <div className="mt-4 space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="target-segment">Segmento-alvo</Label>
+                <Input
+                  id="target-segment"
+                  value={targetSegment}
+                  onChange={(e) => setTargetSegment(e.target.value)}
+                  placeholder="Ex: SaaS B2B, indústria farmacêutica, varejo premium"
+                  maxLength={300}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="persona-desc">Persona ideal</Label>
+                <Textarea
+                  id="persona-desc"
+                  value={personaDescription}
+                  onChange={(e) => setPersonaDescription(e.target.value)}
+                  rows={2}
+                  placeholder="Ex: CTOs e VPs de Tecnologia de empresas com 200+ funcionários, focados em transformação digital"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="offer-desc">Proposta de valor</Label>
+                <Textarea
+                  id="offer-desc"
+                  value={offerDescription}
+                  onChange={(e) => setOfferDescription(e.target.value)}
+                  rows={2}
+                  placeholder="Ex: Consultoria em automação de processos com IA para reduzir custos operacionais"
+                />
+                <p className="text-xs text-(--text-tertiary)">
+                  A IA mencionará isso sutilmente apenas nos steps avançados.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="tone-instructions">Instruções de tom (opcional)</Label>
+                <Textarea
+                  id="tone-instructions"
+                  value={toneInstructions}
+                  onChange={(e) => setToneInstructions(e.target.value)}
+                  rows={2}
+                  placeholder="Ex: Use tom executivo mas descontraído. Evite jargões técnicos."
+                />
+              </div>
+            </div>
+          </details>
 
           {/* Lista de leads */}
           <div className="space-y-1.5">

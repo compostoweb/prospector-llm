@@ -7,6 +7,9 @@ Inclui validação do par provider+model e valores de LLM.
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from models.enums import Channel
@@ -119,6 +122,25 @@ class CadenceCreateRequest(BaseModel):
         description="ID da lista de leads a usar nesta cadência. NULL = nenhuma.",
     )
 
+    # Contexto de prospecção (alimenta prompts da IA)
+    target_segment: str | None = Field(
+        default=None,
+        max_length=300,
+        description="Segmento-alvo: 'SaaS B2B', 'indústria farmacêutica', 'varejo premium'.",
+    )
+    persona_description: str | None = Field(
+        default=None,
+        description="Persona ideal: cargo típico, dores, prioridades do decisor.",
+    )
+    offer_description: str | None = Field(
+        default=None,
+        description="Proposta de valor resumida — o que sua empresa oferece.",
+    )
+    tone_instructions: str | None = Field(
+        default=None,
+        description="Instruções extras de tom/voz para a IA.",
+    )
+
     # Template de steps customizado — se não informado, usa template padrão
     steps_template: list[StepTemplateItem] | None = Field(
         default=None,
@@ -144,6 +166,10 @@ class CadenceUpdateRequest(BaseModel):
     tts_speed: float | None = Field(default=None, ge=0.5, le=2.0)
     tts_pitch: float | None = Field(default=None, ge=-50.0, le=50.0)
     lead_list_id: str | None = None
+    target_segment: str | None = None
+    persona_description: str | None = None
+    offer_description: str | None = None
+    tone_instructions: str | None = None
     steps_template: list[StepTemplateItem] | None = None
 
 
@@ -152,8 +178,8 @@ class CadenceResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
-    id: str
-    tenant_id: str
+    id: uuid.UUID
+    tenant_id: uuid.UUID
     name: str
     description: str | None
     is_active: bool
@@ -166,7 +192,11 @@ class CadenceResponse(BaseModel):
     tts_voice_id: str | None = None
     tts_speed: float = 1.0
     tts_pitch: float = 0.0
-    lead_list_id: str | None = None
+    lead_list_id: uuid.UUID | None = None
+    target_segment: str | None = None
+    persona_description: str | None = None
+    offer_description: str | None = None
+    tone_instructions: str | None = None
     steps_template: list[dict] | None = None
-    created_at: str | None = None
-    updated_at: str | None = None
+    created_at: datetime
+    updated_at: datetime

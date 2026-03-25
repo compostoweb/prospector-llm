@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class LeadListCreateRequest(BaseModel):
@@ -59,6 +59,11 @@ class LeadListDetailResponse(BaseModel):
     leads: list[LeadListLeadItem] = []
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("leads", mode="before")
+    @classmethod
+    def coerce_none_leads(cls, v: list | None) -> list:
+        return v if v is not None else []
 
 
 class LeadListMembersRequest(BaseModel):

@@ -61,13 +61,13 @@ class SandboxRun(Base, TenantMixin, TimestampMixin):
     )
 
     status: Mapped[SandboxRunStatus] = mapped_column(
-        SAEnum(SandboxRunStatus, name="sandbox_run_status"),
+        SAEnum(SandboxRunStatus, name="sandbox_run_status", values_callable=lambda e: [m.value for m in e]),
         default=SandboxRunStatus.RUNNING,
         nullable=False,
     )
 
     lead_source: Mapped[SandboxLeadSource] = mapped_column(
-        SAEnum(SandboxLeadSource, name="sandbox_lead_source"),
+        SAEnum(SandboxLeadSource, name="sandbox_lead_source", values_callable=lambda e: [m.value for m in e]),
         nullable=False,
     )
 
@@ -145,7 +145,7 @@ class SandboxStep(Base, TenantMixin, TimestampMixin):
 
     # ── Status do step ────────────────────────────────────────────────
     status: Mapped[SandboxStepStatus] = mapped_column(
-        SAEnum(SandboxStepStatus, name="sandbox_step_status"),
+        SAEnum(SandboxStepStatus, name="sandbox_step_status", values_callable=lambda e: [m.value for m in e]),
         default=SandboxStepStatus.PENDING,
         nullable=False,
     )

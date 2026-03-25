@@ -67,6 +67,10 @@ async def create_cadence(
         tts_speed=body.tts_speed,
         tts_pitch=body.tts_pitch,
         lead_list_id=body.lead_list_id,
+        target_segment=body.target_segment,
+        persona_description=body.persona_description,
+        offer_description=body.offer_description,
+        tone_instructions=body.tone_instructions,
         steps_template=(
             [s.model_dump(mode="json") for s in body.steps_template]
             if body.steps_template
@@ -104,7 +108,7 @@ async def update_cadence(
 ) -> CadenceResponse:
     cadence = await _get_cadence_or_404(cadence_id, tenant_id, db)
 
-    updates = body.model_dump(exclude_unset=True, exclude={"llm", "steps_template", "tts_provider", "tts_voice_id", "lead_list_id"})
+    updates = body.model_dump(exclude_unset=True, exclude={"llm", "steps_template", "tts_provider", "tts_voice_id", "lead_list_id", "target_segment", "persona_description", "offer_description", "tone_instructions"})
     for field, value in updates.items():
         setattr(cadence, field, value)
 
@@ -117,8 +121,15 @@ async def update_cadence(
         cadence.llm_temperature = body.llm.temperature
         cadence.llm_max_tokens = body.llm.max_tokens
 
-    # TTS fields — atualiza se informado (mesmo que None para limpar)
+    # Campos que precisam de tratamento especial (set explicit, inclusive None)
     raw = body.model_dump(exclude_unset=True)
+
+    # Campos de contexto de prospecção
+    for ctx_field in ("target_segment", "persona_description", "offer_description", "tone_instructions"):
+        if ctx_field in raw:
+            setattr(cadence, ctx_field, getattr(body, ctx_field))
+
+    # TTS fields — atualiza se informado (mesmo que None para limpar)
     if "tts_provider" in raw:
         cadence.tts_provider = body.tts_provider
     if "tts_voice_id" in raw:

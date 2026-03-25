@@ -288,6 +288,13 @@ async def _generate_tts_audio(
     tts_voice_id = cadence.tts_voice_id or settings.SPEECHIFY_VOICE_ID
     tts_speed = getattr(cadence, "tts_speed", 1.0) or 1.0
     tts_pitch = getattr(cadence, "tts_pitch", 0.0) or 0.0
+
+    # Fallback: se o provider configurado não estiver disponível, usa edge
+    available = list(tts_registry._providers.keys())
+    if tts_provider not in available and "edge" in available:
+        tts_provider = "edge"
+        tts_voice_id = settings.EDGE_TTS_DEFAULT_VOICE
+
     audio_bytes = await tts_registry.synthesize(
         provider=tts_provider,
         voice_id=tts_voice_id,

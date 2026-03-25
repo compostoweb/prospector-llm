@@ -84,6 +84,15 @@ export function SandboxStepCard({ step }: SandboxStepCardProps) {
           </span>
           <span className="text-xs text-(--text-disabled)">·</span>
           <span className="text-xs text-(--text-secondary)">{channelLabel(step.channel)}</span>
+          {step.use_voice && (
+            <>
+              <span className="text-xs text-(--text-disabled)">·</span>
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600">
+                <Volume2 size={12} aria-hidden="true" />
+                Áudio
+              </span>
+            </>
+          )}
           <span className="text-xs text-(--text-disabled)">·</span>
           <span className="text-xs text-(--text-secondary)">Dia {step.day_offset}</span>
         </div>

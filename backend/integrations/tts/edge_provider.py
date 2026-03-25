@@ -98,11 +98,13 @@ class EdgeTTSProvider(TTSProvider):
         )
         return audio_bytes
 
-    async def list_voices(self) -> list[TTSVoice]:
-        """Retorna todas as vozes Edge TTS disponíveis."""
+    async def list_voices(self, language_prefix: str = "pt-BR") -> list[TTSVoice]:
+        """Retorna vozes Edge TTS filtradas por idioma (padrão: pt-BR)."""
         raw_voices = await edge_tts.list_voices()
         voices: list[TTSVoice] = []
         for v in raw_voices:
+            if language_prefix and not v["Locale"].startswith(language_prefix):
+                continue
             voices.append(
                 TTSVoice(
                     id=v["ShortName"],

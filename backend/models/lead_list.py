@@ -45,7 +45,7 @@ class LeadList(Base, TenantMixin, TimestampMixin):
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Relationship M:N
-    leads: Mapped[list] = relationship(
+    leads: Mapped[list["Lead"]] = relationship(
         "Lead",
         secondary=lead_list_members,
         lazy="selectin",

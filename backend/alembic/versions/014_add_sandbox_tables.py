@@ -66,7 +66,7 @@ def upgrade() -> None:
         sa.Column("lead_id", sa.UUID(), sa.ForeignKey("leads.id", ondelete="SET NULL"), nullable=True),
         sa.Column("fictitious_lead_data", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         # Canal e posição
-        sa.Column("channel", sa.Enum("linkedin_connect", "linkedin_dm", "email", "manual_task", name="cadence_step_channel", create_type=False), nullable=False),
+        sa.Column("channel", postgresql.ENUM("linkedin_connect", "linkedin_dm", "email", "manual_task", name="cadence_step_channel", create_type=False), nullable=False),
         sa.Column("step_number", sa.Integer(), nullable=False),
         sa.Column("day_offset", sa.Integer(), nullable=False),
         sa.Column("use_voice", sa.Boolean(), nullable=False, server_default="false"),
@@ -85,7 +85,7 @@ def upgrade() -> None:
         sa.Column("tokens_out", sa.Integer(), nullable=True),
         # Simulação de reply
         sa.Column("simulated_reply", sa.Text(), nullable=True),
-        sa.Column("simulated_intent", sa.Enum("interest", "objection", "not_interested", "neutral", "out_of_office", name="interaction_intent", create_type=False), nullable=True),
+        sa.Column("simulated_intent", postgresql.ENUM("interest", "objection", "not_interested", "neutral", "out_of_office", name="interaction_intent", create_type=False), nullable=True),
         sa.Column("simulated_confidence", sa.Float(), nullable=True),
         sa.Column("simulated_reply_summary", sa.String(500), nullable=True),
         # Rate limit simulation
@@ -102,13 +102,13 @@ def upgrade() -> None:
     op.create_index("ix_sandbox_steps_lead_id", "sandbox_steps", ["lead_id"])
 
     # -- RLS policies ---------------------------------------------------
+    op.execute("ALTER TABLE sandbox_runs ENABLE ROW LEVEL SECURITY;")
     op.execute("""
-        ALTER TABLE sandbox_runs ENABLE ROW LEVEL SECURITY;
         CREATE POLICY tenant_isolation_sandbox_runs ON sandbox_runs
             USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
     """)
+    op.execute("ALTER TABLE sandbox_steps ENABLE ROW LEVEL SECURITY;")
     op.execute("""
-        ALTER TABLE sandbox_steps ENABLE ROW LEVEL SECURITY;
         CREATE POLICY tenant_isolation_sandbox_steps ON sandbox_steps
             USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
     """)
