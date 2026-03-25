@@ -32,6 +32,7 @@ from models.cadence_step import CadenceStep  # noqa: F401
 from models.interaction import Interaction  # noqa: F401
 from models.lead import Lead  # noqa: F401
 from models.lead_list import LeadList  # noqa: F401
+from models.manual_task import ManualTask  # noqa: F401
 from models.sandbox import SandboxRun, SandboxStep  # noqa: F401
 from models.tenant import Tenant, TenantIntegration  # noqa: F401
 from models.user import User  # noqa: F401

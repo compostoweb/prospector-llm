@@ -33,6 +33,7 @@ export interface Cadence {
   name: string
   description: string | null
   is_active: boolean
+  mode: "automatic" | "semi_manual"
   llm_provider: "openai" | "gemini"
   llm_model: string
   llm_temperature: number
@@ -54,6 +55,7 @@ export interface Cadence {
 export interface CreateCadenceBody {
   name: string
   description?: string
+  mode?: "automatic" | "semi_manual"
   llm: {
     provider: "openai" | "gemini"
     model: string

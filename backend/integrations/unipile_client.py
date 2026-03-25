@@ -17,7 +17,7 @@ Documentação: https://developer.unipile.com
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 import structlog
@@ -44,6 +44,45 @@ class LinkedInProfile:
     name: str
     headline: str | None
     company: str | None
+
+
+@dataclass
+class ChatAttendee:
+    """Participante de um chat Unipile."""
+    id: str
+    name: str
+    profile_url: str | None = None
+
+
+@dataclass
+class ChatSummary:
+    """Resumo de uma conversa na listagem."""
+    chat_id: str
+    attendees: list[ChatAttendee] = field(default_factory=list)
+    last_message_text: str | None = None
+    last_message_at: str | None = None
+    unread_count: int = 0
+    account_id: str = ""
+
+
+@dataclass
+class ChatMessage:
+    """Uma mensagem dentro de um chat."""
+    id: str
+    sender_id: str
+    sender_name: str
+    text: str
+    timestamp: str
+    is_own: bool = False
+    attachments: list[dict] = field(default_factory=list)
+
+
+@dataclass
+class ChatDetail:
+    """Detalhes de uma conversa."""
+    chat_id: str
+    attendees: list[ChatAttendee] = field(default_factory=list)
+    account_id: str = ""
 
 
 class UnipileClient:
@@ -191,6 +230,141 @@ class UnipileClient:
             headline=data.get("headline"),
             company=data.get("current_company"),
         )
+
+    async def get_relation_status(
+        self,
+        account_id: str,
+        linkedin_profile_id: str,
+    ) -> str | None:
+        """
+        Verifica o status da relação com um perfil LinkedIn.
+        Retorna "CONNECTED" | "PENDING" | None.
+        """
+        params = {
+            "account_id": account_id,
+            "linkedin_profile_id": linkedin_profile_id,
+        }
+        try:
+            response = await self._client.get("/linkedin/relations", params=params)
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            data = response.json()
+            return data.get("status") or None
+        except httpx.HTTPError:
+            logger.warning(
+                "unipile.relation_status.error",
+                profile_id=linkedin_profile_id,
+            )
+            return None
+
+    # ── Chats (UniBox) ────────────────────────────────────────────────
+
+    async def list_chats(
+        self,
+        account_id: str,
+        cursor: str | None = None,
+        limit: int = 20,
+    ) -> dict:
+        """
+        Lista conversas LinkedIn.
+        Retorna dict com 'items' (list[ChatSummary]) e 'cursor' (próxima página).
+        """
+        params: dict = {"account_id": account_id, "limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+
+        response = await self._client.get("/chats", params=params)
+        response.raise_for_status()
+        data = response.json()
+
+        items: list[ChatSummary] = []
+        for chat in data.get("items", []):
+            attendees = [
+                ChatAttendee(
+                    id=att.get("id", ""),
+                    name=att.get("name", ""),
+                    profile_url=att.get("profile_url"),
+                )
+                for att in chat.get("attendees", [])
+            ]
+            items.append(
+                ChatSummary(
+                    chat_id=chat.get("id", ""),
+                    attendees=attendees,
+                    last_message_text=chat.get("last_message", {}).get("text"),
+                    last_message_at=chat.get("last_message", {}).get("timestamp"),
+                    unread_count=chat.get("unread_count", 0),
+                    account_id=account_id,
+                )
+            )
+
+        return {
+            "items": items,
+            "cursor": data.get("cursor"),
+        }
+
+    async def get_chat_messages(
+        self,
+        chat_id: str,
+        cursor: str | None = None,
+        limit: int = 30,
+    ) -> dict:
+        """
+        Obtém mensagens de um chat específico.
+        Retorna dict com 'items' (list[ChatMessage]) e 'cursor'.
+        """
+        params: dict = {"limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+
+        response = await self._client.get(f"/chats/{chat_id}/messages", params=params)
+        response.raise_for_status()
+        data = response.json()
+
+        items: list[ChatMessage] = []
+        for msg in data.get("items", []):
+            items.append(
+                ChatMessage(
+                    id=msg.get("id", ""),
+                    sender_id=msg.get("sender_id", ""),
+                    sender_name=msg.get("sender_name", ""),
+                    text=msg.get("text", ""),
+                    timestamp=msg.get("timestamp", ""),
+                    is_own=msg.get("is_own", False),
+                    attachments=msg.get("attachments", []),
+                )
+            )
+
+        return {
+            "items": items,
+            "cursor": data.get("cursor"),
+        }
+
+    async def get_chat(self, chat_id: str) -> ChatDetail | None:
+        """Obtém detalhes de uma conversa."""
+        try:
+            response = await self._client.get(f"/chats/{chat_id}")
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            data = response.json()
+            attendees = [
+                ChatAttendee(
+                    id=att.get("id", ""),
+                    name=att.get("name", ""),
+                    profile_url=att.get("profile_url"),
+                )
+                for att in data.get("attendees", [])
+            ]
+            return ChatDetail(
+                chat_id=data.get("id", ""),
+                attendees=attendees,
+                account_id=data.get("account_id", ""),
+            )
+        except httpx.HTTPError:
+            logger.warning("unipile.get_chat.error", chat_id=chat_id)
+            return None
 
     async def aclose(self) -> None:
         await self._client.aclose()

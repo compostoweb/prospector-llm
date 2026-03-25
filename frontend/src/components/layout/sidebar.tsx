@@ -15,6 +15,8 @@ import {
   Volume2,
   List,
   Music,
+  ClipboardList,
+  MessageSquare,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useUIStore } from "@/store/ui-store"
@@ -26,6 +28,8 @@ const navItems = [
   { href: "/leads", label: "Leads", icon: Users },
   { href: "/listas", label: "Listas", icon: List },
   { href: "/cadencias", label: "Cadências", icon: GitBranch },
+  { href: "/tarefas", label: "Tarefas", icon: ClipboardList },
+  { href: "/inbox", label: "Inbox", icon: MessageSquare },
 ] as const
 
 const settingsItems = [

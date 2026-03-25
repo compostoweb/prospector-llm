@@ -15,6 +15,8 @@ export type WSEventType =
   | "step.sent"
   | "step.failed"
   | "cadence.finished"
+  | "connection.accepted"
+  | "inbox.new_message"
   | "ping"
 
 export interface WSEvent {
@@ -36,6 +38,8 @@ const INVALIDATION_MAP: Partial<Record<WSEventType, string[][]>> = {
   "step.sent": [["leads"], ["cadences"]],
   "step.failed": [["leads"], ["cadences"]],
   "cadence.finished": [["cadences"]],
+  "connection.accepted": [["leads"], ["manual-tasks"]],
+  "inbox.new_message": [["inbox", "conversations"], ["inbox", "messages"]],
 }
 
 // ── Hook principal ────────────────────────────────────────────────────
@@ -77,6 +81,24 @@ export function useEvents() {
           kind: "step.failed",
           title: "Falha ao enviar mensagem",
           ...(step.lead_name ? { body: step.lead_name } : {}),
+        })
+      }
+
+      if (event.type === "connection.accepted") {
+        const conn = event.data as { lead_name?: string }
+        push({
+          kind: "connection.accepted",
+          title: "Conexão aceita",
+          ...(conn.lead_name ? { body: `${conn.lead_name} aceitou sua conexão` } : {}),
+        })
+      }
+
+      if (event.type === "inbox.new_message") {
+        const msg = event.data as { sender_name?: string }
+        push({
+          kind: "inbox.new_message",
+          title: "Nova mensagem",
+          ...(msg.sender_name ? { body: `${msg.sender_name} enviou uma mensagem` } : {}),
         })
       }
     },

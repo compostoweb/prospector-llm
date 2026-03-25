@@ -32,4 +32,9 @@ CELERY_BEAT_SCHEDULE: dict = {
         "task": "workers.enrich.enrich_pending_batch",
         "schedule": crontab(minute="*/30"),
     },
+    # Verificação de conexões LinkedIn pendentes — a cada 15 minutos
+    "check-connections": {
+        "task": "workers.connection_check.check_pending_connections",
+        "schedule": crontab(minute="*/15"),
+    },
 }

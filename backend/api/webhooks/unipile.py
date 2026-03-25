@@ -43,6 +43,8 @@ from integrations.llm import LLMRegistry
 from models.enums import Channel, Intent, InteractionDirection, LeadStatus
 from models.interaction import Interaction
 from models.lead import Lead
+from models.cadence import Cadence
+from models.cadence_step import CadenceStep
 from services.reply_parser import ReplyParser
 
 logger = structlog.get_logger()
@@ -89,6 +91,8 @@ async def unipile_webhook(
 
     if event_type == "message_received":
         await _handle_message_received(payload, db, registry)
+    elif event_type == "relation_created":
+        await _handle_relation_created(payload, db)
     elif event_type == "account_connected":
         logger.info(
             "webhook.unipile.account_connected",
@@ -100,6 +104,88 @@ async def unipile_webhook(
 
 
 # ── Handlers ──────────────────────────────────────────────────────────
+
+async def _handle_relation_created(
+    payload: dict,
+    db: AsyncSession,
+) -> None:
+    """
+    Processa aceite de conexão LinkedIn.
+    Atualiza lead.linkedin_connection_status e cria ManualTasks se cadência semi-manual.
+    """
+    relation = payload.get("relation") or payload
+    profile_id: str = (
+        relation.get("linkedin_profile_id")
+        or relation.get("provider_id")
+        or relation.get("profile_id")
+        or ""
+    )
+    if not profile_id:
+        logger.warning("webhook.unipile.relation_created.no_profile_id")
+        return
+
+    result = await db.execute(
+        select(Lead).where(Lead.linkedin_profile_id == profile_id.strip())
+    )
+    lead = result.scalar_one_or_none()
+    if not lead:
+        logger.info(
+            "webhook.unipile.relation_created.lead_not_found",
+            profile_id=profile_id,
+        )
+        return
+
+    if lead.linkedin_connection_status == "connected":
+        logger.debug(
+            "webhook.unipile.relation_created.already_connected",
+            lead_id=str(lead.id),
+        )
+        return
+
+    lead.linkedin_connection_status = "connected"
+    lead.linkedin_connected_at = datetime.now(tz=timezone.utc)
+
+    logger.info(
+        "webhook.unipile.relation_created.connected",
+        lead_id=str(lead.id),
+        profile_id=profile_id,
+    )
+
+    # Se lead está em cadência semi-manual, criar ManualTasks
+    step_result = await db.execute(
+        select(CadenceStep.cadence_id)
+        .where(CadenceStep.lead_id == lead.id)
+        .limit(1)
+    )
+    cadence_id = step_result.scalar_one_or_none()
+
+    if cadence_id:
+        cad_result = await db.execute(
+            select(Cadence).where(Cadence.id == cadence_id)
+        )
+        cadence = cad_result.scalar_one_or_none()
+
+        if cadence and cadence.mode == "semi_manual":
+            from services.manual_task_service import ManualTaskService
+            task_service = ManualTaskService()
+            await task_service.create_tasks_for_lead(lead, cadence, db)
+            logger.info(
+                "webhook.unipile.relation_created.tasks_created",
+                lead_id=str(lead.id),
+                cadence_id=str(cadence.id),
+            )
+
+    await db.commit()
+
+    # Broadcast WebSocket para atualizar UI em tempo real
+    from api.routes.ws import broadcast_event
+    await broadcast_event(str(lead.tenant_id), {
+        "type": "connection_accepted",
+        "lead_id": str(lead.id),
+        "lead_name": lead.name,
+        "profile_id": profile_id,
+    })
+
 
 async def _handle_message_received(
     payload: dict,
@@ -214,6 +300,17 @@ async def _handle_message_received(
         confidence=classification.get("confidence"),
         summary=classification.get("summary"),
     )
+
+    # Broadcast WebSocket para atualizar inbox em tempo real
+    from api.routes.ws import broadcast_event
+    await broadcast_event(str(lead.tenant_id), {
+        "type": "new_message",
+        "lead_id": str(lead.id),
+        "lead_name": lead.name,
+        "channel": channel.value,
+        "intent": intent.value,
+        "text_preview": text_content[:100],
+    })
 
 
 # ── Helpers ───────────────────────────────────────────────────────────

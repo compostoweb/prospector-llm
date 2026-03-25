@@ -38,6 +38,16 @@ class Cadence(Base, TenantMixin, TimestampMixin):
     allow_personal_email: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # -------------------------------------------------------
+    # Modo de execução
+    # -------------------------------------------------------
+    mode: Mapped[str] = mapped_column(
+        String(50),
+        default="automatic",
+        server_default="automatic",
+        comment="Modo: automatic | semi_manual",
+    )
+
+    # -------------------------------------------------------
     # Configuração LLM por cadência
     # -------------------------------------------------------
     llm_provider: Mapped[str] = mapped_column(

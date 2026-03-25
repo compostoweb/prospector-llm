@@ -58,6 +58,7 @@ async def create_cadence(
         name=body.name,
         description=body.description,
         allow_personal_email=body.allow_personal_email,
+        mode=body.mode.value,
         llm_provider=body.llm.provider,
         llm_model=body.llm.model,
         llm_temperature=body.llm.temperature,

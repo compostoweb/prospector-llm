@@ -12,7 +12,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from models.enums import Channel, StepType
+from models.enums import CadenceMode, Channel, StepType
 
 # Combinações válidas: provider → lista de prefixos de model aceitos
 # Serve para validação básica — a lista completa vem da API dos providers
@@ -130,6 +130,10 @@ class CadenceCreateRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=200)
     description: str | None = None
     allow_personal_email: bool = False
+    mode: CadenceMode = Field(
+        default=CadenceMode.AUTOMATIC,
+        description="Modo: automatic | semi_manual",
+    )
 
     # Configuração LLM — se não informado, usa defaults globais
     llm: LLMConfigSchema = Field(default_factory=LLMConfigSchema)
@@ -198,6 +202,7 @@ class CadenceUpdateRequest(BaseModel):
     description: str | None = None
     is_active: bool | None = None
     allow_personal_email: bool | None = None
+    mode: CadenceMode | None = None
     llm: LLMConfigSchema | None = None
     tts_provider: str | None = None
     tts_voice_id: str | None = None
@@ -222,6 +227,7 @@ class CadenceResponse(BaseModel):
     description: str | None
     is_active: bool
     allow_personal_email: bool
+    mode: str = "automatic"
     llm_provider: str
     llm_model: str
     llm_temperature: float

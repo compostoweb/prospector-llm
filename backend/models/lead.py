@@ -48,6 +48,17 @@ class Lead(Base, TenantMixin, TimestampMixin):
     # ── LinkedIn ──────────────────────────────────────────────────────
     linkedin_url: Mapped[str | None] = mapped_column(String(500), unique=True, index=True)
     linkedin_profile_id: Mapped[str | None] = mapped_column(String(200), index=True)
+    linkedin_connection_status: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        default=None,
+        comment="Status da conexão LinkedIn: pending | connected | None",
+    )
+    linkedin_connected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
 
     # ── Localização / Segmentação ─────────────────────────────────────
     city: Mapped[str | None] = mapped_column(String(200))

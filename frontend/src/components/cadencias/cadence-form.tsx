@@ -34,6 +34,7 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
 
   const [name, setName] = useState(cadence?.name ?? "")
   const [description, setDescription] = useState(cadence?.description ?? "")
+  const [mode, setMode] = useState<"automatic" | "semi_manual">(cadence?.mode ?? "automatic")
   const [leadListId, setLeadListId] = useState(cadence?.lead_list_id ?? "")
   const { data: leadListDetail } = useLeadList(leadListId)
   const [llmConfig, setLlmConfig] = useState({
@@ -74,6 +75,7 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
     const body: CreateCadenceBody = {
       name: name.trim(),
       ...(description.trim() ? { description: description.trim() } : {}),
+      mode,
       llm: {
         provider: llmConfig.llm_provider,
         model: llmConfig.llm_model,
@@ -142,6 +144,26 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
               rows={2}
               placeholder="Descreva o público-alvo e objetivo desta cadência…"
             />
+          </div>
+
+          {/* Modo */}
+          <div className="space-y-1.5">
+            <Label htmlFor="cadence-mode">Modo de operação</Label>
+            <select
+              id="cadence-mode"
+              value={mode}
+              onChange={(e) => setMode(e.target.value as "automatic" | "semi_manual")}
+              aria-label="Modo de operação"
+              className="flex h-9 w-full rounded-md border border-(--border) bg-transparent px-3 py-1 text-sm text-(--text-primary) focus:outline-none focus:ring-1 focus:ring-(--ring)"
+            >
+              <option value="automatic">Automático — dispara todas as mensagens</option>
+              <option value="semi_manual">Semi-manual — conexão automática, mensagens manuais</option>
+            </select>
+            {mode === "semi_manual" && (
+              <p className="text-xs text-(--text-tertiary)">
+                Apenas o convite de conexão será enviado automaticamente. Após aceite, você revisará e enviará cada mensagem manualmente na fila de tarefas.
+              </p>
+            )}
           </div>
 
           {/* Contexto de prospecção (alimenta a IA) */}

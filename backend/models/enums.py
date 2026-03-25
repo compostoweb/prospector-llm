@@ -105,3 +105,18 @@ class SandboxLeadSource(str, Enum):
     REAL = "real"
     SAMPLE = "sample"
     FICTITIOUS = "fictitious"
+
+
+class CadenceMode(str, Enum):
+    """Modo de execução da cadência."""
+    AUTOMATIC = "automatic"
+    SEMI_MANUAL = "semi_manual"
+
+
+class ManualTaskStatus(str, Enum):
+    """Status de uma tarefa manual na cadência semi-automática."""
+    PENDING = "pending"
+    CONTENT_GENERATED = "content_generated"
+    SENT = "sent"
+    DONE_EXTERNAL = "done_external"
+    SKIPPED = "skipped"

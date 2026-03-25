@@ -100,9 +100,17 @@ class CadenceManager:
         # Usa template customizado da cadência ou o padrão
         template = _resolve_template(cadence)
 
+        # Modo semi-manual: só cria o step de connect (automático)
+        # Os demais steps serão ManualTasks criadas ao detectar aceite
+        is_semi_manual = cadence.mode == "semi_manual"
+
         for step_number, (channel, day_offset, use_voice, audio_file_id, _step_type) in enumerate(
             template, start=1
         ):
+            # Semi-manual: pula tudo que não é connect
+            if is_semi_manual and channel != Channel.LINKEDIN_CONNECT:
+                continue
+
             # Verifica se o lead tem os dados para o canal
             if not _lead_has_channel(lead, channel, cadence):
                 logger.debug(
@@ -136,6 +144,10 @@ class CadenceManager:
             )
 
         lead.status = LeadStatus.IN_CADENCE
+
+        # Semi-manual: marca conexão como pendente
+        if is_semi_manual:
+            lead.linkedin_connection_status = "pending"
 
         await db.flush()  # persiste IDs sem fechar a transação
 

@@ -91,6 +91,8 @@ class LeadResponse(BaseModel):
     company_size: str | None
     linkedin_url: str | None
     linkedin_profile_id: str | None
+    linkedin_connection_status: str | None = None
+    linkedin_connected_at: datetime | None = None
     city: str | None
     location: str | None
     segment: str | None

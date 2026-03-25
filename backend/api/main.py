@@ -35,6 +35,8 @@ from api.routes import tts as tts_router
 from api.routes import tenants as tenants_router
 from api.routes import admin_users as admin_users_router
 from api.routes import ws as ws_router
+from api.routes import manual_tasks as manual_tasks_router
+from api.routes import inbox as inbox_router
 from api.webhooks import unipile as unipile_webhook
 from core.config import settings
 from core.database import AsyncSessionLocal, init_db
@@ -145,6 +147,8 @@ app.include_router(sandbox_router.router)
 app.include_router(tenants_router.router)
 app.include_router(admin_users_router.router)
 app.include_router(ws_router.router)
+app.include_router(manual_tasks_router.router)
+app.include_router(inbox_router.router)
 app.include_router(unipile_webhook.router)
 
 
