@@ -11,6 +11,8 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
+import { FlaskConical } from "lucide-react"
 import type { Cadence, CreateCadenceBody, CadenceStep } from "@/lib/api/hooks/use-cadences"
 
 interface CadenceFormProps {
@@ -167,13 +169,21 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
           />
 
           {/* Ações */}
-          <div className="flex gap-3 pt-2">
+          <div className="flex flex-wrap gap-3 pt-2">
             <Button type="button" variant="outline" onClick={() => router.back()}>
               Cancelar
             </Button>
             <Button type="submit" disabled={isLoading}>
               {isLoading ? "Salvando…" : isEdit ? "Salvar alterações" : "Criar cadência"}
             </Button>
+            {isEdit && cadence && (
+              <Link href={`/cadencias/${cadence.id}/sandbox`}>
+                <Button type="button" variant="outline">
+                  <FlaskConical size={14} aria-hidden="true" />
+                  Testar no Sandbox
+                </Button>
+              </Link>
+            )}
           </div>
         </div>
 

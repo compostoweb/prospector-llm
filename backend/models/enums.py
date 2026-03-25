@@ -67,3 +67,27 @@ class InteractionDirection(str, Enum):
     """Direção da mensagem na interação."""
     OUTBOUND = "outbound"
     INBOUND = "inbound"
+
+
+class SandboxRunStatus(str, Enum):
+    """Status de um sandbox run de cadência."""
+    RUNNING = "running"
+    COMPLETED = "completed"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class SandboxStepStatus(str, Enum):
+    """Status de um step dentro do sandbox."""
+    PENDING = "pending"
+    GENERATING = "generating"
+    GENERATED = "generated"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class SandboxLeadSource(str, Enum):
+    """Origem dos leads usados no sandbox."""
+    REAL = "real"
+    SAMPLE = "sample"
+    FICTITIOUS = "fictitious"

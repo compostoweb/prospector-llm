@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useCadences, useToggleCadence } from "@/lib/api/hooks/use-cadences"
 import { EmptyState } from "@/components/shared/empty-state"
-import { Plus, GitBranch, Users, CheckCircle, Power } from "lucide-react"
+import { Plus, GitBranch, Users, CheckCircle, Power, FlaskConical } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export default function CadenciasPage() {
@@ -81,12 +81,21 @@ export default function CadenciasPage() {
                 <Stat icon={CheckCircle} label="Convertidos" value={0} />
               </div>
 
-              {/* LLM info */}
-              <p className="mt-4 text-xs text-(--text-tertiary)">
-                {cadence.llm_provider === "openai" ? "OpenAI" : "Gemini"} · {cadence.llm_model} ·{" "}
-                {cadence.steps_template?.length ?? 0} passo
-                {(cadence.steps_template?.length ?? 0) !== 1 ? "s" : ""}
-              </p>
+              {/* LLM info + Sandbox link */}
+              <div className="mt-4 flex items-center justify-between">
+                <p className="text-xs text-(--text-tertiary)">
+                  {cadence.llm_provider === "openai" ? "OpenAI" : "Gemini"} · {cadence.llm_model} ·{" "}
+                  {cadence.steps_template?.length ?? 0} passo
+                  {(cadence.steps_template?.length ?? 0) !== 1 ? "s" : ""}
+                </p>
+                <Link
+                  href={`/cadencias/${cadence.id}/sandbox`}
+                  className="flex items-center gap-1 text-xs text-(--text-tertiary) transition-colors hover:text-(--accent)"
+                >
+                  <FlaskConical size={12} aria-hidden="true" />
+                  Sandbox
+                </Link>
+              </div>
             </div>
           ))}
         </div>

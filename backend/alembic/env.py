@@ -26,9 +26,13 @@ from core.config import settings
 # ── Importar TODOS os models para o autogenerate funcionar ──────────
 # Cada import adiciona os models ao metadata da Base
 from models.base import Base  # noqa: F401
+from models.audio_file import AudioFile  # noqa: F401
 from models.cadence import Cadence  # noqa: F401
+from models.cadence_step import CadenceStep  # noqa: F401
 from models.interaction import Interaction  # noqa: F401
 from models.lead import Lead  # noqa: F401
+from models.lead_list import LeadList  # noqa: F401
+from models.sandbox import SandboxRun, SandboxStep  # noqa: F401
 from models.tenant import Tenant, TenantIntegration  # noqa: F401
 from models.user import User  # noqa: F401
 
