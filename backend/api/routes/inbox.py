@@ -21,7 +21,7 @@ import uuid
 from datetime import datetime, timezone
 
 import structlog
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -822,13 +822,14 @@ async def add_lead_tag(
 @router.delete(
     "/conversations/{chat_id}/tags/{tag_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
 )
 async def remove_lead_tag(
     chat_id: str,
     tag_id: uuid.UUID,
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
-) -> None:
+) -> Response:
     """Remove tag de um lead."""
     result = await db.execute(
         select(LeadTag).where(
@@ -842,6 +843,7 @@ async def remove_lead_tag(
 
     await db.delete(tag)
     await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ── Internal helpers ──────────────────────────────────────────────────
