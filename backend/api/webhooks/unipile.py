@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -37,7 +38,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.dependencies import get_current_tenant_id, get_llm_registry, get_session
+from api.dependencies import get_llm_registry, get_session_no_auth
 from core.config import settings
 from integrations.llm import LLMRegistry
 from models.enums import Channel, Intent, InteractionDirection, LeadStatus
@@ -59,7 +60,7 @@ _EMAIL_ACCOUNT_TYPE = "GMAIL"
 @router.post("/unipile", status_code=status.HTTP_200_OK)
 async def unipile_webhook(
     request: Request,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_session_no_auth),
     registry: LLMRegistry = Depends(get_llm_registry),
 ) -> dict:
     """
@@ -78,7 +79,7 @@ async def unipile_webhook(
         )
 
     try:
-        payload = await request.json()
+        payload = json.loads(body)
     except Exception:  # noqa: BLE001
         logger.warning("webhook.unipile.invalid_json")
         raise HTTPException(
@@ -87,7 +88,7 @@ async def unipile_webhook(
         )
 
     event_type: str = payload.get("event", "")
-    logger.info("webhook.unipile.received", event=event_type)
+    logger.info("webhook.unipile.received", event_type=event_type)
 
     if event_type == "message_received":
         await _handle_message_received(payload, db, registry)
@@ -320,8 +321,8 @@ def _verify_signature(body: bytes, signature_header: str) -> bool:
     Valida a assinatura HMAC-SHA256 do webhook Unipile.
     A Unipile envia: X-Unipile-Signature: sha256=<hex_digest>
     """
-    secret = settings.UNIPILE_WEBHOOK_SECRET or ""
-    if not secret:
+    secret = (settings.UNIPILE_WEBHOOK_SECRET or "").strip()
+    if not secret or secret == "...":
         if settings.ENV == "prod":
             logger.error("webhook.unipile.no_secret_in_prod")
             return False

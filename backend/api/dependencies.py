@@ -48,6 +48,24 @@ logger = structlog.get_logger()
 _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
 
+# ── Session sem autenticação (webhooks externos) ─────────────────────
+
+async def get_session_no_auth() -> AsyncGenerator[AsyncSession, None]:
+    """
+    Abre uma AsyncSession SEM injeção de tenant (sem RLS).
+    Usar APENAS em webhooks externos que autenticam via HMAC/signature.
+    """
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
 # ── Session com tenant injetado ───────────────────────────────────────
 
 async def get_session(
