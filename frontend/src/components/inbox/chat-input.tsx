@@ -3,7 +3,7 @@
 import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { useSendVoiceMessage, type SuggestTone } from "@/lib/api/hooks/use-inbox"
+import { useSendVoiceMessage, useSendAttachments, type SuggestTone } from "@/lib/api/hooks/use-inbox"
 import {
   Send,
   Sparkles,
@@ -13,6 +13,11 @@ import {
   ChevronDown,
   Trash2,
   Upload,
+  Paperclip,
+  Smile,
+  X,
+  ImageIcon,
+  FileText,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -45,6 +50,9 @@ export function ChatInput({
   chatId,
 }: ChatInputProps) {
   const [showTones, setShowTones] = useState(false)
+  const [showEmoji, setShowEmoji] = useState(false)
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Audio recording state
   const [recordingState, setRecordingState] = useState<RecordingState>("idle")
@@ -56,6 +64,7 @@ export function ChatInput({
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const sendVoice = useSendVoiceMessage()
+  const sendAttachments = useSendAttachments()
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -128,6 +137,39 @@ export function ChatInput({
     discardRecording()
   }
 
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const selected = Array.from(e.target.files ?? [])
+    if (selected.length > 0) {
+      setPendingFiles((prev) => [...prev, ...selected])
+    }
+    // Reset input so same file can be re-selected
+    e.target.value = ""
+  }
+
+  function removeFile(index: number) {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  async function handleSendWithAttachments() {
+    if (pendingFiles.length === 0 && !value.trim()) return
+    if (pendingFiles.length > 0) {
+      await sendAttachments.mutateAsync({
+        chatId,
+        files: pendingFiles,
+        text: value.trim() || undefined,
+      })
+      setPendingFiles([])
+      onChange("")
+    } else {
+      onSend()
+    }
+  }
+
+  function insertEmoji(emoji: string) {
+    onChange(value + emoji)
+    setShowEmoji(false)
+  }
+
   const formatSeconds = (s: number) =>
     `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`
 
@@ -184,8 +226,46 @@ export function ChatInput({
         </div>
       )}
 
+      {/* Pending files preview */}
+      {pendingFiles.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {pendingFiles.map((file, i) => (
+            <div
+              key={`${file.name}-${i}`}
+              className="flex items-center gap-1.5 rounded-md border border-(--border-default) bg-(--bg-overlay) px-2 py-1"
+            >
+              {file.type.startsWith("image/") ? (
+                <ImageIcon size={12} className="text-(--text-tertiary)" />
+              ) : (
+                <FileText size={12} className="text-(--text-tertiary)" />
+              )}
+              <span className="max-w-32 truncate text-xs text-(--text-secondary)">{file.name}</span>
+              <button
+                type="button"
+                onClick={() => removeFile(i)}
+                title="Remover arquivo"
+                className="rounded-sm p-0.5 text-(--text-tertiary) hover:text-(--danger)"
+              >
+                <X size={10} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Text input + actions */}
       <div className="flex items-end gap-2">
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.gif,.mp4,.webm"
+          onChange={handleFileSelect}
+          className="hidden"
+          title="Selecionar arquivos"
+        />
+
         <Textarea
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -196,6 +276,42 @@ export function ChatInput({
         />
 
         <div className="flex shrink-0 gap-1">
+          {/* Attachment button */}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            aria-label="Anexar arquivo"
+            className="flex h-9 w-9 items-center justify-center rounded-md border border-(--border-default) text-(--text-secondary) transition-colors hover:bg-(--bg-overlay) hover:text-(--text-primary)"
+          >
+            <Paperclip size={14} aria-hidden="true" />
+          </button>
+
+          {/* Emoji picker */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowEmoji((v) => !v)}
+              aria-label="Inserir emoji"
+              className="flex h-9 w-9 items-center justify-center rounded-md border border-(--border-default) text-(--text-secondary) transition-colors hover:bg-(--bg-overlay) hover:text-(--text-primary)"
+            >
+              <Smile size={14} aria-hidden="true" />
+            </button>
+            {showEmoji && (
+              <div className="absolute bottom-full right-0 z-10 mb-1 grid max-h-48 w-64 grid-cols-8 gap-0.5 overflow-y-auto rounded-md border border-(--border-default) bg-(--bg-surface) p-2 shadow-lg">
+                {COMMON_EMOJIS.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => insertEmoji(emoji)}
+                    className="flex h-8 w-8 items-center justify-center rounded text-lg transition-colors hover:bg-(--bg-overlay)"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* AI suggest button */}
           <div className="relative">
             <button
@@ -250,11 +366,11 @@ export function ChatInput({
 
           {/* Send */}
           <Button
-            onClick={onSend}
-            disabled={isSending || !value.trim()}
+            onClick={handleSendWithAttachments}
+            disabled={(isSending || sendAttachments.isPending) && !pendingFiles.length && !value.trim()}
             className="h-9"
           >
-            {isSending ? (
+            {(isSending || sendAttachments.isPending) ? (
               <Loader2 size={14} className="animate-spin" />
             ) : (
               <Send size={14} aria-hidden="true" />
@@ -265,3 +381,11 @@ export function ChatInput({
     </div>
   )
 }
+
+const COMMON_EMOJIS = [
+  "😀", "😂", "😊", "🥰", "😎", "🤔", "👍", "👋",
+  "🎉", "🔥", "💯", "❤️", "👏", "🙌", "💪", "🤝",
+  "✅", "⭐", "🚀", "💡", "📊", "📈", "🏆", "🎯",
+  "😅", "😉", "🤩", "😍", "🫡", "🤗", "😤", "🫠",
+  "👀", "🙏", "✨", "💬", "📌", "🔗", "📞", "📧",
+]

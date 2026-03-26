@@ -39,6 +39,12 @@ export interface ChatMessage {
   timestamp: string
   is_own: boolean
   attachments: Record<string, unknown>[]
+  reactions?: MessageReaction[]
+}
+
+export interface MessageReaction {
+  emoji: string
+  is_own: boolean
 }
 
 export interface ChatMessagesResponse {
@@ -68,21 +74,36 @@ export interface ConversationLead {
   attendee_profile_url: string | null
   attendee_profile_picture_url: string | null
   attendee_id: string | null
+  attendee_headline: string | null
+  attendee_location: string | null
+  attendee_email: string | null
+  attendee_connections_count: number | null
+  attendee_is_premium: boolean
 }
 
 export type SuggestTone = "formal" | "casual" | "objetiva" | "consultiva"
 
+export type InboxFilter = "all" | "unread"
+
 // ── Queries ───────────────────────────────────────────────────────────
 
-export function useConversations(cursor?: string) {
+export function useConversations(opts?: {
+  cursor?: string
+  filter?: InboxFilter
+  search?: string
+}) {
   const { data: session } = useSession()
+  const filter = opts?.filter ?? "all"
+  const search = opts?.search ?? ""
+  const cursor = opts?.cursor
 
   return useQuery({
-    queryKey: ["inbox", "conversations", cursor],
+    queryKey: ["inbox", "conversations", filter, search, cursor],
     queryFn: async (): Promise<ConversationListResponse> => {
       const client = createBrowserClient(session?.accessToken)
-      const query: Record<string, string> = {}
+      const query: Record<string, string> = { limit: "50", filter }
       if (cursor) query.cursor = cursor
+      if (search) query.search = search
 
       const { data, error } = await client.GET("/inbox/conversations" as never, {
         params: { query } as never,
@@ -90,8 +111,24 @@ export function useConversations(cursor?: string) {
       if (error) throw new Error("Falha ao carregar conversas")
       return data as ConversationListResponse
     },
-    staleTime: 15 * 1000,
+    staleTime: 60 * 1000,
     enabled: !!session?.accessToken,
+  })
+}
+
+export function useSyncInbox() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (): Promise<void> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { error } = await client.POST("/inbox/sync" as never)
+      if (error) throw new Error("Falha ao sincronizar")
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] })
+    },
   })
 }
 
@@ -279,6 +316,131 @@ export function useSendToCRM() {
       )
       if (error) throw new Error("Falha ao enviar para CRM")
       return data as { person_id: number; deal_id: number | null; status: string }
+    },
+  })
+}
+
+export function useSendAttachments() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      chatId,
+      files,
+      text,
+    }: {
+      chatId: string
+      files: File[]
+      text?: string | undefined
+    }) => {
+      const accessToken = session?.accessToken
+      if (!accessToken) throw new Error("Sessão expirada")
+
+      const formData = new FormData()
+      if (text) formData.append("text", text)
+      for (const file of files) {
+        formData.append("files", file)
+      }
+
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/inbox/conversations/${encodeURIComponent(chatId)}/send-attachments`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}` },
+          body: formData,
+        },
+      )
+      if (!res.ok) throw new Error("Falha ao enviar anexos")
+      return res.json()
+    },
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["inbox", "messages", variables.chatId],
+      })
+      void queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] })
+    },
+  })
+}
+
+export function useAddReaction() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      chatId,
+      messageId,
+      emoji,
+    }: {
+      chatId: string
+      messageId: string
+      emoji: string
+    }) => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.POST(
+        `/inbox/conversations/${chatId}/messages/${messageId}/reactions` as never,
+        { body: { emoji } as never },
+      )
+      if (error) throw new Error("Falha ao adicionar reação")
+      return data
+    },
+    onMutate: async ({ chatId, messageId, emoji }) => {
+      // Optimistic update
+      await queryClient.cancelQueries({ queryKey: ["inbox", "messages", chatId] })
+      const key = ["inbox", "messages", chatId, undefined]
+      const prev = queryClient.getQueryData<ChatMessagesResponse>(key)
+      if (prev) {
+        queryClient.setQueryData<ChatMessagesResponse>(key, {
+          ...prev,
+          items: prev.items.map((msg) =>
+            msg.id === messageId
+              ? { ...msg, reactions: [...(msg.reactions ?? []), { emoji, is_own: true }] }
+              : msg,
+          ),
+        })
+      }
+      return { prev }
+    },
+    onError: (_err, { chatId }, context) => {
+      if (context?.prev) {
+        queryClient.setQueryData(["inbox", "messages", chatId, undefined], context.prev)
+      }
+    },
+    onSettled: (_data, _err, { chatId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["inbox", "messages", chatId],
+      })
+    },
+  })
+}
+
+export function useRemoveReaction() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      chatId,
+      messageId,
+      emoji,
+    }: {
+      chatId: string
+      messageId: string
+      emoji: string
+    }) => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.DELETE(
+        `/inbox/conversations/${chatId}/messages/${messageId}/reactions` as never,
+        { body: { emoji } as never },
+      )
+      if (error) throw new Error("Falha ao remover reação")
+      return data
+    },
+    onSettled: (_data, _err, { chatId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["inbox", "messages", chatId],
+      })
     },
   })
 }

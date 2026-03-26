@@ -22,6 +22,10 @@ import {
   Send,
   Check,
   ExternalLink,
+  Crown,
+  Users,
+  Globe,
+  Briefcase,
 } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
@@ -88,10 +92,40 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
                   <User size={24} className="text-(--text-tertiary)" aria-hidden="true" />
                 </div>
               )}
-              <h4 className="text-base font-semibold text-(--text-primary)">
-                {lead?.attendee_name || "Desconhecido"}
-              </h4>
+              <div className="text-center">
+                <div className="flex items-center justify-center gap-1.5">
+                  <h4 className="text-base font-semibold text-(--text-primary)">
+                    {lead?.attendee_name || "Membro LinkedIn"}
+                  </h4>
+                  {lead?.attendee_is_premium && (
+                    <Crown size={14} className="text-amber-500" aria-hidden="true" />
+                  )}
+                </div>
+                {lead?.attendee_headline && (
+                  <p className="mt-1 text-xs leading-relaxed text-(--text-secondary)">
+                    {lead.attendee_headline}
+                  </p>
+                )}
+              </div>
             </div>
+
+            {/* Location & connections */}
+            {(lead?.attendee_location ?? lead?.attendee_connections_count != null) && (
+              <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-(--text-tertiary)">
+                {lead?.attendee_location && (
+                  <span className="flex items-center gap-1">
+                    <MapPin size={11} aria-hidden="true" />
+                    {lead.attendee_location}
+                  </span>
+                )}
+                {lead?.attendee_connections_count != null && (
+                  <span className="flex items-center gap-1">
+                    <Users size={11} aria-hidden="true" />
+                    {lead.attendee_connections_count.toLocaleString("pt-BR")} conexões
+                  </span>
+                )}
+              </div>
+            )}
 
             {/* LinkedIn profile link */}
             {lead?.attendee_profile_url && (
@@ -105,6 +139,16 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
                 Ver perfil no LinkedIn
                 <ExternalLink size={10} className="ml-auto" aria-hidden="true" />
               </a>
+            )}
+
+            {/* Contact email from Unipile */}
+            {lead?.attendee_email && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
+                  Contato
+                </p>
+                <InfoRow icon={Mail} label="Email" value={lead.attendee_email} />
+              </div>
             )}
 
             {/* Info box */}
@@ -172,11 +216,18 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
                 </div>
               )}
               <div className="text-center">
-                <h4 className="text-base font-semibold text-(--text-primary)">
-                  {lead.name ?? "Sem nome"}
-                </h4>
-                {lead.job_title && (
-                  <p className="text-sm text-(--text-secondary)">{lead.job_title}</p>
+                <div className="flex items-center justify-center gap-1.5">
+                  <h4 className="text-base font-semibold text-(--text-primary)">
+                    {lead.name ?? "Sem nome"}
+                  </h4>
+                  {lead.attendee_is_premium && (
+                    <Crown size={14} className="text-amber-500" aria-hidden="true" />
+                  )}
+                </div>
+                {(lead.job_title ?? lead.attendee_headline) && (
+                  <p className="mt-1 text-xs leading-relaxed text-(--text-secondary)">
+                    {lead.job_title ?? lead.attendee_headline}
+                  </p>
                 )}
                 {lead.company && (
                   <p className="mt-0.5 flex items-center justify-center gap-1 text-sm text-(--text-secondary)">
@@ -201,6 +252,24 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
                 </span>
               )}
             </div>
+
+            {/* Location & connections (from Unipile) */}
+            {(lead.attendee_location ?? lead.attendee_connections_count != null) && (
+              <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-(--text-tertiary)">
+                {(lead.city ?? lead.attendee_location) && (
+                  <span className="flex items-center gap-1">
+                    <MapPin size={11} aria-hidden="true" />
+                    {lead.city ?? lead.attendee_location}
+                  </span>
+                )}
+                {lead.attendee_connections_count != null && (
+                  <span className="flex items-center gap-1">
+                    <Users size={11} aria-hidden="true" />
+                    {lead.attendee_connections_count.toLocaleString("pt-BR")} conexões
+                  </span>
+                )}
+              </div>
+            )}
 
             {/* Pending tasks */}
             {lead.pending_tasks_count > 0 && (
@@ -254,6 +323,9 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
               )}
               {lead.email_personal && (
                 <InfoRow icon={Mail} label="Email pessoal" value={lead.email_personal} />
+              )}
+              {!lead.email_corporate && !lead.email_personal && lead.attendee_email && (
+                <InfoRow icon={Mail} label="Email" value={lead.attendee_email} />
               )}
               {lead.phone && (
                 <InfoRow icon={Phone} label="Telefone" value={lead.phone} />

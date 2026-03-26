@@ -34,6 +34,7 @@ from models.interaction import Interaction
 from models.lead import Lead
 from models.manual_task import ManualTask
 from schemas.inbox import (
+    AddReactionRequest,
     ChatAttendeeSchema,
     ChatMessageSchema,
     ChatMessagesResponse,
@@ -52,12 +53,34 @@ logger = structlog.get_logger()
 router = APIRouter(prefix="/inbox", tags=["Inbox"])
 
 
+@router.post("/sync")
+async def sync_inbox(
+    _tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+) -> dict:
+    """Dispara resync da conta LinkedIn na Unipile e invalida caches."""
+    account_id = settings.UNIPILE_ACCOUNT_ID_LINKEDIN or ""
+    if not account_id:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Conta LinkedIn não configurada",
+        )
+    ok = await unipile_client.sync_account(account_id)
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao sincronizar conta LinkedIn",
+        )
+    return {"status": "sync_started"}
+
+
 @router.get("/conversations", response_model=ConversationListResponse)
 async def list_conversations(
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
     cursor: str | None = Query(default=None),
-    limit: int = Query(default=20, ge=1, le=50),
+    limit: int = Query(default=50, ge=1, le=100),
+    filter: str = Query(default="all", description="all | unread"),
+    search: str = Query(default="", description="Buscar por nome do contato"),
 ) -> ConversationListResponse:
     """Lista conversas LinkedIn com enriquecimento de dados do lead."""
     account_id = settings.UNIPILE_ACCOUNT_ID_LINKEDIN or ""
@@ -71,12 +94,27 @@ async def list_conversations(
         account_id=account_id,
         cursor=cursor,
         limit=limit,
+        unread_only=(filter == "unread"),
     )
+
+    search_lower = search.strip().lower()
 
     conversations: list[ConversationSchema] = []
     for chat in result["items"]:
         # Tenta vincular attendee a lead no sistema
         lead_info = await _find_lead_for_chat(chat.attendees, tenant_id, db)
+
+        # Client-side search filter by attendee name or lead name
+        if search_lower:
+            name_match = False
+            for a in chat.attendees:
+                if search_lower in (a.name or "").lower():
+                    name_match = True
+                    break
+            if lead_info.get("lead_name") and search_lower in lead_info["lead_name"].lower():
+                name_match = True
+            if not name_match:
+                continue
 
         conversations.append(
             ConversationSchema(
@@ -238,6 +276,58 @@ async def send_voice(
     return {"message_id": result.message_id, "status": "sent"}
 
 
+@router.post("/conversations/{chat_id}/send-attachments")
+async def send_attachments(
+    chat_id: str,
+    text: str = "",
+    files: list[UploadFile] = File(...),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> dict:
+    """Envia mensagem com anexos (imagens, documentos, etc.)."""
+    if not files:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nenhum arquivo enviado")
+
+    chat = await unipile_client.get_chat(chat_id)
+    if not chat:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat não encontrado")
+
+    account_id = chat.account_id or settings.UNIPILE_ACCOUNT_ID_LINKEDIN or ""
+    attendee_ids = [a.id for a in chat.attendees]
+    if not attendee_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Sem destinatário")
+
+    attachments: list[tuple[str, bytes, str]] = []
+    for f in files:
+        file_bytes = await f.read()
+        attachments.append((f.filename or "file", file_bytes, f.content_type or "application/octet-stream"))
+
+    result = await unipile_client.send_linkedin_dm_with_attachments(
+        account_id=account_id,
+        linkedin_profile_id=attendee_ids[0],
+        message=text,
+        attachments=attachments,
+    )
+
+    # Registra Interaction outbound se lead existe
+    lead = await _find_lead_by_attendees(chat.attendees, tenant_id, db)
+    if lead:
+        interaction = Interaction(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            lead_id=lead.id,
+            channel=Channel.LINKEDIN_DM,
+            direction=InteractionDirection.OUTBOUND,
+            content_text=text or None,
+            unipile_message_id=result.message_id,
+            created_at=datetime.now(tz=timezone.utc),
+        )
+        db.add(interaction)
+        await db.commit()
+
+    return {"message_id": result.message_id, "status": "sent"}
+
+
 @router.post("/conversations/{chat_id}/suggest", response_model=SuggestReplyResponse)
 async def suggest_reply(
     chat_id: str,
@@ -303,6 +393,11 @@ async def get_conversation_lead(
     attendee_profile_url = first_att.profile_url if first_att else None
     attendee_profile_picture_url = first_att.profile_picture_url if first_att else None
     attendee_id = first_att.id if first_att else None
+    attendee_headline = first_att.headline if first_att else None
+    attendee_location = first_att.location if first_att else None
+    attendee_email = first_att.email if first_att else None
+    attendee_connections_count = first_att.connections_count if first_att else None
+    attendee_is_premium = first_att.is_premium if first_att else False
 
     lead = await _find_lead_by_attendees(chat.attendees, tenant_id, db)
     if not lead:
@@ -312,6 +407,11 @@ async def get_conversation_lead(
             attendee_profile_url=attendee_profile_url,
             attendee_profile_picture_url=attendee_profile_picture_url,
             attendee_id=attendee_id,
+            attendee_headline=attendee_headline,
+            attendee_location=attendee_location,
+            attendee_email=attendee_email,
+            attendee_connections_count=attendee_connections_count,
+            attendee_is_premium=attendee_is_premium,
         )
 
     # Conta tarefas pendentes do lead
@@ -346,6 +446,11 @@ async def get_conversation_lead(
         attendee_profile_url=attendee_profile_url,
         attendee_profile_picture_url=attendee_profile_picture_url,
         attendee_id=attendee_id,
+        attendee_headline=attendee_headline,
+        attendee_location=attendee_location,
+        attendee_email=attendee_email,
+        attendee_connections_count=attendee_connections_count,
+        attendee_is_premium=attendee_is_premium,
     )
 
 
@@ -467,6 +572,56 @@ async def send_to_crm(
         "deal_id": deal_id,
         "status": "sent",
     }
+
+
+@router.post("/conversations/{chat_id}/messages/{message_id}/reactions")
+async def add_reaction(
+    chat_id: str,
+    message_id: str,
+    body: AddReactionRequest,
+) -> dict:
+    """Adiciona reação emoji a uma mensagem."""
+    success = await unipile_client.add_reaction(
+        message_id=message_id,
+        emoji=body.emoji,
+    )
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao adicionar reação via Unipile",
+        )
+    logger.info(
+        "inbox.reaction_added",
+        chat_id=chat_id,
+        message_id=message_id,
+        emoji=body.emoji,
+    )
+    return {"status": "ok", "message_id": message_id, "emoji": body.emoji}
+
+
+@router.delete("/conversations/{chat_id}/messages/{message_id}/reactions")
+async def remove_reaction(
+    chat_id: str,
+    message_id: str,
+    body: AddReactionRequest,
+) -> dict:
+    """Remove reação emoji de uma mensagem."""
+    success = await unipile_client.remove_reaction(
+        message_id=message_id,
+        emoji=body.emoji,
+    )
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao remover reação via Unipile",
+        )
+    logger.info(
+        "inbox.reaction_removed",
+        chat_id=chat_id,
+        message_id=message_id,
+        emoji=body.emoji,
+    )
+    return {"status": "ok", "message_id": message_id, "emoji": body.emoji}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────

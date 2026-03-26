@@ -4,8 +4,47 @@ import { useTheme } from "next-themes"
 import { Sun, Moon, Monitor } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-export function ThemeToggle({ className }: { className?: string }) {
+interface ThemeToggleProps {
+  className?: string
+  collapsed?: boolean
+}
+
+const THEME_CYCLE = ["light", "dark", "system"] as const
+type ThemeValue = (typeof THEME_CYCLE)[number]
+
+const THEME_ICONS: Record<ThemeValue, typeof Sun> = {
+  light: Sun,
+  dark: Moon,
+  system: Monitor,
+}
+
+const THEME_LABELS: Record<ThemeValue, string> = {
+  light: "Tema claro",
+  dark: "Tema escuro",
+  system: "Tema do sistema",
+}
+
+export function ThemeToggle({ className, collapsed }: ThemeToggleProps) {
   const { theme, setTheme } = useTheme()
+
+  if (collapsed) {
+    const current = (theme as ThemeValue) ?? "system"
+    const Icon = THEME_ICONS[current] ?? Monitor
+    const nextTheme = THEME_CYCLE[(THEME_CYCLE.indexOf(current) + 1) % THEME_CYCLE.length]
+
+    return (
+      <button
+        aria-label={`${THEME_LABELS[current]} — clique para alternar`}
+        onClick={() => setTheme(nextTheme)}
+        className={cn(
+          "flex h-8 w-8 items-center justify-center rounded-md text-(--text-tertiary) transition-colors hover:bg-(--bg-overlay) hover:text-(--text-secondary)",
+          className,
+        )}
+      >
+        <Icon size={16} aria-hidden="true" />
+      </button>
+    )
+  }
 
   const options = [
     { value: "light", icon: Sun, label: "Tema claro" },

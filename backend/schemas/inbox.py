@@ -20,6 +20,11 @@ class ChatAttendeeSchema(BaseModel):
     name: str
     profile_url: str | None = None
     profile_picture_url: str | None = None
+    headline: str | None = None
+    location: str | None = None
+    email: str | None = None
+    connections_count: int | None = None
+    is_premium: bool = False
 
 
 class ConversationSchema(BaseModel):
@@ -103,6 +108,11 @@ class ConversationLeadResponse(BaseModel):
     attendee_profile_url: str | None = None
     attendee_profile_picture_url: str | None = None
     attendee_id: str | None = None
+    attendee_headline: str | None = None
+    attendee_location: str | None = None
+    attendee_email: str | None = None
+    attendee_connections_count: int | None = None
+    attendee_is_premium: bool = False
 
 
 class QuickCreateLeadRequest(BaseModel):
@@ -112,3 +122,8 @@ class QuickCreateLeadRequest(BaseModel):
     linkedin_profile_id: str | None = None
     company: str | None = None
     job_title: str | None = None
+
+
+class AddReactionRequest(BaseModel):
+    """Adicionar/remover reação a uma mensagem."""
+    emoji: str = Field(..., min_length=1, max_length=10)
