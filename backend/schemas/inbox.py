@@ -24,7 +24,9 @@ class ChatAttendeeSchema(BaseModel):
     location: str | None = None
     email: str | None = None
     connections_count: int | None = None
+    shared_connections_count: int | None = None
     is_premium: bool = False
+    websites: list[str] = []
 
 
 class ConversationSchema(BaseModel):
@@ -112,7 +114,9 @@ class ConversationLeadResponse(BaseModel):
     attendee_location: str | None = None
     attendee_email: str | None = None
     attendee_connections_count: int | None = None
+    attendee_shared_connections_count: int | None = None
     attendee_is_premium: bool = False
+    attendee_websites: list[str] = []
 
 
 class QuickCreateLeadRequest(BaseModel):
@@ -127,3 +131,53 @@ class QuickCreateLeadRequest(BaseModel):
 class AddReactionRequest(BaseModel):
     """Adicionar/remover reação a uma mensagem."""
     emoji: str = Field(..., min_length=1, max_length=10)
+
+
+# ── Atividade recente do lead ─────────────────────────────────────────
+
+class RecentActivityItem(BaseModel):
+    """Uma interação recente com o lead."""
+    id: uuid.UUID
+    channel: str
+    direction: str
+    content_preview: str | None = None
+    intent: str | None = None
+    created_at: datetime
+
+
+class RecentActivityResponse(BaseModel):
+    """Últimas interações do lead."""
+    items: list[RecentActivityItem]
+
+
+# ── Histórico de cadências do lead ────────────────────────────────────
+
+class CadenceHistoryItem(BaseModel):
+    """Cadência em que o lead participou/participa."""
+    cadence_id: uuid.UUID
+    cadence_name: str
+    mode: str
+    total_steps: int
+    completed_steps: int
+    last_step_at: datetime | None = None
+    is_active: bool
+
+
+class CadenceHistoryResponse(BaseModel):
+    """Lista de cadências do lead."""
+    items: list[CadenceHistoryItem]
+
+
+# ── Tags do lead ──────────────────────────────────────────────────────
+
+class LeadTagSchema(BaseModel):
+    """Tag associada a um lead."""
+    id: uuid.UUID
+    name: str
+    color: str
+
+
+class AddTagRequest(BaseModel):
+    """Adicionar tag a um lead."""
+    name: str = Field(..., min_length=1, max_length=50)
+    color: str = Field(default="#6366f1", max_length=7, pattern=r"^#[0-9a-fA-F]{6}$")

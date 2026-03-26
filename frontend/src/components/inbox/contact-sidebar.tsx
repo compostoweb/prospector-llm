@@ -5,7 +5,13 @@ import {
   useConversationLead,
   useQuickCreateLead,
   useSendToCRM,
+  useRecentActivity,
+  useCadenceHistory,
+  useLeadTags,
+  useAddTag,
+  useRemoveTag,
 } from "@/lib/api/hooks/use-inbox"
+import type { RecentActivityItem, CadenceHistoryItem, LeadTag } from "@/lib/api/hooks/use-inbox"
 import {
   User,
   Building2,
@@ -26,6 +32,15 @@ import {
   Users,
   Globe,
   Briefcase,
+  Activity,
+  Tag,
+  X,
+  Plus,
+  ChevronDown,
+  ChevronRight,
+  MessageSquare,
+  ArrowUpRight,
+  ArrowDownLeft,
 } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
@@ -53,10 +68,7 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
   }
 
   function handleSendCRM() {
-    sendCRM.mutate(
-      { chatId },
-      { onSuccess: () => setCrmSent(true) },
-    )
+    sendCRM.mutate({ chatId }, { onSuccess: () => setCrmSent(true) })
   }
 
   return (
@@ -124,6 +136,32 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
                     {lead.attendee_connections_count.toLocaleString("pt-BR")} conexões
                   </span>
                 )}
+                {lead?.attendee_shared_connections_count != null &&
+                  lead.attendee_shared_connections_count > 0 && (
+                    <span className="flex items-center gap-1">
+                      <Users size={11} aria-hidden="true" />
+                      {lead.attendee_shared_connections_count} em comum
+                    </span>
+                  )}
+              </div>
+            )}
+
+            {/* Websites */}
+            {lead?.attendee_websites && lead.attendee_websites.length > 0 && (
+              <div className="space-y-1">
+                {lead.attendee_websites.map((url) => (
+                  <a
+                    key={url}
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-xs text-(--accent) hover:underline"
+                  >
+                    <Globe size={11} aria-hidden="true" />
+                    <span className="truncate">{url.replace(/^https?:\/\/(www\.)?/, "")}</span>
+                    <ExternalLink size={9} className="shrink-0" aria-hidden="true" />
+                  </a>
+                ))}
               </div>
             )}
 
@@ -268,8 +306,37 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
                     {lead.attendee_connections_count.toLocaleString("pt-BR")} conexões
                   </span>
                 )}
+                {lead.attendee_shared_connections_count != null &&
+                  lead.attendee_shared_connections_count > 0 && (
+                    <span className="flex items-center gap-1">
+                      <Users size={11} aria-hidden="true" />
+                      {lead.attendee_shared_connections_count} em comum
+                    </span>
+                  )}
               </div>
             )}
+
+            {/* Websites */}
+            {lead.attendee_websites && lead.attendee_websites.length > 0 && (
+              <div className="space-y-1">
+                {lead.attendee_websites.map((url) => (
+                  <a
+                    key={url}
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-xs text-(--accent) hover:underline"
+                  >
+                    <Globe size={11} aria-hidden="true" />
+                    <span className="truncate">{url.replace(/^https?:\/\/(www\.)?/, "")}</span>
+                    <ExternalLink size={9} className="shrink-0" aria-hidden="true" />
+                  </a>
+                ))}
+              </div>
+            )}
+
+            {/* Tags */}
+            <TagsSection chatId={chatId} />
 
             {/* Pending tasks */}
             {lead.pending_tasks_count > 0 && (
@@ -278,7 +345,8 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
                 className="flex items-center gap-2 rounded-md border border-(--warning)/30 bg-(--warning)/5 px-3 py-2 text-xs font-medium text-(--warning) transition-colors hover:bg-(--warning)/10"
               >
                 <ClipboardList size={14} aria-hidden="true" />
-                {lead.pending_tasks_count} tarefa{lead.pending_tasks_count > 1 ? "s" : ""} pendente{lead.pending_tasks_count > 1 ? "s" : ""}
+                {lead.pending_tasks_count} tarefa{lead.pending_tasks_count > 1 ? "s" : ""} pendente
+                {lead.pending_tasks_count > 1 ? "s" : ""}
               </a>
             )}
 
@@ -311,12 +379,7 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
               </p>
 
               {lead.linkedin_url && (
-                <InfoRow
-                  icon={Linkedin}
-                  label="LinkedIn"
-                  value="Perfil"
-                  href={lead.linkedin_url}
-                />
+                <InfoRow icon={Linkedin} label="LinkedIn" value="Perfil" href={lead.linkedin_url} />
               )}
               {lead.email_corporate && (
                 <InfoRow icon={Mail} label="Email corp." value={lead.email_corporate} />
@@ -327,12 +390,8 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
               {!lead.email_corporate && !lead.email_personal && lead.attendee_email && (
                 <InfoRow icon={Mail} label="Email" value={lead.attendee_email} />
               )}
-              {lead.phone && (
-                <InfoRow icon={Phone} label="Telefone" value={lead.phone} />
-              )}
-              {lead.city && (
-                <InfoRow icon={MapPin} label="Cidade" value={lead.city} />
-              )}
+              {lead.phone && <InfoRow icon={Phone} label="Telefone" value={lead.phone} />}
+              {lead.city && <InfoRow icon={MapPin} label="Cidade" value={lead.city} />}
             </div>
 
             {/* Business info */}
@@ -341,14 +400,18 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
                 <p className="text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
                   Empresa
                 </p>
-                {lead.segment && (
-                  <InfoRow icon={Target} label="Segmento" value={lead.segment} />
-                )}
+                {lead.segment && <InfoRow icon={Target} label="Segmento" value={lead.segment} />}
                 {lead.industry && (
                   <InfoRow icon={Factory} label="Indústria" value={lead.industry} />
                 )}
               </div>
             )}
+
+            {/* Recent Activity */}
+            <RecentActivitySection chatId={chatId} />
+
+            {/* Cadence History */}
+            <CadenceHistorySection chatId={chatId} />
 
             {/* Notes */}
             {lead.notes && (
@@ -356,9 +419,7 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
                 <p className="text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
                   Observações
                 </p>
-                <p className="text-xs text-(--text-secondary) whitespace-pre-wrap">
-                  {lead.notes}
-                </p>
+                <p className="text-xs text-(--text-secondary) whitespace-pre-wrap">{lead.notes}</p>
               </div>
             )}
 
@@ -374,6 +435,279 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// ── Tags Section ──────────────────────────────────────────────────────
+
+const TAG_COLORS = [
+  "#6366f1",
+  "#ec4899",
+  "#f59e0b",
+  "#10b981",
+  "#3b82f6",
+  "#8b5cf6",
+  "#ef4444",
+  "#14b8a6",
+  "#f97316",
+  "#06b6d4",
+]
+
+function TagsSection({ chatId }: { chatId: string }) {
+  const { data: tags } = useLeadTags(chatId)
+  const addTag = useAddTag()
+  const removeTag = useRemoveTag()
+  const [showInput, setShowInput] = useState(false)
+  const [newTagName, setNewTagName] = useState("")
+  const [selectedColor, setSelectedColor] = useState(TAG_COLORS[0])
+
+  function handleAdd() {
+    const name = newTagName.trim()
+    if (!name) return
+    addTag.mutate(
+      { chatId, name, color: selectedColor },
+      {
+        onSuccess: () => {
+          setNewTagName("")
+          setShowInput(false)
+        },
+      },
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">Tags</p>
+        <button
+          type="button"
+          onClick={() => setShowInput(!showInput)}
+          title="Adicionar tag"
+          className="rounded p-0.5 text-(--text-tertiary) transition-colors hover:text-(--text-primary)"
+        >
+          <Plus size={12} aria-hidden="true" />
+        </button>
+      </div>
+
+      {/* Existing tags */}
+      {tags && tags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {tags.map((tag) => (
+            <span
+              key={tag.id}
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-white"
+              style={{ backgroundColor: tag.color }}
+            >
+              {tag.name}
+              <button
+                type="button"
+                onClick={() => removeTag.mutate({ chatId, tagId: tag.id })}
+                title={`Remover tag ${tag.name}`}
+                className="ml-0.5 rounded-full p-0.5 transition-colors hover:bg-white/20"
+              >
+                <X size={8} aria-hidden="true" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Add tag input */}
+      {showInput && (
+        <div className="space-y-2 rounded-md border border-(--border-default) bg-(--bg-overlay) p-2">
+          <input
+            type="text"
+            value={newTagName}
+            onChange={(e) => setNewTagName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleAdd()
+            }}
+            placeholder="Nome da tag..."
+            className="w-full rounded border border-(--border-default) bg-(--bg-surface) px-2 py-1 text-xs text-(--text-primary) placeholder:text-(--text-tertiary) focus:outline-none focus:ring-1 focus:ring-(--accent)"
+          />
+          <div className="flex flex-wrap gap-1">
+            {TAG_COLORS.map((color) => (
+              <button
+                key={color}
+                type="button"
+                onClick={() => setSelectedColor(color)}
+                title={`Cor ${color}`}
+                className="h-4 w-4 rounded-full transition-transform"
+                style={{
+                  backgroundColor: color,
+                  outline: selectedColor === color ? "2px solid var(--accent)" : "none",
+                  outlineOffset: "1px",
+                  transform: selectedColor === color ? "scale(1.2)" : "scale(1)",
+                }}
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={handleAdd}
+            disabled={!newTagName.trim() || addTag.isPending}
+            className="flex w-full items-center justify-center gap-1.5 rounded bg-(--accent) px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+          >
+            {addTag.isPending ? (
+              <Loader2 size={10} className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Tag size={10} aria-hidden="true" />
+            )}
+            Adicionar
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Recent Activity Section ───────────────────────────────────────────
+
+const CHANNEL_LABELS: Record<string, string> = {
+  linkedin_connect: "Conexão",
+  linkedin_dm: "DM LinkedIn",
+  email: "Email",
+}
+
+function RecentActivitySection({ chatId }: { chatId: string }) {
+  const { data } = useRecentActivity(chatId)
+  const [open, setOpen] = useState(false)
+
+  if (!data?.items || data.items.length === 0) return null
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between text-xs font-medium uppercase tracking-wider text-(--text-tertiary) transition-colors hover:text-(--text-secondary)"
+      >
+        <span className="flex items-center gap-1.5">
+          <Activity size={11} aria-hidden="true" />
+          Atividade recente
+        </span>
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+      </button>
+
+      {open && (
+        <div className="space-y-1.5">
+          {data.items.map((item) => (
+            <div
+              key={item.id}
+              className="flex items-start gap-2 rounded-md bg-(--bg-overlay) px-2.5 py-2"
+            >
+              <div className="mt-0.5 shrink-0">
+                {item.direction === "outbound" ? (
+                  <ArrowUpRight size={11} className="text-(--accent)" aria-hidden="true" />
+                ) : (
+                  <ArrowDownLeft size={11} className="text-emerald-500" aria-hidden="true" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-medium text-(--text-secondary)">
+                    {CHANNEL_LABELS[item.channel] ?? item.channel}
+                  </span>
+                  {item.intent && (
+                    <span className="rounded bg-(--accent-subtle) px-1 py-px text-[9px] font-medium text-(--accent-subtle-fg)">
+                      {item.intent}
+                    </span>
+                  )}
+                </div>
+                {item.content_preview && (
+                  <p className="mt-0.5 line-clamp-2 text-[10px] text-(--text-tertiary)">
+                    {item.content_preview}
+                  </p>
+                )}
+                <p className="mt-0.5 text-[9px] text-(--text-tertiary)">
+                  {new Date(item.created_at).toLocaleDateString("pt-BR", {
+                    day: "2-digit",
+                    month: "short",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Cadence History Section ──────────────────────────────────────────
+
+function CadenceHistorySection({ chatId }: { chatId: string }) {
+  const { data } = useCadenceHistory(chatId)
+  const [open, setOpen] = useState(false)
+
+  if (!data?.items || data.items.length === 0) return null
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between text-xs font-medium uppercase tracking-wider text-(--text-tertiary) transition-colors hover:text-(--text-secondary)"
+      >
+        <span className="flex items-center gap-1.5">
+          <MessageSquare size={11} aria-hidden="true" />
+          Cadências
+        </span>
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+      </button>
+
+      {open && (
+        <div className="space-y-2">
+          {data.items.map((c) => {
+            const pct =
+              c.total_steps > 0 ? Math.round((c.completed_steps / c.total_steps) * 100) : 0
+            return (
+              <div
+                key={c.cadence_id}
+                className="rounded-md border border-(--border-default) bg-(--bg-overlay) p-2.5"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-(--text-primary)">
+                    {c.cadence_name}
+                  </span>
+                  <span
+                    className={`rounded-full px-1.5 py-px text-[9px] font-medium ${
+                      c.is_active
+                        ? "bg-emerald-500/10 text-emerald-600"
+                        : "bg-(--bg-overlay) text-(--text-tertiary)"
+                    }`}
+                  >
+                    {c.is_active ? "Ativa" : "Finalizada"}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[10px] text-(--text-tertiary)">
+                  {c.mode} · {c.completed_steps}/{c.total_steps} steps
+                </p>
+                {/* Progress bar */}
+                <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-(--bg-surface)">
+                  <div
+                    className="h-full rounded-full bg-(--accent) transition-all"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                {c.last_step_at && (
+                  <p className="mt-1 text-[9px] text-(--text-tertiary)">
+                    Último step:{" "}
+                    {new Date(c.last_step_at).toLocaleDateString("pt-BR", {
+                      day: "2-digit",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                  </p>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

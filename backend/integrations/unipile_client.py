@@ -63,7 +63,9 @@ class ChatAttendee:
     location: str | None = None
     email: str | None = None
     connections_count: int | None = None
+    shared_connections_count: int | None = None
     is_premium: bool = False
+    websites: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -368,7 +370,9 @@ class UnipileClient:
                 "location": data.get("location") or None,
                 "email": contact_email,
                 "connections_count": data.get("connections_count"),
+                "shared_connections_count": data.get("shared_connections_count"),
                 "is_premium": bool(data.get("is_premium")),
+                "websites": data.get("websites") or [],
             }
             # Shorter TTL when name is empty so we retry sooner
             ttl = _PROFILE_CACHE_TTL if has_name else _PROFILE_CACHE_TTL_EMPTY
@@ -407,7 +411,9 @@ class UnipileClient:
             location=profile.get("location"),
             email=profile.get("email"),
             connections_count=profile.get("connections_count"),
+            shared_connections_count=profile.get("shared_connections_count"),
             is_premium=bool(profile.get("is_premium")),
+            websites=profile.get("websites") or [],
         )
 
     async def _get_last_message_preview(

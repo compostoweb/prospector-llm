@@ -29,19 +29,28 @@ from api.dependencies import get_effective_tenant_id, get_llm_registry, get_sess
 from core.config import settings
 from integrations.llm import LLMRegistry
 from integrations.unipile_client import unipile_client
-from models.enums import Channel, InteractionDirection, LeadSource, LeadStatus, ManualTaskStatus
+from models.enums import Channel, InteractionDirection, LeadSource, LeadStatus, ManualTaskStatus, StepStatus
 from models.interaction import Interaction
 from models.lead import Lead
+from models.lead_tag import LeadTag
 from models.manual_task import ManualTask
+from models.cadence_step import CadenceStep
+from models.cadence import Cadence
 from schemas.inbox import (
     AddReactionRequest,
+    AddTagRequest,
+    CadenceHistoryItem,
+    CadenceHistoryResponse,
     ChatAttendeeSchema,
     ChatMessageSchema,
     ChatMessagesResponse,
     ConversationLeadResponse,
     ConversationListResponse,
     ConversationSchema,
+    LeadTagSchema,
     QuickCreateLeadRequest,
+    RecentActivityItem,
+    RecentActivityResponse,
     SendMessageRequest,
     SuggestReplyRequest,
     SuggestReplyResponse,
@@ -397,7 +406,9 @@ async def get_conversation_lead(
     attendee_location = first_att.location if first_att else None
     attendee_email = first_att.email if first_att else None
     attendee_connections_count = first_att.connections_count if first_att else None
+    attendee_shared_connections_count = first_att.shared_connections_count if first_att else None
     attendee_is_premium = first_att.is_premium if first_att else False
+    attendee_websites = list(first_att.websites) if first_att else []
 
     lead = await _find_lead_by_attendees(chat.attendees, tenant_id, db)
     if not lead:
@@ -411,7 +422,9 @@ async def get_conversation_lead(
             attendee_location=attendee_location,
             attendee_email=attendee_email,
             attendee_connections_count=attendee_connections_count,
+            attendee_shared_connections_count=attendee_shared_connections_count,
             attendee_is_premium=attendee_is_premium,
+            attendee_websites=attendee_websites,
         )
 
     # Conta tarefas pendentes do lead
@@ -450,7 +463,9 @@ async def get_conversation_lead(
         attendee_location=attendee_location,
         attendee_email=attendee_email,
         attendee_connections_count=attendee_connections_count,
+        attendee_shared_connections_count=attendee_shared_connections_count,
         attendee_is_premium=attendee_is_premium,
+        attendee_websites=attendee_websites,
     )
 
 
@@ -625,7 +640,211 @@ async def remove_reaction(
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
+# ── Recent Activity ───────────────────────────────────────────────────
 
+@router.get(
+    "/conversations/{chat_id}/activity",
+    response_model=RecentActivityResponse,
+)
+async def get_lead_recent_activity(
+    chat_id: str,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> RecentActivityResponse:
+    """Retorna últimas interações do lead vinculado à conversa."""
+    chat = await unipile_client.get_chat(chat_id)
+    if not chat:
+        return RecentActivityResponse(items=[])
+
+    lead = await _find_lead_by_attendees(chat.attendees, tenant_id, db)
+    if not lead:
+        return RecentActivityResponse(items=[])
+
+    result = await db.execute(
+        select(Interaction)
+        .where(
+            Interaction.lead_id == lead.id,
+            Interaction.tenant_id == tenant_id,
+        )
+        .order_by(Interaction.created_at.desc())
+        .limit(10)
+    )
+    interactions = result.scalars().all()
+
+    return RecentActivityResponse(
+        items=[
+            RecentActivityItem(
+                id=i.id,
+                channel=i.channel.value,
+                direction=i.direction.value,
+                content_preview=i.content_text[:120] if i.content_text else None,
+                intent=i.intent.value if i.intent else None,
+                created_at=i.created_at,
+            )
+            for i in interactions
+        ]
+    )
+
+
+# ── Cadence History ──────────────────────────────────────────────────
+
+@router.get(
+    "/conversations/{chat_id}/cadences",
+    response_model=CadenceHistoryResponse,
+)
+async def get_lead_cadence_history(
+    chat_id: str,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> CadenceHistoryResponse:
+    """Retorna cadências em que o lead participou/participa."""
+    chat = await unipile_client.get_chat(chat_id)
+    if not chat:
+        return CadenceHistoryResponse(items=[])
+
+    lead = await _find_lead_by_attendees(chat.attendees, tenant_id, db)
+    if not lead:
+        return CadenceHistoryResponse(items=[])
+
+    # Busca cadências distintas em que o lead tem steps
+    result = await db.execute(
+        select(
+            Cadence.id,
+            Cadence.name,
+            Cadence.mode,
+            Cadence.is_active,
+            func.count(CadenceStep.id).label("total_steps"),
+            func.count(CadenceStep.id).filter(
+                CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED])
+            ).label("completed_steps"),
+            func.max(CadenceStep.sent_at).label("last_step_at"),
+        )
+        .join(CadenceStep, CadenceStep.cadence_id == Cadence.id)
+        .where(
+            CadenceStep.lead_id == lead.id,
+            CadenceStep.tenant_id == tenant_id,
+        )
+        .group_by(Cadence.id, Cadence.name, Cadence.mode, Cadence.is_active)
+        .order_by(func.max(CadenceStep.sent_at).desc().nulls_last())
+    )
+    rows = result.all()
+
+    return CadenceHistoryResponse(
+        items=[
+            CadenceHistoryItem(
+                cadence_id=row.id,
+                cadence_name=row.name,
+                mode=row.mode,
+                total_steps=row.total_steps,
+                completed_steps=row.completed_steps,
+                last_step_at=row.last_step_at,
+                is_active=row.is_active,
+            )
+            for row in rows
+        ]
+    )
+
+
+# ── Tags ──────────────────────────────────────────────────────────────
+
+@router.get(
+    "/conversations/{chat_id}/tags",
+    response_model=list[LeadTagSchema],
+)
+async def get_lead_tags(
+    chat_id: str,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> list[LeadTagSchema]:
+    """Retorna tags do lead vinculado à conversa."""
+    chat = await unipile_client.get_chat(chat_id)
+    if not chat:
+        return []
+
+    lead = await _find_lead_by_attendees(chat.attendees, tenant_id, db)
+    if not lead:
+        return []
+
+    result = await db.execute(
+        select(LeadTag).where(
+            LeadTag.lead_id == lead.id,
+            LeadTag.tenant_id == tenant_id,
+        )
+    )
+    tags = result.scalars().all()
+    return [LeadTagSchema(id=t.id, name=t.name, color=t.color) for t in tags]
+
+
+@router.post(
+    "/conversations/{chat_id}/tags",
+    response_model=LeadTagSchema,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_lead_tag(
+    chat_id: str,
+    body: AddTagRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> LeadTagSchema:
+    """Adiciona tag a um lead a partir da conversa do inbox."""
+    chat = await unipile_client.get_chat(chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat não encontrado")
+
+    lead = await _find_lead_by_attendees(chat.attendees, tenant_id, db)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead não vinculado a esta conversa")
+
+    # Verifica duplicata
+    existing = await db.execute(
+        select(LeadTag).where(
+            LeadTag.lead_id == lead.id,
+            LeadTag.name == body.name,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Tag já existe para este lead")
+
+    tag = LeadTag(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        lead_id=lead.id,
+        name=body.name,
+        color=body.color,
+    )
+    db.add(tag)
+    await db.commit()
+    await db.refresh(tag)
+
+    return LeadTagSchema(id=tag.id, name=tag.name, color=tag.color)
+
+
+@router.delete(
+    "/conversations/{chat_id}/tags/{tag_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def remove_lead_tag(
+    chat_id: str,
+    tag_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> None:
+    """Remove tag de um lead."""
+    result = await db.execute(
+        select(LeadTag).where(
+            LeadTag.id == tag_id,
+            LeadTag.tenant_id == tenant_id,
+        )
+    )
+    tag = result.scalar_one_or_none()
+    if not tag:
+        raise HTTPException(status_code=404, detail="Tag não encontrada")
+
+    await db.delete(tag)
+    await db.commit()
+
+
+# ── Internal helpers ──────────────────────────────────────────────────
 async def _find_lead_for_chat(
     attendees: list,
     tenant_id: uuid.UUID,

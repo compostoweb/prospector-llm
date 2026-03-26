@@ -78,7 +78,34 @@ export interface ConversationLead {
   attendee_location: string | null
   attendee_email: string | null
   attendee_connections_count: number | null
+  attendee_shared_connections_count: number | null
   attendee_is_premium: boolean
+  attendee_websites: string[]
+}
+
+export interface RecentActivityItem {
+  id: string
+  channel: string
+  direction: string
+  content_preview: string | null
+  intent: string | null
+  created_at: string
+}
+
+export interface CadenceHistoryItem {
+  cadence_id: string
+  cadence_name: string
+  mode: string
+  total_steps: number
+  completed_steps: number
+  last_step_at: string | null
+  is_active: boolean
+}
+
+export interface LeadTag {
+  id: string
+  name: string
+  color: string
 }
 
 export type SuggestTone = "formal" | "casual" | "objetiva" | "consultiva"
@@ -142,10 +169,9 @@ export function useChatMessages(chatId: string, cursor?: string) {
       const query: Record<string, string> = {}
       if (cursor) query.cursor = cursor
 
-      const { data, error } = await client.GET(
-        `/inbox/conversations/${chatId}/messages` as never,
-        { params: { query } as never },
-      )
+      const { data, error } = await client.GET(`/inbox/conversations/${chatId}/messages` as never, {
+        params: { query } as never,
+      })
       if (error) throw new Error("Falha ao carregar mensagens")
       return data as ChatMessagesResponse
     },
@@ -161,9 +187,7 @@ export function useConversationLead(chatId: string) {
     queryKey: ["inbox", "lead", chatId],
     queryFn: async (): Promise<ConversationLead> => {
       const client = createBrowserClient(session?.accessToken)
-      const { data, error } = await client.GET(
-        `/inbox/conversations/${chatId}/lead` as never,
-      )
+      const { data, error } = await client.GET(`/inbox/conversations/${chatId}/lead` as never)
       if (error) throw new Error("Falha ao carregar dados do lead")
       return data as ConversationLead
     },
@@ -179,18 +203,11 @@ export function useSendMessage() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({
-      chatId,
-      text,
-    }: {
-      chatId: string
-      text: string
-    }) => {
+    mutationFn: async ({ chatId, text }: { chatId: string; text: string }) => {
       const client = createBrowserClient(session?.accessToken)
-      const { data, error } = await client.POST(
-        `/inbox/conversations/${chatId}/send` as never,
-        { body: { text } as never },
-      )
+      const { data, error } = await client.POST(`/inbox/conversations/${chatId}/send` as never, {
+        body: { text } as never,
+      })
       if (error) throw new Error("Falha ao enviar mensagem")
       return data
     },
@@ -208,13 +225,7 @@ export function useSendVoiceMessage() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({
-      chatId,
-      audioBlob,
-    }: {
-      chatId: string
-      audioBlob: Blob
-    }) => {
+    mutationFn: async ({ chatId, audioBlob }: { chatId: string; audioBlob: Blob }) => {
       const accessToken = session?.accessToken
       if (!accessToken) throw new Error("Sessão expirada")
 
@@ -253,10 +264,9 @@ export function useSuggestReply() {
       tone: SuggestTone
     }): Promise<{ suggested_text: string; tone: string }> => {
       const client = createBrowserClient(session?.accessToken)
-      const { data, error } = await client.POST(
-        `/inbox/conversations/${chatId}/suggest` as never,
-        { body: { tone } as never },
-      )
+      const { data, error } = await client.POST(`/inbox/conversations/${chatId}/suggest` as never, {
+        body: { tone } as never,
+      })
       if (error) throw new Error("Falha ao gerar sugestão")
       return data as { suggested_text: string; tone: string }
     },
@@ -311,9 +321,7 @@ export function useSendToCRM() {
       chatId: string
     }): Promise<{ person_id: number; deal_id: number | null; status: string }> => {
       const client = createBrowserClient(session?.accessToken)
-      const { data, error } = await client.POST(
-        `/inbox/conversations/${chatId}/send-crm` as never,
-      )
+      const { data, error } = await client.POST(`/inbox/conversations/${chatId}/send-crm` as never)
       if (error) throw new Error("Falha ao enviar para CRM")
       return data as { person_id: number; deal_id: number | null; status: string }
     },
@@ -440,6 +448,109 @@ export function useRemoveReaction() {
     onSettled: (_data, _err, { chatId }) => {
       void queryClient.invalidateQueries({
         queryKey: ["inbox", "messages", chatId],
+      })
+    },
+  })
+}
+
+// ── Recent Activity ───────────────────────────────────────────────────
+
+export function useRecentActivity(chatId: string) {
+  const { data: session } = useSession()
+
+  return useQuery({
+    queryKey: ["inbox", "activity", chatId],
+    queryFn: async (): Promise<{ items: RecentActivityItem[] }> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.GET(`/inbox/conversations/${chatId}/activity` as never)
+      if (error) throw new Error("Falha ao carregar atividade")
+      return data as { items: RecentActivityItem[] }
+    },
+    staleTime: 60 * 1000,
+    enabled: !!session?.accessToken && !!chatId,
+  })
+}
+
+// ── Cadence History ──────────────────────────────────────────────────
+
+export function useCadenceHistory(chatId: string) {
+  const { data: session } = useSession()
+
+  return useQuery({
+    queryKey: ["inbox", "cadences", chatId],
+    queryFn: async (): Promise<{ items: CadenceHistoryItem[] }> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.GET(`/inbox/conversations/${chatId}/cadences` as never)
+      if (error) throw new Error("Falha ao carregar cadências")
+      return data as { items: CadenceHistoryItem[] }
+    },
+    staleTime: 60 * 1000,
+    enabled: !!session?.accessToken && !!chatId,
+  })
+}
+
+// ── Tags ──────────────────────────────────────────────────────────────
+
+export function useLeadTags(chatId: string) {
+  const { data: session } = useSession()
+
+  return useQuery({
+    queryKey: ["inbox", "tags", chatId],
+    queryFn: async (): Promise<LeadTag[]> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.GET(`/inbox/conversations/${chatId}/tags` as never)
+      if (error) throw new Error("Falha ao carregar tags")
+      return data as LeadTag[]
+    },
+    staleTime: 30 * 1000,
+    enabled: !!session?.accessToken && !!chatId,
+  })
+}
+
+export function useAddTag() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      chatId,
+      name,
+      color,
+    }: {
+      chatId: string
+      name: string
+      color?: string | undefined
+    }): Promise<LeadTag> => {
+      const client = createBrowserClient(session?.accessToken)
+      const body: Record<string, string> = { name }
+      if (color) body.color = color
+      const { data, error } = await client.POST(`/inbox/conversations/${chatId}/tags` as never, {
+        body: body as never,
+      })
+      if (error) throw new Error("Falha ao adicionar tag")
+      return data as LeadTag
+    },
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["inbox", "tags", variables.chatId],
+      })
+    },
+  })
+}
+
+export function useRemoveTag() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ chatId, tagId }: { chatId: string; tagId: string }) => {
+      const client = createBrowserClient(session?.accessToken)
+      const { error } = await client.DELETE(`/inbox/conversations/${chatId}/tags/${tagId}` as never)
+      if (error) throw new Error("Falha ao remover tag")
+    },
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["inbox", "tags", variables.chatId],
       })
     },
   })
