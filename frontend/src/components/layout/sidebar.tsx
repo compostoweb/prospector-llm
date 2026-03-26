@@ -20,6 +20,7 @@ import {
   MessageSquare,
   Bell,
   LogOut,
+  Search,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useUIStore } from "@/store/ui-store"
@@ -41,6 +42,7 @@ import {
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/leads", label: "Leads", icon: Users },
+  { href: "/leads/busca-linkedin", label: "Busca LinkedIn", icon: Search },
   { href: "/listas", label: "Listas", icon: List },
   { href: "/cadencias", label: "Cadências", icon: GitBranch },
   { href: "/tarefas", label: "Tarefas", icon: ClipboardList },
@@ -93,26 +95,33 @@ export function Sidebar() {
 
       {/* Navegação principal */}
       <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2">
-        {navItems.map(({ href, label, icon: Icon }) => {
-          const active = pathname === href || pathname.startsWith(href + "/")
-          return (
-            <Link
-              key={href}
-              href={href}
-              title={sidebarCollapsed ? label : undefined}
-              className={cn(
-                "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors",
-                active
-                  ? "bg-(--accent-subtle) text-(--accent-subtle-fg) font-medium"
-                  : "text-(--text-secondary) hover:bg-(--bg-overlay) hover:text-(--text-primary)",
-                sidebarCollapsed && "justify-center",
-              )}
-            >
-              <Icon size={16} aria-hidden="true" className="shrink-0" />
-              {!sidebarCollapsed && <span>{label}</span>}
-            </Link>
-          )
-        })}
+        {(() => {
+          // Usa o href mais específico (mais longo) que corresponde ao pathname atual
+          const activeHref = [...navItems]
+            .sort((a, b) => b.href.length - a.href.length)
+            .find(({ href }) => pathname === href || pathname.startsWith(href + "/"))?.href
+
+          return navItems.map(({ href, label, icon: Icon }) => {
+            const active = href === activeHref
+            return (
+              <Link
+                key={href}
+                href={href}
+                title={sidebarCollapsed ? label : undefined}
+                className={cn(
+                  "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors",
+                  active
+                    ? "bg-(--accent-subtle) text-(--accent-subtle-fg) font-medium"
+                    : "text-(--text-secondary) hover:bg-(--bg-overlay) hover:text-(--text-primary)",
+                  sidebarCollapsed && "justify-center",
+                )}
+              >
+                <Icon size={16} aria-hidden="true" className="shrink-0" />
+                {!sidebarCollapsed && <span>{label}</span>}
+              </Link>
+            )
+          })
+        })()}
 
         {/* Separador */}
         <div className="my-2 border-t border-(--border-subtle)" />

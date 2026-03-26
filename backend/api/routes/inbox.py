@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.dependencies import get_effective_tenant_id, get_llm_registry, get_session_flexible
 from core.config import settings
 from integrations.llm import LLMRegistry
+from integrations.s3_client import S3Client
 from integrations.unipile_client import unipile_client
 from models.enums import Channel, InteractionDirection, LeadSource, LeadStatus, ManualTaskStatus, StepStatus
 from models.interaction import Interaction
@@ -252,13 +253,16 @@ async def send_voice(
     if not attendee_ids:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Sem destinatário")
 
-    # Salva áudio temporariamente no Redis
-    from core.redis_client import redis_client
+    # Faz upload para S3 para gerar URL pública acessível pela Unipile
     audio_bytes = await audio.read()
-    audio_key = f"voice:inbox:{chat_id}:{uuid.uuid4()}"
-    await redis_client.set(audio_key, audio_bytes, ex=3600)
-
-    audio_url = f"/api/audio/temp/{audio_key}"
+    s3 = S3Client()
+    filename = audio.filename or "voice.mp3"
+    _key, audio_url = s3.upload_audio(
+        data=audio_bytes,
+        tenant_id=str(tenant_id),
+        filename=filename,
+        content_type=audio.content_type or "audio/mpeg",
+    )
 
     result = await unipile_client.send_linkedin_voice_note(
         account_id=account_id,

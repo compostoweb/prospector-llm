@@ -281,3 +281,111 @@ export function useEnrollLead() {
     },
   })
 }
+
+// ── LinkedIn Search ───────────────────────────────────────────────────
+
+export interface LinkedInSearchParams {
+  keywords: string
+  titles?: string[] | undefined
+  companies?: string[] | undefined
+  location_ids?: string[] | undefined
+  industry_ids?: string[] | undefined
+  network_distance?: number[] | undefined // [1, 2, 3]
+  limit?: number | undefined
+  cursor?: string | undefined
+}
+
+export interface LinkedInProfile {
+  provider_id: string
+  name: string
+  headline: string | null
+  company: string | null
+  location: string | null
+  profile_url: string | null
+  profile_picture_url: string | null
+  network_distance: number | null // 1=1º grau, 2=2º grau, 3=3º+
+}
+
+export interface LinkedInSearchResult {
+  items: LinkedInProfile[]
+  cursor: string | null
+}
+
+export interface LinkedInImportResult {
+  created: number
+  skipped: number
+  lead_ids: string[]
+}
+
+export function useSearchLinkedIn() {
+  const { data: session, status } = useSession()
+
+  return useMutation({
+    mutationFn: async (params: LinkedInSearchParams): Promise<LinkedInSearchResult> => {
+      if (status !== "authenticated" || !session?.accessToken) {
+        throw new Error("Sessão não disponível. Recarregue a página.")
+      }
+      const client = createBrowserClient(session.accessToken)
+      const { data, error } = await client.POST("/leads/search-linkedin" as never, {
+        body: params as never,
+      })
+      if (error) throw new Error("Falha na busca LinkedIn")
+      return data as LinkedInSearchResult
+    },
+  })
+}
+
+export function useImportLinkedInProfiles() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      profiles,
+      list_id,
+    }: {
+      profiles: LinkedInProfile[]
+      list_id?: string
+    }): Promise<LinkedInImportResult> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.POST("/leads/import-linkedin" as never, {
+        body: { profiles, list_id: list_id ?? null } as never,
+      })
+      if (error) throw new Error("Falha ao importar leads do LinkedIn")
+      return data as LinkedInImportResult
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["leads"] })
+    },
+  })
+}
+
+export interface LinkedInSearchParamItem {
+  id: string
+  title: string
+}
+
+/**
+ * Busca todos os itens de LOCATION ou INDUSTRY disponíveis via Unipile.
+ * O endpoint retorna uma lista estática (ignora query), então buscamos
+ * uma única vez por tipo e filtramos no cliente.
+ */
+export function useLinkedInSearchParams(type: "LOCATION" | "INDUSTRY") {
+  const { data: session } = useSession()
+
+  return useQuery<LinkedInSearchParamItem[]>({
+    queryKey: ["linkedin-search-params", type],
+    queryFn: async () => {
+      if (!session?.accessToken) return []
+      const client = createBrowserClient(session.accessToken)
+      const { data, error } = await client.GET("/leads/linkedin-search-params" as never, {
+        params: { query: { type } } as never,
+      })
+      if (error) return []
+      const result = data as { items: LinkedInSearchParamItem[] }
+      return result.items ?? []
+    },
+    enabled: !!session?.accessToken,
+    staleTime: 30 * 60 * 1000,
+  })
+}

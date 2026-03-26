@@ -1,12 +1,13 @@
 ﻿"use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { useLeads } from "@/lib/api/hooks/use-leads"
 import { useUIStore } from "@/store/ui-store"
 import { LeadTable } from "@/components/leads/lead-table"
 import { LeadCreateDialog } from "@/components/leads/lead-create-dialog"
 import { LeadImportDialog } from "@/components/leads/lead-import-dialog"
-import { Search, X } from "lucide-react"
+import { Search, X, Linkedin } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const STATUS_OPTIONS = [
@@ -49,6 +50,13 @@ export default function LeadsPage() {
         </div>
         <div className="flex gap-2">
           <LeadImportDialog />
+          <Link
+            href="/leads/busca-linkedin"
+            className="inline-flex items-center gap-1.5 rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-1.5 text-sm font-medium text-(--text-secondary) transition-colors hover:bg-(--bg-overlay) hover:text-(--text-primary)"
+          >
+            <Linkedin size={14} />
+            Busca LinkedIn
+          </Link>
           <LeadCreateDialog />
         </div>
       </div>

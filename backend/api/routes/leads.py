@@ -436,6 +436,128 @@ async def import_leads(
     return LeadImportResponse(imported=imported, duplicates=duplicates, errors=errors)
 
 
+# ── LinkedIn Search ───────────────────────────────────────────────────
+
+from pydantic import BaseModel as _BaseModel  # noqa: E402
+
+
+class LinkedInSearchRequest(_BaseModel):
+    keywords: str
+    # filtros multi-valor (mapeiam para o schema Unipile Classic - People)
+    titles: list[str] | None = None          # advanced_keywords.title (OR-joined)
+    companies: list[str] | None = None       # advanced_keywords.company (OR-joined)
+    location_ids: list[str] | None = None    # IDs numéricos do lookup /linkedin-search-params
+    industry_ids: list[str] | None = None    # IDs numéricos do lookup /linkedin-search-params
+    network_distance: list[int] | None = None  # [1=1º, 2=2º, 3=3º+]
+    limit: int = 25
+    cursor: str | None = None
+
+
+class LinkedInImportRequest(_BaseModel):
+    profiles: list[dict]
+    list_id: uuid.UUID | None = None
+
+
+@router.post("/search-linkedin", response_model=dict)
+async def search_linkedin(
+    body: LinkedInSearchRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> dict:
+    """
+    Busca perfis LinkedIn via Unipile.
+    Não importa — apenas retorna os resultados para preview.
+    """
+    from core.config import settings
+    from models.tenant import TenantIntegration
+    from services.linkedin_search_service import search_linkedin_profiles
+
+    integ_result = await db.execute(
+        select(TenantIntegration).where(TenantIntegration.tenant_id == tenant_id)
+    )
+    integration = integ_result.scalar_one_or_none()
+    linkedin_account_id = (
+        (integration and integration.unipile_linkedin_account_id)
+        or settings.UNIPILE_ACCOUNT_ID_LINKEDIN
+        or ""
+    )
+
+    if not linkedin_account_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Conta LinkedIn não configurada para este tenant.",
+        )
+
+    result = await search_linkedin_profiles(
+        account_id=linkedin_account_id,
+        keywords=body.keywords,
+        titles=body.titles,
+        companies=body.companies,
+        location_ids=body.location_ids,
+        industry_ids=body.industry_ids,
+        network_distance=body.network_distance,
+        limit=body.limit,
+        cursor=body.cursor,
+    )
+    return result
+
+
+@router.get("/linkedin-search-params", response_model=dict)
+async def linkedin_search_params(
+    type: Annotated[str, Query(description="LOCATION | INDUSTRY")],
+    query: Annotated[str, Query(description="Texto para busca")] = "",
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> dict:
+    """
+    Faz lookup de IDs de localização ou setor no LinkedIn via Unipile.
+    Necessário para usar os filtros native do LinkedIn Search.
+    """
+    from core.config import settings
+    from models.tenant import TenantIntegration
+
+    integ_result = await db.execute(
+        select(TenantIntegration).where(TenantIntegration.tenant_id == tenant_id)
+    )
+    integration = integ_result.scalar_one_or_none()
+    linkedin_account_id = (
+        (integration and integration.unipile_linkedin_account_id)
+        or settings.UNIPILE_ACCOUNT_ID_LINKEDIN
+        or ""
+    )
+    if not linkedin_account_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Conta LinkedIn não configurada para este tenant.",
+        )
+    from integrations.unipile_client import unipile_client
+    return await unipile_client.search_linkedin_params(
+        account_id=linkedin_account_id,
+        param_type=type,
+        query=query,
+    )
+
+
+@router.post("/import-linkedin", response_model=dict, status_code=status.HTTP_201_CREATED)
+async def import_linkedin(
+    body: LinkedInImportRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> dict:
+    """
+    Importa perfis selecionados do LinkedIn como leads (source=linkedin_search).
+    Deduplica por linkedin_profile_id dentro do tenant.
+    """
+    from services.linkedin_search_service import import_linkedin_profiles
+
+    return await import_linkedin_profiles(
+        profiles=body.profiles,
+        tenant_id=tenant_id,
+        list_id=body.list_id,
+        db=db,
+    )
+
+
 # ── Helper ────────────────────────────────────────────────────────────
 
 async def _get_lead_or_404(

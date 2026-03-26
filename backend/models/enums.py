@@ -16,6 +16,9 @@ class Channel(str, Enum):
     """Canais de comunicação disponíveis."""
     LINKEDIN_CONNECT = "linkedin_connect"
     LINKEDIN_DM = "linkedin_dm"
+    LINKEDIN_POST_REACTION = "linkedin_post_reaction"
+    LINKEDIN_POST_COMMENT = "linkedin_post_comment"
+    LINKEDIN_INMAIL = "linkedin_inmail"
     EMAIL = "email"
     MANUAL_TASK = "manual_task"
 
@@ -25,6 +28,7 @@ class LeadSource(str, Enum):
     MANUAL = "manual"
     APIFY_MAPS = "apify_maps"
     APIFY_LINKEDIN = "apify_linkedin"
+    LINKEDIN_SEARCH = "linkedin_search"
     IMPORT = "import"
     API = "api"
 
@@ -78,6 +82,9 @@ class StepType(str, Enum):
     LINKEDIN_DM_VOICE = "linkedin_dm_voice"
     LINKEDIN_DM_FOLLOWUP = "linkedin_dm_followup"
     LINKEDIN_DM_BREAKUP = "linkedin_dm_breakup"
+    LINKEDIN_POST_REACTION = "linkedin_post_reaction"
+    LINKEDIN_POST_COMMENT = "linkedin_post_comment"
+    LINKEDIN_INMAIL = "linkedin_inmail"
     EMAIL_FIRST = "email_first"
     EMAIL_FOLLOWUP = "email_followup"
     EMAIL_BREAKUP = "email_breakup"

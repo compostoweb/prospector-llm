@@ -259,6 +259,50 @@ Regras:
 Exemplo de estilo:
 "[Nome], sei que [tema] talvez não seja prioridade agora. Deixo a porta aberta — quando quiser trocar uma ideia sobre [benefício real], estou por aqui. Um abraço."
 """.strip(),
+
+    "linkedin_post_comment": """
+TIPO: Comentário em post recente do lead no LinkedIn
+OBJETIVO: Gerar reciprocidade e visibilidade — aparecer de forma positiva no radar do lead antes da abordagem direta.
+
+Regras:
+- MÁXIMO 2 frases curtas (até 280 caracteres no total)
+- Use o conteúdo do post do lead (disponível em POSTS RECENTES DO LEAD) para criar um comentário genuíno e específico
+- Demonstre que leu e entendeu o post — nunca pareça genérico ou bajulador
+- Adicione perspectiva: concorde com dado, amplie o raciocínio, traga analogia do setor, ou faça uma pergunta inteligente
+- Tom: colega do setor que achou o ponto de vista interessante — positivo mas com substância
+- PROIBIDO: "Que post incrível!", "Excelente perspectiva!", bajulação vazia
+- PROIBIDO: se apresentar, mencionar produto, incluir links, pedir reunião
+- PROIBIDO: comentário genérico que poderia servir para qualquer post
+
+Bons exemplos de estilo:
+"Dado importante esse sobre [X]. Na prática tenho visto [empresas do setor] adotando [Y] com resultados interessantes — curioso saber como vocês encaram isso."
+"Esse ponto sobre [tema] ressoa bastante. Exatamente o que os times de [cargo] mais sentem quando [situação]. Boa observação."
+""".strip(),
+
+    "linkedin_inmail": """
+TIPO: InMail LinkedIn (mensagem para não-conexão, requer Premium)
+OBJETIVO: Primeira abordagem direta a alguém fora da rede — objetivo é iniciar diálogo genuíno.
+
+O InMail é uma oportunidade rara e valiosa com leads fora da sua rede. Use com o mesmo rigor de um cold email premium.
+O ASSUNTO é fundamental — é a primeira coisa que o lead vê.
+
+FORMATO DE SAÍDA — Retorne EXATAMENTE este JSON (sem markdown, sem comentários):
+{"subject": "Assunto do InMail aqui", "body": "Corpo do InMail aqui"}
+
+Regras do ASSUNTO (subject):
+- Máximo 60 caracteres
+- Específico e intrigante — referencia algo real do lead/empresa/setor
+- PROIBIDO: "Oportunidade", "Parceria", "Proposta", "Novidade", soa comercial demais
+- Bons exemplos: "[Empresa] + [tendência do setor]", "[Cargo] que enfrenta [desafio específico]", "Pergunta sobre [tema que o lead postou/comentou]"
+
+Regras do CORPO (body):
+- Máximo 200 palavras, 3 parágrafos curtos
+- Parágrafo 1: hook específico — o que te motivou a contatar (post, notícia, cargo, empresa, dado do setor)
+- Parágrafo 2: contexto de valor — dado, insight, problema que você observa no setor ou no perfil do lead
+- Parágrafo 3: CTA de baixo atrito — pergunta de opinião ou binária. NUNCA "agendar call"
+- PROIBIDO: apresentação comercial, "nossa solução", preços, links de calendário
+- Tom: executivo, curioso, peer-to-peer — como se escrevesse para um contato de segundo grau
+""".strip(),
 }
 
 
@@ -326,6 +370,23 @@ def _build_user_prompt(
     linkedin_post = context.get("recent_linkedin_post", "Não disponível")
     news = context.get("company_news", "Nenhuma notícia recente")
 
+    # Posts recentes do lead (cache armazenado no modelo)
+    recent_posts_block = ""
+    if getattr(lead, "linkedin_recent_posts_json", None):
+        try:
+            import json as _json  # noqa: PLC0415
+            posts_data = _json.loads(lead.linkedin_recent_posts_json)  # type: ignore[arg-type]
+            if posts_data:
+                lines = ["POSTS RECENTES DO LEAD NO LINKEDIN:"]
+                for idx, p in enumerate(posts_data[:3], 1):
+                    content = (p.get("content") or "").strip()
+                    published = p.get("published_at", "")
+                    if content:
+                        lines.append(f"Post {idx} ({published[:10] if published else 'data desconhecida'}): {content[:400]}")
+                recent_posts_block = "\n".join(lines)
+        except (ValueError, TypeError):
+            pass
+
     step_key = resolve_step_key(
         channel, step, total_steps, use_voice, previous_channel, step_type=step_type,
     )
@@ -375,7 +436,7 @@ PESQUISA SOBRE A EMPRESA:
 POST RECENTE DO LEAD NO LINKEDIN:
 {linkedin_post}
 
-NOTÍCIAS RECENTES DA EMPRESA/SETOR:
+{recent_posts_block + chr(10) if recent_posts_block else ""}NOTÍCIAS RECENTES DA EMPRESA/SETOR:
 {news}
 
 POSIÇÃO NA CADÊNCIA: Step {step} de {total_steps}.
@@ -400,6 +461,9 @@ def resolve_step_key(
     # Override manual — o usuário escolheu explicitamente o tipo
     if step_type and step_type in STEP_INSTRUCTIONS:
         return step_type
+
+    if channel in ("linkedin_post_comment", "linkedin_inmail"):
+        return channel
 
     if channel == "linkedin_connect":
         return "linkedin_connect"

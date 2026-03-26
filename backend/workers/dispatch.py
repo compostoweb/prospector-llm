@@ -69,6 +69,7 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
     from models.enums import Channel, InteractionDirection, StepStatus
     from models.interaction import Interaction
     from models.lead import Lead
+    from models.tenant import TenantIntegration
     from services.ai_composer import AIComposer
     from core.config import settings
     from core.redis_client import redis_client
@@ -110,6 +111,22 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
             logger.error("dispatch.missing_lead_or_cadence", step_id=step_id)
             return {"step_id": step_id, "status": "failed"}
 
+        # ── Resolve account_ids do tenant (fallback para settings globais) ──
+        integ_result = await db.execute(
+            select(TenantIntegration).where(TenantIntegration.tenant_id == tid)
+        )
+        integration = integ_result.scalar_one_or_none()
+        linkedin_account_id = (
+            (integration and integration.unipile_linkedin_account_id)
+            or settings.UNIPILE_ACCOUNT_ID_LINKEDIN
+            or ""
+        )
+        gmail_account_id = (
+            (integration and integration.unipile_gmail_account_id)
+            or settings.UNIPILE_ACCOUNT_ID_GMAIL
+            or ""
+        )
+
         try:
             # ── Contexto do website (cache 24h, assíncrono) ───────────
             context: dict = {}
@@ -123,22 +140,26 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                 context["company_info"] = company_text
 
             # ── Composição de mensagem via LLM ────────────────────────
+            # LINKEDIN_POST_REACTION não precisa de LLM — apenas reage ao post
             registry = LLMRegistry(settings=settings, redis=redis_client)
             composer = AIComposer(registry=registry)
-            message_text = await composer.compose(
-                lead=lead,
-                channel=step.channel.value,
-                step_number=step.step_number,
-                context=context,
-                cadence=cadence,
-            )
+            if step.channel != Channel.LINKEDIN_POST_REACTION:
+                message_text = await composer.compose(
+                    lead=lead,
+                    channel=step.channel.value,
+                    step_number=step.step_number,
+                    context=context,
+                    cadence=cadence,
+                )
+            else:
+                message_text = ""
 
             # ── Envio via Unipile ─────────────────────────────────────
             content_audio_url: str | None = None
 
             if step.channel == Channel.LINKEDIN_CONNECT:
                 result = await unipile_client.send_linkedin_connect(
-                    account_id=settings.UNIPILE_ACCOUNT_ID_LINKEDIN or "",
+                    account_id=linkedin_account_id,
                     linkedin_profile_id=lead.linkedin_profile_id or "",
                     message=message_text,
                 )
@@ -171,14 +192,14 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                         )
 
                     result = await unipile_client.send_linkedin_voice_note(
-                        account_id=settings.UNIPILE_ACCOUNT_ID_LINKEDIN or "",
+                        account_id=linkedin_account_id,
                         linkedin_profile_id=lead.linkedin_profile_id or "",
                         audio_url=audio_url,
                     )
                     content_audio_url = audio_url
                 else:
                     result = await unipile_client.send_linkedin_dm(
-                        account_id=settings.UNIPILE_ACCOUNT_ID_LINKEDIN or "",
+                        account_id=linkedin_account_id,
                         linkedin_profile_id=lead.linkedin_profile_id or "",
                         message=message_text,
                     )
@@ -191,7 +212,7 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                     return {"step_id": step_id, "status": "skipped", "reason": "no_email"}
 
                 result = await unipile_client.send_email(
-                    account_id=settings.UNIPILE_ACCOUNT_ID_GMAIL or "",
+                    account_id=gmail_account_id,
                     to_email=email_to,
                     subject=_build_email_subject(lead, step.step_number),
                     body_html=message_text,
@@ -213,6 +234,91 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                     success = True
                     message_id = None
                 result = _FakeResult()
+
+            elif step.channel == Channel.LINKEDIN_POST_REACTION:
+                # Não usa LLM — reage diretamente ao post mais recente do lead
+                if not lead.linkedin_profile_id:
+                    step.status = StepStatus.SKIPPED
+                    await db.commit()
+                    return {"step_id": step_id, "status": "skipped", "reason": "no_linkedin_profile_id"}
+
+                reacted = await unipile_client.react_to_latest_post(
+                    account_id=linkedin_account_id,
+                    provider_id=lead.linkedin_profile_id,
+                    emoji="LIKE",
+                )
+                if not reacted:
+                    step.status = StepStatus.SKIPPED
+                    await db.commit()
+                    logger.info(
+                        "dispatch.post_reaction.skipped",
+                        step_id=step_id,
+                        lead_id=str(lead.id),
+                        reason="no_recent_post",
+                    )
+                    return {"step_id": step_id, "status": "skipped", "reason": "no_recent_post"}
+
+                # message_text fica vazio pois não é mensagem de texto
+                message_text = ""
+
+                class _FakeResult:  # type: ignore[no-redef]
+                    success = True
+                    message_id = None
+                result = _FakeResult()
+
+            elif step.channel == Channel.LINKEDIN_POST_COMMENT:
+                if not lead.linkedin_profile_id:
+                    step.status = StepStatus.SKIPPED
+                    await db.commit()
+                    return {"step_id": step_id, "status": "skipped", "reason": "no_linkedin_profile_id"}
+
+                # message_text já foi gerado pelo composer (deve ser o comentário)
+                commented = await unipile_client.comment_on_latest_post(
+                    account_id=linkedin_account_id,
+                    provider_id=lead.linkedin_profile_id,
+                    comment_text=message_text,
+                )
+                if not commented:
+                    step.status = StepStatus.SKIPPED
+                    await db.commit()
+                    logger.info(
+                        "dispatch.post_comment.skipped",
+                        step_id=step_id,
+                        lead_id=str(lead.id),
+                        reason="no_recent_post",
+                    )
+                    return {"step_id": step_id, "status": "skipped", "reason": "no_recent_post"}
+
+                class _FakeResult:  # type: ignore[no-redef]
+                    success = True
+                    message_id = None
+                result = _FakeResult()
+
+            elif step.channel == Channel.LINKEDIN_INMAIL:
+                if not lead.linkedin_profile_id:
+                    step.status = StepStatus.SKIPPED
+                    await db.commit()
+                    return {"step_id": step_id, "status": "skipped", "reason": "no_linkedin_profile_id"}
+
+                # Composer retorna JSON: {"subject": "...", "body": "..."}
+                try:
+                    import json as _json  # noqa: PLC0415
+                    inmail_data = _json.loads(message_text)
+                    inmail_subject = inmail_data.get("subject", "")
+                    inmail_body = inmail_data.get("body", message_text)
+                except (ValueError, KeyError):
+                    # Fallback: usa message_text como corpo sem assunto
+                    inmail_subject = ""
+                    inmail_body = message_text
+
+                result = await unipile_client.send_linkedin_inmail(
+                    account_id=linkedin_account_id,
+                    linkedin_profile_id=lead.linkedin_profile_id,
+                    subject=inmail_subject,
+                    message=inmail_body,
+                )
+                # Salva o corpo efetivo como content_text
+                message_text = inmail_body
 
             else:
                 step.status = StepStatus.SKIPPED

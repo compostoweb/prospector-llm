@@ -10,6 +10,9 @@ import type { LeadListLeadItem } from "@/lib/api/hooks/use-lead-lists"
 const CHANNEL_OPTIONS = [
   { value: "linkedin_connect", label: "LinkedIn Connect" },
   { value: "linkedin_dm", label: "LinkedIn DM" },
+  { value: "linkedin_post_reaction", label: "LinkedIn Reação em Post" },
+  { value: "linkedin_post_comment", label: "LinkedIn Comentário em Post" },
+  { value: "linkedin_inmail", label: "LinkedIn InMail" },
   { value: "email", label: "E-mail" },
   { value: "manual_task", label: "Tarefa Manual" },
 ] as const
@@ -25,6 +28,9 @@ const STEP_TYPE_OPTIONS: Record<string, { value: StepType; label: string }[]> = 
     { value: "linkedin_dm_followup", label: "Follow-up" },
     { value: "linkedin_dm_breakup", label: "Despedida / Breakup" },
   ],
+  linkedin_post_reaction: [{ value: "linkedin_post_reaction", label: "Curtir post recente (👍)" }],
+  linkedin_post_comment: [{ value: "linkedin_post_comment", label: "Comentar post recente" }],
+  linkedin_inmail: [{ value: "linkedin_inmail", label: "InMail (Premium)" }],
   email: [
     { value: "email_first", label: "Primeiro e-mail (cold mail)" },
     { value: "email_followup", label: "Follow-up" },

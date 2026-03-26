@@ -1,5 +1,13 @@
 ﻿import { cn, channelLabel } from "@/lib/utils"
-import { Mail, Linkedin, UserPlus, ClipboardList } from "lucide-react"
+import {
+  Mail,
+  Linkedin,
+  UserPlus,
+  ClipboardList,
+  ThumbsUp,
+  MessageSquare,
+  Send,
+} from "lucide-react"
 
 interface BadgeChannelProps {
   channel: string
@@ -9,6 +17,9 @@ interface BadgeChannelProps {
 const channelIcon: Record<string, React.ReactNode> = {
   linkedin_dm: <Linkedin size={11} aria-hidden="true" />,
   linkedin_connect: <UserPlus size={11} aria-hidden="true" />,
+  linkedin_post_reaction: <ThumbsUp size={11} aria-hidden="true" />,
+  linkedin_post_comment: <MessageSquare size={11} aria-hidden="true" />,
+  linkedin_inmail: <Send size={11} aria-hidden="true" />,
   email: <Mail size={11} aria-hidden="true" />,
   manual_task: <ClipboardList size={11} aria-hidden="true" />,
 }

@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
+from models.enums import Channel, StepStatus
 from models.lead import Lead
 from models.tenant import Tenant
 from workers.celery_app import celery_app
@@ -95,7 +96,7 @@ async def _check_async() -> dict:
                         lead_id=str(lead.id),
                     )
 
-                elif _is_expired(lead):
+                elif await _is_expired(lead, db):
                     lead.linkedin_connection_status = None
                     expired += 1
                     logger.info(
@@ -145,8 +146,37 @@ async def _create_tasks_if_semi_manual(lead: Lead, db: async_sessionmaker) -> No
 
 
 def _is_expired(lead: Lead) -> bool:
-    """Verifica se a conexão pendente expirou (mais de 14 dias)."""
+    """Mantido por compatibilidade — use _is_expired() async para precisão."""
     if not lead.created_at:
         return False
     cutoff = datetime.now(tz=timezone.utc) - timedelta(days=_EXPIRY_DAYS)
     return lead.created_at < cutoff
+
+
+async def _is_expired(lead: Lead, db) -> bool:  # type: ignore[misc]
+    """
+    Verifica se o convite de conexão expirou (mais de 14 dias desde o envio).
+    Usa sent_at do step LINKEDIN_CONNECT para precisão — fallback para lead.created_at.
+    """
+    sent_at: datetime | None = None
+    try:
+        step_result = await db.execute(
+            select(CadenceStep)
+            .where(CadenceStep.lead_id == lead.id)
+            .where(CadenceStep.channel == Channel.LINKEDIN_CONNECT)
+            .where(CadenceStep.status == StepStatus.SENT)
+            .limit(1)
+        )
+        step = step_result.scalar_one_or_none()
+        if step:
+            sent_at = step.sent_at
+    except Exception:
+        pass
+
+    reference = sent_at or lead.created_at
+    if not reference:
+        return False
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=timezone.utc)
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=_EXPIRY_DAYS)
+    return reference < cutoff

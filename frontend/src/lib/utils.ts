@@ -42,6 +42,9 @@ export function channelLabel(channel: string): string {
   const map: Record<string, string> = {
     linkedin_connect: "LinkedIn Connect",
     linkedin_dm: "LinkedIn DM",
+    linkedin_post_reaction: "Reação em Post",
+    linkedin_post_comment: "Comentário em Post",
+    linkedin_inmail: "InMail",
     email: "E-mail",
     manual_task: "Tarefa Manual",
   }

@@ -3,6 +3,7 @@ import { DM_Sans } from "next/font/google"
 import { SessionProvider } from "next-auth/react"
 import { ThemeProvider } from "next-themes"
 import { ReactQueryProvider } from "@/components/providers/react-query-provider"
+import { auth } from "@/lib/auth/config"
 import "@/styles/globals.css"
 
 // ── Fonte ─────────────────────────────────────────────────────────────
@@ -26,7 +27,11 @@ export const metadata: Metadata = {
 
 // ── Layout ────────────────────────────────────────────────────────────
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Pré-carrega a sessão no servidor para evitar flash de "não autenticado"
+  // e corrigir race condition em mutations antes do SessionProvider hidratar.
+  const session = await auth()
+
   return (
     <html
       lang="pt-BR"
@@ -34,7 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       suppressHydrationWarning // next-themes altera data-theme no client
     >
       <body>
-        <SessionProvider>
+        <SessionProvider session={session}>
           <ThemeProvider attribute="data-theme" defaultTheme="system" enableSystem>
             <ReactQueryProvider>{children}</ReactQueryProvider>
           </ThemeProvider>

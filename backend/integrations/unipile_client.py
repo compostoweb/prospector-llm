@@ -866,6 +866,378 @@ class UnipileClient:
     async def __aexit__(self, *_: object) -> None:
         await self.aclose()
 
+    # ── LinkedIn Posts ────────────────────────────────────────────────
+
+    _POSTS_CACHE_TTL = 14400  # 4h
+    _POST_RECENT_DAYS = 7
+
+    async def get_lead_posts(
+        self,
+        account_id: str,
+        provider_id: str,
+        limit: int = 3,
+    ) -> list[dict]:
+        """
+        Busca posts recentes do lead no LinkedIn.
+        Retorna lista de dicts com: post_id, content, published_at.
+        Cache Redis 4h por provider_id.
+        """
+        from core.redis_client import redis_client
+
+        cache_key = f"unipile:posts:{provider_id}"
+        cached = await redis_client.get(cache_key)
+        if cached:
+            try:
+                return json.loads(cached)[:limit]
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        try:
+            response = await self._client.get(
+                "/linkedin/posts",
+                params={"account_id": account_id, "user_id": provider_id, "limit": limit},
+            )
+            if response.status_code != 200:
+                logger.debug(
+                    "unipile.posts.not_found",
+                    provider_id=provider_id,
+                    status=response.status_code,
+                )
+                return []
+            data = response.json()
+            posts_raw = data.get("items", data if isinstance(data, list) else [])
+            posts = [
+                {
+                    "post_id": p.get("id", ""),
+                    "content": (p.get("text") or p.get("content") or "")[:500],
+                    "published_at": p.get("published_at") or p.get("created_at") or "",
+                }
+                for p in posts_raw
+                if (p.get("text") or p.get("content"))
+            ]
+            await redis_client.set(cache_key, json.dumps(posts), ex=self._POSTS_CACHE_TTL)
+            return posts[:limit]
+        except Exception:
+            logger.debug("unipile.posts.error", provider_id=provider_id)
+            return []
+
+    async def react_to_latest_post(
+        self,
+        account_id: str,
+        provider_id: str,
+        emoji: str = "LIKE",
+    ) -> bool:
+        """
+        Reage ao post mais recente do lead (≤7 dias).
+        Retorna True se reagiu, False se não há post recente ou houve erro.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        posts = await self.get_lead_posts(account_id, provider_id, limit=1)
+        if not posts:
+            logger.info("unipile.react.no_posts", provider_id=provider_id)
+            return False
+
+        post = posts[0]
+        post_id = post.get("post_id", "")
+        published_at = post.get("published_at", "")
+
+        # Verifica se o post é recente (≤7 dias)
+        if published_at:
+            try:
+                pub_dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+                cutoff = datetime.now(tz=timezone.utc) - timedelta(days=self._POST_RECENT_DAYS)
+                if pub_dt < cutoff:
+                    logger.info(
+                        "unipile.react.post_too_old",
+                        provider_id=provider_id,
+                        published_at=published_at,
+                    )
+                    return False
+            except (ValueError, TypeError):
+                pass  # data inválida — tenta reagir mesmo assim
+
+        if not post_id:
+            return False
+
+        try:
+            response = await self._client.put(
+                f"/linkedin/posts/{post_id}/reactions",
+                json={"account_id": account_id, "reaction": emoji},
+            )
+            response.raise_for_status()
+            logger.info(
+                "unipile.react.sent",
+                provider_id=provider_id,
+                post_id=post_id,
+                emoji=emoji,
+            )
+            return True
+        except httpx.HTTPError:
+            logger.warning("unipile.react.error", provider_id=provider_id, post_id=post_id)
+            return False
+
+    async def comment_on_latest_post(
+        self,
+        account_id: str,
+        provider_id: str,
+        comment_text: str,
+    ) -> bool:
+        """
+        Comenta no post mais recente do lead (≤7 dias).
+        Retorna True se comentou, False se não há post recente ou houve erro.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        posts = await self.get_lead_posts(account_id, provider_id, limit=1)
+        if not posts:
+            logger.info("unipile.comment.no_posts", provider_id=provider_id)
+            return False
+
+        post = posts[0]
+        post_id = post.get("post_id", "")
+        published_at = post.get("published_at", "")
+
+        if published_at:
+            try:
+                pub_dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+                cutoff = datetime.now(tz=timezone.utc) - timedelta(days=self._POST_RECENT_DAYS)
+                if pub_dt < cutoff:
+                    logger.info(
+                        "unipile.comment.post_too_old",
+                        provider_id=provider_id,
+                        published_at=published_at,
+                    )
+                    return False
+            except (ValueError, TypeError):
+                pass
+
+        if not post_id:
+            return False
+
+        try:
+            response = await self._client.post(
+                f"/linkedin/posts/{post_id}/comments",
+                json={"account_id": account_id, "text": comment_text},
+            )
+            response.raise_for_status()
+            logger.info(
+                "unipile.comment.sent",
+                provider_id=provider_id,
+                post_id=post_id,
+            )
+            return True
+        except httpx.HTTPError:
+            logger.warning("unipile.comment.error", provider_id=provider_id, post_id=post_id)
+            return False
+
+    async def send_linkedin_inmail(
+        self,
+        account_id: str,
+        linkedin_profile_id: str,
+        subject: str,
+        message: str,
+    ) -> SendResult:
+        """
+        Envia InMail para um perfil LinkedIn (para não-conexões).
+        Requer conta com LinkedIn Premium / Sales Navigator.
+        """
+        payload = {
+            "account_id": account_id,
+            "attendees_ids": [linkedin_profile_id],
+            "text": message,
+            "subject": subject,
+            "inmail": True,
+        }
+        response = await self._client.post("/chats/messages", json=payload)
+        response.raise_for_status()
+        data = response.json()
+        msg_id: str = data.get("id", "")
+        logger.info(
+            "unipile.inmail.sent",
+            profile_id=linkedin_profile_id,
+            message_id=msg_id,
+        )
+        return SendResult(message_id=msg_id, success=True)
+
+    async def search_linkedin_params(
+        self,
+        account_id: str,
+        param_type: str,
+        query: str,
+    ) -> dict:
+        """
+        Faz lookup de IDs de parâmetros para busca LinkedIn (LOCATION, INDUSTRY, etc.).
+        Retorna {"items": [{"id": "...", "title": "..."}]}.
+        """
+        try:
+            response = await self._client.get(
+                "/linkedin/search/parameters",
+                params={"account_id": account_id, "type": param_type, "query": query},
+            )
+            response.raise_for_status()
+            data = response.json()
+            items = data.get("items", [])
+            return {
+                "items": [
+                    {"id": item.get("id", ""), "title": item.get("title", "")}
+                    for item in items
+                ]
+            }
+        except httpx.HTTPError as exc:
+            logger.warning("unipile.search_params.error", param_type=param_type, error=str(exc))
+            return {"items": []}
+
+    def _parse_linkedin_items(self, raw_items: list[dict]) -> list[dict]:
+        """Normaliza itens brutos do Unipile para o formato interno."""
+        nd_map = {
+            "DISTANCE_1": 1, "DISTANCE_2": 2,
+            "DISTANCE_3PLUS": 3, "DISTANCE_3": 3, "OUT_OF_NETWORK": 3,
+        }
+        items: list[dict] = []
+        for p in raw_items:
+            public_identifier = p.get("public_identifier") or p.get("public_id") or ""
+            nd = nd_map.get(p.get("network_distance", ""))
+            items.append({
+                "provider_id": p.get("id") or p.get("public_id") or "",
+                "name": p.get("name") or (
+                    f"{p.get('first_name', '')} {p.get('last_name', '')}".strip()
+                ),
+                "headline": p.get("headline") or p.get("title") or None,
+                "company": p.get("company") or p.get("current_company") or None,
+                "location": p.get("location") or None,
+                "profile_url": (
+                    p.get("public_profile_url") or p.get("profile_url")
+                    or (
+                        f"https://www.linkedin.com/in/{public_identifier}"
+                        if public_identifier else None
+                    )
+                ),
+                "profile_picture_url": p.get("profile_picture_url") or None,
+                "network_distance": nd,
+            })
+        return items
+
+    async def _fetch_linkedin_page(
+        self,
+        account_id: str,
+        body: dict,
+        page_size: int,
+        cursor: str | None = None,
+    ) -> dict:
+        """Faz uma única chamada ao Unipile /linkedin/search."""
+        query_params: dict = {"account_id": account_id, "limit": page_size}
+        if cursor:
+            query_params["cursor"] = cursor
+
+        response = await self._client.post(
+            "/linkedin/search", params=query_params, json=body
+        )
+        response.raise_for_status()
+        data = response.json()
+        raw_items = data.get("items", data if isinstance(data, list) else [])
+        return {
+            "items": self._parse_linkedin_items(raw_items),
+            "cursor": data.get("cursor") or data.get("next_cursor"),
+        }
+
+    async def search_linkedin_profiles(
+        self,
+        account_id: str,
+        keywords: str,
+        titles: list[str] | None = None,
+        companies: list[str] | None = None,
+        location_ids: list[str] | None = None,
+        industry_ids: list[str] | None = None,
+        network_distance: list[int] | None = None,
+        limit: int = 25,
+        cursor: str | None = None,
+    ) -> dict:
+        """
+        Busca perfis LinkedIn via Unipile Classic People Search.
+        Auto-pagina até atingir ``limit`` quando ``cursor`` não é fornecido.
+        Se ``cursor`` é fornecido (ex.: "Carregar mais"), faz apenas 1 fetch.
+        """
+        PAGE_SIZE = 25   # Unipile pode reduzir (Classic ≈ 10)
+        MAX_PAGES = 20   # segurança anti-loop infinito
+
+        body: dict = {
+            "api": "classic",
+            "category": "people",
+            "keywords": keywords,
+        }
+        if location_ids:
+            body["location"] = location_ids
+        if industry_ids:
+            body["industry"] = industry_ids
+        if network_distance:
+            body["network_distance"] = network_distance
+
+        advanced: dict = {}
+        if titles:
+            advanced["title"] = " OR ".join(titles)
+        if companies:
+            advanced["company"] = " OR ".join(companies)
+        if advanced:
+            body["advanced_keywords"] = advanced
+
+        try:
+            # Com cursor fornecido → fetch único (ex.: "Carregar mais")
+            if cursor:
+                return await self._fetch_linkedin_page(
+                    account_id=account_id,
+                    body=body,
+                    page_size=min(limit, PAGE_SIZE),
+                    cursor=cursor,
+                )
+
+            # Sem cursor → auto-paginação até atingir limit
+            all_items: list[dict] = []
+            current_cursor: str | None = None
+
+            for page_num in range(MAX_PAGES):
+                remaining = limit - len(all_items)
+                if remaining <= 0:
+                    break
+
+                page = await self._fetch_linkedin_page(
+                    account_id=account_id,
+                    body=body,
+                    page_size=min(remaining, PAGE_SIZE),
+                    cursor=current_cursor,
+                )
+
+                page_items = page.get("items", [])
+                all_items.extend(page_items)
+                current_cursor = page.get("cursor")
+
+                logger.debug(
+                    "unipile.search.page",
+                    page=page_num + 1,
+                    fetched=len(page_items),
+                    total=len(all_items),
+                    target=limit,
+                )
+
+                if not current_cursor or not page_items:
+                    break
+
+                # Pequena pausa entre páginas para não estourar rate-limit
+                if len(all_items) < limit:
+                    await asyncio.sleep(0.3)
+
+            return {
+                "items": all_items[:limit],
+                "cursor": current_cursor,
+            }
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "unipile.search.error",
+                keywords=keywords,
+                error=str(exc),
+            )
+            return {"items": [], "cursor": None}
+
 
 # Singleton para uso direto sem contexto
 unipile_client = UnipileClient()

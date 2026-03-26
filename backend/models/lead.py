@@ -96,3 +96,11 @@ class Lead(Base, TenantMixin, TimestampMixin):
 
     # ── Notas internas ────────────────────────────────────────────────
     notes: Mapped[str | None] = mapped_column(Text)
+
+    # ── Cache de posts LinkedIn (populado no enrich) ──────────────────
+    linkedin_recent_posts_json: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        default=None,
+        comment="JSON com últimos posts do lead no LinkedIn (cache de enriquecimento)",
+    )
