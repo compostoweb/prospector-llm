@@ -15,9 +15,12 @@ const ERROR_MESSAGES: Record<string, string> = {
 
 export default async function LoginPage({ searchParams }: Props) {
   const session = await auth()
-  if (session) redirect("/dashboard")
-
   const { error } = await searchParams
+
+  // Se a sessão existe mas o erro é session_expired, não redirecionar
+  // (o token do backend expirou — o NextAuth pode ainda ter a sessão em cache)
+  if (session && error !== "session_expired") redirect("/dashboard")
+
   const errorMessage = error ? (ERROR_MESSAGES[error] ?? ERROR_MESSAGES.default) : null
 
   return (

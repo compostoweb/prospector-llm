@@ -3,6 +3,9 @@ import { auth } from "@/lib/auth/config"
 import { env } from "@/env"
 import type { paths } from "./schema"
 
+// Guarda para evitar múltiplos signOut simultâneos quando várias requests retornam 401
+let _signingOut = false
+
 // ── Client para Server Components (lê a sessão do servidor) ──────────
 
 export async function createServerClient() {
@@ -40,9 +43,12 @@ export function createBrowserClient(accessToken?: string) {
         return request
       },
       onResponse({ response }) {
-        // Token expirado → limpar sessão no próximo render
-        if (response.status === 401 && typeof window !== "undefined") {
-          window.location.href = "/login?error=session_expired"
+        // Token expirado → faz signOut (limpa cookie) e redireciona para login
+        if (response.status === 401 && typeof window !== "undefined" && !_signingOut) {
+          _signingOut = true
+          void import("next-auth/react").then(({ signOut }) => {
+            void signOut({ callbackUrl: "/login?error=session_expired" })
+          })
         }
         return response
       },

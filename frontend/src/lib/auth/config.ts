@@ -93,8 +93,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         return token
       }
 
-      // Token expirado — sessão inválida (backend não tem refresh endpoint)
-      return { ...token, error: "TokenExpired" }
+      // Token expirado — invalida sessão completamente (força novo login)
+      // Retornar null sinaliza ao NextAuth v5 que a sessão deve ser destruída
+      return null
     },
 
     session({ session, token }) {
