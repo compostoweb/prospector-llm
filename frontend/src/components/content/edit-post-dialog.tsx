@@ -1,7 +1,13 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { useCreateContentPost, type PostPillar, type HookType } from "@/lib/api/hooks/use-content"
+import { useEffect, useState } from "react"
+import { AlertTriangle } from "lucide-react"
+import {
+  useUpdatePost,
+  type ContentPost,
+  type PostPillar,
+  type HookType,
+} from "@/lib/api/hooks/use-content"
 import {
   Dialog,
   DialogContent,
@@ -36,13 +42,13 @@ const HOOK_OPTIONS: { value: HookType; label: string }[] = [
   { value: "data", label: "Dado" },
 ]
 
-interface CreatePostDialogProps {
+interface EditPostDialogProps {
+  post: ContentPost | null
   open: boolean
   onOpenChange: (open: boolean) => void
-  defaultPublishDate?: string
 }
 
-export function CreatePostDialog({ open, onOpenChange, defaultPublishDate }: CreatePostDialogProps) {
+export function EditPostDialog({ post, open, onOpenChange }: EditPostDialogProps) {
   const [title, setTitle] = useState("")
   const [body, setBody] = useState("")
   const [pillar, setPillar] = useState<PostPillar>("authority")
@@ -50,70 +56,96 @@ export function CreatePostDialog({ open, onOpenChange, defaultPublishDate }: Cre
   const [hashtags, setHashtags] = useState("")
   const [publishDate, setPublishDate] = useState("")
   const [weekNumber, setWeekNumber] = useState("")
+  const [syncWarning, setSyncWarning] = useState<string | null>(null)
 
+  const updatePost = useUpdatePost()
+
+  // Preencher form quando o post mudar
   useEffect(() => {
-    if (defaultPublishDate) setPublishDate(defaultPublishDate)
-  }, [defaultPublishDate])
-
-  const createPost = useCreateContentPost()
+    if (!post) return
+    setTitle(post.title)
+    setBody(post.body)
+    setPillar(post.pillar)
+    setHookType(post.hook_type ?? "none")
+    setHashtags(post.hashtags ?? "")
+    setPublishDate(
+      post.publish_date
+        ? post.publish_date.slice(0, 16) // "YYYY-MM-DDTHH:mm"
+        : "",
+    )
+    setWeekNumber(post.week_number ? String(post.week_number) : "")
+    setSyncWarning(null)
+  }, [post])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    await createPost.mutateAsync({
-      title,
-      body,
-      pillar,
-      hook_type: hookType === "none" ? null : hookType,
-      hashtags: hashtags || null,
-      character_count: body.length,
-      publish_date: publishDate || null,
-      week_number: weekNumber ? parseInt(weekNumber, 10) : null,
+    if (!post) return
+    const result = await updatePost.mutateAsync({
+      postId: post.id,
+      data: {
+        title,
+        body,
+        pillar,
+        hook_type: hookType === "none" ? null : hookType,
+        hashtags: hashtags || null,
+        character_count: body.length,
+        publish_date: publishDate || null,
+        week_number: weekNumber ? parseInt(weekNumber, 10) : null,
+      },
     })
-    onOpenChange(false)
-    resetForm()
+    if (result.linkedin_sync_warning) {
+      setSyncWarning(result.linkedin_sync_warning)
+    } else {
+      onOpenChange(false)
+    }
   }
 
-  function resetForm() {
-    setTitle("")
-    setBody("")
-    setPillar("authority")
-    setHookType("none")
-    setHashtags("")
-    setPublishDate("")
-    setWeekNumber("")
-  }
+  const charCount = body.length
+  const isOverLimit = charCount > 3000
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Novo post</DialogTitle>
+          <DialogTitle>Editar post</DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        {syncWarning && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{syncWarning}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-2">
           <div className="grid gap-1.5">
-            <Label htmlFor="title">Título interno</Label>
+            <Label htmlFor="edit-title">Título</Label>
             <Input
-              id="title"
+              id="edit-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Ex: Semana 5 · Tema principal"
+              placeholder="Título interno do post"
               required
             />
           </div>
 
           <div className="grid gap-1.5">
-            <Label htmlFor="body">Texto do post</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="edit-body">Conteúdo</Label>
+              <span
+                className={`text-xs ${isOverLimit ? "text-(--danger)" : "text-(--text-tertiary)"}`}
+              >
+                {charCount} / 3000
+              </span>
+            </div>
             <Textarea
-              id="body"
+              id="edit-body"
               value={body}
               onChange={(e) => setBody(e.target.value)}
-              placeholder="Escreva o conteúdo do post..."
-              rows={8}
+              rows={10}
+              className="resize-none text-sm"
               required
-              className="resize-none font-mono text-sm"
             />
-            <p className="text-xs text-(--text-tertiary) text-right">{body.length} / 3.000 chars</p>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -135,9 +167,12 @@ export function CreatePostDialog({ open, onOpenChange, defaultPublishDate }: Cre
 
             <div className="grid gap-1.5">
               <Label>Tipo de gancho</Label>
-              <Select value={hookType} onValueChange={(v) => setHookType(v as HookType | "none")}>
+              <Select
+                value={hookType}
+                onValueChange={(v) => setHookType(v as HookType | "none")}
+              >
                 <SelectTrigger>
-                  <SelectValue placeholder="Nenhum" />
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Nenhum</SelectItem>
@@ -153,18 +188,19 @@ export function CreatePostDialog({ open, onOpenChange, defaultPublishDate }: Cre
 
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1.5">
-              <Label htmlFor="publish_date">Data de publicação</Label>
+              <Label htmlFor="edit-publish-date">Data de publicação</Label>
               <Input
-                id="publish_date"
+                id="edit-publish-date"
                 type="datetime-local"
                 value={publishDate}
                 onChange={(e) => setPublishDate(e.target.value)}
               />
             </div>
+
             <div className="grid gap-1.5">
-              <Label htmlFor="week_number">Semana</Label>
+              <Label htmlFor="edit-week">Semana</Label>
               <Input
-                id="week_number"
+                id="edit-week"
                 type="number"
                 min={1}
                 max={54}
@@ -176,12 +212,12 @@ export function CreatePostDialog({ open, onOpenChange, defaultPublishDate }: Cre
           </div>
 
           <div className="grid gap-1.5">
-            <Label htmlFor="hashtags">Hashtags</Label>
+            <Label htmlFor="edit-hashtags">Hashtags</Label>
             <Input
-              id="hashtags"
+              id="edit-hashtags"
               value={hashtags}
               onChange={(e) => setHashtags(e.target.value)}
-              placeholder="#ia #processos #automacao"
+              placeholder="#marketing #automacao"
             />
           </div>
 
@@ -189,14 +225,15 @@ export function CreatePostDialog({ open, onOpenChange, defaultPublishDate }: Cre
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={createPost.isPending}
+              onClick={() => { setSyncWarning(null); onOpenChange(false) }}
             >
-              Cancelar
+              {syncWarning ? "Fechar" : "Cancelar"}
             </Button>
-            <Button type="submit" disabled={createPost.isPending}>
-              {createPost.isPending ? "Criando…" : "Criar post"}
-            </Button>
+            {!syncWarning && (
+              <Button type="submit" disabled={updatePost.isPending || isOverLimit}>
+                {updatePost.isPending ? "Salvando…" : "Salvar alterações"}
+              </Button>
+            )}
           </DialogFooter>
         </form>
       </DialogContent>

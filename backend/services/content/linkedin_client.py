@@ -109,6 +109,20 @@ class LinkedInClient:
         logger.info("linkedin.post_cancelled", post_urn=post_urn)
         return True
 
+    async def delete_published_post(self, post_urn: str) -> bool:
+        """
+        Deleta um post ja publicado (lifecycleState=PUBLISHED) do LinkedIn.
+
+        post_urn: urn:li:ugcPost:{id}
+        Retorna True se deletado com sucesso (HTTP 204).
+        Requer scope w_member_social.
+        """
+        encoded_urn = post_urn.replace(":", "%3A")
+        response = await self._client.delete(f"/ugcPosts/{encoded_urn}")
+        self._raise_for_status(response)
+        logger.info("linkedin.post_deleted", post_urn=post_urn)
+        return True
+
     async def get_post(self, post_urn: str) -> dict:
         """Busca detalhes de um post UGC."""
         encoded_urn = post_urn.replace(":", "%3A")
@@ -148,18 +162,19 @@ class LinkedInClient:
     @staticmethod
     async def get_profile(access_token: str) -> dict:
         """
-        Busca dados basicos do perfil autenticado (r_liteprofile).
-        Retorna: id (person_id), localizedFirstName, localizedLastName.
+        Busca dados basicos do perfil autenticado via OpenID Connect userinfo.
+        Retorna: sub (person_id), given_name, family_name, name, email.
+
+        Compativel com scopes: openid profile email.
         """
         async with httpx.AsyncClient(
             base_url=_LINKEDIN_API_BASE,
             headers={
                 "Authorization": f"Bearer {access_token}",
-                "X-Restli-Protocol-Version": "2.0.0",
             },
             timeout=15.0,
         ) as client:
-            response = await client.get("/me")
+            response = await client.get("/userinfo")
             if response.status_code != 200:
                 raise LinkedInClientError(response.status_code, response.text)
             return response.json()

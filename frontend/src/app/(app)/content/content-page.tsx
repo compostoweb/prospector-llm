@@ -2,9 +2,10 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Plus, Filter, Sparkles } from "lucide-react"
+import { Plus, Filter, Sparkles, LayoutGrid, CalendarDays } from "lucide-react"
 import { useContentPosts, type PostStatus, type PostPillar } from "@/lib/api/hooks/use-content"
 import { PostCard } from "@/components/content/post-card"
+import { CalendarView } from "@/components/content/calendar-view"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -35,10 +36,11 @@ export default function ContentPage() {
   const [statusFilter, setStatusFilter] = useState<PostStatus | "all">("all")
   const [pillarFilter, setPillarFilter] = useState<PostPillar | "all">("all")
   const [createOpen, setCreateOpen] = useState(false)
+  const [view, setView] = useState<"grid" | "calendar">("grid")
 
   const { data: posts, isLoading } = useContentPosts({
-    status: statusFilter === "all" ? undefined : statusFilter,
-    pillar: pillarFilter === "all" ? undefined : pillarFilter,
+    ...(statusFilter !== "all" && { status: statusFilter }),
+    ...(pillarFilter !== "all" && { pillar: pillarFilter }),
   })
 
   return (
@@ -81,6 +83,26 @@ export default function ContentPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Toggle de visão */}
+          <div className="flex items-center rounded-md border border-(--border-default) overflow-hidden h-8">
+            <button
+              type="button"
+              aria-label="Visão grade"
+              onClick={() => setView("grid")}
+              className={`px-2.5 h-full flex items-center transition-colors ${view === "grid" ? "bg-(--accent) text-white" : "text-(--text-secondary) hover:bg-(--bg-overlay)"}`}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              aria-label="Visão calendário"
+              onClick={() => setView("calendar")}
+              className={`px-2.5 h-full flex items-center transition-colors ${view === "calendar" ? "bg-(--accent) text-white" : "text-(--text-secondary) hover:bg-(--bg-overlay)"}`}
+            >
+              <CalendarDays className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
           <Button asChild variant="outline" size="sm" className="h-8 text-xs gap-1.5">
             <Link href="/content/gerar">
               <Sparkles className="h-3.5 w-3.5" />
@@ -94,13 +116,15 @@ export default function ContentPage() {
         </div>
       </div>
 
-      {/* Posts */}
-      {isLoading ? (
+      {/* Conteúdo */}
+      {view === "calendar" ? (
+        <CalendarView posts={posts ?? []} />
+      ) : isLoading ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
           {Array.from({ length: 6 }).map((_, i) => (
             <div
               key={i}
-              className="rounded-(--radius-lg) border border-(--border-default) bg-(--bg-surface) p-4 h-48 animate-pulse"
+              className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-4 h-48 animate-pulse"
             />
           ))}
         </div>

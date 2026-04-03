@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronUp,
   AlertTriangle,
+  Pencil,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { StatusBadge, PillarBadge } from "@/components/content/post-badges"
@@ -24,6 +25,7 @@ import {
   useDeletePost,
   type ContentPost,
 } from "@/lib/api/hooks/use-content"
+import { EditPostDialog } from "@/components/content/edit-post-dialog"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -39,6 +41,7 @@ interface PostCardProps {
 
 export function PostCard({ post }: PostCardProps) {
   const [expanded, setExpanded] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
 
   const approve = useApprovePost()
   const schedule = useSchedulePost()
@@ -54,12 +57,13 @@ export function PostCard({ post }: PostCardProps) {
     deletePost.isPending
 
   return (
-    <div
-      className={cn(
-        "rounded-(--radius-lg) border border-(--border-default) bg-(--bg-surface) p-4 flex flex-col gap-3 shadow-(--shadow-sm)",
-        post.status === "failed" && "border-(--danger)",
-      )}
-    >
+    <>
+      <div
+        className={cn(
+          "rounded-(--radius-lg) border border-(--border-default) bg-(--bg-surface) p-4 flex flex-col gap-3 shadow-(--shadow-sm)",
+          post.status === "failed" && "border-(--danger)",
+        )}
+      >
       {/* Cabeçalho */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-1 min-w-0">
@@ -77,6 +81,7 @@ export function PostCard({ post }: PostCardProps) {
           <ActionMenu
             post={post}
             isLoading={isLoading}
+            onEdit={() => setEditOpen(true)}
             onApprove={() => approve.mutate(post.id)}
             onSchedule={() => schedule.mutate(post.id)}
             onCancelSchedule={() => cancelSchedule.mutate(post.id)}
@@ -87,12 +92,10 @@ export function PostCard({ post }: PostCardProps) {
       </div>
 
       {/* Preview do body */}
-      <div
-        className="cursor-pointer"
+      <button
+        type="button"
+        className="cursor-pointer text-left"
         onClick={() => setExpanded((v) => !v)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => e.key === "Enter" && setExpanded((v) => !v)}
       >
         <p
           className={cn(
@@ -102,7 +105,7 @@ export function PostCard({ post }: PostCardProps) {
         >
           {post.body}
         </p>
-        <button className="flex items-center gap-1 text-xs text-(--accent) mt-1">
+        <span className="flex items-center gap-1 text-xs text-(--accent) mt-1">
           {expanded ? (
             <>
               <ChevronUp className="h-3 w-3" /> Recolher
@@ -112,8 +115,8 @@ export function PostCard({ post }: PostCardProps) {
               <ChevronDown className="h-3 w-3" /> Ver tudo
             </>
           )}
-        </button>
-      </div>
+        </span>
+      </button>
 
       {/* Metadados */}
       <div className="flex items-center gap-4 text-xs text-(--text-tertiary) flex-wrap">
@@ -149,6 +152,9 @@ export function PostCard({ post }: PostCardProps) {
         </div>
       )}
     </div>
+
+      <EditPostDialog post={post} open={editOpen} onOpenChange={setEditOpen} />
+    </>
   )
 }
 
@@ -157,6 +163,7 @@ export function PostCard({ post }: PostCardProps) {
 interface ActionMenuProps {
   post: ContentPost
   isLoading: boolean
+  onEdit: () => void
   onApprove: () => void
   onSchedule: () => void
   onCancelSchedule: () => void
@@ -167,6 +174,7 @@ interface ActionMenuProps {
 function ActionMenu({
   post,
   isLoading,
+  onEdit,
   onApprove,
   onSchedule,
   onCancelSchedule,
@@ -180,7 +188,18 @@ function ActionMenu({
           Ações
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44">
+      <DropdownMenuContent align="end" className="w-48">
+        {/* Editar — sempre disponível */}
+        <DropdownMenuItem onClick={onEdit}>
+          <Pencil className="h-3.5 w-3.5 mr-2" />
+          Editar
+        </DropdownMenuItem>
+
+        {(post.status === "draft" ||
+          post.status === "approved" ||
+          post.status === "scheduled" ||
+          post.status === "failed") && <DropdownMenuSeparator />}
+
         {post.status === "draft" && (
           <DropdownMenuItem onClick={onApprove}>
             <Check className="h-3.5 w-3.5 mr-2" />
@@ -211,18 +230,16 @@ function ActionMenu({
             </DropdownMenuItem>
           </>
         )}
-        {post.status === "draft" && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={onDelete}
-              className="text-(--danger) focus:text-(--danger)"
-            >
-              <Trash2 className="h-3.5 w-3.5 mr-2" />
-              Excluir
-            </DropdownMenuItem>
-          </>
-        )}
+
+        {/* Excluir — sempre disponível */}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={onDelete}
+          className="text-(--danger) focus:text-(--danger)"
+        >
+          <Trash2 className="h-3.5 w-3.5 mr-2" />
+          Excluir
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )

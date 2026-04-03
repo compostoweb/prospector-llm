@@ -84,6 +84,8 @@ class ContentPostResponse(BaseModel):
     error_message: str | None
     created_at: datetime
     updated_at: datetime
+    # Preenchido apenas na resposta do PUT quando post já foi publicado no LinkedIn
+    linkedin_sync_warning: str | None = None
 
 
 # ─────────────────────────────────────────────────────────────────────

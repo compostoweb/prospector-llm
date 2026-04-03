@@ -40,6 +40,7 @@ export interface ContentPost {
   error_message: string | null
   created_at: string
   updated_at: string
+  linkedin_sync_warning?: string | null
 }
 
 export interface ContentTheme {
@@ -301,6 +302,40 @@ export function useDeletePost() {
         },
       )
       if (!res.ok) throw new Error("Erro ao deletar post")
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: contentKeys.all }),
+  })
+}
+
+export interface ContentPostUpdateBody {
+  title?: string | null
+  body?: string | null
+  pillar?: PostPillar | null
+  hook_type?: HookType | null
+  hashtags?: string | null
+  character_count?: number | null
+  publish_date?: string | null
+  week_number?: number | null
+}
+
+export function useUpdatePost() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ postId, data }: { postId: string; data: ContentPostUpdateBody }) => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/posts/${postId}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session?.accessToken ?? ""}`,
+          },
+          body: JSON.stringify(data),
+        },
+      )
+      if (!res.ok) throw new Error("Erro ao atualizar post")
+      return res.json() as Promise<ContentPost & { linkedin_sync_warning?: string | null }>
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: contentKeys.all }),
   })

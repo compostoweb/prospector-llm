@@ -32,6 +32,8 @@ from schemas.content import (
     ContentPostResponse,
     ContentPostUpdate,
 )
+from services.content.linkedin_client import LinkedInClientError
+from services.content.publisher import delete_from_linkedin
 
 logger = structlog.get_logger()
 
@@ -129,12 +131,24 @@ async def update_post(
     db: AsyncSession = Depends(get_session_flexible),
 ) -> ContentPostResponse:
     post = await _get_post_or_404(post_id, tenant_id, db)
+
+    was_published = post.status == "published" and post.linkedin_post_urn is not None
+
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(post, field, value)
     await db.commit()
     await db.refresh(post)
     logger.info("content.post_updated", post_id=str(post_id), tenant_id=str(tenant_id))
-    return ContentPostResponse.model_validate(post)
+
+    response = ContentPostResponse.model_validate(post)
+    if was_published:
+        response = response.model_copy(update={
+            "linkedin_sync_warning": (
+                "Post atualizado localmente. A API do LinkedIn não permite "
+                "editar o conteúdo de posts já publicados — o texto no LinkedIn permanece inalterado."
+            )
+        })
+    return response
 
 
 # ── Delete ────────────────────────────────────────────────────────────
@@ -146,11 +160,14 @@ async def delete_post(
     db: AsyncSession = Depends(get_session_flexible),
 ) -> None:
     post = await _get_post_or_404(post_id, tenant_id, db)
-    if post.status != "draft":
+    try:
+        await delete_from_linkedin(db, post=post, tenant_id=tenant_id)
+    except LinkedInClientError as exc:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Nao e possivel deletar post com status '{post.status}'. Apenas drafts podem ser deletados.",
-        )
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Erro ao deletar post no LinkedIn (API {exc.status_code}): {exc.detail}. "
+                   "O post local não foi removido.",
+        ) from exc
     await db.delete(post)
     await db.commit()
     logger.info("content.post_deleted", post_id=str(post_id), tenant_id=str(tenant_id))

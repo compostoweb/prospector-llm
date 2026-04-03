@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useSearchParams, useRouter } from "next/navigation"
 import { ExternalLink, Linkedin, CheckCircle, AlertCircle, Loader2, Save } from "lucide-react"
 import {
   useContentSettings,
@@ -12,12 +13,34 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { useSession } from "next-auth/react"
+import { useQueryClient } from "@tanstack/react-query"
+import { contentKeys } from "@/lib/api/hooks/use-content"
 
 export default function ConfiguracoesPage() {
   const { data: settings, isLoading } = useContentSettings()
   const update = useUpdateContentSettings()
   const { data: linkedinAccount, isLoading: loadingLinkedin } = useLinkedInContentAccount()
   const { data: session } = useSession()
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const queryClient = useQueryClient()
+
+  // Banner de resultado do OAuth LinkedIn
+  const [banner, setBanner] = useState<{ type: "success" | "error"; message: string } | null>(null)
+
+  useEffect(() => {
+    const connected = searchParams.get("linkedin_connected")
+    const error = searchParams.get("linkedin_error")
+    if (connected) {
+      setBanner({ type: "success", message: "Conta LinkedIn conectada com sucesso!" })
+      // Invalidar cache para refletir a nova conta
+      queryClient.invalidateQueries({ queryKey: contentKeys.linkedinStatus() })
+      router.replace("/content/configuracoes")
+    } else if (error) {
+      setBanner({ type: "error", message: decodeURIComponent(error) })
+      router.replace("/content/configuracoes")
+    }
+  }, [searchParams, router, queryClient])
 
   const [form, setForm] = useState({
     author_name: "",
@@ -27,8 +50,6 @@ export default function ConfiguracoesPage() {
   })
 
   const [isDirty, setIsDirty] = useState(false)
-
-  // Sync form when settings are loaded
   useEffect(() => {
     if (!settings) return
     setForm({
@@ -77,6 +98,31 @@ export default function ConfiguracoesPage() {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-4xl">
+      {/* Banner OAuth resultado */}
+      {banner && (
+        <div
+          className={`lg:col-span-2 flex items-center gap-2 rounded-md px-3 py-2.5 text-sm ${
+            banner.type === "success"
+              ? "bg-(--success-subtle) text-(--success-subtle-fg)"
+              : "bg-(--danger-subtle) text-(--danger-subtle-fg)"
+          }`}
+        >
+          {banner.type === "success" ? (
+            <CheckCircle className="h-4 w-4 shrink-0" />
+          ) : (
+            <AlertCircle className="h-4 w-4 shrink-0" />
+          )}
+          <span className="flex-1">{banner.message}</span>
+          <button
+            type="button"
+            aria-label="Fechar"
+            onClick={() => setBanner(null)}
+            className="opacity-70 hover:opacity-100"
+          >
+            ✕
+          </button>
+        </div>
+      )}
       {/* Perfil do autor */}
       <section className="bg-(--bg-surface) rounded-(--radius-lg) border border-(--border-default) p-5 shadow-(--shadow-sm) flex flex-col gap-4">
         <h2 className="text-sm font-semibold text-(--text-primary)">Perfil do autor</h2>

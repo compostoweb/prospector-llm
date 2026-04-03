@@ -18,11 +18,13 @@ from urllib.parse import urlencode
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible
 from core.config import settings
+from core.database import AsyncSessionLocal, get_session
 from core.redis_client import redis_client
 from models.content_linkedin_account import ContentLinkedInAccount
 from schemas.content import ContentLinkedInAccountResponse, LinkedInAuthUrl
@@ -32,7 +34,7 @@ logger = structlog.get_logger()
 
 router = APIRouter(prefix="/linkedin", tags=["Content Hub — LinkedIn OAuth"])
 
-_OAUTH_SCOPES = "r_liteprofile w_member_social"
+_OAUTH_SCOPES = "openid profile email w_member_social"
 _OAUTH_AUTHORIZE_URL = "https://www.linkedin.com/oauth/v2/authorization"
 _STATE_REDIS_PREFIX = "content:linkedin:oauth_state:"
 _STATE_TTL_SECONDS = 600  # 10 minutos
@@ -74,32 +76,45 @@ async def get_auth_url(
 
 @router.get("/callback")
 async def oauth_callback(
-    code: str = Query(..., description="Authorization code retornado pelo LinkedIn"),
     state: str = Query(..., description="State UUID gerado em /auth-url"),
-    db: AsyncSession = Depends(get_session_flexible),
-) -> ContentLinkedInAccountResponse:
+    code: str | None = Query(None, description="Authorization code retornado pelo LinkedIn"),
+    error: str | None = Query(None),
+    error_description: str | None = Query(None),
+) -> RedirectResponse:
     """
     Recebe o authorization_code do LinkedIn, troca por tokens e salva a conta.
 
     Valida o state no Redis para prevenir CSRF.
     Faz upsert em content_linkedin_accounts (um por tenant).
+    Nao exige JWT — tenant_id e extraido do state armazenado no Redis.
+    Redireciona para o frontend apos sucesso ou erro.
     """
+    _frontend_settings = f"{settings.FRONTEND_URL}/content/configuracoes"
+
+    # LinkedIn redirecionou com erro
+    if error:
+        logger.warning(
+            "content.linkedin_oauth_error",
+            error=error,
+            error_description=error_description,
+        )
+        from urllib.parse import quote
+        msg = quote(f"LinkedIn recusou: {error}. {error_description or ''}".strip())
+        return RedirectResponse(url=f"{_frontend_settings}?linkedin_error={msg}")
+
     # Validar state (anti-CSRF)
     redis_key = f"{_STATE_REDIS_PREFIX}{state}"
     tenant_id_str: str | None = await redis_client.get(redis_key)
     if not tenant_id_str:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="State invalido ou expirado. Inicie o fluxo OAuth novamente.",
-        )
+        return RedirectResponse(url=f"{_frontend_settings}?linkedin_error=State+invalido+ou+expirado")
     await redis_client.delete(redis_key)
     tenant_id = uuid.UUID(tenant_id_str)
 
     if not settings.LINKEDIN_CLIENT_ID or not settings.LINKEDIN_CLIENT_SECRET:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LinkedIn OAuth nao configurado no servidor.",
-        )
+        return RedirectResponse(url=f"{_frontend_settings}?linkedin_error=LinkedIn+OAuth+nao+configurado")
+
+    if not code:
+        return RedirectResponse(url=f"{_frontend_settings}?linkedin_error=Authorization+code+ausente")
 
     # Trocar code por tokens
     try:
@@ -111,10 +126,9 @@ async def oauth_callback(
         )
     except LinkedInClientError as exc:
         logger.error("content.linkedin_token_exchange_failed", error=str(exc), tenant_id=str(tenant_id))
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Falha ao trocar authorization_code por tokens: {exc.detail}",
-        )
+        from urllib.parse import quote
+        msg = quote(f"Falha ao trocar token: {exc.detail}")
+        return RedirectResponse(url=f"{_frontend_settings}?linkedin_error={msg}")
 
     access_token: str = token_data["access_token"]
     refresh_token: str | None = token_data.get("refresh_token")
@@ -128,62 +142,63 @@ async def oauth_callback(
         profile = await LinkedInClient.get_profile(access_token)
     except LinkedInClientError as exc:
         logger.error("content.linkedin_profile_fetch_failed", error=str(exc), tenant_id=str(tenant_id))
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Falha ao buscar perfil LinkedIn: {exc.detail}",
-        )
+        from urllib.parse import quote
+        msg = quote(f"Falha ao buscar perfil: {exc.detail}")
+        return RedirectResponse(url=f"{_frontend_settings}?linkedin_error={msg}")
 
-    person_id: str = profile["id"]
+    # OpenID Connect retorna 'sub' como id; fallback para 'id' (v2 legacy)
+    person_id: str = profile.get("sub") or profile.get("id") or ""
     person_urn = f"urn:li:person:{person_id}"
-    first_name = profile.get("localizedFirstName", "")
-    last_name = profile.get("localizedLastName", "")
-    display_name = f"{first_name} {last_name}".strip() or None
+    first_name = profile.get("given_name") or profile.get("localizedFirstName", "")
+    last_name = profile.get("family_name") or profile.get("localizedLastName", "")
+    display_name = f"{first_name} {last_name}".strip() or profile.get("name") or None
 
     # Criptografar tokens se chave disponivel
     access_token_stored = _maybe_encrypt(access_token)
     refresh_token_stored = _maybe_encrypt(refresh_token) if refresh_token else None
 
-    # Upsert — um registro por tenant
-    result = await db.execute(
-        select(ContentLinkedInAccount).where(ContentLinkedInAccount.tenant_id == tenant_id)
-    )
-    account = result.scalar_one_or_none()
-
-    now = datetime.now(timezone.utc)
-    if account is None:
-        account = ContentLinkedInAccount(
-            tenant_id=tenant_id,
-            person_id=person_id,
-            person_urn=person_urn,
-            display_name=display_name,
-            access_token=access_token_stored,
-            refresh_token=refresh_token_stored,
-            token_expires_at=token_expires_at,
-            scopes=_OAUTH_SCOPES,
-            is_active=True,
-            connected_at=now,
+    # Upsert — um registro por tenant (sessao sem RLS; tenant ja validado via state)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(ContentLinkedInAccount).where(ContentLinkedInAccount.tenant_id == tenant_id)
         )
-        db.add(account)
-    else:
-        account.person_id = person_id
-        account.person_urn = person_urn
-        account.display_name = display_name
-        account.access_token = access_token_stored
-        account.refresh_token = refresh_token_stored
-        account.token_expires_at = token_expires_at
-        account.scopes = _OAUTH_SCOPES
-        account.is_active = True
-        account.connected_at = now
+        account = result.scalar_one_or_none()
 
-    await db.commit()
-    await db.refresh(account)
-    logger.info(
-        "content.linkedin_account_connected",
-        tenant_id=str(tenant_id),
-        person_id=person_id,
-        display_name=display_name,
-    )
-    return ContentLinkedInAccountResponse.model_validate(account)
+        now = datetime.now(timezone.utc)
+        if account is None:
+            account = ContentLinkedInAccount(
+                tenant_id=tenant_id,
+                person_id=person_id,
+                person_urn=person_urn,
+                display_name=display_name,
+                access_token=access_token_stored,
+                refresh_token=refresh_token_stored,
+                token_expires_at=token_expires_at,
+                scopes=_OAUTH_SCOPES,
+                is_active=True,
+                connected_at=now,
+            )
+            db.add(account)
+        else:
+            account.person_id = person_id
+            account.person_urn = person_urn
+            account.display_name = display_name
+            account.access_token = access_token_stored
+            account.refresh_token = refresh_token_stored
+            account.token_expires_at = token_expires_at
+            account.scopes = _OAUTH_SCOPES
+            account.is_active = True
+            account.connected_at = now
+
+        await db.commit()
+        await db.refresh(account)
+        logger.info(
+            "content.linkedin_account_connected",
+            tenant_id=str(tenant_id),
+            person_id=person_id,
+            display_name=display_name,
+        )
+        return RedirectResponse(url=f"{_frontend_settings}?linkedin_connected=1")
 
 
 # ── Status ────────────────────────────────────────────────────────────

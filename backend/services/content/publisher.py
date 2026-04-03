@@ -299,3 +299,59 @@ async def cancel_schedule(
         tenant_id=str(tenant_id),
     )
     return post
+
+
+async def delete_from_linkedin(
+    db: AsyncSession,
+    *,
+    post: ContentPost,
+    tenant_id: uuid.UUID,
+) -> None:
+    """
+    Tenta remover o post do LinkedIn antes de excluir localmente.
+
+    - Post publicado (linkedin_post_urn): DELETE /ugcPosts/{urn}
+    - Post agendado (linkedin_scheduled_id): PATCH lifecycleState=DELETED
+    - Draft/approved sem URN: não faz nada
+
+    Levanta LinkedInClientError se a API retornar erro, permitindo que o
+    endpoint decida se bloqueia ou apenas registra o aviso.
+    """
+    if not post.linkedin_post_urn and not post.linkedin_scheduled_id:
+        return
+
+    account_result = await db.execute(
+        select(ContentLinkedInAccount).where(
+            ContentLinkedInAccount.tenant_id == tenant_id,
+            ContentLinkedInAccount.is_active.is_(True),
+        )
+    )
+    account = account_result.scalar_one_or_none()
+    if account is None:
+        logger.warning(
+            "content.publisher.delete_linkedin_no_account",
+            post_id=str(post.id),
+            tenant_id=str(tenant_id),
+        )
+        return
+
+    access_token = _maybe_decrypt(account.access_token)
+
+    async with LinkedInClient(
+        access_token=access_token,
+        person_urn=account.person_urn,
+    ) as client:
+        if post.linkedin_post_urn:
+            await client.delete_published_post(post.linkedin_post_urn)
+            logger.info(
+                "content.publisher.linkedin_deleted",
+                post_id=str(post.id),
+                post_urn=post.linkedin_post_urn,
+            )
+        elif post.linkedin_scheduled_id:
+            await client.cancel_scheduled_post(post.linkedin_scheduled_id)
+            logger.info(
+                "content.publisher.linkedin_scheduled_deleted",
+                post_id=str(post.id),
+                scheduled_id=post.linkedin_scheduled_id,
+            )
