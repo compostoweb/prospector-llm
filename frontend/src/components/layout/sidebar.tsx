@@ -17,6 +17,7 @@ import {
   LogOut,
   Search,
   Mail,
+  FileText,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useUIStore } from "@/store/ui-store"
@@ -42,6 +43,7 @@ const navItems = [
   { href: "/listas", label: "Listas", icon: List },
   { href: "/cadencias", label: "Cadências", icon: GitBranch },
   { href: "/cold-email", label: "Cold Email", icon: Mail },
+  { href: "/content", label: "Conteúdo", icon: FileText },
   { href: "/tarefas", label: "Tarefas", icon: ClipboardList },
   { href: "/inbox", label: "Inbox", icon: MessageSquare },
 ] as const
