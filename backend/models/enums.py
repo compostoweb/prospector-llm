@@ -120,6 +120,41 @@ class CadenceMode(str, Enum):
     SEMI_MANUAL = "semi_manual"
 
 
+class CadenceType(str, Enum):
+    """Tipo de cadência — define quais canais são permitidos."""
+    MIXED = "mixed"       # canais múltiplos (LinkedIn + Email)
+    EMAIL_ONLY = "email_only"  # somente canal EMAIL (cold email)
+
+
+class EmailProviderType(str, Enum):
+    """Tipo de provedor de e-mail da conta conectada."""
+    UNIPILE_GMAIL = "unipile_gmail"   # Gmail via Unipile API
+    GOOGLE_OAUTH = "google_oauth"     # Gmail OAuth direto (google-auth)
+    SMTP = "smtp"                     # SMTP genérico (aiosmtplib)
+
+
+class WarmupStatus(str, Enum):
+    """Status de uma campanha de warmup de e-mail."""
+    ACTIVE = "active"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+
+
+class WarmupLogDirection(str, Enum):
+    """Direção de um e-mail de warmup."""
+    SENT = "sent"
+    RECEIVED = "received"
+
+
+class WarmupLogStatus(str, Enum):
+    """Status de entrega de um e-mail de warmup."""
+    DELIVERED = "delivered"
+    OPENED = "opened"
+    REPLIED = "replied"
+    SPAM = "spam"
+    FAILED = "failed"
+
+
 class ManualTaskStatus(str, Enum):
     """Status de uma tarefa manual na cadência semi-automática."""
     PENDING = "pending"

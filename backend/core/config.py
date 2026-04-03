@@ -151,6 +151,60 @@ class Settings(BaseSettings):
     LIMIT_LINKEDIN_DM: int = 40
     LIMIT_EMAIL: int = 300
 
+    # ── Cold Email / Tracking ─────────────────────────────────────────
+    TRACKING_BASE_URL: str = Field(
+        default="http://localhost:8000",
+        description="URL pública da API — usada em pixels de rastreamento e links de unsubscribe",
+    )
+
+    # ── Email Providers (Google OAuth direto para Gmail) ──────────────
+    GOOGLE_CLIENT_ID_EMAIL: str | None = Field(
+        default=None,
+        description="Google OAuth Client ID com escopo gmail.send (app separada do login)",
+    )
+    GOOGLE_CLIENT_SECRET_EMAIL: str | None = Field(
+        default=None,
+        description="Google OAuth Client Secret para gmail.send",
+    )
+    GOOGLE_REDIRECT_URI_EMAIL: str = Field(
+        default="http://localhost:8000/email-accounts/google/callback",
+        description="URI de redirect OAuth para contas de e-mail",
+    )
+    EMAIL_ACCOUNT_ENCRYPTION_KEY: str | None = Field(
+        default=None,
+        description="Fernet key (base64) para encriptar tokens/senhas de contas de e-mail",
+    )
+
+    # ── LinkedIn Accounts (native provider) ───────────────────────────
+    LINKEDIN_ACCOUNT_ENCRYPTION_KEY: str | None = Field(
+        default=None,
+        description="Fernet key para encriptar cookie li_at (nativo). Pode reusar EMAIL_ACCOUNT_ENCRYPTION_KEY.",
+    )
+
+    # ── Content Hub — LinkedIn OAuth (Share on LinkedIn product) ──────
+    LINKEDIN_CLIENT_ID: str | None = Field(
+        default=None,
+        description="LinkedIn App Client ID para OAuth do Content Hub (Share on LinkedIn).",
+    )
+    LINKEDIN_CLIENT_SECRET: str | None = Field(
+        default=None,
+        description="LinkedIn App Client Secret para OAuth do Content Hub.",
+    )
+    LINKEDIN_REDIRECT_URI: str = Field(
+        default="http://localhost:8000/api/content/linkedin/callback",
+        description="URI de redirect OAuth do Content Hub. Deve ser registrado no LinkedIn Developer Portal.",
+    )
+
+    # ── Content Hub — geração com IA ───────────────────────────────────
+    CONTENT_GEN_PROVIDER: str = Field(
+        default="openai",
+        description="Provider LLM para geração de posts (openai | gemini).",
+    )
+    CONTENT_GEN_MODEL: str = Field(
+        default="gpt-4o-mini",
+        description="Modelo LLM para geração de posts.",
+    )
+
 
 # Singleton — importar de qualquer lugar com: from core.config import settings
 settings = Settings()

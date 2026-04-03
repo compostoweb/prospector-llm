@@ -84,6 +84,17 @@ class StepTemplateItem(BaseModel):
             "NULL = inferência automática baseada no canal, posição e contexto."
         ),
     )
+    # A/B testing de assunto (só canal EMAIL)
+    subject_variants: list[str] | None = Field(
+        default=None,
+        max_length=10,
+        description="Variações de assunto para A/B testing (2–4 opções). Só canal EMAIL.",
+    )
+    # Template salvo (substitui LLM para o corpo do e-mail)
+    email_template_id: str | None = Field(
+        default=None,
+        description="ID de EmailTemplate salvo. Se preenchido, usa o corpo do template ao invés de LLM.",
+    )
 
     @model_validator(mode="after")
     def voice_only_for_dm(self) -> "StepTemplateItem":
@@ -134,6 +145,10 @@ class CadenceCreateRequest(BaseModel):
         default=CadenceMode.AUTOMATIC,
         description="Modo: automatic | semi_manual",
     )
+    cadence_type: str = Field(
+        default="mixed",
+        description="Tipo: mixed | email_only. email_only força todos os steps no canal EMAIL.",
+    )
 
     # Configuração LLM — se não informado, usa defaults globais
     llm: LLMConfigSchema = Field(default_factory=LLMConfigSchema)
@@ -162,6 +177,14 @@ class CadenceCreateRequest(BaseModel):
     lead_list_id: str | None = Field(
         default=None,
         description="ID da lista de leads a usar nesta cadência. NULL = nenhuma.",
+    )
+    email_account_id: str | None = Field(
+        default=None,
+        description="ID da conta de e-mail preferencial para steps EMAIL. NULL = usa Unipile global.",
+    )
+    linkedin_account_id: str | None = Field(
+        default=None,
+        description="ID da conta LinkedIn preferencial para steps LinkedIn. NULL = usa Unipile global.",
     )
 
     # Contexto de prospecção (alimenta prompts da IA)
@@ -203,12 +226,15 @@ class CadenceUpdateRequest(BaseModel):
     is_active: bool | None = None
     allow_personal_email: bool | None = None
     mode: CadenceMode | None = None
+    cadence_type: str | None = None
     llm: LLMConfigSchema | None = None
     tts_provider: str | None = None
     tts_voice_id: str | None = None
     tts_speed: float | None = Field(default=None, ge=0.5, le=2.0)
     tts_pitch: float | None = Field(default=None, ge=-50.0, le=50.0)
     lead_list_id: str | None = None
+    email_account_id: str | None = None
+    linkedin_account_id: str | None = None
     target_segment: str | None = None
     persona_description: str | None = None
     offer_description: str | None = None
@@ -228,6 +254,7 @@ class CadenceResponse(BaseModel):
     is_active: bool
     allow_personal_email: bool
     mode: str = "automatic"
+    cadence_type: str = "mixed"
     llm_provider: str
     llm_model: str
     llm_temperature: float
@@ -237,6 +264,8 @@ class CadenceResponse(BaseModel):
     tts_speed: float = 1.0
     tts_pitch: float = 0.0
     lead_list_id: uuid.UUID | None = None
+    email_account_id: uuid.UUID | None = None
+    linkedin_account_id: uuid.UUID | None = None
     target_segment: str | None = None
     persona_description: str | None = None
     offer_description: str | None = None

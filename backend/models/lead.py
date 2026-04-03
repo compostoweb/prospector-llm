@@ -104,3 +104,17 @@ class Lead(Base, TenantMixin, TimestampMixin):
         default=None,
         comment="JSON com últimos posts do lead no LinkedIn (cache de enriquecimento)",
     )
+
+    # ── Cold email ────────────────────────────────────────────────────
+    timezone: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        default=None,
+        comment="Fuso horário do lead ex: 'America/Sao_Paulo'. Usado para scheduling por timezone.",
+    )
+    email_bounced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+        comment="Se preenchido, e-mails para este lead são pulados (bounce detectado).",
+    )

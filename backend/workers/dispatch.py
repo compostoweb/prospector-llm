@@ -154,15 +154,42 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
             else:
                 message_text = ""
 
-            # ── Envio via Unipile ─────────────────────────────────────
+            # ── Envio via canal LinkedIn / Email ──────────────────────
             content_audio_url: str | None = None
+            # Interaction pré-criada pelo canal EMAIL (necessário antes do envio para o pixel)
+            email_interaction: Interaction | None = None
 
             if step.channel == Channel.LINKEDIN_CONNECT:
-                result = await unipile_client.send_linkedin_connect(
-                    account_id=linkedin_account_id,
-                    linkedin_profile_id=lead.linkedin_profile_id or "",
-                    message=message_text,
-                )
+                if getattr(cadence, "linkedin_account_id", None):
+                    # Usa LinkedInRegistry com conta configurada na cadência
+                    from models.linkedin_account import LinkedInAccount as _LIA  # noqa: PLC0415
+                    from integrations.linkedin import LinkedInRegistry as _LIR  # noqa: PLC0415
+
+                    _li_acc_q = await db.execute(
+                        select(_LIA).where(_LIA.id == cadence.linkedin_account_id)
+                    )
+                    _li_account = _li_acc_q.scalar_one_or_none()
+                    if _li_account is None:
+                        step.status = StepStatus.SKIPPED
+                        await db.commit()
+                        return {"step_id": step_id, "status": "skipped", "reason": "linkedin_account_not_found"}
+                    _li_registry = _LIR(settings=settings)
+                    _li_result = await _li_registry.send_connect(
+                        account=_li_account,
+                        linkedin_profile_id=lead.linkedin_profile_id or "",
+                        message=message_text,
+                    )
+                    # Normaliza para interface compatível
+                    class _WrappedResult:
+                        success = _li_result.success
+                        message_id = _li_result.message_id
+                    result = _WrappedResult()
+                else:
+                    result = await unipile_client.send_linkedin_connect(
+                        account_id=linkedin_account_id,
+                        linkedin_profile_id=lead.linkedin_profile_id or "",
+                        message=message_text,
+                    )
 
             elif step.channel == Channel.LINKEDIN_DM:
                 if step.use_voice:
@@ -198,25 +225,139 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                     )
                     content_audio_url = audio_url
                 else:
-                    result = await unipile_client.send_linkedin_dm(
-                        account_id=linkedin_account_id,
-                        linkedin_profile_id=lead.linkedin_profile_id or "",
-                        message=message_text,
-                    )
+                    if getattr(cadence, "linkedin_account_id", None):
+                        from models.linkedin_account import LinkedInAccount as _LIA  # noqa: PLC0415
+                        from integrations.linkedin import LinkedInRegistry as _LIR  # noqa: PLC0415
+
+                        _li_acc_q = await db.execute(
+                            select(_LIA).where(_LIA.id == cadence.linkedin_account_id)
+                        )
+                        _li_account = _li_acc_q.scalar_one_or_none()
+                        if _li_account is None:
+                            step.status = StepStatus.SKIPPED
+                            await db.commit()
+                            return {"step_id": step_id, "status": "skipped", "reason": "linkedin_account_not_found"}
+                        _li_registry = _LIR(settings=settings)
+                        _li_result = await _li_registry.send_dm(
+                            account=_li_account,
+                            linkedin_profile_id=lead.linkedin_profile_id or "",
+                            message=message_text,
+                        )
+
+                        class _WrappedDMResult:
+                            success = _li_result.success
+                            message_id = _li_result.message_id
+                        result = _WrappedDMResult()
+                    else:
+                        result = await unipile_client.send_linkedin_dm(
+                            account_id=linkedin_account_id,
+                            linkedin_profile_id=lead.linkedin_profile_id or "",
+                            message=message_text,
+                        )
 
             elif step.channel == Channel.EMAIL:
+                from models.email_unsubscribe import EmailUnsubscribe  # noqa: PLC0415
+                from services.email_footer import inject_tracking  # noqa: PLC0415
+                import random as _random  # noqa: PLC0415
+
                 email_to = lead.email_corporate or lead.email_personal or ""
                 if not email_to:
                     step.status = StepStatus.SKIPPED
                     await db.commit()
                     return {"step_id": step_id, "status": "skipped", "reason": "no_email"}
 
-                result = await unipile_client.send_email(
-                    account_id=gmail_account_id,
-                    to_email=email_to,
-                    subject=_build_email_subject(lead, step.step_number),
-                    body_html=message_text,
+                # Verifica bounce
+                if lead.email_bounced_at is not None:
+                    step.status = StepStatus.SKIPPED
+                    await db.commit()
+                    return {"step_id": step_id, "status": "skipped", "reason": "email_bounced"}
+
+                # Verifica descadastro
+                unsub_q = await db.execute(
+                    select(EmailUnsubscribe).where(
+                        EmailUnsubscribe.tenant_id == tid,
+                        EmailUnsubscribe.email == email_to.lower(),
+                    )
                 )
+                if unsub_q.scalar_one_or_none() is not None:
+                    step.status = StepStatus.SKIPPED
+                    await db.commit()
+                    return {"step_id": step_id, "status": "skipped", "reason": "unsubscribed"}
+
+                # A/B: escolhe subject de subject_variants ou usa fallback
+                subject = _build_email_subject(lead, step.step_number)
+                if cadence.steps_template:
+                    matching = [
+                        s for s in cadence.steps_template
+                        if s.get("step_number") == step.step_number
+                    ]
+                    if matching and matching[0].get("subject_variants"):
+                        subject = _random.choice(matching[0]["subject_variants"])
+                        step.subject_used = subject
+
+                # Pré-cria Interaction antes do envio para ter o ID para o pixel de rastreamento
+                now_pre = datetime.now(tz=timezone.utc)
+                email_interaction = Interaction(
+                    id=uuid.uuid4(),
+                    tenant_id=tid,
+                    lead_id=lead.id,
+                    channel=Channel.EMAIL,
+                    direction=InteractionDirection.OUTBOUND,
+                    content_text=message_text,
+                    created_at=now_pre,
+                )
+                db.add(email_interaction)
+                await db.flush()  # garante email_interaction.id sem commit
+
+                # Injeta pixel de abertura e rodapé de descadastro
+                tracked_html = inject_tracking(
+                    body_html=message_text,
+                    interaction_id=email_interaction.id,
+                    tenant_id=tid,
+                    email=email_to,
+                )
+
+                # Usa EmailRegistry se a cadência tem email_account_id configurado
+                if getattr(cadence, "email_account_id", None):
+                    from sqlalchemy import select as _sel  # noqa: PLC0415
+                    from models.email_account import EmailAccount  # noqa: PLC0415
+                    from integrations.email import EmailRegistry  # noqa: PLC0415
+                    from core.config import settings as _cfg  # noqa: PLC0415
+
+                    _acc_result = await db.execute(
+                        _sel(EmailAccount).where(EmailAccount.id == cadence.email_account_id)
+                    )
+                    _email_account = _acc_result.scalar_one_or_none()
+                    if _email_account is None:
+                        logger.warning(
+                            "dispatch.email_account_not_found",
+                            cadence_id=str(cadence.id),
+                            email_account_id=str(cadence.email_account_id),
+                        )
+                        step.status = StepStatus.SKIPPED
+                        await db.commit()
+                        return {"step_id": step_id, "status": "skipped", "reason": "email_account_not_found"}
+
+                    _registry = EmailRegistry(settings=_cfg)
+                    _send_result = await _registry.send(
+                        account=_email_account,
+                        to_email=email_to,
+                        subject=subject,
+                        body_html=tracked_html,
+                    )
+                    _result_mid = _send_result.message_id if _send_result.success else None
+                else:
+                    # Fallback: usa Unipile global (comportamento anterior)
+                    _r = await unipile_client.send_email(
+                        account_id=gmail_account_id,
+                        to_email=email_to,
+                        subject=subject,
+                        body_html=tracked_html,
+                    )
+                    _send_result = _r
+                    _result_mid = _r.message_id if _r.success else None
+
+                email_interaction.unipile_message_id = _result_mid
 
             elif step.channel == Channel.MANUAL_TASK:
                 # MANUAL_TASK: não envia mensagem — notifica admin via email
@@ -327,18 +468,23 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
 
             # ── Salva Interaction outbound ────────────────────────────
             now = datetime.now(tz=timezone.utc)
-            interaction = Interaction(
-                id=uuid.uuid4(),
-                tenant_id=tid,
-                lead_id=lead.id,
-                channel=step.channel,
-                direction=InteractionDirection.OUTBOUND,
-                content_text=message_text,
-                content_audio_url=content_audio_url,
-                unipile_message_id=result.message_id if result.success else None,
-                created_at=now,
-            )
-            db.add(interaction)
+            if email_interaction is not None:
+                # EMAIL: interaction já pré-criada e adicionada; só garante o now
+                interaction = email_interaction
+                now = email_interaction.created_at  # type: ignore[assignment]
+            else:
+                interaction = Interaction(
+                    id=uuid.uuid4(),
+                    tenant_id=tid,
+                    lead_id=lead.id,
+                    channel=step.channel,
+                    direction=InteractionDirection.OUTBOUND,
+                    content_text=message_text,
+                    content_audio_url=content_audio_url,
+                    unipile_message_id=result.message_id if result.success else None,
+                    created_at=now,
+                )
+                db.add(interaction)
 
             # ── Atualiza step ─────────────────────────────────────────
             step.status = StepStatus.SENT

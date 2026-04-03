@@ -10,17 +10,13 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  Zap,
-  User,
-  Plug,
-  Volume2,
   List,
-  Music,
   ClipboardList,
   MessageSquare,
   Bell,
   LogOut,
   Search,
+  Mail,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useUIStore } from "@/store/ui-store"
@@ -45,18 +41,12 @@ const navItems = [
   { href: "/leads/busca-linkedin", label: "Busca LinkedIn", icon: Search },
   { href: "/listas", label: "Listas", icon: List },
   { href: "/cadencias", label: "Cadências", icon: GitBranch },
+  { href: "/cold-email", label: "Cold Email", icon: Mail },
   { href: "/tarefas", label: "Tarefas", icon: ClipboardList },
   { href: "/inbox", label: "Inbox", icon: MessageSquare },
 ] as const
 
-const settingsItems = [
-  { href: "/configuracoes/conta", label: "Conta", icon: User },
-  { href: "/configuracoes/llm", label: "Modelos LLM", icon: Zap },
-  { href: "/configuracoes/voz", label: "Vozes TTS", icon: Volume2 },
-  { href: "/configuracoes/audios", label: "Áudios", icon: Music },
-  { href: "/configuracoes/unipile", label: "Unipile", icon: Plug },
-  { href: "/configuracoes/integracoes", label: "Integrações", icon: Settings },
-] as const
+const settingsItems = [{ href: "/configuracoes", label: "Configurações", icon: Settings }] as const
 
 // ── Sidebar ───────────────────────────────────────────────────────────
 
@@ -133,7 +123,7 @@ export function Sidebar() {
           </p>
         )}
         {settingsItems.map(({ href, label, icon: Icon }) => {
-          const active = pathname === href
+          const active = pathname === href || pathname.startsWith(href + "/")
           return (
             <Link
               key={href}

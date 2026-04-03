@@ -72,6 +72,12 @@ class Interaction(Base, TenantMixin):
     # ── Metadados de canal ────────────────────────────────────────────
     unipile_message_id: Mapped[str | None] = mapped_column(String(200), index=True)
     opened: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    opened_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+        comment="Timestamp da primeira abertura do e-mail (via tracking pixel).",
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -97,6 +97,14 @@ class CadenceStep(Base, TenantMixin):
     )
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # ── A/B de assunto (cold email) ───────────────────────────────────
+    subject_used: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        default=None,
+        comment="Variante de assunto usada no envio (A/B testing). NULL = subject padrão.",
+    )
+
     # ── Relacionamentos ───────────────────────────────────────────────
     cadence: Mapped["Cadence"] = relationship(  # type: ignore[name-defined]  # noqa: F821
         "Cadence",

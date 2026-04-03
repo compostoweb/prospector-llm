@@ -3,6 +3,8 @@
 import { useState } from "react"
 import { useCreateCadence, useUpdateCadence } from "@/lib/api/hooks/use-cadences"
 import { useLeadLists, useLeadList } from "@/lib/api/hooks/use-lead-lists"
+import { useEmailAccounts } from "@/lib/api/hooks/use-email-accounts"
+import { useLinkedInAccounts } from "@/lib/api/hooks/use-linkedin-accounts"
 import { CadenceSteps } from "@/components/cadencias/cadence-steps"
 import { LLMConfigForm } from "@/components/cadencias/llm-config-form"
 import { TTSConfigForm, type TTSConfig } from "@/components/cadencias/tts-config-form"
@@ -35,6 +37,9 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
   const [name, setName] = useState(cadence?.name ?? "")
   const [description, setDescription] = useState(cadence?.description ?? "")
   const [mode, setMode] = useState<"automatic" | "semi_manual">(cadence?.mode ?? "automatic")
+  const [cadenceType, setCadenceType] = useState<"mixed" | "email_only">(
+    cadence?.cadence_type ?? "mixed",
+  )
   const [leadListId, setLeadListId] = useState(cadence?.lead_list_id ?? "")
   const { data: leadListDetail } = useLeadList(leadListId)
   const [llmConfig, setLlmConfig] = useState({
@@ -50,6 +55,10 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
     tts_speed: cadence?.tts_speed ?? 1.0,
     tts_pitch: cadence?.tts_pitch ?? 0.0,
   })
+  const [emailAccountId, setEmailAccountId] = useState<string>(cadence?.email_account_id ?? "")
+  const { data: emailAccountsData } = useEmailAccounts()
+  const [linkedInAccountId, setLinkedInAccountId] = useState<string>(cadence?.linkedin_account_id ?? "")
+  const { data: linkedInAccountsData } = useLinkedInAccounts()
   const [targetSegment, setTargetSegment] = useState(cadence?.target_segment ?? "")
   const [personaDescription, setPersonaDescription] = useState(cadence?.persona_description ?? "")
   const [offerDescription, setOfferDescription] = useState(cadence?.offer_description ?? "")
@@ -76,6 +85,7 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
       name: name.trim(),
       ...(description.trim() ? { description: description.trim() } : {}),
       mode,
+      cadence_type: cadenceType,
       llm: {
         provider: llmConfig.llm_provider,
         model: llmConfig.llm_model,
@@ -87,6 +97,8 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
       tts_speed: ttsConfig.tts_speed,
       tts_pitch: ttsConfig.tts_pitch,
       lead_list_id: leadListId || null,
+      email_account_id: emailAccountId || null,
+      linkedin_account_id: linkedInAccountId || null,
       target_segment: targetSegment.trim() || null,
       persona_description: personaDescription.trim() || null,
       offer_description: offerDescription.trim() || null,
@@ -157,12 +169,58 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
               className="flex h-9 w-full rounded-md border border-(--border) bg-transparent px-3 py-1 text-sm text-(--text-primary) focus:outline-none focus:ring-1 focus:ring-(--ring)"
             >
               <option value="automatic">Automático — dispara todas as mensagens</option>
-              <option value="semi_manual">Semi-manual — conexão automática, mensagens manuais</option>
+              <option value="semi_manual">
+                Semi-manual — conexão automática, mensagens manuais
+              </option>
             </select>
             {mode === "semi_manual" && (
               <p className="text-xs text-(--text-tertiary)">
-                Apenas o convite de conexão será enviado automaticamente. Após aceite, você revisará e enviará cada mensagem manualmente na fila de tarefas.
+                Apenas o convite de conexão será enviado automaticamente. Após aceite, você revisará
+                e enviará cada mensagem manualmente na fila de tarefas.
               </p>
+            )}
+          </div>
+
+          {/* Tipo de cadência */}
+          <div className="space-y-1.5">
+            <Label htmlFor="cadence-type">Tipo de cadência</Label>
+            <select
+              id="cadence-type"
+              value={cadenceType}
+              onChange={(e) => setCadenceType(e.target.value as "mixed" | "email_only")}
+              aria-label="Tipo de cadência"
+              className="flex h-9 w-full rounded-md border border-(--border) bg-transparent px-3 py-1 text-sm text-(--text-primary) focus:outline-none focus:ring-1 focus:ring-(--ring)"
+            >
+              <option value="mixed">Mista — LinkedIn + E-mail</option>
+              <option value="email_only">Só E-mail — apenas passos de e-mail</option>
+            </select>
+            {cadenceType === "email_only" && (
+              <p className="text-xs text-(--text-tertiary)">
+                Todos os passos devem usar o canal E-mail. Configurações de TTS e LinkedIn não se
+                aplicam.
+              </p>
+            )}
+            {cadenceType === "email_only" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="email-account">Conta de e-mail (opcional)</Label>
+                <select
+                  id="email-account"
+                  value={emailAccountId}
+                  onChange={(e) => setEmailAccountId(e.target.value)}
+                  aria-label="Conta de e-mail"
+                  className="flex h-9 w-full rounded-md border border-(--border) bg-transparent px-3 py-1 text-sm text-(--text-primary) focus:outline-none focus:ring-1 focus:ring-(--ring)"
+                >
+                  <option value="">Padrão (Unipile)</option>
+                  {(emailAccountsData?.accounts ?? []).map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.display_name} ({acc.email_address})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-(--text-tertiary)">
+                  Deixe em branco para usar a conta Unipile configurada em integrações.
+                </p>
+              </div>
             )}
           </div>
 
@@ -242,6 +300,33 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
               Vincule uma lista para usar os leads desta cadência.
             </p>
           </div>
+
+          {/* Conta LinkedIn (apenas para cadências mixed) */}
+          {cadenceType === "mixed" && (
+            <div className="space-y-1.5">
+              <Label htmlFor="linkedin-account">Conta LinkedIn (opcional)</Label>
+              <select
+                id="linkedin-account"
+                value={linkedInAccountId}
+                onChange={(e) => setLinkedInAccountId(e.target.value)}
+                aria-label="Conta LinkedIn"
+                className="flex h-9 w-full rounded-md border border-(--border) bg-transparent px-3 py-1 text-sm text-(--text-primary) focus:outline-none focus:ring-1 focus:ring-(--ring)"
+              >
+                <option value="">Padrão (Unipile global)</option>
+                {(linkedInAccountsData?.accounts ?? []).filter((a) => a.is_active).map((acc) => (
+                  <option key={acc.id} value={acc.id}>
+                    {acc.display_name}
+                    {acc.linkedin_username ? ` (${acc.linkedin_username})` : ""}
+                    {" — "}
+                    {acc.provider_type === "native" ? "Nativo" : "Unipile"}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-(--text-tertiary)">
+                Deixe em branco para usar a conta Unipile configurada em integrações.
+              </p>
+            </div>
+          )}
 
           {/* LLM Config */}
           <LLMConfigForm value={llmConfig} onChange={setLlmConfig} />

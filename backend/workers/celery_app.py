@@ -45,6 +45,7 @@ task_queues = (
     Queue("enrich", default_exchange, routing_key="enrich"),
     Queue("cadence", default_exchange, routing_key="cadence"),
     Queue("dispatch", default_exchange, routing_key="dispatch"),
+    Queue("content", default_exchange, routing_key="content"),
 )
 
 # ── Configuração ──────────────────────────────────────────────────────

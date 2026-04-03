@@ -144,6 +144,38 @@ class Cadence(Base, TenantMixin, TimestampMixin):
     )
 
     # -------------------------------------------------------
+    # Tipo de cadência (cold email vs mixed)
+    # -------------------------------------------------------
+    cadence_type: Mapped[str] = mapped_column(
+        String(50),
+        default="mixed",
+        server_default="mixed",
+        comment="Tipo: mixed | email_only. email_only força todos os steps no canal EMAIL.",
+    )
+
+    # -------------------------------------------------------
+    # Conta de e-mail preferencial para steps EMAIL
+    # -------------------------------------------------------
+    email_account_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("email_accounts.id", ondelete="SET NULL"),
+        nullable=True,
+        default=None,
+        comment="Conta de e-mail usada para envio (EmailAccount). NULL = usa Unipile global.",
+    )
+
+    # -------------------------------------------------------
+    # Conta LinkedIn preferencial para steps LinkedIn
+    # -------------------------------------------------------
+    linkedin_account_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("linkedin_accounts.id", ondelete="SET NULL"),
+        nullable=True,
+        default=None,
+        comment="Conta LinkedIn usada nos steps (LinkedInAccount). NULL = usa Unipile global.",
+    )
+
+    # -------------------------------------------------------
     # Lista de leads associada (opcional)
     # -------------------------------------------------------
     lead_list_id: Mapped[uuid.UUID | None] = mapped_column(

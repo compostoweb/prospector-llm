@@ -37,6 +37,12 @@ from api.routes import admin_users as admin_users_router
 from api.routes import ws as ws_router
 from api.routes import manual_tasks as manual_tasks_router
 from api.routes import inbox as inbox_router
+from api.routes import email_templates as email_templates_router
+from api.routes import email_tracking as email_tracking_router
+from api.routes import email_accounts as email_accounts_router
+from api.routes import linkedin_accounts as linkedin_accounts_router
+from api.routes import warmup as warmup_router
+from api.routes.content import router as content_router
 from api.webhooks import unipile as unipile_webhook
 from core.config import settings
 from core.database import AsyncSessionLocal, init_db
@@ -149,6 +155,12 @@ app.include_router(admin_users_router.router)
 app.include_router(ws_router.router)
 app.include_router(manual_tasks_router.router)
 app.include_router(inbox_router.router)
+app.include_router(email_templates_router.router)
+app.include_router(email_tracking_router.router)
+app.include_router(email_accounts_router.router)
+app.include_router(linkedin_accounts_router.router)
+app.include_router(warmup_router.router)
+app.include_router(content_router, prefix="/api")
 app.include_router(unipile_webhook.router)
 
 

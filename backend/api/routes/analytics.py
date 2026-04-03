@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.dependencies import get_effective_tenant_id, get_session_flexible
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
-from models.enums import InteractionDirection, LeadStatus, StepStatus
+from models.enums import Channel, InteractionDirection, LeadStatus, StepStatus
 from models.interaction import Interaction
 from models.lead import Lead
 
@@ -473,4 +473,350 @@ async def get_cadence_performance(
         ))
 
     logger.debug("analytics.performance", tenant_id=str(tenant_id), days=days)
+    return result
+
+
+# ── Email Analytics ───────────────────────────────────────────────────
+
+
+class EmailStatsResponse(BaseModel):
+    sent: int = 0
+    opened: int = 0
+    replied: int = 0
+    unsubscribed: int = 0
+    open_rate: float = 0.0
+    reply_rate: float = 0.0
+
+
+class EmailCadenceItem(BaseModel):
+    cadence_id: str
+    cadence_name: str
+    sent: int = 0
+    opened: int = 0
+    replied: int = 0
+    open_rate: float = 0.0
+    reply_rate: float = 0.0
+
+
+class EmailOverTimeItem(BaseModel):
+    date: str
+    sent: int = 0
+    opened: int = 0
+    replied: int = 0
+
+
+class EmailABResultItem(BaseModel):
+    subject: str
+    sent: int = 0
+    opened: int = 0
+    open_rate: float = 0.0
+
+
+@router.get("/email/stats", response_model=EmailStatsResponse)
+async def get_email_stats(
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
+    db: AsyncSession = Depends(get_session_flexible),
+    tenant_id: UUID = Depends(get_effective_tenant_id),
+) -> EmailStatsResponse:
+    """Estatísticas gerais de e-mail: enviados, abertos, respondidos, descadastros."""
+    from models.email_unsubscribe import EmailUnsubscribe  # noqa: PLC0415
+
+    since = _utc_days_ago(days)
+
+    # Enviados (outbound EMAIL)
+    sent_q = await db.execute(
+        select(func.count(Interaction.id)).where(
+            Interaction.tenant_id == tenant_id,
+            Interaction.channel == Channel.EMAIL,
+            Interaction.direction == InteractionDirection.OUTBOUND,
+            Interaction.created_at >= since,
+        )
+    )
+    sent = sent_q.scalar() or 0
+
+    # Abertos
+    opened_q = await db.execute(
+        select(func.count(Interaction.id)).where(
+            Interaction.tenant_id == tenant_id,
+            Interaction.channel == Channel.EMAIL,
+            Interaction.direction == InteractionDirection.OUTBOUND,
+            Interaction.opened.is_(True),
+            Interaction.opened_at >= since,
+        )
+    )
+    opened = opened_q.scalar() or 0
+
+    # Respondidos (inbound EMAIL)
+    replied_q = await db.execute(
+        select(func.count(Interaction.id)).where(
+            Interaction.tenant_id == tenant_id,
+            Interaction.channel == Channel.EMAIL,
+            Interaction.direction == InteractionDirection.INBOUND,
+            Interaction.created_at >= since,
+        )
+    )
+    replied = replied_q.scalar() or 0
+
+    # Descadastros no período
+    unsub_q = await db.execute(
+        select(func.count(EmailUnsubscribe.id)).where(
+            EmailUnsubscribe.tenant_id == tenant_id,
+            EmailUnsubscribe.unsubscribed_at >= since,
+        )
+    )
+    unsubscribed = unsub_q.scalar() or 0
+
+    open_rate = round((opened / sent) * 100, 1) if sent > 0 else 0.0
+    reply_rate = round((replied / sent) * 100, 1) if sent > 0 else 0.0
+
+    logger.debug("analytics.email.stats", tenant_id=str(tenant_id), days=days)
+    return EmailStatsResponse(
+        sent=sent,
+        opened=opened,
+        replied=replied,
+        unsubscribed=unsubscribed,
+        open_rate=open_rate,
+        reply_rate=reply_rate,
+    )
+
+
+@router.get("/email/cadences", response_model=list[EmailCadenceItem])
+async def get_email_cadences_stats(
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
+    db: AsyncSession = Depends(get_session_flexible),
+    tenant_id: UUID = Depends(get_effective_tenant_id),
+) -> list[EmailCadenceItem]:
+    """Performance por cadência: enviados, abertos, taxa de abertura e resposta."""
+    since = _utc_days_ago(days)
+
+    # Steps EMAIL enviados por cadência
+    steps_q = await db.execute(
+        select(
+            CadenceStep.cadence_id,
+            func.count(CadenceStep.id).label("sent"),
+        )
+        .where(
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.channel == Channel.EMAIL,
+            CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED]),
+            CadenceStep.sent_at >= since,
+        )
+        .group_by(CadenceStep.cadence_id)
+        .order_by(func.count(CadenceStep.id).desc())
+    )
+    step_rows = steps_q.all()
+    if not step_rows:
+        return []
+
+    cadence_ids = [row.cadence_id for row in step_rows]
+
+    cadences_q = await db.execute(
+        select(Cadence.id, Cadence.name).where(Cadence.id.in_(cadence_ids))
+    )
+    name_map = {row.id: row.name for row in cadences_q.all()}
+
+    # Abertos por cadência (via CadenceStep.lead_id + Interaction join)
+    opened_q = await db.execute(
+        select(
+            CadenceStep.cadence_id,
+            func.count(Interaction.id).label("opened"),
+        )
+        .join(Interaction, Interaction.lead_id == CadenceStep.lead_id)
+        .where(
+            CadenceStep.cadence_id.in_(cadence_ids),
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.channel == Channel.EMAIL,
+            Interaction.channel == Channel.EMAIL,
+            Interaction.direction == InteractionDirection.OUTBOUND,
+            Interaction.opened.is_(True),
+            Interaction.opened_at >= since,
+        )
+        .group_by(CadenceStep.cadence_id)
+    )
+    opened_map = {row.cadence_id: row.opened for row in opened_q.all()}
+
+    # Respondidos por cadência
+    replied_q = await db.execute(
+        select(
+            CadenceStep.cadence_id,
+            func.count(Interaction.id).label("replied"),
+        )
+        .join(Interaction, Interaction.lead_id == CadenceStep.lead_id)
+        .where(
+            CadenceStep.cadence_id.in_(cadence_ids),
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.channel == Channel.EMAIL,
+            Interaction.channel == Channel.EMAIL,
+            Interaction.direction == InteractionDirection.INBOUND,
+            Interaction.created_at >= since,
+        )
+        .group_by(CadenceStep.cadence_id)
+    )
+    replied_map = {row.cadence_id: row.replied for row in replied_q.all()}
+
+    result = []
+    for row in step_rows:
+        sent = row.sent or 0
+        opened = opened_map.get(row.cadence_id, 0)
+        replied = replied_map.get(row.cadence_id, 0)
+        result.append(EmailCadenceItem(
+            cadence_id=str(row.cadence_id),
+            cadence_name=name_map.get(row.cadence_id, "—"),
+            sent=sent,
+            opened=opened,
+            replied=replied,
+            open_rate=round((opened / sent) * 100, 1) if sent > 0 else 0.0,
+            reply_rate=round((replied / sent) * 100, 1) if sent > 0 else 0.0,
+        ))
+
+    logger.debug("analytics.email.cadences", tenant_id=str(tenant_id), days=days)
+    return result
+
+
+@router.get("/email/over-time", response_model=list[EmailOverTimeItem])
+async def get_email_over_time(
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
+    db: AsyncSession = Depends(get_session_flexible),
+    tenant_id: UUID = Depends(get_effective_tenant_id),
+) -> list[EmailOverTimeItem]:
+    """Série temporal diária de e-mails enviados, abertos e respondidos."""
+    since = _utc_days_ago(days)
+
+    # Enviados por dia
+    sent_q = await db.execute(
+        select(
+            func.date_trunc("day", Interaction.created_at).label("day"),
+            func.count(Interaction.id).label("cnt"),
+        )
+        .where(
+            Interaction.tenant_id == tenant_id,
+            Interaction.channel == Channel.EMAIL,
+            Interaction.direction == InteractionDirection.OUTBOUND,
+            Interaction.created_at >= since,
+        )
+        .group_by(func.date_trunc("day", Interaction.created_at))
+    )
+    sent_map: dict[str, int] = {}
+    for row in sent_q.all():
+        sent_map[row.day.strftime("%Y-%m-%d")] = row.cnt
+
+    # Abertos por dia
+    opened_q = await db.execute(
+        select(
+            func.date_trunc("day", Interaction.opened_at).label("day"),
+            func.count(Interaction.id).label("cnt"),
+        )
+        .where(
+            Interaction.tenant_id == tenant_id,
+            Interaction.channel == Channel.EMAIL,
+            Interaction.opened.is_(True),
+            Interaction.opened_at >= since,
+        )
+        .group_by(func.date_trunc("day", Interaction.opened_at))
+    )
+    opened_map: dict[str, int] = {}
+    for row in opened_q.all():
+        opened_map[row.day.strftime("%Y-%m-%d")] = row.cnt
+
+    # Respondidos por dia (inbound)
+    replied_q = await db.execute(
+        select(
+            func.date_trunc("day", Interaction.created_at).label("day"),
+            func.count(Interaction.id).label("cnt"),
+        )
+        .where(
+            Interaction.tenant_id == tenant_id,
+            Interaction.channel == Channel.EMAIL,
+            Interaction.direction == InteractionDirection.INBOUND,
+            Interaction.created_at >= since,
+        )
+        .group_by(func.date_trunc("day", Interaction.created_at))
+    )
+    replied_map: dict[str, int] = {}
+    for row in replied_q.all():
+        replied_map[row.day.strftime("%Y-%m-%d")] = row.cnt
+
+    all_days = sorted(set(sent_map) | set(opened_map) | set(replied_map))
+    result = [
+        EmailOverTimeItem(
+            date=d,
+            sent=sent_map.get(d, 0),
+            opened=opened_map.get(d, 0),
+            replied=replied_map.get(d, 0),
+        )
+        for d in all_days
+    ]
+
+    logger.debug("analytics.email.over_time", tenant_id=str(tenant_id), days=days)
+    return result
+
+
+@router.get("/email/ab-results", response_model=list[EmailABResultItem])
+async def get_email_ab_results(
+    cadence_id: UUID = Query(..., description="ID da cadência"),
+    step_number: int = Query(..., ge=1, description="Número do step"),
+    db: AsyncSession = Depends(get_session_flexible),
+    tenant_id: UUID = Depends(get_effective_tenant_id),
+) -> list[EmailABResultItem]:
+    """Resultados A/B por variante de assunto para um step específico."""
+    # Busca steps agrupados por subject_used
+    q = await db.execute(
+        select(
+            CadenceStep.subject_used,
+            func.count(CadenceStep.id).label("sent"),
+        )
+        .where(
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.cadence_id == cadence_id,
+            CadenceStep.step_number == step_number,
+            CadenceStep.channel == Channel.EMAIL,
+            CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED]),
+            CadenceStep.subject_used.is_not(None),
+        )
+        .group_by(CadenceStep.subject_used)
+        .order_by(func.count(CadenceStep.id).desc())
+    )
+    rows = q.all()
+    if not rows:
+        return []
+
+    # Abertos por subject_used via join com Interaction
+    opened_q = await db.execute(
+        select(
+            CadenceStep.subject_used,
+            func.count(Interaction.id).label("opened"),
+        )
+        .join(Interaction, Interaction.lead_id == CadenceStep.lead_id)
+        .where(
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.cadence_id == cadence_id,
+            CadenceStep.step_number == step_number,
+            CadenceStep.channel == Channel.EMAIL,
+            CadenceStep.subject_used.is_not(None),
+            Interaction.channel == Channel.EMAIL,
+            Interaction.direction == InteractionDirection.OUTBOUND,
+            Interaction.opened.is_(True),
+        )
+        .group_by(CadenceStep.subject_used)
+    )
+    opened_map: dict[str | None, int] = {row.subject_used: row.opened for row in opened_q.all()}
+
+    result = [
+        EmailABResultItem(
+            subject=row.subject_used or "(sem assunto)",
+            sent=row.sent,
+            opened=opened_map.get(row.subject_used, 0),
+            open_rate=round(
+                (opened_map.get(row.subject_used, 0) / row.sent) * 100, 1
+            ) if row.sent > 0 else 0.0,
+        )
+        for row in rows
+    ]
+
+    logger.debug(
+        "analytics.email.ab_results",
+        tenant_id=str(tenant_id),
+        cadence_id=str(cadence_id),
+        step_number=step_number,
+    )
     return result

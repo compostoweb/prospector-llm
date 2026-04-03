@@ -16,7 +16,7 @@ from __future__ import annotations
 import uuid
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,14 +33,14 @@ router = APIRouter(prefix="/cadences", tags=["Cadences"])
 
 @router.get("", response_model=list[CadenceResponse])
 async def list_cadences(
+    cadence_type: str | None = Query(default=None, description="Filtrar por tipo: 'mixed' | 'email_only'"),
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> list[CadenceResponse]:
-    result = await db.execute(
-        select(Cadence)
-        .where(Cadence.tenant_id == tenant_id)
-        .order_by(Cadence.created_at.desc())
-    )
+    stmt = select(Cadence).where(Cadence.tenant_id == tenant_id)
+    if cadence_type:
+        stmt = stmt.where(Cadence.cadence_type == cadence_type)
+    result = await db.execute(stmt.order_by(Cadence.created_at.desc()))
     cadences = result.scalars().all()
     return [CadenceResponse.model_validate(c) for c in cadences]
 
@@ -59,6 +59,7 @@ async def create_cadence(
         description=body.description,
         allow_personal_email=body.allow_personal_email,
         mode=body.mode.value,
+        cadence_type=body.cadence_type,
         llm_provider=body.llm.provider,
         llm_model=body.llm.model,
         llm_temperature=body.llm.temperature,
@@ -68,6 +69,7 @@ async def create_cadence(
         tts_speed=body.tts_speed,
         tts_pitch=body.tts_pitch,
         lead_list_id=body.lead_list_id,
+        email_account_id=body.email_account_id,
         target_segment=body.target_segment,
         persona_description=body.persona_description,
         offer_description=body.offer_description,
@@ -109,7 +111,7 @@ async def update_cadence(
 ) -> CadenceResponse:
     cadence = await _get_cadence_or_404(cadence_id, tenant_id, db)
 
-    updates = body.model_dump(exclude_unset=True, exclude={"llm", "steps_template", "tts_provider", "tts_voice_id", "lead_list_id", "target_segment", "persona_description", "offer_description", "tone_instructions"})
+    updates = body.model_dump(exclude_unset=True, exclude={"llm", "steps_template", "tts_provider", "tts_voice_id", "lead_list_id", "email_account_id", "target_segment", "persona_description", "offer_description", "tone_instructions", "cadence_type"})
     for field, value in updates.items():
         setattr(cadence, field, value)
 
@@ -141,6 +143,10 @@ async def update_cadence(
         cadence.tts_pitch = body.tts_pitch
     if "lead_list_id" in raw:
         cadence.lead_list_id = body.lead_list_id
+    if "email_account_id" in raw:
+        cadence.email_account_id = body.email_account_id
+    if "cadence_type" in raw and body.cadence_type is not None:
+        cadence.cadence_type = body.cadence_type
 
     await db.commit()
     await db.refresh(cadence)

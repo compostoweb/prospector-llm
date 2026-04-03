@@ -25,6 +25,8 @@ export interface CadenceStep {
   use_voice: boolean
   audio_file_id: string | null
   step_type: StepType | null
+  subject_variants?: string[] | null
+  email_template_id?: string | null
 }
 
 export interface Cadence {
@@ -34,6 +36,7 @@ export interface Cadence {
   description: string | null
   is_active: boolean
   mode: "automatic" | "semi_manual"
+  cadence_type: "mixed" | "email_only"
   llm_provider: "openai" | "gemini"
   llm_model: string
   llm_temperature: number
@@ -43,6 +46,8 @@ export interface Cadence {
   tts_speed: number
   tts_pitch: number
   lead_list_id: string | null
+  email_account_id: string | null
+  linkedin_account_id: string | null
   target_segment: string | null
   persona_description: string | null
   offer_description: string | null
@@ -56,6 +61,7 @@ export interface CreateCadenceBody {
   name: string
   description?: string
   mode?: "automatic" | "semi_manual"
+  cadence_type?: "mixed" | "email_only"
   llm: {
     provider: "openai" | "gemini"
     model: string
@@ -67,6 +73,8 @@ export interface CreateCadenceBody {
   tts_speed?: number
   tts_pitch?: number
   lead_list_id?: string | null
+  email_account_id?: string | null
+  linkedin_account_id?: string | null
   target_segment?: string | null
   persona_description?: string | null
   offer_description?: string | null
@@ -76,14 +84,15 @@ export interface CreateCadenceBody {
 
 // ── Hooks de query ────────────────────────────────────────────────────
 
-export function useCadences() {
+export function useCadences(cadenceType?: "mixed" | "email_only") {
   const { data: session } = useSession()
 
   return useQuery({
-    queryKey: ["cadences"],
+    queryKey: ["cadences", cadenceType],
     queryFn: async (): Promise<Cadence[]> => {
       const client = createBrowserClient(session?.accessToken)
-      const { data, error } = await client.GET("/cadences" as never)
+      const url = cadenceType ? `/cadences?cadence_type=${cadenceType}` : "/cadences"
+      const { data, error } = await client.GET(url as never)
       if (error) throw new Error("Falha ao carregar cadências")
       return (data as Cadence[]) ?? []
     },

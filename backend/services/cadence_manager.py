@@ -104,6 +104,17 @@ class CadenceManager:
         # Os demais steps serão ManualTasks criadas ao detectar aceite
         is_semi_manual = cadence.mode == "semi_manual"
 
+        # Validação email_only: todos os steps do template devem ser EMAIL
+        is_email_only = getattr(cadence, "cadence_type", "mixed") == "email_only"
+        if is_email_only:
+            non_email = [
+                item[0].value for item in template if item[0] != Channel.EMAIL
+            ]
+            if non_email:
+                raise ValueError(
+                    f"Cadência email_only não pode ter steps do(s) canal(is): {', '.join(non_email)}"
+                )
+
         for step_number, (channel, day_offset, use_voice, audio_file_id, _step_type) in enumerate(
             template, start=1
         ):
@@ -120,7 +131,21 @@ class CadenceManager:
                 )
                 continue
 
-            scheduled_at = now + timedelta(days=day_offset)
+            # Para steps EMAIL, agenda às 9h00 no timezone do lead (se disponível)
+            base_date = now + timedelta(days=day_offset)
+            if channel == Channel.EMAIL and lead.timezone:
+                try:
+                    from zoneinfo import ZoneInfo  # noqa: PLC0415
+                    tz = ZoneInfo(lead.timezone)
+                    local_date = base_date.astimezone(tz).date()
+                    scheduled_at = datetime(
+                        local_date.year, local_date.month, local_date.day, 9, 0, 0,
+                        tzinfo=tz,
+                    ).astimezone(timezone.utc)
+                except Exception:
+                    scheduled_at = base_date
+            else:
+                scheduled_at = base_date
 
             step = CadenceStep(
                 id=uuid.uuid4(),

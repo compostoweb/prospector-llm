@@ -1,13 +1,18 @@
 ﻿"use client"
 
+import { useState } from "react"
 import Link from "next/link"
 import { useCadences, useToggleCadence } from "@/lib/api/hooks/use-cadences"
 import { EmptyState } from "@/components/shared/empty-state"
-import { Plus, GitBranch, Users, CheckCircle, Power, FlaskConical } from "lucide-react"
+import { Plus, GitBranch, Users, CheckCircle, Power, FlaskConical, Mail } from "lucide-react"
 import { cn } from "@/lib/utils"
 
+type CadenceFilter = "all" | "mixed" | "email_only"
+
 export default function CadenciasPage() {
-  const { data: cadences, isLoading } = useCadences()
+  const [filter, setFilter] = useState<CadenceFilter>("all")
+  const cadenceType = filter === "all" ? undefined : (filter as "mixed" | "email_only")
+  const { data: cadences, isLoading } = useCadences(cadenceType)
   const toggleCadence = useToggleCadence()
 
   function handleToggle(id: string, current: boolean) {
@@ -31,6 +36,32 @@ export default function CadenciasPage() {
         </Link>
       </div>
 
+      {/* Filtro por tipo */}
+      <div className="flex gap-1 rounded-md border border-(--border-default) bg-(--bg-overlay) p-1 w-fit">
+        {(
+          [
+            { key: "all", label: "Todas" },
+            { key: "mixed", label: "Mistas" },
+            { key: "email_only", label: "Só E-mail" },
+          ] as const
+        ).map(({ key, label }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setFilter(key)}
+            className={cn(
+              "rounded px-3 py-1 text-xs font-medium transition-colors",
+              filter === key
+                ? "bg-(--bg-surface) text-(--text-primary) shadow-sm"
+                : "text-(--text-secondary) hover:text-(--text-primary)",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Badge de tipo no card */}
       {/* Lista */}
       {isLoading ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -56,6 +87,12 @@ export default function CadenciasPage() {
                       {cadence.description}
                     </p>
                   )}
+                  {cadence.cadence_type === "email_only" && (
+                    <span className="mt-1 inline-flex items-center gap-1 rounded bg-(--accent)/10 px-1.5 py-0.5 text-[10px] font-medium text-(--accent)">
+                      <Mail size={9} aria-hidden="true" />
+                      Só E-mail
+                    </span>
+                  )}
                 </Link>
 
                 {/* Toggle ativo/inativo */}
@@ -63,7 +100,7 @@ export default function CadenciasPage() {
                   type="button"
                   onClick={() => handleToggle(cadence.id, cadence.is_active)}
                   aria-label={cadence.is_active ? "Desativar cadência" : "Ativar cadência"}
-                  aria-pressed={cadence.is_active ? "true" : "false"}
+                  aria-pressed={cadence.is_active}
                   disabled={toggleCadence.isPending}
                   className={cn(
                     "shrink-0 transition-colors disabled:opacity-50",
