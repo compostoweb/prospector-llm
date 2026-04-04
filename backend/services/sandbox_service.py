@@ -294,7 +294,7 @@ class SandboxService:
             previous_channel = prev_channel_map.get(step.step_number)
 
             try:
-                content, llm_info = await self._compose_step(
+                content, email_subject, llm_info = await self._compose_step(
                     step, cadence, composer, context_fetcher, registry, db,
                     total_steps=total_steps,
                     previous_channel=previous_channel,
@@ -305,9 +305,9 @@ class SandboxService:
                 step.tokens_in = llm_info.get("tokens_in")
                 step.tokens_out = llm_info.get("tokens_out")
 
-                # Gera subject para email
+                # Subject extraído do JSON LLM em _compose_step (evita segunda chamada LLM)
                 if step.channel == Channel.EMAIL:
-                    step.email_subject = await self._generate_email_subject(
+                    step.email_subject = email_subject or await self._generate_email_subject(
                         step, cadence, registry
                     )
 
@@ -385,7 +385,7 @@ class SandboxService:
         await db.flush()
 
         try:
-            content, llm_info = await self._compose_step(
+            content, email_subject, llm_info = await self._compose_step(
                 step, cadence, composer, context_fetcher, registry, db,
                 total_steps=total_steps,
                 previous_channel=prev_channel,
@@ -396,8 +396,9 @@ class SandboxService:
             step.tokens_in = llm_info.get("tokens_in")
             step.tokens_out = llm_info.get("tokens_out")
 
+            # Subject extraído do JSON LLM em _compose_step (evita segunda chamada LLM)
             if step.channel == Channel.EMAIL:
-                step.email_subject = await self._generate_email_subject(
+                step.email_subject = email_subject or await self._generate_email_subject(
                     step, cadence, registry
                 )
 
@@ -989,8 +990,16 @@ class SandboxService:
         db: AsyncSession,
         total_steps: int = 1,
         previous_channel: str | None = None,
-    ) -> tuple[str, dict]:
-        """Compõe mensagem para um step usando o mesmo pipeline do dispatch."""
+    ) -> tuple[str, str | None, dict]:
+        """Compõe mensagem para um step usando o mesmo pipeline do dispatch.
+
+        Returns:
+            Tuple[content, email_subject, llm_info]
+            email_subject é preenchido apenas para Canal EMAIL (extraído do JSON LLM).
+        """
+        # Rastreia company/name para fallback do parser de email
+        _company: str | None = None
+        _name: str | None = None
 
         if step.lead_id:
             # Lead real — busca via query async (não usar step.lead por lazy loading)
@@ -1002,6 +1011,9 @@ class SandboxService:
             lead = result.scalar_one_or_none()
             if not lead:
                 raise ValueError(f"Lead {step.lead_id} não encontrado.")
+
+            _company = lead.company
+            _name = lead.name
 
             context: dict = {}
             if lead.website:
@@ -1035,6 +1047,8 @@ class SandboxService:
         else:
             # Lead fictício
             fdata = step.fictitious_lead_data or {}
+            _company = fdata.get("company")
+            _name = fdata.get("name", "Lead Teste")
             context = {"site_summary": f"Empresa fictícia: {fdata.get('company', 'N/A')} - Setor: {fdata.get('industry', 'N/A')}"}
 
             user_prompt = _build_sandbox_user_prompt(
@@ -1080,7 +1094,18 @@ class SandboxService:
             "tokens_out": response.output_tokens,
         }
 
-        return response.text.strip(), llm_info
+        # Para EMAIL: instrução já pede JSON {subject, body} — extrai aqui para evitar segunda chamada LLM
+        if step.channel == Channel.EMAIL:
+            from services.ai_composer import _parse_email_json
+            from types import SimpleNamespace
+
+            _lead_proxy = SimpleNamespace(company=_company, name=_name)
+            email_subject, email_body = _parse_email_json(
+                response.text.strip(), _lead_proxy, step.step_number
+            )
+            return email_body, email_subject, llm_info
+
+        return response.text.strip(), None, llm_info
 
     async def _generate_tts_preview(
         self,

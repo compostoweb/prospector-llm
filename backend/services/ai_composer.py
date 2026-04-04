@@ -13,6 +13,8 @@ import structlog
 from integrations.llm import LLMMessage, LLMRegistry, LLMResponse
 from models.cadence import Cadence
 from models.lead import Lead
+from services.outreach_playbook import PlaybookEntry, get_lead_playbook
+from services.sector_templates import get_few_shot_example
 
 logger = structlog.get_logger()
 
@@ -198,6 +200,25 @@ Regras:
 TIPO: Primeiro email frio (cold mail)
 OBJETIVO: Captar atenção em 5 segundos, abrir conversa. A PRIMEIRA FRASE É TÃO IMPORTANTE QUANTO O ASSUNTO.
 
+FORMATO OBRIGATÓRIO — Retorne EXATAMENTE este JSON (sem markdown, sem comentários):
+{"subject": "Assunto do email aqui", "body": "Corpo do email aqui"}
+
+Regras do ASSUNTO (subject):
+- Máximo 8 palavras
+- Específico ao lead/empresa/setor/dor — nunca genérico
+- PROIBIDO: "Uma ideia para", "proposta", "oportunidade", "parceria", "apresentação"
+- Banco de estilos de alto open-rate (USE COMO REFERÊNCIA, ADAPTE AO LEAD):
+  • "Sua recepção ainda agenda manualmente?"
+  • "Fechamento mensal da [Empresa]: de dias para horas"
+  • "O dado chega tarde para sua decisão?"
+  • "Engenheiro sênior resolvendo ticket de suporte"
+  • "Agência cresce, margem não acompanha?"
+  • "Obrigações acessórias manuais: o risco que cresce"
+  • "Contratos críticos sem controle centralizado"
+  • "O cliente liga e você abre cinco sistemas"
+  • "Antes de contratar mais alguém no time"
+  • "O que está escapando da sua operação hoje"
+
 Não comece com apresentação — vá direto ao ponto. Seu nome já está no remetente.
 Escolha o método de copy mais adequado aos dados disponíveis:
 
@@ -227,6 +248,17 @@ Exemplo de método INSIGHT:
 TIPO: Follow-up por email (lead não respondeu o primeiro)
 OBJETIVO: Reengajar com conteúdo novo, demonstrar persistência inteligente. Use método DIFERENTE do anterior.
 
+FORMATO OBRIGATÓRIO — Retorne EXATAMENTE este JSON (sem markdown, sem comentários):
+{"subject": "Assunto do email aqui", "body": "Corpo do email aqui"}
+
+Regras do ASSUNTO (subject):
+- Máximo 8 palavras, novo ângulo — nunca idêntico ao email anterior
+- Estilos de follow-up de alto open-rate (ADAPTE AO LEAD):
+  • "Re: [tema novo do setor]"
+  • "Dado que vi sobre [setor] e lembrei de você"
+  • "Um ângulo diferente sobre [dor confirmada]"
+  • "[Empresa]: [métrica relativa ao setor]?"
+
 Se o primeiro email usou BINÁRIO, agora use INSIGHT ou DIS.
 Se usou INSIGHT, agora use DPO ou BINÁRIO.
 SEMPRE traga um ângulo novo — nunca repita a mesma estrutura.
@@ -245,6 +277,13 @@ Regras:
     "email_breakup": """
 TIPO: Email de despedida / último contato
 OBJETIVO: Última tentativa respeitosa, criar senso de fechamento. Pode ser o método DPO ou BINÁRIO pela brevidade.
+
+FORMATO OBRIGATÓRIO — Retorne EXATAMENTE este JSON (sem markdown, sem comentários):
+{"subject": "Assunto do email aqui", "body": "Corpo do email aqui"}
+
+Regras do ASSUNTO:
+- Máximo 8 palavras, tom de fechamento natural
+- Exemplos: "Encerrando o contato por enquanto", "Última mensagem por ora", "Deixo a porta aberta"
 
 Regras:
 - Máximo 100 palavras, 2 parágrafos
@@ -354,6 +393,143 @@ class AIComposer:
 
         return response.text.strip()
 
+    async def compose_email(
+        self,
+        lead: Lead,
+        step_number: int,
+        context: dict,
+        cadence: Cadence,
+        step_type: str | None = None,
+        total_steps: int = 1,
+        previous_channel: str | None = None,
+    ) -> tuple[str, str]:
+        """Gera subject + body de email via LLM (retorna JSON internamente).
+
+        Returns:
+            Tuple[subject, body] — ambos como strings limpas.
+        """
+        user_prompt = _build_user_prompt(
+            lead, "email", step_number, context,
+            total_steps=total_steps,
+            previous_channel=previous_channel,
+            cadence=cadence,
+            step_type=step_type,
+        )
+
+        messages = [
+            LLMMessage(role="system", content=COMPOSER_SYSTEM_PROMPT),
+            LLMMessage(role="user", content=user_prompt),
+        ]
+
+        response: LLMResponse = await self._registry.complete(
+            messages=messages,
+            provider=cadence.llm_provider,
+            model=cadence.llm_model,
+            temperature=cadence.llm_temperature,
+            max_tokens=cadence.llm_max_tokens,
+        )
+
+        raw = response.text.strip()
+
+        # Parse JSON gerado pelo LLM
+        subject, body = _parse_email_json(raw, lead=lead, step_number=step_number)
+
+        logger.info(
+            "ai_composer.compose_email",
+            lead_id=str(lead.id),
+            step=step_number,
+            provider=response.provider,
+            model=response.model,
+            subject_len=len(subject),
+            tokens_in=response.input_tokens,
+            tokens_out=response.output_tokens,
+        )
+
+        return subject, body
+
+
+def _parse_email_json(raw: str, lead: object, step_number: int) -> tuple[str, str]:
+    """Extrai (subject, body) do JSON retornado pelo LLM.
+
+    Resiliente: se o parse falhar, retorna um subject de fallback simples
+    e o texto bruto como body.
+    """
+    # Normaliza markdown code fences que alguns modelos adicionam
+    text = raw
+    if text.startswith("```"):
+        lines = text.splitlines()
+        # Remove a primeira (``` ou ```json) e a última (```)
+        text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+
+    try:
+        data = json.loads(text)
+        subject = str(data.get("subject", "")).strip()
+        body = str(data.get("body", "")).strip()
+        if subject and body:
+            return subject, body
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Fallback: o LLM gerou texto puro (sem JSON). Usa texto como body.
+    company = getattr(lead, "company", None) or getattr(lead, "name", "você")
+    fallback_subject = f"Uma ideia para {company}" if step_number == 1 else f"Re: Uma ideia para {company}"
+    return fallback_subject, raw
+
+
+def _select_copy_method(
+    step_key: str,
+    lead: Lead,
+    playbook_entry: PlaybookEntry | None,
+    context: dict,
+    step_number: int = 1,
+    total_steps: int = 1,
+) -> str | None:
+    """Seleciona o método de copy mais adequado para o step.
+
+    Retorna uma das strings: 'AIRE' | 'DIS' | 'DPO' | 'BINÁRIO' | 'INSIGHT',
+    ou None quando o step não usa método de copy (ex: linkedin_connect).
+    """
+    # Steps que não usam método de copy estruturado
+    if step_key in ("linkedin_connect", "linkedin_post_comment", "linkedin_dm_post_connect_voice"):
+        return None
+
+    # Breakup → DPO (brevidade máxima)
+    if step_key in ("email_breakup", "linkedin_dm_breakup"):
+        return "DPO"
+
+    # Posts recentes disponíveis → BINÁRIO é o mais eficaz
+    has_posts = bool(getattr(lead, "linkedin_recent_posts_json", None))
+    has_site = bool(context.get("site_summary") and context.get("site_summary") != "Não disponível")
+
+    # Follow-ups com posts → BINÁRIO; com site/notícias → INSIGHT
+    is_followup = step_key in ("email_followup", "linkedin_dm_followup")
+    if is_followup:
+        if has_posts:
+            return "BINÁRIO"
+        if has_site:
+            return "INSIGHT"
+        return "DPO"
+
+    # Primeiro contato: dor confirmada pelo playbook → DIS
+    if playbook_entry and step_number <= 2:
+        return "DIS"
+
+    # Posts disponíveis no primeiro contato → BINÁRIO
+    if has_posts and step_number <= 2:
+        return "BINÁRIO"
+
+    # Default para primeiro contato sem dados extras
+    return "AIRE"
+
+
+_COPY_METHOD_DEFINITIONS: dict[str, str] = {
+    "AIRE": "Atenção (sobre o lead, não sobre você) → Interesse (algo que ele pode melhorar) → Referência (prova social/autoridade) → Estímulo (CTA com opções).",
+    "DIS": "Dor (cenário que o lead certamente reconhece) → Implicação (custo real de não resolver) → Solução (oferecer como pergunta, não afirmação). Use quando a dor do setor é conhecida.",
+    "DPO": "Dor (cenário atual com o problema) → Prazer (cenário futuro sem o problema) → Objetividade (CTA curtíssimo e direto). Ideal para brevidade.",
+    "BINÁRIO": "Observação verdadeira e relevante sobre o lead ou setor → Pergunta fechada sim/não direcionada ao benefício. Ultra-conciso e eficaz quando há dado específico.",
+    "INSIGHT": "Recurso externo (estudo, relatório, notícia de terceiros) → Contexto (por que aquilo importa para este lead) → Conexão (como se relaciona com a dor dele) → Pergunta reflexiva. Posiciona como consultor.",
+}
+
 
 def _build_user_prompt(
     lead: Lead,
@@ -405,7 +581,28 @@ def _build_user_prompt(
     if lead.linkedin_url:
         lead_lines.append(f"LinkedIn: {lead.linkedin_url}")
 
-    # Contexto da cadência (segmento-alvo, persona, oferta)
+    # ── Playbook estratégico do setor/cargo ───────────────────────────────────
+    playbook_entry: PlaybookEntry | None = get_lead_playbook(lead)
+    playbook_block = ""
+    if playbook_entry:
+        playbook_block = f"""PLAYBOOK DO SETOR E CARGO (use para calibrar a abordagem):
+Dor principal: {playbook_entry.dor_principal}
+Dor secundária: {playbook_entry.dor_secundaria}
+Gatilho emocional (o que o cargo carrega internamente): "{playbook_entry.gatilho_emocional}"
+Gancho de valor: {playbook_entry.gancho}"""
+
+    # ── Método de copy selecionado ────────────────────────────────────────────
+    copy_method = _select_copy_method(
+        step_key, lead, playbook_entry, context,
+        step_number=step,
+        total_steps=total_steps,
+    )
+    copy_method_block = ""
+    if copy_method:
+        definition = _COPY_METHOD_DEFINITIONS.get(copy_method, "")
+        copy_method_block = f"MÉTODO OBRIGATÓRIO PARA ESTE STEP: {copy_method}\n{definition}"
+
+    # ── Contexto da cadência (segmento-alvo, persona, oferta) ─────────────────
     cadence_context_lines: list[str] = []
     if cadence:
         if cadence.target_segment:
@@ -419,30 +616,39 @@ def _build_user_prompt(
 
     cadence_block = "\n".join(cadence_context_lines) if cadence_context_lines else "Não configurado"
 
-    return f"""
-{step_instruction}
+    # Monta o prompt final
+    blocks: list[str] = [step_instruction, "---", "DADOS DO LEAD:", chr(10).join(lead_lines)]
 
----
+    if playbook_block:
+        blocks.append(f"\n{playbook_block}")
 
-DADOS DO LEAD:
-{chr(10).join(lead_lines)}
+    if copy_method_block:
+        blocks.append(f"\n{copy_method_block}")
 
-CONTEXTO DA CAMPANHA:
-{cadence_block}
+    # ── Few-shot de referência por setor ──────────────────────────────────────
+    few_shot_block = get_few_shot_example(
+        sector=playbook_entry.sector if playbook_entry else None,
+        role=playbook_entry.role if playbook_entry else None,
+        channel=channel,
+        step_key=step_key,
+    )
+    if few_shot_block:
+        blocks.append(f"\n{few_shot_block}")
 
-PESQUISA SOBRE A EMPRESA:
-{site_summary}
+    blocks += [
+        f"\nCONTEXTO DA CAMPANHA:\n{cadence_block}",
+        f"\nPESQUISA SOBRE A EMPRESA:\n{site_summary}",
+        f"\nPOST RECENTE DO LEAD NO LINKEDIN:\n{linkedin_post}",
+    ]
 
-POST RECENTE DO LEAD NO LINKEDIN:
-{linkedin_post}
+    if recent_posts_block:
+        blocks.append(f"\n{recent_posts_block}")
 
-{recent_posts_block + chr(10) if recent_posts_block else ""}NOTÍCIAS RECENTES DA EMPRESA/SETOR:
-{news}
+    blocks.append(f"\nNOTÍCIAS RECENTES DA EMPRESA/SETOR:\n{news}")
+    blocks.append(f"\nPOSIÇÃO NA CADÊNCIA: Step {step} de {total_steps}.")
+    blocks.append("\nEscreva a mensagem agora:")
 
-POSIÇÃO NA CADÊNCIA: Step {step} de {total_steps}.
-
-Escreva a mensagem agora:
-""".strip()
+    return "\n".join(blocks).strip()
 
 
 def resolve_step_key(

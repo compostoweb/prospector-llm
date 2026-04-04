@@ -141,9 +141,10 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
 
             # ── Composição de mensagem via LLM ────────────────────────
             # LINKEDIN_POST_REACTION não precisa de LLM — apenas reage ao post
+            # EMAIL usa compose_email() diretamente no branch abaixo (gera subject+body em chamada única)
             registry = LLMRegistry(settings=settings, redis=redis_client)
             composer = AIComposer(registry=registry)
-            if step.channel != Channel.LINKEDIN_POST_REACTION:
+            if step.channel not in (Channel.LINKEDIN_POST_REACTION, Channel.EMAIL):
                 message_text = await composer.compose(
                     lead=lead,
                     channel=step.channel.value,
@@ -284,8 +285,14 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                     await db.commit()
                     return {"step_id": step_id, "status": "skipped", "reason": "unsubscribed"}
 
-                # A/B: escolhe subject de subject_variants ou usa fallback
-                subject = _build_email_subject(lead, step.step_number)
+                # Gera subject + body via LLM em chamada única (JSON internamente)
+                subject, message_text = await composer.compose_email(
+                    lead=lead,
+                    step_number=step.step_number,
+                    context=context,
+                    cadence=cadence,
+                )
+                # A/B override: se cadência tem subject_variants configurado, tem prioridade
                 if cadence.steps_template:
                     matching = [
                         s for s in cadence.steps_template
@@ -293,7 +300,8 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                     ]
                     if matching and matching[0].get("subject_variants"):
                         subject = _random.choice(matching[0]["subject_variants"])
-                        step.subject_used = subject
+                # Persiste subject para analytics de open-rate
+                step.subject_used = subject
 
                 # Pré-cria Interaction antes do envio para ter o ID para o pixel de rastreamento
                 now_pre = datetime.now(tz=timezone.utc)
