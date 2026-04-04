@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
+from models.email_template import EmailTemplate
 from models.enums import Channel, LeadStatus, StepStatus
 from models.interaction import Interaction
 from models.lead import Lead
@@ -289,6 +290,126 @@ async def test_dispatch_email_sent(
     call_kwargs = mock_unipile.send_email.call_args.kwargs
     assert call_kwargs["to_email"] == "joao@acme.com"
     assert "body_html" in call_kwargs
+
+
+async def test_dispatch_email_manual_template_body_is_used(
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    tenant,
+) -> None:
+    """message_template configurado no step deve sobrescrever o body gerado por IA."""
+    from workers.dispatch import _dispatch_async
+
+    lead = _make_lead(tenant_id, email_corporate="joao@acme.com")
+    cadence = _make_cadence(tenant_id)
+    cadence.steps_template = [
+        {
+            "step_number": 1,
+            "channel": "email",
+            "day_offset": 0,
+            "message_template": "Olá {first_name}, vi a operação da {company}.",
+        }
+    ]
+    step = _make_step(tenant_id, lead.id, cadence.id, channel=Channel.EMAIL)
+    db.add_all([lead, cadence, step])
+    await db.flush()
+
+    with (
+        patch("workers.dispatch.get_session") as mock_get_session,
+        patch("workers.dispatch.context_fetcher") as mock_ctx,
+        patch("workers.dispatch.AIComposer") as mock_composer_cls,
+        patch("workers.dispatch.unipile_client") as mock_unipile,
+        patch("workers.dispatch.LLMRegistry"),
+        patch("workers.dispatch.redis_client"),
+    ):
+        async def _fake_session(_tid):
+            yield db
+
+        mock_get_session.side_effect = _fake_session
+        mock_ctx.fetch_from_website = AsyncMock(return_value=None)
+        mock_ctx.search_company = AsyncMock(return_value=None)
+
+        composer_instance = MagicMock()
+        composer_instance.compose_email = AsyncMock(return_value=("Assunto IA", "Body IA"))
+        mock_composer_cls.return_value = composer_instance
+
+        mock_unipile.send_email = AsyncMock(return_value=_send_result("email_msg_manual"))
+
+        task_mock = MagicMock()
+        result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
+
+    assert result["status"] == "sent"
+    composer_instance.compose_email.assert_not_awaited()
+    call_kwargs = mock_unipile.send_email.call_args.kwargs
+    assert call_kwargs["subject"].startswith("Uma ideia para")
+    assert "Olá João" in call_kwargs["body_html"]
+    assert "Acme Corp" in call_kwargs["body_html"]
+
+
+async def test_dispatch_email_saved_template_and_subject_variants(
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    tenant,
+) -> None:
+    """email_template_id deve montar body/subject e subject_variants deve ter prioridade."""
+    from workers.dispatch import _dispatch_async
+
+    lead = _make_lead(tenant_id, email_corporate="joao@acme.com")
+    cadence = _make_cadence(tenant_id)
+    email_template = EmailTemplate(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        name="Primeiro contato",
+        subject="Assunto base para {{company}}",
+        body_html="<p>Olá {{name}}, aqui é um template para {{company}}.</p>",
+    )
+    cadence.steps_template = [
+        {
+            "step_number": 1,
+            "channel": "email",
+            "day_offset": 0,
+            "email_template_id": str(email_template.id),
+            "subject_variants": ["Variante A", "Variante B"],
+        }
+    ]
+    step = _make_step(tenant_id, lead.id, cadence.id, channel=Channel.EMAIL)
+    db.add_all([lead, cadence, email_template, step])
+    await db.flush()
+
+    with (
+        patch("workers.dispatch.get_session") as mock_get_session,
+        patch("workers.dispatch.context_fetcher") as mock_ctx,
+        patch("workers.dispatch.AIComposer") as mock_composer_cls,
+        patch("workers.dispatch.unipile_client") as mock_unipile,
+        patch("workers.dispatch.LLMRegistry"),
+        patch("workers.dispatch.redis_client"),
+        patch("random.choice", return_value="Variante B"),
+    ):
+        async def _fake_session(_tid):
+            yield db
+
+        mock_get_session.side_effect = _fake_session
+        mock_ctx.fetch_from_website = AsyncMock(return_value=None)
+        mock_ctx.search_company = AsyncMock(return_value=None)
+
+        composer_instance = MagicMock()
+        composer_instance.compose_email = AsyncMock(return_value=("Assunto IA", "Body IA"))
+        mock_composer_cls.return_value = composer_instance
+
+        mock_unipile.send_email = AsyncMock(return_value=_send_result("email_msg_template"))
+
+        task_mock = MagicMock()
+        result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
+
+    assert result["status"] == "sent"
+    composer_instance.compose_email.assert_not_awaited()
+    await db.refresh(step)
+    assert step.subject_used == "Variante B"
+
+    call_kwargs = mock_unipile.send_email.call_args.kwargs
+    assert call_kwargs["subject"] == "Variante B"
+    assert "João Silva" in call_kwargs["body_html"]
+    assert "Acme Corp" in call_kwargs["body_html"]
 
 
 async def test_dispatch_email_no_address_skips(

@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.dependencies import get_effective_tenant_id, get_session_flexible
 from models.cadence import Cadence
 from schemas.cadence import CadenceCreateRequest, CadenceResponse, CadenceUpdateRequest
+from services.cadence_manager import serialize_steps_template
 
 logger = structlog.get_logger()
 
@@ -75,7 +76,7 @@ async def create_cadence(
         offer_description=body.offer_description,
         tone_instructions=body.tone_instructions,
         steps_template=(
-            [s.model_dump(mode="json") for s in body.steps_template]
+            serialize_steps_template([s.model_dump(mode="json") for s in body.steps_template])
             if body.steps_template
             else None
         ),
@@ -116,7 +117,9 @@ async def update_cadence(
         setattr(cadence, field, value)
 
     if body.steps_template is not None:
-        cadence.steps_template = [s.model_dump(mode="json") for s in body.steps_template]
+        cadence.steps_template = serialize_steps_template(
+            [s.model_dump(mode="json") for s in body.steps_template]
+        )
 
     if body.llm is not None:
         cadence.llm_provider = body.llm.provider

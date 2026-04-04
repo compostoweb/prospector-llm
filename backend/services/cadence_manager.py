@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import structlog
 from sqlalchemy import select
@@ -257,6 +258,62 @@ def _resolve_template(cadence: Cadence) -> list[tuple[Channel, int, bool, str | 
         )
         for item in cadence.steps_template
     ]
+
+
+def serialize_steps_template(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normaliza steps_template persistindo step_number explícito no JSONB."""
+    normalized: list[dict[str, Any]] = []
+    for step_number, item in enumerate(items, start=1):
+        current = dict(item)
+        current["step_number"] = step_number
+        normalized.append(current)
+    return normalized
+
+
+def get_template_step_config(cadence: Cadence, step_number: int) -> dict[str, Any] | None:
+    """Retorna a configuração do step por número, com fallback posicional."""
+    if step_number < 1:
+        return None
+
+    if cadence.steps_template:
+        for item in cadence.steps_template:
+            if isinstance(item, dict) and item.get("step_number") == step_number:
+                return item
+
+        index = step_number - 1
+        if 0 <= index < len(cadence.steps_template):
+            item = cadence.steps_template[index]
+            if isinstance(item, dict):
+                return item
+        return None
+
+    index = step_number - 1
+    if not (0 <= index < len(_DEFAULT_TEMPLATE)):
+        return None
+
+    channel, day_offset, use_voice, audio_file_id, step_type = _DEFAULT_TEMPLATE[index]
+    return {
+        "step_number": step_number,
+        "channel": channel.value,
+        "day_offset": day_offset,
+        "use_voice": use_voice,
+        "audio_file_id": audio_file_id,
+        "step_type": step_type,
+    }
+
+
+def get_previous_template_channel(cadence: Cadence, step_number: int) -> str | None:
+    """Retorna o canal do step anterior para inferência do composer."""
+    previous = get_template_step_config(cadence, step_number - 1)
+    if not previous:
+        return None
+    channel = previous.get("channel")
+    return str(channel) if channel else None
+
+
+def get_total_template_steps(cadence: Cadence) -> int:
+    """Retorna o total de steps da cadência."""
+    return len(cadence.steps_template or _DEFAULT_TEMPLATE)
 
 
 def _lead_has_channel(lead: Lead, channel: Channel, cadence: Cadence) -> bool:

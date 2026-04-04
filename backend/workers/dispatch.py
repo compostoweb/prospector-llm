@@ -71,6 +71,12 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
     from models.lead import Lead
     from models.tenant import TenantIntegration
     from services.ai_composer import AIComposer
+    from services.cadence_manager import (
+        get_previous_template_channel,
+        get_template_step_config,
+        get_total_template_steps,
+    )
+    from services.message_template_renderer import render_message_template, render_saved_email_template
     from core.config import settings
     from core.redis_client import redis_client
 
@@ -144,14 +150,29 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
             # EMAIL usa compose_email() diretamente no branch abaixo (gera subject+body em chamada única)
             registry = LLMRegistry(settings=settings, redis=redis_client)
             composer = AIComposer(registry=registry)
+            template_step = get_template_step_config(cadence, step.step_number)
+            previous_channel = get_previous_template_channel(cadence, step.step_number)
+            total_steps = get_total_template_steps(cadence)
+            configured_step_type = str(template_step.get("step_type")) if template_step and template_step.get("step_type") else None
+            configured_message = render_message_template(
+                template_step.get("message_template") if template_step else None,
+                lead,
+            )
             if step.channel not in (Channel.LINKEDIN_POST_REACTION, Channel.EMAIL):
-                message_text = await composer.compose(
-                    lead=lead,
-                    channel=step.channel.value,
-                    step_number=step.step_number,
-                    context=context,
-                    cadence=cadence,
-                )
+                if configured_message:
+                    message_text = configured_message
+                else:
+                    message_text = await composer.compose(
+                        lead=lead,
+                        channel=step.channel.value,
+                        step_number=step.step_number,
+                        context=context,
+                        cadence=cadence,
+                        total_steps=total_steps,
+                        use_voice=step.use_voice,
+                        previous_channel=previous_channel,
+                        step_type=configured_step_type,
+                    )
             else:
                 message_text = ""
 
@@ -257,6 +278,7 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                         )
 
             elif step.channel == Channel.EMAIL:
+                from models.email_template import EmailTemplate  # noqa: PLC0415
                 from models.email_unsubscribe import EmailUnsubscribe  # noqa: PLC0415
                 from services.email_footer import inject_tracking  # noqa: PLC0415
                 import random as _random  # noqa: PLC0415
@@ -285,21 +307,56 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                     await db.commit()
                     return {"step_id": step_id, "status": "skipped", "reason": "unsubscribed"}
 
-                # Gera subject + body via LLM em chamada única (JSON internamente)
-                subject, message_text = await composer.compose_email(
-                    lead=lead,
-                    step_number=step.step_number,
-                    context=context,
-                    cadence=cadence,
-                )
+                subject_variants = template_step.get("subject_variants") if template_step else None
+                configured_email_template_id = template_step.get("email_template_id") if template_step else None
+
+                if configured_email_template_id:
+                    email_template: EmailTemplate | None = None
+                    try:
+                        template_uuid = uuid.UUID(str(configured_email_template_id))
+                        template_result = await db.execute(
+                            select(EmailTemplate).where(
+                                EmailTemplate.id == template_uuid,
+                                EmailTemplate.tenant_id == tid,
+                                EmailTemplate.is_active.is_(True),
+                            )
+                        )
+                        email_template = template_result.scalar_one_or_none()
+                    except ValueError:
+                        email_template = None
+
+                    if email_template is not None:
+                        subject, message_text = render_saved_email_template(email_template, lead)
+                    else:
+                        logger.warning(
+                            "dispatch.email_template_not_found",
+                            cadence_id=str(cadence.id),
+                            step_id=step_id,
+                            email_template_id=str(configured_email_template_id),
+                        )
+                        configured_email_template_id = None
+
+                if not configured_email_template_id:
+                    if configured_message:
+                        subject = _build_email_subject(lead, step.step_number)
+                        message_text = configured_message
+                    else:
+                        # Gera subject + body via LLM em chamada única (JSON internamente)
+                        subject, message_text = await composer.compose_email(
+                            lead=lead,
+                            step_number=step.step_number,
+                            context=context,
+                            cadence=cadence,
+                            step_type=configured_step_type,
+                            total_steps=total_steps,
+                            previous_channel=previous_channel,
+                        )
+
                 # A/B override: se cadência tem subject_variants configurado, tem prioridade
-                if cadence.steps_template:
-                    matching = [
-                        s for s in cadence.steps_template
-                        if s.get("step_number") == step.step_number
-                    ]
-                    if matching and matching[0].get("subject_variants"):
-                        subject = _random.choice(matching[0]["subject_variants"])
+                if subject_variants:
+                    cleaned_variants = [str(item).strip() for item in subject_variants if str(item).strip()]
+                    if cleaned_variants:
+                        subject = _random.choice(cleaned_variants)
                 # Persiste subject para analytics de open-rate
                 step.subject_used = subject
 

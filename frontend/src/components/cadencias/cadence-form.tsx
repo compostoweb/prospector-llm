@@ -57,7 +57,9 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
   })
   const [emailAccountId, setEmailAccountId] = useState<string>(cadence?.email_account_id ?? "")
   const { data: emailAccountsData } = useEmailAccounts()
-  const [linkedInAccountId, setLinkedInAccountId] = useState<string>(cadence?.linkedin_account_id ?? "")
+  const [linkedInAccountId, setLinkedInAccountId] = useState<string>(
+    cadence?.linkedin_account_id ?? "",
+  )
   const { data: linkedInAccountsData } = useLinkedInAccounts()
   const [targetSegment, setTargetSegment] = useState(cadence?.target_segment ?? "")
   const [personaDescription, setPersonaDescription] = useState(cadence?.persona_description ?? "")
@@ -78,6 +80,10 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
     }
     if (steps.length === 0) {
       setError("Adicione pelo menos um passo")
+      return
+    }
+    if (cadenceType === "email_only" && steps.some((step) => step.channel !== "email")) {
+      setError("Cadências do tipo Só E-mail aceitam apenas passos com canal E-mail")
       return
     }
 
@@ -313,14 +319,16 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
                 className="flex h-9 w-full rounded-md border border-(--border) bg-transparent px-3 py-1 text-sm text-(--text-primary) focus:outline-none focus:ring-1 focus:ring-(--ring)"
               >
                 <option value="">Padrão (Unipile global)</option>
-                {(linkedInAccountsData?.accounts ?? []).filter((a) => a.is_active).map((acc) => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.display_name}
-                    {acc.linkedin_username ? ` (${acc.linkedin_username})` : ""}
-                    {" — "}
-                    {acc.provider_type === "native" ? "Nativo" : "Unipile"}
-                  </option>
-                ))}
+                {(linkedInAccountsData?.accounts ?? [])
+                  .filter((a) => a.is_active)
+                  .map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.display_name}
+                      {acc.linkedin_username ? ` (${acc.linkedin_username})` : ""}
+                      {" — "}
+                      {acc.provider_type === "native" ? "Nativo" : "Unipile"}
+                    </option>
+                  ))}
               </select>
               <p className="text-xs text-(--text-tertiary)">
                 Deixe em branco para usar a conta Unipile configurada em integrações.

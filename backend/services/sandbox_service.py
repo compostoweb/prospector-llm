@@ -43,7 +43,8 @@ from models.lead import Lead
 from models.lead_list import lead_list_members
 from models.sandbox import SandboxRun, SandboxStep
 from services.ai_composer import AIComposer, resolve_step_key, STEP_INSTRUCTIONS
-from services.cadence_manager import cadence_manager, _resolve_template
+from services.cadence_manager import cadence_manager, _resolve_template, get_template_step_config
+from services.message_template_renderer import render_message_template, render_saved_email_template
 from services.reply_parser import ReplyParser
 
 logger = structlog.get_logger()
@@ -308,7 +309,7 @@ class SandboxService:
                 # Subject extraído do JSON LLM em _compose_step (evita segunda chamada LLM)
                 if step.channel == Channel.EMAIL:
                     step.email_subject = email_subject or await self._generate_email_subject(
-                        step, cadence, registry
+                        step, cadence, registry, db
                     )
 
                 # Gera áudio TTS para steps com use_voice
@@ -399,7 +400,7 @@ class SandboxService:
             # Subject extraído do JSON LLM em _compose_step (evita segunda chamada LLM)
             if step.channel == Channel.EMAIL:
                 step.email_subject = email_subject or await self._generate_email_subject(
-                    step, cadence, registry
+                    step, cadence, registry, db
                 )
 
             # Gera áudio TTS para steps com use_voice
@@ -997,9 +998,18 @@ class SandboxService:
             Tuple[content, email_subject, llm_info]
             email_subject é preenchido apenas para Canal EMAIL (extraído do JSON LLM).
         """
+        template_step = get_template_step_config(cadence, step.step_number)
+        llm_bypassed_info = {
+            "provider": None,
+            "model": None,
+            "tokens_in": None,
+            "tokens_out": None,
+        }
+
         # Rastreia company/name para fallback do parser de email
         _company: str | None = None
         _name: str | None = None
+        lead_proxy: object
 
         if step.lead_id:
             # Lead real — busca via query async (não usar step.lead por lazy loading)
@@ -1011,6 +1021,8 @@ class SandboxService:
             lead = result.scalar_one_or_none()
             if not lead:
                 raise ValueError(f"Lead {step.lead_id} não encontrado.")
+
+            lead_proxy = lead
 
             _company = lead.company
             _name = lead.name
@@ -1046,7 +1058,23 @@ class SandboxService:
             )
         else:
             # Lead fictício
+            from types import SimpleNamespace
+
             fdata = step.fictitious_lead_data or {}
+            lead_proxy = SimpleNamespace(
+                name=fdata.get("name", "Lead Teste"),
+                company=fdata.get("company"),
+                first_name=fdata.get("name", "Lead Teste").split(" ")[0],
+                last_name=" ".join(fdata.get("name", "Lead Teste").split(" ")[1:]),
+                job_title=fdata.get("job_title"),
+                industry=fdata.get("industry"),
+                city=fdata.get("city"),
+                location=fdata.get("city"),
+                company_size=fdata.get("company_size"),
+                website=fdata.get("website"),
+                linkedin_url=fdata.get("linkedin_url"),
+                email=fdata.get("email"),
+            )
             _company = fdata.get("company")
             _name = fdata.get("name", "Lead Teste")
             context = {"site_summary": f"Empresa fictícia: {fdata.get('company', 'N/A')} - Setor: {fdata.get('industry', 'N/A')}"}
@@ -1069,6 +1097,43 @@ class SandboxService:
                 cadence=cadence,
                 step_type=step.step_type,
             )
+
+        configured_message = render_message_template(
+            template_step.get("message_template") if template_step else None,
+            lead_proxy,
+        )
+        subject_variants = template_step.get("subject_variants") if template_step else None
+        configured_email_template_id = template_step.get("email_template_id") if template_step else None
+
+        if step.channel == Channel.EMAIL and configured_email_template_id:
+            from models.email_template import EmailTemplate
+
+            try:
+                template_result = await db.execute(
+                    select(EmailTemplate).where(
+                        EmailTemplate.id == uuid.UUID(str(configured_email_template_id)),
+                        EmailTemplate.tenant_id == cadence.tenant_id,
+                        EmailTemplate.is_active.is_(True),
+                    )
+                )
+                email_template = template_result.scalar_one_or_none()
+            except ValueError:
+                email_template = None
+
+            if email_template is not None:
+                subject, body = render_saved_email_template(email_template, lead_proxy)
+                cleaned_variants = [str(item).strip() for item in (subject_variants or []) if str(item).strip()]
+                if cleaned_variants:
+                    subject = cleaned_variants[0]
+                return body, subject, llm_bypassed_info
+
+        if configured_message:
+            email_subject: str | None = None
+            if step.channel == Channel.EMAIL:
+                cleaned_variants = [str(item).strip() for item in (subject_variants or []) if str(item).strip()]
+                if cleaned_variants:
+                    email_subject = cleaned_variants[0]
+            return configured_message, email_subject, llm_bypassed_info
 
         from services.ai_composer import COMPOSER_SYSTEM_PROMPT
 
@@ -1148,9 +1213,10 @@ class SandboxService:
         step: SandboxStep,
         cadence: Cadence,
         registry: LLMRegistry,
+        db: AsyncSession,
     ) -> str:
         """Gera assunto de email via LLM."""
-        lead_info = await self._get_lead_info_sync(step)
+        lead_info = await self._get_lead_info(step, db)
 
         prompt = (
             f"Gere um assunto de email curto e atraente para uma mensagem de prospecção B2B.\n"
@@ -1191,16 +1257,6 @@ class SandboxService:
             "email": fdata.get("email"),
             "industry": fdata.get("industry"),
             "linkedin_url": fdata.get("linkedin_url"),
-        }
-
-    def _get_lead_info_sync(self, step: SandboxStep) -> dict:
-        """Retorna info do lead sem acesso ao DB (fictício only)."""
-        fdata = step.fictitious_lead_data or {}
-        return {
-            "name": fdata.get("name", "Lead Teste"),
-            "company": fdata.get("company"),
-            "job_title": fdata.get("job_title"),
-            "email": fdata.get("email"),
         }
 
     async def _classify_and_save_reply(

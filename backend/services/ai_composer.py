@@ -357,6 +357,9 @@ class AIComposer:
         step_number: int,
         context: dict,              # vindo de context_fetcher
         cadence: Cadence,
+        total_steps: int = 1,
+        use_voice: bool = False,
+        previous_channel: str | None = None,
         step_type: str | None = None,
     ) -> str:
         """
@@ -364,7 +367,15 @@ class AIComposer:
         Usa o provider e modelo configurados na cadência.
         """
         user_prompt = _build_user_prompt(
-            lead, channel, step_number, context, cadence=cadence, step_type=step_type,
+            lead,
+            channel,
+            step_number,
+            context,
+            total_steps=total_steps,
+            use_voice=use_voice,
+            previous_channel=previous_channel,
+            cadence=cadence,
+            step_type=step_type,
         )
 
         messages = [

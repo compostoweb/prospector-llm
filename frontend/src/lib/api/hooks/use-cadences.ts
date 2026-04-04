@@ -14,12 +14,24 @@ export type StepType =
   | "linkedin_dm_voice"
   | "linkedin_dm_followup"
   | "linkedin_dm_breakup"
+  | "linkedin_post_reaction"
+  | "linkedin_post_comment"
+  | "linkedin_inmail"
   | "email_first"
   | "email_followup"
   | "email_breakup"
 
+export type CadenceChannel =
+  | "linkedin_connect"
+  | "linkedin_dm"
+  | "linkedin_post_reaction"
+  | "linkedin_post_comment"
+  | "linkedin_inmail"
+  | "email"
+  | "manual_task"
+
 export interface CadenceStep {
-  channel: "linkedin_connect" | "linkedin_dm" | "email"
+  channel: CadenceChannel
   day_offset: number
   message_template: string
   use_voice: boolean
