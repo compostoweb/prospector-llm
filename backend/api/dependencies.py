@@ -23,8 +23,8 @@ Uso:
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncGenerator
 from functools import lru_cache
-from typing import AsyncGenerator
 
 import structlog
 from fastapi import Depends, HTTPException, status
@@ -33,10 +33,14 @@ from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.database import AsyncSessionLocal, get_session as _get_session
+from core.config import settings
+from core.database import AsyncSessionLocal
+from core.database import get_session as _get_session
 from core.redis_client import RedisClient, redis_client
 from core.security import (
     decode_token,
+)
+from core.security import (
     get_current_tenant_id as _get_current_tenant_id,
 )
 from integrations.llm.registry import LLMRegistry
@@ -49,6 +53,7 @@ _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
 
 # ── Session sem autenticação (webhooks externos) ─────────────────────
+
 
 async def get_session_no_auth() -> AsyncGenerator[AsyncSession, None]:
     """
@@ -68,6 +73,7 @@ async def get_session_no_auth() -> AsyncGenerator[AsyncSession, None]:
 
 # ── Session com tenant injetado ───────────────────────────────────────
 
+
 async def get_session(
     tenant_id: uuid.UUID = Depends(_get_current_tenant_id),
 ) -> AsyncGenerator[AsyncSession, None]:
@@ -80,6 +86,7 @@ async def get_session(
 
 
 # ── Tenant atual ──────────────────────────────────────────────────────
+
 
 def get_current_tenant_id(
     tenant_id: uuid.UUID = Depends(_get_current_tenant_id),
@@ -119,7 +126,10 @@ async def get_effective_tenant_id(
     # Token de usuário → busca o primeiro tenant ativo (MVP)
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(Tenant.id).where(Tenant.is_active.is_(True)).limit(1)
+            select(Tenant.id)
+            .where(Tenant.is_active.is_(True))
+            .order_by((Tenant.slug == settings.DEFAULT_TENANT_SLUG).desc(), Tenant.created_at.asc())
+            .limit(1)
         )
         tenant_id = result.scalar_one_or_none()
 
@@ -190,10 +200,12 @@ async def get_current_tenant_flexible(
 
 # ── LLM Registry ──────────────────────────────────────────────────────
 
+
 @lru_cache(maxsize=1)
 def _build_llm_registry() -> LLMRegistry:
     """Constrói o LLMRegistry uma única vez (singleton via lru_cache)."""
     from core.config import settings
+
     return LLMRegistry(settings=settings, redis=redis_client)
 
 
@@ -204,10 +216,12 @@ def get_llm_registry() -> LLMRegistry:
 
 # ── TTS Registry ──────────────────────────────────────────────────────
 
+
 @lru_cache(maxsize=1)
 def _build_tts_registry() -> TTSRegistry:
     """Constrói o TTSRegistry uma única vez (singleton via lru_cache)."""
     from core.config import settings
+
     return TTSRegistry(settings=settings, redis=redis_client)
 
 
@@ -217,6 +231,7 @@ def get_tts_registry() -> TTSRegistry:
 
 
 # ── Redis ─────────────────────────────────────────────────────────────
+
 
 def get_redis() -> RedisClient:
     """Retorna o redis_client global."""

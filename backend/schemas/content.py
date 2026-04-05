@@ -55,6 +55,7 @@ class ContentPostMetricsUpdate(BaseModel):
     likes: int = Field(default=0, ge=0)
     comments: int = Field(default=0, ge=0)
     shares: int = Field(default=0, ge=0)
+    saves: int = Field(default=0, ge=0)
     engagement_rate: float | None = Field(default=None, ge=0.0, le=100.0)
 
 
@@ -78,6 +79,7 @@ class ContentPostResponse(BaseModel):
     likes: int
     comments: int
     shares: int
+    saves: int
     engagement_rate: float | None
     metrics_updated_at: datetime | None
     published_at: datetime | None
@@ -209,6 +211,32 @@ class ContentLinkedInAccountResponse(BaseModel):
     connected_at: datetime
     token_expires_at: datetime | None
     updated_at: datetime
+    # Analytics via Unipile
+    has_unipile: bool = False
+    last_voyager_sync_at: datetime | None = None
+
+    @classmethod
+    def from_orm_with_computed(
+        cls, obj: object, *, has_unipile: bool = False,
+    ) -> ContentLinkedInAccountResponse:
+        """Popula campos computados a partir do model + flag externa."""
+        data = cls.model_validate(obj)
+        data.has_unipile = has_unipile
+        data.last_voyager_sync_at = getattr(obj, "last_voyager_sync_at", None)
+        return data
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Analytics Sync
+# ─────────────────────────────────────────────────────────────────────
+
+class VoyagerSyncResponse(BaseModel):
+    success: bool
+    posts_created: int
+    posts_updated: int
+    posts_skipped: int
+    error: str | None = None
+    synced_at: datetime
 
 
 # ─────────────────────────────────────────────────────────────────────

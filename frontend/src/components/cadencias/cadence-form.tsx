@@ -120,8 +120,8 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
         const created = await createCadence.mutateAsync(body)
         router.push(`/cadencias/${created.id}`)
       }
-    } catch {
-      setError("Erro ao salvar cadência. Tente novamente.")
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao salvar cadência. Tente novamente.")
     }
   }
 

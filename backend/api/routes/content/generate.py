@@ -10,7 +10,6 @@ Endpoints de geração de conteúdo com IA:
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -18,7 +17,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import (
-    get_current_tenant,
     get_effective_tenant_id,
     get_llm_registry,
     get_session_flexible,
@@ -31,17 +29,21 @@ from models.content_settings import ContentSettings
 from models.content_theme import ContentTheme
 from models.enums import LeadStatus
 from models.lead import Lead
-from models.tenant import Tenant
 from schemas.content import (
+    ContentThemeResponse,
     GeneratePostRequest,
     GeneratePostResponse,
     GeneratePostVariation,
     ImprovePostRequest,
     ImprovePostResponse,
     ThemeSuggestion,
-    ContentThemeResponse,
 )
-from services.content.llm_generator import generate_post, improve_post
+from services.content.llm_generator import (
+    GeneratedVariation,
+    ReferenceExample,
+    generate_post,
+    improve_post,
+)
 from services.content.rules import count_characters, validate_post
 
 logger = structlog.get_logger()
@@ -51,6 +53,7 @@ router = APIRouter(prefix="/generate", tags=["Content Hub — IA"])
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
+
 async def _get_settings_or_defaults(
     db: AsyncSession,
     tenant_id: uuid.UUID,
@@ -59,17 +62,17 @@ async def _get_settings_or_defaults(
     Retorna (author_name, author_voice) do ContentSettings do tenant.
     Usa fallback genérico se ainda não configurado.
     """
-    result = await db.execute(
-        select(ContentSettings).where(ContentSettings.tenant_id == tenant_id)
-    )
+    result = await db.execute(select(ContentSettings).where(ContentSettings.tenant_id == tenant_id))
     content_settings = result.scalar_one_or_none()
 
     author_name = (
-        content_settings.author_name if content_settings and content_settings.author_name
+        content_settings.author_name
+        if content_settings and content_settings.author_name
         else "o autor"
     )
     author_voice = (
-        content_settings.author_voice if content_settings and content_settings.author_voice
+        content_settings.author_voice
+        if content_settings and content_settings.author_voice
         else (
             "Profissional sênior com experiência prática no setor. "
             "Tom direto, sem jargão vazio. Foco em resultados concretos."
@@ -79,6 +82,7 @@ async def _get_settings_or_defaults(
 
 
 # ── POST /content/generate ────────────────────────────────────────────
+
 
 @router.post(
     "",
@@ -101,7 +105,7 @@ async def generate_content(
     author_name, author_voice = await _get_settings_or_defaults(db, tenant_id)
 
     # Carrega referências se solicitado
-    references: list[dict] = []
+    references: list[ReferenceExample] = []
     if body.use_references:
         refs_result = await db.execute(
             select(ContentReference)
@@ -133,7 +137,7 @@ async def generate_content(
         model=model,
     )
 
-    raw_variations = await generate_post(
+    raw_variations: list[GeneratedVariation] = await generate_post(
         theme=body.theme,
         pillar=body.pillar,
         hook_type=body.hook_type,
@@ -167,6 +171,7 @@ async def generate_content(
 
 
 # ── POST /content/generate/improve ───────────────────────────────────
+
 
 @router.post(
     "/improve",
@@ -207,7 +212,12 @@ async def improve_content(
             )
         post_body = post.body
     else:
-        post_body = body.body  # type: ignore[assignment]
+        if body.body is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Informe post_id ou body.",
+            )
+        post_body = body.body
 
     author_name, author_voice = await _get_settings_or_defaults(db, tenant_id)
 
@@ -240,6 +250,7 @@ async def improve_content(
 
 
 # ── POST /content/generate/suggest-themes ────────────────────────────
+
 
 @router.post(
     "/suggest-themes",
@@ -290,10 +301,7 @@ async def suggest_themes(
             suggestions.append(
                 ThemeSuggestion(
                     theme=ContentThemeResponse.model_validate(theme),
-                    reason=(
-                        f"{lead_count} lead(s) do setor '{industry}' "
-                        "em cadência esta semana."
-                    ),
+                    reason=(f"{lead_count} lead(s) do setor '{industry}' em cadência esta semana."),
                     lead_count=lead_count,
                     sector=industry,
                 )

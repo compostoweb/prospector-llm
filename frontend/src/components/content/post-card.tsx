@@ -1,8 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { format, parseISO } from "date-fns"
-import { ptBR } from "date-fns/locale"
+import { formatDateBR } from "@/lib/date"
 import {
   Calendar,
   Check,
@@ -14,6 +13,13 @@ import {
   ChevronUp,
   AlertTriangle,
   Pencil,
+  Sparkles,
+  ExternalLink,
+  Eye,
+  Heart,
+  MessageCircle,
+  TrendingUp,
+  Bookmark,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { StatusBadge, PillarBadge } from "@/components/content/post-badges"
@@ -42,6 +48,7 @@ interface PostCardProps {
 export function PostCard({ post }: PostCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
+  const [improveOpen, setImproveOpen] = useState(false)
 
   const approve = useApprovePost()
   const schedule = useSchedulePost()
@@ -60,100 +67,147 @@ export function PostCard({ post }: PostCardProps) {
     <>
       <div
         className={cn(
-          "rounded-(--radius-lg) border border-(--border-default) bg-(--bg-surface) p-4 flex flex-col gap-3 shadow-(--shadow-sm)",
+          "rounded-lg border border-(--border-default) bg-(--bg-surface) p-4 flex flex-col gap-3 shadow-(--shadow-sm)",
           post.status === "failed" && "border-(--danger)",
         )}
       >
-      {/* Cabeçalho */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex flex-col gap-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <StatusBadge status={post.status} />
-            <PillarBadge pillar={post.pillar} />
-            {post.week_number && (
-              <span className="text-xs text-(--text-tertiary)">Sem. {post.week_number}</span>
-            )}
+        {/* Cabeçalho */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-col gap-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <StatusBadge status={post.status} />
+              <PillarBadge pillar={post.pillar} />
+              {post.week_number && (
+                <span className="text-xs text-(--text-tertiary)">Sem. {post.week_number}</span>
+              )}
+            </div>
+            <p className="text-sm font-medium text-(--text-primary) truncate">{post.title}</p>
           </div>
-          <p className="text-sm font-medium text-(--text-primary) truncate">{post.title}</p>
+
+          <div className="flex items-center gap-1 shrink-0">
+            <ActionMenu
+              post={post}
+              isLoading={isLoading}
+              onEdit={() => setEditOpen(true)}
+              onImprove={() => {
+                setImproveOpen(true)
+                setEditOpen(true)
+              }}
+              onApprove={() => approve.mutate(post.id)}
+              onSchedule={() => schedule.mutate(post.id)}
+              onCancelSchedule={() => cancelSchedule.mutate(post.id)}
+              onPublishNow={() => publishNow.mutate(post.id)}
+              onDelete={() => deletePost.mutate(post.id)}
+            />
+          </div>
         </div>
 
-        <div className="flex items-center gap-1 shrink-0">
-          <ActionMenu
-            post={post}
-            isLoading={isLoading}
-            onEdit={() => setEditOpen(true)}
-            onApprove={() => approve.mutate(post.id)}
-            onSchedule={() => schedule.mutate(post.id)}
-            onCancelSchedule={() => cancelSchedule.mutate(post.id)}
-            onPublishNow={() => publishNow.mutate(post.id)}
-            onDelete={() => deletePost.mutate(post.id)}
-          />
-        </div>
-      </div>
-
-      {/* Preview do body */}
-      <button
-        type="button"
-        className="cursor-pointer text-left"
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <p
-          className={cn(
-            "text-sm text-(--text-secondary) whitespace-pre-wrap",
-            !expanded && "line-clamp-3",
-          )}
+        {/* Preview do body */}
+        <button
+          type="button"
+          className="cursor-pointer text-left"
+          onClick={() => setExpanded((v) => !v)}
         >
-          {post.body}
-        </p>
-        <span className="flex items-center gap-1 text-xs text-(--accent) mt-1">
-          {expanded ? (
-            <>
-              <ChevronUp className="h-3 w-3" /> Recolher
-            </>
-          ) : (
-            <>
-              <ChevronDown className="h-3 w-3" /> Ver tudo
-            </>
-          )}
-        </span>
-      </button>
+          <p
+            className={cn(
+              "text-sm text-(--text-secondary) whitespace-pre-wrap",
+              !expanded && "line-clamp-3",
+            )}
+          >
+            {post.body}
+          </p>
+          <span className="flex items-center gap-1 text-xs text-(--accent) mt-1">
+            {expanded ? (
+              <>
+                <ChevronUp className="h-3 w-3" /> Recolher
+              </>
+            ) : (
+              <>
+                <ChevronDown className="h-3 w-3" /> Ver tudo
+              </>
+            )}
+          </span>
+        </button>
 
-      {/* Metadados */}
-      <div className="flex items-center gap-4 text-xs text-(--text-tertiary) flex-wrap">
-        {post.publish_date && (
-          <span className="flex items-center gap-1">
-            <Calendar className="h-3 w-3" />
-            {format(parseISO(post.publish_date), "dd MMM yyyy 'às' HH:mm", { locale: ptBR })}
-          </span>
-        )}
-        {post.character_count && (
-          <span className="flex items-center gap-1">
-            <span>{post.character_count} chars</span>
-          </span>
-        )}
-        {post.published_at && (
-          <span className="flex items-center gap-1 text-(--success)">
-            <Check className="h-3 w-3" />
-            Publicado em {format(parseISO(post.published_at), "dd MMM yyyy", { locale: ptBR })}
-          </span>
-        )}
-        {post.status === "published" && post.impressions > 0 && (
-          <span className="flex items-center gap-1">
-            👁 {post.impressions.toLocaleString("pt-BR")} impressões
-          </span>
+        {/* Metadados */}
+        <div className="flex items-center gap-4 text-xs text-(--text-tertiary) flex-wrap">
+          {post.publish_date && (
+            <span className="flex items-center gap-1">
+              <Calendar className="h-3 w-3" />
+              {formatDateBR(post.publish_date, "dd MMM yyyy 'às' HH:mm")}
+            </span>
+          )}
+          {post.character_count && (
+            <span className="flex items-center gap-1">
+              <span>{post.character_count} chars</span>
+            </span>
+          )}
+          {post.published_at && (
+            <span className="flex items-center gap-1 text-(--success)">
+              <Check className="h-3 w-3" />
+              Publicado em {formatDateBR(post.published_at, "dd MMM yyyy 'às' HH:mm")}
+            </span>
+          )}
+          {post.status === "published" && post.impressions > 0 && (
+            <span className="flex items-center gap-1">
+              <Eye className="h-3 w-3" /> {post.impressions.toLocaleString("pt-BR")}
+            </span>
+          )}
+          {post.status === "published" && post.likes > 0 && (
+            <span className="flex items-center gap-1">
+              <Heart className="h-3 w-3" /> {post.likes.toLocaleString("pt-BR")}
+            </span>
+          )}
+          {post.status === "published" && post.comments > 0 && (
+            <span className="flex items-center gap-1">
+              <MessageCircle className="h-3 w-3" /> {post.comments.toLocaleString("pt-BR")}
+            </span>
+          )}
+          {post.status === "published" && post.saves > 0 && (
+            <span className="flex items-center gap-1">
+              <Bookmark className="h-3 w-3" /> {post.saves.toLocaleString("pt-BR")}
+            </span>
+          )}
+          {post.status === "published" &&
+            post.engagement_rate != null &&
+            post.engagement_rate > 0 && (
+              <span className="flex items-center gap-1">
+                <TrendingUp className="h-3 w-3" /> {post.engagement_rate.toFixed(1)}%
+              </span>
+            )}
+          {post.linkedin_post_urn && (
+            <a
+              href={`https://www.linkedin.com/feed/update/${post.linkedin_post_urn}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 hover:text-(--accent) transition-colors"
+              title="Abrir no LinkedIn"
+            >
+              <ExternalLink className="h-3 w-3" /> LinkedIn
+            </a>
+          )}
+        </div>
+
+        {/* Erro */}
+        {post.error_message && (
+          <div className="flex items-start gap-2 rounded-md bg-(--danger-subtle) text-(--danger-subtle-fg) p-2 text-xs">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            {post.error_message}
+          </div>
         )}
       </div>
 
-      {/* Erro */}
-      {post.error_message && (
-        <div className="flex items-start gap-2 rounded-(--radius-md) bg-(--danger-subtle) text-(--danger-subtle-fg) p-2 text-xs">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-          {post.error_message}
-        </div>
-      )}
-    </div>
-
-      <EditPostDialog post={post} open={editOpen} onOpenChange={setEditOpen} />
+      <EditPostDialog
+        post={post}
+        open={editOpen}
+        onOpenChange={(value) => {
+          setEditOpen(value)
+          if (!value) {
+            setImproveOpen(false)
+          }
+        }}
+        defaultImproveOpen={improveOpen}
+      />
     </>
   )
 }
@@ -164,6 +218,7 @@ interface ActionMenuProps {
   post: ContentPost
   isLoading: boolean
   onEdit: () => void
+  onImprove: () => void
   onApprove: () => void
   onSchedule: () => void
   onCancelSchedule: () => void
@@ -175,6 +230,7 @@ function ActionMenu({
   post,
   isLoading,
   onEdit,
+  onImprove,
   onApprove,
   onSchedule,
   onCancelSchedule,
@@ -193,6 +249,10 @@ function ActionMenu({
         <DropdownMenuItem onClick={onEdit}>
           <Pencil className="h-3.5 w-3.5 mr-2" />
           Editar
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={onImprove}>
+          <Sparkles className="h-3.5 w-3.5 mr-2" />
+          Melhorar com IA
         </DropdownMenuItem>
 
         {(post.status === "draft" ||
@@ -233,10 +293,7 @@ function ActionMenu({
 
         {/* Excluir — sempre disponível */}
         <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onClick={onDelete}
-          className="text-(--danger) focus:text-(--danger)"
-        >
+        <DropdownMenuItem onClick={onDelete} className="text-(--danger) focus:text-(--danger)">
           <Trash2 className="h-3.5 w-3.5 mr-2" />
           Excluir
         </DropdownMenuItem>

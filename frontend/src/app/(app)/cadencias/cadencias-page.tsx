@@ -2,6 +2,8 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { useSession } from "next-auth/react"
+import { useCadenceOverview } from "@/lib/api/hooks/use-cadence-analytics"
 import { useCadences, useToggleCadence } from "@/lib/api/hooks/use-cadences"
 import { EmptyState } from "@/components/shared/empty-state"
 import { Plus, GitBranch, Users, CheckCircle, Power, FlaskConical, Mail } from "lucide-react"
@@ -11,9 +13,14 @@ type CadenceFilter = "all" | "mixed" | "email_only"
 
 export default function CadenciasPage() {
   const [filter, setFilter] = useState<CadenceFilter>("all")
+  const { status } = useSession()
   const cadenceType = filter === "all" ? undefined : (filter as "mixed" | "email_only")
-  const { data: cadences, isLoading } = useCadences(cadenceType)
+  const { data: cadences, isLoading, error: cadencesError } = useCadences(cadenceType)
+  const { data: overview, isLoading: loadingOverview } = useCadenceOverview()
   const toggleCadence = useToggleCadence()
+  const isPageLoading = status === "loading" || isLoading || loadingOverview
+
+  const overviewMap = new Map((overview ?? []).map((item) => [item.cadence_id, item]))
 
   function handleToggle(id: string, current: boolean) {
     void toggleCadence.mutate({ id, is_active: !current })
@@ -63,78 +70,99 @@ export default function CadenciasPage() {
 
       {/* Badge de tipo no card */}
       {/* Lista */}
-      {isLoading ? (
+      {isPageLoading ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="h-40 animate-pulse rounded-lg bg-(--bg-overlay)" />
           ))}
         </div>
+      ) : cadencesError ? (
+        <EmptyState
+          icon={GitBranch}
+          title="Não foi possível carregar as cadências"
+          description="A API não respondeu como esperado. Recarregue a página e confirme se o backend está ativo."
+          action={
+            <Link
+              href="/cadencias"
+              className="inline-flex items-center gap-1.5 rounded-md bg-(--accent) px-4 py-2 text-sm font-medium text-white hover:bg-(--accent-hover)"
+            >
+              Tentar novamente
+            </Link>
+          }
+        />
       ) : cadences && cadences.length > 0 ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {cadences.map((cadence) => (
-            <div
-              key={cadence.id}
-              className="relative flex flex-col rounded-lg border border-(--border-default) bg-(--bg-surface) p-5 shadow-(--shadow-sm)"
-            >
-              {/* Header do card */}
-              <div className="flex items-start justify-between gap-2">
-                <Link href={`/cadencias/${cadence.id}`} className="min-w-0">
-                  <p className="truncate font-semibold text-(--text-primary) hover:underline">
-                    {cadence.name}
-                  </p>
-                  {cadence.description && (
-                    <p className="mt-0.5 line-clamp-2 text-xs text-(--text-secondary)">
-                      {cadence.description}
+          {cadences.map((cadence) => {
+            const metrics = overviewMap.get(cadence.id)
+
+            return (
+              <div
+                key={cadence.id}
+                className="relative flex flex-col rounded-lg border border-(--border-default) bg-(--bg-surface) p-5 shadow-(--shadow-sm)"
+              >
+                {/* Header do card */}
+                <div className="flex items-start justify-between gap-2">
+                  <Link href={`/cadencias/${cadence.id}`} className="min-w-0">
+                    <p className="truncate font-semibold text-(--text-primary) hover:underline">
+                      {cadence.name}
                     </p>
-                  )}
-                  {cadence.cadence_type === "email_only" && (
-                    <span className="mt-1 inline-flex items-center gap-1 rounded bg-(--accent)/10 px-1.5 py-0.5 text-[10px] font-medium text-(--accent)">
-                      <Mail size={9} aria-hidden="true" />
-                      Só E-mail
-                    </span>
-                  )}
-                </Link>
+                    {cadence.description && (
+                      <p className="mt-0.5 line-clamp-2 text-xs text-(--text-secondary)">
+                        {cadence.description}
+                      </p>
+                    )}
+                    {cadence.cadence_type === "email_only" && (
+                      <span className="mt-1 inline-flex items-center gap-1 rounded bg-(--accent)/10 px-1.5 py-0.5 text-[10px] font-medium text-(--accent)">
+                        <Mail size={9} aria-hidden="true" />
+                        Só E-mail
+                      </span>
+                    )}
+                  </Link>
 
-                {/* Toggle ativo/inativo */}
-                <button
-                  type="button"
-                  onClick={() => handleToggle(cadence.id, cadence.is_active)}
-                  aria-label={cadence.is_active ? "Desativar cadência" : "Ativar cadência"}
-                  aria-pressed={cadence.is_active}
-                  disabled={toggleCadence.isPending}
-                  className={cn(
-                    "shrink-0 transition-colors disabled:opacity-50",
-                    cadence.is_active ? "text-(--success)" : "text-(--text-disabled)",
-                  )}
-                >
-                  <Power size={16} aria-hidden="true" />
-                </button>
-              </div>
+                  {/* Toggle ativo/inativo */}
+                  <button
+                    type="button"
+                    onClick={() => handleToggle(cadence.id, cadence.is_active)}
+                    aria-label={cadence.is_active ? "Desativar cadência" : "Ativar cadência"}
+                    disabled={toggleCadence.isPending}
+                    className={cn(
+                      "shrink-0 transition-colors disabled:opacity-50",
+                      cadence.is_active ? "text-(--success)" : "text-(--text-disabled)",
+                    )}
+                  >
+                    <Power size={16} aria-hidden="true" />
+                  </button>
+                </div>
 
-              {/* Stats */}
-              <div className="mt-4 grid grid-cols-3 divide-x divide-(--border-subtle)">
-                <Stat icon={Users} label="Total" value={0} />
-                <Stat icon={GitBranch} label="Em andamento" value={0} />
-                <Stat icon={CheckCircle} label="Convertidos" value={0} />
-              </div>
+                {/* Stats */}
+                <div className="mt-4 grid grid-cols-3 divide-x divide-(--border-subtle)">
+                  <Stat icon={Users} label="Total" value={metrics?.total_leads ?? 0} />
+                  <Stat icon={GitBranch} label="Em andamento" value={metrics?.leads_active ?? 0} />
+                  <Stat
+                    icon={CheckCircle}
+                    label="Convertidos"
+                    value={metrics?.leads_converted ?? 0}
+                  />
+                </div>
 
-              {/* LLM info + Sandbox link */}
-              <div className="mt-4 flex items-center justify-between">
-                <p className="text-xs text-(--text-tertiary)">
-                  {cadence.llm_provider === "openai" ? "OpenAI" : "Gemini"} · {cadence.llm_model} ·{" "}
-                  {cadence.steps_template?.length ?? 0} passo
-                  {(cadence.steps_template?.length ?? 0) !== 1 ? "s" : ""}
-                </p>
-                <Link
-                  href={`/cadencias/${cadence.id}/sandbox`}
-                  className="flex items-center gap-1 text-xs text-(--text-tertiary) transition-colors hover:text-(--accent)"
-                >
-                  <FlaskConical size={12} aria-hidden="true" />
-                  Sandbox
-                </Link>
+                {/* LLM info + Sandbox link */}
+                <div className="mt-4 flex items-center justify-between">
+                  <p className="text-xs text-(--text-tertiary)">
+                    {cadence.llm_provider === "openai" ? "OpenAI" : "Gemini"} · {cadence.llm_model}{" "}
+                    · {cadence.steps_template?.length ?? 0} passo
+                    {(cadence.steps_template?.length ?? 0) !== 1 ? "s" : ""}
+                  </p>
+                  <Link
+                    href={`/cadencias/${cadence.id}/sandbox`}
+                    className="flex items-center gap-1 text-xs text-(--text-tertiary) transition-colors hover:text-(--accent)"
+                  >
+                    <FlaskConical size={12} aria-hidden="true" />
+                    Sandbox
+                  </Link>
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       ) : (
         <EmptyState

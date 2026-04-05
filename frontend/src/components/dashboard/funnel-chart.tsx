@@ -88,10 +88,18 @@ export function FunnelChart({ data, isLoading }: FunnelChartProps) {
             fontSize: 12,
             color: "var(--text-primary)",
           }}
-          formatter={(value: number, _name: string, props: { payload: { percentage: number } }) => [
-            `${value} (${props.payload.percentage}%)`,
-            "Leads",
-          ]}
+          formatter={(value, _name, item) => {
+            const percentage =
+              item &&
+              typeof item.payload === "object" &&
+              item.payload !== null &&
+              "percentage" in item.payload &&
+              typeof item.payload.percentage === "number"
+                ? item.payload.percentage
+                : 0
+
+            return [`${value} (${percentage}%)`, "Leads"]
+          }}
           cursor={{ fill: "var(--bg-overlay)" }}
         />
         <Bar dataKey="count" radius={[0, 4, 4, 0]} maxBarSize={28}>

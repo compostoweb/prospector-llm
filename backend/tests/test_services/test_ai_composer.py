@@ -16,8 +16,7 @@ from integrations.llm.base import LLMMessage, LLMResponse
 from models.cadence import Cadence
 from models.enums import LeadStatus
 from models.lead import Lead
-from services.ai_composer import AIComposer, COMPOSER_SYSTEM_PROMPT
-
+from services.ai_composer import COMPOSER_SYSTEM_PROMPT, AIComposer, prepare_composer_messages
 
 pytestmark = pytest.mark.asyncio
 
@@ -39,14 +38,24 @@ def _make_registry(response_text: str = "Olá, vi que vocês trabalham com X..."
     return registry
 
 
-def _make_lead(tenant_id: uuid.UUID) -> Lead:
+def _make_lead(
+    tenant_id: uuid.UUID,
+    *,
+    company: str = "Tech Startup",
+    website: str = "https://techstartup.com",
+    linkedin_url: str = "https://linkedin.com/in/mariasouza",
+    job_title: str | None = None,
+    industry: str | None = None,
+) -> Lead:
     return Lead(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         name="Maria Souza",
-        company="Tech Startup",
-        website="https://techstartup.com",
-        linkedin_url="https://linkedin.com/in/mariasouza",
+        company=company,
+        website=website,
+        linkedin_url=linkedin_url,
+        job_title=job_title,
+        industry=industry,
         status=LeadStatus.ENRICHED,
     )
 
@@ -165,3 +174,68 @@ async def test_compose_user_prompt_includes_lead_data():
     user_prompt = messages[1].content
     # O prompt deve mencionar o nome ou a empresa do lead
     assert "Maria Souza" in user_prompt or "Tech Startup" in user_prompt
+
+
+async def test_prepare_composer_messages_returns_observability_metadata() -> None:
+    """prepare_composer_messages() deve expor o contexto de composição usado."""
+    tid = uuid.uuid4()
+    lead = _make_lead(
+        tid,
+        company="Finance Labs",
+        website="https://financelabs.com",
+        job_title="CFO",
+        industry="Financeiro e contabilidade",
+    )
+
+    messages, composition_context = prepare_composer_messages(
+        lead=lead,
+        channel="email",
+        step_number=1,
+        context={"site_summary": "Empresa com operação financeira distribuída."},
+        cadence=_make_cadence(tid),
+    )
+
+    assert messages[0].content == COMPOSER_SYSTEM_PROMPT
+    assert composition_context.generation_mode == "llm"
+    assert composition_context.step_key == "email_first"
+    assert composition_context.copy_method == "DIS"
+    assert composition_context.playbook_sector == "financeiro"
+    assert composition_context.playbook_role == "cfo"
+    assert composition_context.few_shot_applied is True
+    assert composition_context.few_shot_key == "financeiro:cfo:email:first"
+    assert composition_context.few_shot_method == "DPO"
+    assert composition_context.has_site_summary is True
+
+
+async def test_compose_attaches_composition_context_to_response_raw():
+    """compose() deve anexar o composition_context normalizado ao raw da resposta."""
+    tid = uuid.uuid4()
+    registry = _make_registry("Mensagem personalizada para CFO.")
+    composer = AIComposer(registry)
+    lead = _make_lead(
+        tid,
+        company="Finance Labs",
+        website="https://financelabs.com",
+        job_title="CFO",
+        industry="Financeiro e contabilidade",
+    )
+
+    await composer.compose(
+        lead=lead,
+        channel="email",
+        step_number=1,
+        context={"site_summary": "Empresa com operação financeira distribuída."},
+        cadence=_make_cadence(tid),
+    )
+
+    response = registry.complete.return_value
+    composition_context = response.raw.get("composition_context")
+
+    assert composition_context is not None
+    assert composition_context["generation_mode"] == "llm"
+    assert composition_context["step_key"] == "email_first"
+    assert composition_context["playbook_sector"] == "financeiro"
+    assert composition_context["playbook_role"] == "cfo"
+    assert composition_context["few_shot_applied"] is True
+    assert composition_context["few_shot_key"] == "financeiro:cfo:email:first"
+    assert composition_context["has_site_summary"] is True

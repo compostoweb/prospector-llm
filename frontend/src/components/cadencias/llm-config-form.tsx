@@ -1,6 +1,5 @@
 ﻿"use client"
 
-import { useState } from "react"
 import { useLLMModels } from "@/lib/api/hooks/use-llm-models"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -25,10 +24,14 @@ interface LLMConfigFormProps {
   onChange: (config: LLMConfig) => void
 }
 
+const PROVIDER_OPTIONS: LLMConfig["llm_provider"][] = ["openai", "gemini"]
+
 export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
   const { data, isLoading } = useLLMModels()
 
-  const providers = data?.providers ?? []
+  const configuredProviders = new Set(
+    PROVIDER_OPTIONS.filter((provider) => (data?.providers ?? []).includes(provider)),
+  )
   const currentProviderModels = data?.byProvider[value.llm_provider] ?? []
 
   function update<K extends keyof LLMConfig>(key: K, val: LLMConfig[K]) {
@@ -52,13 +55,14 @@ export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
         <div>
           <label className="mb-1 block text-xs font-medium text-(--text-secondary)">Provider</label>
           <div className="flex gap-2">
-            {["openai", "gemini"].map((p) => (
+            {PROVIDER_OPTIONS.map((p) => (
               <button
                 key={p}
                 type="button"
-                onClick={() => update("llm_provider", p as "openai" | "gemini")}
+                onClick={() => update("llm_provider", p)}
+                disabled={configuredProviders.size > 0 && !configuredProviders.has(p)}
                 className={cn(
-                  "flex-1 rounded-md border py-2 text-xs font-medium transition-colors",
+                  "flex-1 rounded-md border py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
                   value.llm_provider === p
                     ? "border-(--accent) bg-(--accent-subtle) text-(--accent-subtle-fg)"
                     : "border-(--border-default) bg-(--bg-surface) text-(--text-secondary) hover:bg-(--bg-overlay)",

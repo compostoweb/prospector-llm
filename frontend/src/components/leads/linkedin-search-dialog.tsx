@@ -51,12 +51,15 @@ export function LinkedInSearchDialog() {
 
   function handleSearch(loadMore = false) {
     if (!keywords.trim()) return
+
+    const mergedKeywords = [keywords, location, industry, companySize]
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join(" ")
+
     searchMutation.mutate(
       {
-        keywords: keywords.trim(),
-        location: location.trim() || undefined,
-        industry: industry.trim() || undefined,
-        company_size: companySize.trim() || undefined,
+        keywords: mergedKeywords,
         limit: 25,
         cursor: loadMore ? (cursor ?? undefined) : undefined,
       },

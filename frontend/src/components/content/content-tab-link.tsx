@@ -2,13 +2,25 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { FileText, Sparkles, Settings2 } from "lucide-react"
+import {
+  FileText,
+  Sparkles,
+  Settings2,
+  BookOpen,
+  LayoutDashboard,
+  Lightbulb,
+  LayoutList,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Route } from "next"
 
 const TABS = [
-  { href: "/content", label: "Calendário", Icon: FileText },
+  { href: "/content", label: "Dashboard", Icon: LayoutDashboard },
+  { href: "/content/posts", label: "Posts", Icon: LayoutList },
+  { href: "/content/calendario", label: "Calendário", Icon: FileText },
   { href: "/content/gerar", label: "Gerar com IA", Icon: Sparkles },
+  { href: "/content/temas", label: "Temas", Icon: Lightbulb },
+  { href: "/content/referencias", label: "Referências", Icon: BookOpen },
   { href: "/content/configuracoes", label: "Configurações", Icon: Settings2 },
 ]
 

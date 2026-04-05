@@ -13,7 +13,7 @@ DELETE /content/linkedin/disconnect — desativa conta (is_active=False)
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
 import structlog
@@ -24,10 +24,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible
 from core.config import settings
-from core.database import AsyncSessionLocal, get_session
+from core.database import AsyncSessionLocal
 from core.redis_client import redis_client
 from models.content_linkedin_account import ContentLinkedInAccount
-from schemas.content import ContentLinkedInAccountResponse, LinkedInAuthUrl
+from models.linkedin_account import LinkedInAccount
+from schemas.content import (
+    ContentLinkedInAccountResponse,
+    LinkedInAuthUrl,
+    VoyagerSyncResponse,
+)
 from services.content.linkedin_client import LinkedInClient, LinkedInClientError
 
 logger = structlog.get_logger()
@@ -41,6 +46,7 @@ _STATE_TTL_SECONDS = 600  # 10 minutos
 
 
 # ── Gerar URL de autorizacao ──────────────────────────────────────────
+
 
 @router.get("/auth-url", response_model=LinkedInAuthUrl)
 async def get_auth_url(
@@ -60,19 +66,22 @@ async def get_auth_url(
     redis_key = f"{_STATE_REDIS_PREFIX}{state}"
     await redis_client.set(redis_key, str(tenant_id), ex=_STATE_TTL_SECONDS)
 
-    params = urlencode({
-        "response_type": "code",
-        "client_id": settings.LINKEDIN_CLIENT_ID,
-        "redirect_uri": settings.LINKEDIN_REDIRECT_URI,
-        "scope": _OAUTH_SCOPES,
-        "state": state,
-    })
+    params = urlencode(
+        {
+            "response_type": "code",
+            "client_id": settings.LINKEDIN_CLIENT_ID,
+            "redirect_uri": settings.LINKEDIN_REDIRECT_URI,
+            "scope": _OAUTH_SCOPES,
+            "state": state,
+        }
+    )
     url = f"{_OAUTH_AUTHORIZE_URL}?{params}"
     logger.info("content.linkedin_oauth_url_generated", tenant_id=str(tenant_id))
     return LinkedInAuthUrl(url=url)
 
 
 # ── Callback OAuth ────────────────────────────────────────────────────
+
 
 @router.get("/callback")
 async def oauth_callback(
@@ -99,6 +108,7 @@ async def oauth_callback(
             error_description=error_description,
         )
         from urllib.parse import quote
+
         msg = quote(f"LinkedIn recusou: {error}. {error_description or ''}".strip())
         return RedirectResponse(url=f"{_frontend_settings}?linkedin_error={msg}")
 
@@ -106,15 +116,21 @@ async def oauth_callback(
     redis_key = f"{_STATE_REDIS_PREFIX}{state}"
     tenant_id_str: str | None = await redis_client.get(redis_key)
     if not tenant_id_str:
-        return RedirectResponse(url=f"{_frontend_settings}?linkedin_error=State+invalido+ou+expirado")
+        return RedirectResponse(
+            url=f"{_frontend_settings}?linkedin_error=State+invalido+ou+expirado"
+        )
     await redis_client.delete(redis_key)
     tenant_id = uuid.UUID(tenant_id_str)
 
     if not settings.LINKEDIN_CLIENT_ID or not settings.LINKEDIN_CLIENT_SECRET:
-        return RedirectResponse(url=f"{_frontend_settings}?linkedin_error=LinkedIn+OAuth+nao+configurado")
+        return RedirectResponse(
+            url=f"{_frontend_settings}?linkedin_error=LinkedIn+OAuth+nao+configurado"
+        )
 
     if not code:
-        return RedirectResponse(url=f"{_frontend_settings}?linkedin_error=Authorization+code+ausente")
+        return RedirectResponse(
+            url=f"{_frontend_settings}?linkedin_error=Authorization+code+ausente"
+        )
 
     # Trocar code por tokens
     try:
@@ -125,8 +141,11 @@ async def oauth_callback(
             redirect_uri=settings.LINKEDIN_REDIRECT_URI,
         )
     except LinkedInClientError as exc:
-        logger.error("content.linkedin_token_exchange_failed", error=str(exc), tenant_id=str(tenant_id))
+        logger.error(
+            "content.linkedin_token_exchange_failed", error=str(exc), tenant_id=str(tenant_id)
+        )
         from urllib.parse import quote
+
         msg = quote(f"Falha ao trocar token: {exc.detail}")
         return RedirectResponse(url=f"{_frontend_settings}?linkedin_error={msg}")
 
@@ -135,14 +154,17 @@ async def oauth_callback(
     expires_in: int | None = token_data.get("expires_in")
     token_expires_at: datetime | None = None
     if expires_in:
-        token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+        token_expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
 
     # Buscar perfil do LinkedIn
     try:
         profile = await LinkedInClient.get_profile(access_token)
     except LinkedInClientError as exc:
-        logger.error("content.linkedin_profile_fetch_failed", error=str(exc), tenant_id=str(tenant_id))
+        logger.error(
+            "content.linkedin_profile_fetch_failed", error=str(exc), tenant_id=str(tenant_id)
+        )
         from urllib.parse import quote
+
         msg = quote(f"Falha ao buscar perfil: {exc.detail}")
         return RedirectResponse(url=f"{_frontend_settings}?linkedin_error={msg}")
 
@@ -164,7 +186,7 @@ async def oauth_callback(
         )
         account = result.scalar_one_or_none()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if account is None:
             account = ContentLinkedInAccount(
                 tenant_id=tenant_id,
@@ -203,6 +225,7 @@ async def oauth_callback(
 
 # ── Status ────────────────────────────────────────────────────────────
 
+
 @router.get("/status", response_model=ContentLinkedInAccountResponse)
 async def get_linkedin_status(
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
@@ -221,10 +244,22 @@ async def get_linkedin_status(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Nenhuma conta LinkedIn conectada para este tenant.",
         )
-    return ContentLinkedInAccountResponse.model_validate(account)
+
+    # Verifica se existe conta Unipile conectada (necessaria para analytics)
+    unipile_result = await db.execute(
+        select(LinkedInAccount).where(
+            LinkedInAccount.tenant_id == tenant_id,
+            LinkedInAccount.is_active.is_(True),
+            LinkedInAccount.unipile_account_id.is_not(None),
+        )
+    )
+    has_unipile = unipile_result.scalar_one_or_none() is not None
+
+    return ContentLinkedInAccountResponse.from_orm_with_computed(account, has_unipile=has_unipile)
 
 
 # ── Desconectar ───────────────────────────────────────────────────────
+
 
 @router.delete("/disconnect", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def disconnect_linkedin(
@@ -250,6 +285,7 @@ async def disconnect_linkedin(
 
 # ── Criptografia de tokens ────────────────────────────────────────────
 
+
 def _maybe_encrypt(value: str) -> str:
     """
     Criptografa o valor com Fernet se LINKEDIN_ACCOUNT_ENCRYPTION_KEY estiver configurada.
@@ -259,8 +295,51 @@ def _maybe_encrypt(value: str) -> str:
         return value
     try:
         from cryptography.fernet import Fernet
+
         fernet = Fernet(settings.LINKEDIN_ACCOUNT_ENCRYPTION_KEY.encode())
         return fernet.encrypt(value.encode()).decode()
     except Exception as exc:
         logger.warning("content.linkedin_token_encryption_failed", error=str(exc))
         return value
+
+
+# ── Analytics Sync via Unipile ────────────────────────────────────────
+
+
+@router.post("/sync", response_model=VoyagerSyncResponse)
+async def sync_analytics(
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> VoyagerSyncResponse:
+    """
+    Dispara sincronizacao manual de analytics via Unipile API.
+
+    Busca impressoes, likes, comentarios e compartilhamentos dos posts
+    publicados pelo perfil pessoal e atualiza os dados no banco.
+
+    Requer que o tenant tenha uma conta LinkedIn conectada via Unipile
+    (modulo de prospeccao em Configuracoes do Sistema).
+    """
+    from services.content.voyager_sync_service import sync_voyager_for_tenant
+
+    result = await sync_voyager_for_tenant(
+        tenant_id=str(tenant_id),
+        db=db,
+    )
+
+    logger.info(
+        "content.analytics_sync_manual",
+        tenant_id=str(tenant_id),
+        posts_created=result.posts_created,
+        posts_updated=result.posts_updated,
+        error=result.error,
+    )
+
+    return VoyagerSyncResponse(
+        success=result.success,
+        posts_created=result.posts_created,
+        posts_updated=result.posts_updated,
+        posts_skipped=result.posts_skipped,
+        error=result.error,
+        synced_at=result.synced_at,
+    )

@@ -105,6 +105,7 @@ class ContentPost(Base, TenantMixin, TimestampMixin):
     likes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     comments: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     shares: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    saves: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     engagement_rate: Mapped[float | None] = mapped_column(
         Numeric(5, 2),
         nullable=True,

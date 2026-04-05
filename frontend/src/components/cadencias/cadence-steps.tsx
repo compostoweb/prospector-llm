@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react"
 import { Plus, Trash2, GripVertical, Volume2, Music, Play, Loader2 } from "lucide-react"
-import type { CadenceStep, StepType } from "@/lib/api/hooks/use-cadences"
+import type { CadenceChannel, CadenceStep, StepType } from "@/lib/api/hooks/use-cadences"
 import { useAudioFiles } from "@/lib/api/hooks/use-audio-files"
 import { useEmailTemplates } from "@/lib/api/hooks/use-email-templates"
 import { useTestTTS } from "@/lib/api/hooks/use-tts"
@@ -61,6 +61,7 @@ interface CadenceStepsProps {
   ttsSpeed?: number
   ttsPitch?: number
   leads?: LeadListLeadItem[] | undefined
+  allowedChannels?: CadenceChannel[]
 }
 
 /** Resolve variáveis do template com dados do lead */
@@ -108,12 +109,17 @@ export function CadenceSteps({
   ttsSpeed,
   ttsPitch,
   leads,
+  allowedChannels,
 }: CadenceStepsProps) {
   const textareaRefs = useRef<Map<number, HTMLTextAreaElement>>(new Map())
   const { data: audioFilesData } = useAudioFiles()
   const { data: emailTemplatesData } = useEmailTemplates(undefined, true)
   const audioFiles = audioFilesData?.items ?? []
   const emailTemplates = emailTemplatesData ?? []
+  const availableChannelOptions =
+    allowedChannels && allowedChannels.length > 0
+      ? CHANNEL_OPTIONS.filter((option) => allowedChannels.includes(option.value as CadenceChannel))
+      : CHANNEL_OPTIONS
   const testTTS = useTestTTS()
   const previewAudioRef = useRef<HTMLAudioElement | null>(null)
   const [previewingStep, setPreviewingStep] = useState<number | null>(null)
@@ -127,8 +133,9 @@ export function CadenceSteps({
   )
 
   function addStep() {
+    const defaultChannel = (availableChannelOptions[0]?.value ?? "linkedin_dm") as CadenceChannel
     const newStep: CadenceStep = {
-      channel: "linkedin_dm",
+      channel: defaultChannel,
       day_offset: value.length === 0 ? 0 : 3,
       message_template: "",
       use_voice: false,
@@ -275,7 +282,7 @@ export function CadenceSteps({
                   aria-label={`Canal do passo ${index + 1}`}
                   className="w-full rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-sm text-(--text-primary) focus:border-(--accent) focus:outline-none"
                 >
-                  {CHANNEL_OPTIONS.map(({ value: v, label }) => (
+                  {availableChannelOptions.map(({ value: v, label }) => (
                     <option key={v} value={v}>
                       {label}
                     </option>

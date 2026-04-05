@@ -59,6 +59,12 @@ const STEP_TYPE_LABELS: Record<string, string> = {
   email_breakup: "Despedida",
 }
 
+const GENERATION_MODE_LABELS: Record<string, string> = {
+  llm: "Gerado por IA",
+  message_template: "Template fixo da etapa",
+  email_template: "Template salvo de e-mail",
+}
+
 export function SandboxStepCard({ step }: SandboxStepCardProps) {
   const regenerate = useRegenerateStep()
   const approve = useApproveStep()
@@ -73,6 +79,7 @@ export function SandboxStepCard({ step }: SandboxStepCardProps) {
     variant: "neutral" as const,
   }
   const ChannelIcon = CHANNEL_ICON[step.channel] ?? Mail
+  const compositionContext = step.composition_context
 
   const leadName = step.fictitious_lead_data?.name ?? "Lead"
   const leadCompany = step.fictitious_lead_data?.company ?? ""
@@ -180,6 +187,44 @@ export function SandboxStepCard({ step }: SandboxStepCardProps) {
         <p className="mt-2 text-[11px] text-(--text-disabled)">
           {step.llm_provider}/{step.llm_model} · {step.tokens_in ?? 0}+{step.tokens_out ?? 0} tokens
         </p>
+      )}
+
+      {compositionContext && (
+        <div className="mt-3 rounded-md border border-(--border-subtle) bg-(--bg-overlay) p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-(--text-tertiary)">
+              Composição
+            </span>
+            <Badge variant="info">
+              {GENERATION_MODE_LABELS[compositionContext.generation_mode] ?? compositionContext.generation_mode}
+            </Badge>
+            {compositionContext.copy_method && (
+              <Badge variant="default">Método {compositionContext.copy_method}</Badge>
+            )}
+            <Badge variant={compositionContext.few_shot_applied ? "success" : "neutral"}>
+              {compositionContext.few_shot_applied ? "Few-shot ativo" : "Sem few-shot"}
+            </Badge>
+          </div>
+
+          <div className="mt-2 space-y-1 text-xs text-(--text-secondary)">
+            {(compositionContext.playbook_sector || compositionContext.playbook_role) && (
+              <p>
+                Playbook: {compositionContext.playbook_sector ?? "setor livre"}
+                {compositionContext.playbook_role ? ` · ${compositionContext.playbook_role}` : ""}
+              </p>
+            )}
+            {compositionContext.matched_role && (
+              <p>
+                Cargo usado no few-shot: {compositionContext.matched_role}
+                {compositionContext.few_shot_method ? ` · ${compositionContext.few_shot_method}` : ""}
+              </p>
+            )}
+            <p>
+              Sinais: {compositionContext.has_site_summary ? "site/contexto externo" : "sem pesquisa externa"}
+              {compositionContext.has_recent_posts ? " · posts recentes do lead" : " · sem posts recentes"}
+            </p>
+          </div>
+        </div>
       )}
 
       {/* Simulated Reply */}

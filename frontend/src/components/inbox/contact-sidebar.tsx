@@ -11,7 +11,6 @@ import {
   useAddTag,
   useRemoveTag,
 } from "@/lib/api/hooks/use-inbox"
-import type { RecentActivityItem, CadenceHistoryItem, LeadTag } from "@/lib/api/hooks/use-inbox"
 import {
   User,
   Building2,
@@ -31,7 +30,6 @@ import {
   Crown,
   Users,
   Globe,
-  Briefcase,
   Activity,
   Tag,
   X,
@@ -44,6 +42,7 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
+import { cn } from "@/lib/utils"
 
 interface ContactSidebarProps {
   chatId: string
@@ -454,6 +453,28 @@ const TAG_COLORS = [
   "#06b6d4",
 ]
 
+const TAG_COLOR_CLASS_MAP: Record<string, { pill: string; swatch: string }> = {
+  "#6366f1": { pill: "contact-tag-pill-indigo", swatch: "contact-tag-swatch-indigo" },
+  "#ec4899": { pill: "contact-tag-pill-pink", swatch: "contact-tag-swatch-pink" },
+  "#f59e0b": { pill: "contact-tag-pill-amber", swatch: "contact-tag-swatch-amber" },
+  "#10b981": { pill: "contact-tag-pill-emerald", swatch: "contact-tag-swatch-emerald" },
+  "#3b82f6": { pill: "contact-tag-pill-blue", swatch: "contact-tag-swatch-blue" },
+  "#8b5cf6": { pill: "contact-tag-pill-violet", swatch: "contact-tag-swatch-violet" },
+  "#ef4444": { pill: "contact-tag-pill-red", swatch: "contact-tag-swatch-red" },
+  "#14b8a6": { pill: "contact-tag-pill-teal", swatch: "contact-tag-swatch-teal" },
+  "#f97316": { pill: "contact-tag-pill-orange", swatch: "contact-tag-swatch-orange" },
+  "#06b6d4": { pill: "contact-tag-pill-cyan", swatch: "contact-tag-swatch-cyan" },
+}
+
+function getTagColorClasses(color: string | null | undefined): { pill: string; swatch: string } {
+  return (
+    TAG_COLOR_CLASS_MAP[color ?? ""] ?? {
+      pill: "contact-tag-pill-default",
+      swatch: "contact-tag-swatch-default",
+    }
+  )
+}
+
 function TagsSection({ chatId }: { chatId: string }) {
   const { data: tags } = useLeadTags(chatId)
   const addTag = useAddTag()
@@ -496,8 +517,10 @@ function TagsSection({ chatId }: { chatId: string }) {
           {tags.map((tag) => (
             <span
               key={tag.id}
-              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-white"
-              style={{ backgroundColor: tag.color }}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-white",
+                getTagColorClasses(tag.color).pill,
+              )}
             >
               {tag.name}
               <button
@@ -533,13 +556,11 @@ function TagsSection({ chatId }: { chatId: string }) {
                 type="button"
                 onClick={() => setSelectedColor(color)}
                 title={`Cor ${color}`}
-                className="h-4 w-4 rounded-full transition-transform"
-                style={{
-                  backgroundColor: color,
-                  outline: selectedColor === color ? "2px solid var(--accent)" : "none",
-                  outlineOffset: "1px",
-                  transform: selectedColor === color ? "scale(1.2)" : "scale(1)",
-                }}
+                className={cn(
+                  "contact-tag-swatch h-4 w-4 rounded-full transition-transform",
+                  getTagColorClasses(color).swatch,
+                  selectedColor === color && "contact-tag-swatch-selected",
+                )}
               />
             ))}
           </div>
@@ -687,12 +708,11 @@ function CadenceHistorySection({ chatId }: { chatId: string }) {
                   {c.mode} · {c.completed_steps}/{c.total_steps} steps
                 </p>
                 {/* Progress bar */}
-                <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-(--bg-surface)">
-                  <div
-                    className="h-full rounded-full bg-(--accent) transition-all"
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
+                <progress
+                  className="contact-sidebar-progress mt-1.5 w-full"
+                  value={pct}
+                  max={100}
+                />
                 {c.last_step_at && (
                   <p className="mt-1 text-[9px] text-(--text-tertiary)">
                     Último step:{" "}

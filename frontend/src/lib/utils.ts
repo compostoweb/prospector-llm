@@ -84,3 +84,5 @@ export function formatBRL(value: number): string {
     currency: "BRL",
   }).format(value)
 }
+
+export { formatDateBR } from "@/lib/date"

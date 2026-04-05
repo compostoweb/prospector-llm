@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 # ── Estrutura de dados ─────────────────────────────────────────────────────────
 
 
@@ -30,6 +29,18 @@ class FewShotExample:
     method: str            # AIRE | DIS | DPO | BINÁRIO | INSIGHT
     subject: str           # email only — vazio para linkedin
     message: str
+
+
+@dataclass(frozen=True)
+class FewShotMatch:
+    """Resultado da busca de um few-shot com metadados de match."""
+
+    sector: str
+    requested_role: str | None
+    matched_role: str
+    channel: str
+    step_type: str
+    example: FewShotExample
 
 
 # ── Banco de exemplos ──────────────────────────────────────────────────────────
@@ -560,11 +571,29 @@ def get_few_shot_example(
 
     norm_channel = "email" if "email" in channel else "linkedin"
 
-    example = _find_example(sector, role, norm_channel, step_type)
-    if not example:
+    match = _find_example_match(sector, role, norm_channel, step_type)
+    if not match:
         return ""
 
-    return _format_example(example)
+    return _format_example(match.example)
+
+
+def get_few_shot_match(
+    sector: str | None,
+    role: str | None,
+    channel: str,
+    step_key: str,
+) -> FewShotMatch | None:
+    """Retorna detalhes do few-shot selecionado para observabilidade."""
+    if not sector:
+        return None
+
+    step_type = _step_key_to_type(step_key)
+    if not step_type:
+        return None
+
+    norm_channel = "email" if "email" in channel else "linkedin"
+    return _find_example_match(sector, role, norm_channel, step_type)
 
 
 def _step_key_to_type(step_key: str) -> str | None:
@@ -584,29 +613,50 @@ def _step_key_to_type(step_key: str) -> str | None:
     return None
 
 
-def _find_example(
+def _find_example_match(
     sector: str,
     role: str | None,
     channel: str,
     step_type: str,
-) -> FewShotExample | None:
-    """Busca exemplo com fallback progressivo de cargo."""
+) -> FewShotMatch | None:
+    """Busca exemplo com fallback progressivo e retorna o cargo efetivamente usado."""
     # Tenta cargo exato
     if role:
         key = (sector, role, channel, step_type)
         if key in _EXAMPLES:
-            return _EXAMPLES[key]
+            return FewShotMatch(
+                sector=sector,
+                requested_role=role,
+                matched_role=role,
+                channel=channel,
+                step_type=step_type,
+                example=_EXAMPLES[key],
+            )
 
         # Tenta cargos de fallback definidos para este cargo
         for fallback_role in _ROLE_FALLBACK.get(role, []):
             key = (sector, fallback_role, channel, step_type)
             if key in _EXAMPLES:
-                return _EXAMPLES[key]
+                return FewShotMatch(
+                    sector=sector,
+                    requested_role=role,
+                    matched_role=fallback_role,
+                    channel=channel,
+                    step_type=step_type,
+                    example=_EXAMPLES[key],
+                )
 
     # Tenta qualquer cargo do setor (primeiro match no dict)
     for (s, r, c, t), ex in _EXAMPLES.items():
         if s == sector and c == channel and t == step_type:
-            return ex
+            return FewShotMatch(
+                sector=sector,
+                requested_role=role,
+                matched_role=r,
+                channel=channel,
+                step_type=step_type,
+                example=ex,
+            )
 
     return None
 

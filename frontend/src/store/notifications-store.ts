@@ -8,6 +8,8 @@ export type NotificationKind =
   | "step.sent"
   | "step.failed"
   | "cadence.finished"
+  | "connection.accepted"
+  | "inbox.new_message"
   | "system"
 
 export interface Notification {
@@ -36,7 +38,7 @@ const MAX_NOTIFICATIONS = 50
 
 // ── Store ─────────────────────────────────────────────────────────────
 
-export const useNotificationsStore = create<NotificationsState>()((set, get) => ({
+export const useNotificationsStore = create<NotificationsState>()((set) => ({
   notifications: [],
   unreadCount: 0,
 

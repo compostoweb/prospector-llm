@@ -3,7 +3,6 @@
 import { useState } from "react"
 import {
   Mail,
-  Plus,
   Trash2,
   CheckCircle2,
   XCircle,
@@ -38,13 +37,6 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
@@ -149,14 +141,20 @@ function AccountSettingsModal({
 
   if (!account) return null
 
+  const currentAccount = account
+
   function handleSyncSignature() {
     setFetchMsg(null)
     fetchSig(
-      { accountId: account!.id, save: false },
+      { accountId: currentAccount.id, save: false },
       {
         onSuccess: (r) => {
           setSignature(r.signature ?? "")
-          setFetchMsg(r.signature ? "✓ Assinatura importada com sucesso!" : "Gmail não tem assinatura configurada.")
+          setFetchMsg(
+            r.signature
+              ? "✓ Assinatura importada com sucesso!"
+              : "Gmail não tem assinatura configurada.",
+          )
         },
         onError: (e) => setFetchMsg(`✗ ${e.message}`),
       },
@@ -166,7 +164,7 @@ function AccountSettingsModal({
   function handleSave() {
     update(
       {
-        id: account!.id,
+        id: currentAccount.id,
         body: {
           daily_send_limit: dailyLimit,
           email_signature: signature || null,
@@ -181,7 +179,7 @@ function AccountSettingsModal({
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Configurar conta</DialogTitle>
-          <p className="text-sm text-(--text-secondary)">{account.email_address}</p>
+          <p className="text-sm text-(--text-secondary)">{currentAccount.email_address}</p>
         </DialogHeader>
         <div className="grid gap-4 py-2">
           {/* Limite diário */}
@@ -211,7 +209,7 @@ function AccountSettingsModal({
                 >
                   {showHtml ? "Editar visual" : "HTML bruto"}
                 </button>
-                {account.provider_type === "google_oauth" && (
+                {currentAccount.provider_type === "google_oauth" && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -260,7 +258,7 @@ function AccountSettingsModal({
             )}
             <p className="text-xs text-(--text-tertiary)">
               Será anexada ao final de cada e-mail enviado por esta conta.
-              {account.provider_type === "google_oauth" &&
+              {currentAccount.provider_type === "google_oauth" &&
                 ' Use "Sincronizar do Gmail" para importar a assinatura existente.'}
             </p>
           </div>
@@ -469,12 +467,21 @@ function SMTPModal({ open, onClose }: { open: boolean; onClose: () => void }) {
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <Label>Senha IMAP <span className="text-(--text-tertiary) font-normal">(deixe em branco para usar a mesma do SMTP)</span></Label>
+                  <Label>
+                    Senha IMAP{" "}
+                    <span className="text-(--text-tertiary) font-normal">
+                      (deixe em branco para usar a mesma do SMTP)
+                    </span>
+                  </Label>
                   <Input
                     type="password"
                     placeholder="Mesma senha SMTP"
                     value={form.imap_password ?? ""}
-                    onChange={(e) => setForm((p) => ({ ...p, imap_password: e.target.value } as CreateSMTPAccountBody))}
+                    onChange={(e) =>
+                      setForm(
+                        (p) => ({ ...p, imap_password: e.target.value }) as CreateSMTPAccountBody,
+                      )
+                    }
                   />
                 </div>
                 <div className="flex items-center gap-2">
@@ -705,10 +712,7 @@ export default function EmailAccountsPage() {
 
       <SMTPModal open={smtpOpen} onClose={() => setSmtpOpen(false)} />
       <UnipileModal open={unipileOpen} onClose={() => setUnipileOpen(false)} />
-      <AccountSettingsModal
-        account={editingAccount}
-        onClose={() => setEditingAccount(null)}
-      />
+      <AccountSettingsModal account={editingAccount} onClose={() => setEditingAccount(null)} />
     </div>
   )
 }

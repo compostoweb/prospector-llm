@@ -17,6 +17,20 @@ export interface FictitiousLeadData {
   website?: string | null
 }
 
+export interface SandboxCompositionContext {
+  generation_mode: string
+  step_key: string
+  copy_method: string | null
+  playbook_sector: string | null
+  playbook_role: string | null
+  matched_role: string | null
+  few_shot_applied: boolean
+  few_shot_key: string | null
+  few_shot_method: string | null
+  has_site_summary: boolean
+  has_recent_posts: boolean
+}
+
 export interface SandboxStep {
   id: string
   sandbox_run_id: string
@@ -36,6 +50,7 @@ export interface SandboxStep {
   llm_model: string | null
   tokens_in: number | null
   tokens_out: number | null
+  composition_context: SandboxCompositionContext | null
   simulated_reply: string | null
   simulated_intent: "interest" | "objection" | "not_interested" | "neutral" | "out_of_office" | null
   simulated_confidence: number | null

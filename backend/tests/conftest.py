@@ -15,7 +15,6 @@ Variável opcional: TEST_DATABASE_URL (default: settings.DATABASE_URL)
 
 from __future__ import annotations
 
-import asyncio
 import os
 import uuid
 from collections.abc import AsyncGenerator
@@ -24,8 +23,19 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession, AsyncTransaction, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
+    AsyncEngine,
+    AsyncSession,
+    AsyncTransaction,
+    create_async_engine,
+)
 
+# Importa todos os models para garantir que estão no Base.metadata
+import models.cadence  # noqa: F401  # pyright: ignore[reportUnusedImport]
+import models.cadence_step  # noqa: F401  # pyright: ignore[reportUnusedImport]
+import models.interaction  # noqa: F401  # pyright: ignore[reportUnusedImport]
+import models.lead  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from api.dependencies import get_current_tenant_id, get_session
 from api.main import app
 from core.config import settings
@@ -33,29 +43,15 @@ from core.security import create_access_token
 from models.base import Base
 from models.tenant import Tenant, TenantIntegration
 
-# Importa todos os models para garantir que estão no Base.metadata
-import models.cadence  # noqa: F401  # pyright: ignore[reportUnusedImport]
-import models.cadence_step  # noqa: F401  # pyright: ignore[reportUnusedImport]
-import models.interaction  # noqa: F401  # pyright: ignore[reportUnusedImport]
-import models.lead  # noqa: F401  # pyright: ignore[reportUnusedImport]
-
 _TEST_DB_URL = os.getenv("TEST_DATABASE_URL", settings.DATABASE_URL)
-
-
-# ── Event loop (scope=session para fixtures async de session) ─────────
-
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
 
 
 # ── Engine de teste (scope=session) ──────────────────────────────────
 
+
 @pytest_asyncio.fixture(scope="session")
 async def test_engine():
-    """Cria o engine, inicializa as tabelas e destrói no final da sessão."""
+    """Cria o engine e garante o schema mínimo necessário para a sessão de testes."""
     engine = create_async_engine(
         _TEST_DB_URL,
         echo=False,
@@ -65,12 +61,11 @@ async def test_engine():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield engine
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
 
 
 # ── tenant_id fixo por sessão ─────────────────────────────────────────
+
 
 @pytest.fixture(scope="session")
 def tenant_id() -> uuid.UUID:
@@ -78,6 +73,7 @@ def tenant_id() -> uuid.UUID:
 
 
 # ── DB session com rollback por teste ─────────────────────────────────
+
 
 @pytest_asyncio.fixture
 async def db(test_engine: AsyncEngine, tenant_id: uuid.UUID) -> AsyncGenerator[AsyncSession, None]:
@@ -92,7 +88,12 @@ async def db(test_engine: AsyncEngine, tenant_id: uuid.UUID) -> AsyncGenerator[A
         await conn.execute(text("SET row_security = off"))
     except Exception:
         pass  # PostgreSQL pode não ter RLS configurado no banco de testes
-    session = AsyncSession(bind=conn, expire_on_commit=False, autoflush=False)
+    session = AsyncSession(
+        bind=conn,
+        expire_on_commit=False,
+        autoflush=False,
+        join_transaction_mode="create_savepoint",
+    )
     yield session
     await session.close()
     await trans.rollback()
@@ -100,6 +101,7 @@ async def db(test_engine: AsyncEngine, tenant_id: uuid.UUID) -> AsyncGenerator[A
 
 
 # ── Tenant de teste ───────────────────────────────────────────────────
+
 
 @pytest_asyncio.fixture
 async def tenant(db: AsyncSession, tenant_id: uuid.UUID) -> Tenant:
@@ -114,6 +116,7 @@ async def tenant(db: AsyncSession, tenant_id: uuid.UUID) -> Tenant:
 
 # ── Token JWT e headers ───────────────────────────────────────────────
 
+
 @pytest.fixture
 def access_token(tenant_id: uuid.UUID) -> str:
     return create_access_token({"tenant_id": str(tenant_id)})
@@ -125,6 +128,7 @@ def auth_headers(access_token: str) -> dict[str, str]:
 
 
 # ── Cliente HTTP com overrides de dependências ────────────────────────
+
 
 @pytest_asyncio.fixture
 async def client(

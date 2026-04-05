@@ -1,5 +1,6 @@
 ﻿"use client"
 
+import { useEffect, useState } from "react"
 import { useTheme } from "next-themes"
 import { Sun, Moon, Monitor } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -26,11 +27,19 @@ const THEME_LABELS: Record<ThemeValue, string> = {
 
 export function ThemeToggle({ className, collapsed }: ThemeToggleProps) {
   const { theme, setTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  const selectedTheme: ThemeValue = mounted ? ((theme as ThemeValue | undefined) ?? "system") : "system"
 
   if (collapsed) {
-    const current = (theme as ThemeValue) ?? "system"
+    const current = selectedTheme
     const Icon = THEME_ICONS[current] ?? Monitor
-    const nextTheme = THEME_CYCLE[(THEME_CYCLE.indexOf(current) + 1) % THEME_CYCLE.length]
+    const nextTheme =
+      THEME_CYCLE[(THEME_CYCLE.indexOf(current) + 1) % THEME_CYCLE.length] ?? "system"
 
     return (
       <button
@@ -65,12 +74,12 @@ export function ThemeToggle({ className, collapsed }: ThemeToggleProps) {
         <button
           key={value}
           role="radio"
-          aria-checked={theme === value ? "true" : "false"}
+          aria-checked={selectedTheme === value ? "true" : "false"}
           aria-label={label}
           onClick={() => setTheme(value)}
           className={cn(
             "flex h-7 w-7 items-center justify-center rounded-sm transition-colors",
-            theme === value
+            selectedTheme === value
               ? "bg-(--bg-surface) text-(--text-primary) shadow-(--shadow-sm)"
               : "text-(--text-tertiary) hover:text-(--text-secondary)",
           )}

@@ -57,6 +57,14 @@ class Settings(BaseSettings):
         default="adriano@compostoweb.com.br",
         description="Email do admin master — criado automaticamente no startup se não existir",
     )
+    DEFAULT_TENANT_NAME: str = Field(
+        default="Composto Web",
+        description="Nome do tenant padrao criado automaticamente quando o banco esta vazio.",
+    )
+    DEFAULT_TENANT_SLUG: str = Field(
+        default="composto-web",
+        description="Slug do tenant padrao criado automaticamente quando o banco esta vazio.",
+    )
     FRONTEND_URL: str = Field(
         default="http://localhost:3000",
         description="URL pública do frontend Next.js — usado para redirecionar após OAuth",

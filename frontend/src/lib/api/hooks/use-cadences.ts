@@ -94,6 +94,33 @@ export interface CreateCadenceBody {
   steps_template: CadenceStep[]
 }
 
+function extractApiErrorMessage(error: unknown, fallback: string): string {
+  if (!error || typeof error !== "object") {
+    return fallback
+  }
+
+  const detail = (error as { detail?: unknown }).detail
+
+  if (typeof detail === "string" && detail.trim()) {
+    return detail
+  }
+
+  if (Array.isArray(detail)) {
+    const firstError = detail[0]
+    if (
+      firstError &&
+      typeof firstError === "object" &&
+      "msg" in firstError &&
+      typeof firstError.msg === "string" &&
+      firstError.msg.trim()
+    ) {
+      return firstError.msg
+    }
+  }
+
+  return fallback
+}
+
 // ── Hooks de query ────────────────────────────────────────────────────
 
 export function useCadences(cadenceType?: "mixed" | "email_only") {
@@ -140,7 +167,7 @@ export function useCreateCadence() {
       const { data, error } = await client.POST("/cadences" as never, {
         body: body as never,
       })
-      if (error) throw new Error("Falha ao criar cadência")
+      if (error) throw new Error(extractApiErrorMessage(error, "Falha ao criar cadência"))
       return data as Cadence
     },
     onSuccess: () => {
@@ -162,7 +189,7 @@ export function useUpdateCadence() {
       const { data, error } = await client.PATCH(`/cadences/${id}` as never, {
         body: body as never,
       })
-      if (error) throw new Error("Falha ao atualizar cadência")
+      if (error) throw new Error(extractApiErrorMessage(error, "Falha ao atualizar cadência"))
       return data as Cadence
     },
     onSuccess: (cadence) => {

@@ -46,6 +46,7 @@ logger = structlog.get_logger()
 
 # ── Listagem ──────────────────────────────────────────────────────────
 
+
 @router.get("", response_model=LinkedInAccountListResponse)
 async def list_linkedin_accounts(
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
@@ -65,6 +66,7 @@ async def list_linkedin_accounts(
 
 
 # ── Conectar via Unipile ──────────────────────────────────────────────
+
 
 @router.post(
     "/unipile",
@@ -98,6 +100,7 @@ async def create_unipile_account(
 
 # ── Conectar via cookie li_at (provider nativo) ───────────────────────
 
+
 @router.post(
     "/native",
     response_model=LinkedInAccountResponse,
@@ -110,14 +113,14 @@ async def create_native_account(
 ) -> LinkedInAccountResponse:
     """
     Conecta uma conta LinkedIn via cookie li_at.
-    Valida o cookie antes de salvar — rejeita se já estiver expirado.
     O cookie é armazenado criptografado com Fernet.
+    A validade real será confirmada pelo primeiro ping ou sync
+    (LinkedIn bloqueia validação a partir de IPs de servidor).
     """
-    ok, error = await ping_native_account(body.li_at_cookie)
-    if not ok:
+    if len(body.li_at_cookie.strip()) < 50:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Cookie li_at inválido ou expirado: {error}",
+            detail="Cookie li_at parece inválido (muito curto). Copie o valor completo.",
         )
 
     encrypted_li_at = encrypt_credential(body.li_at_cookie)
@@ -143,6 +146,7 @@ async def create_native_account(
 
 # ── Detalhe ───────────────────────────────────────────────────────────
 
+
 @router.get("/{account_id}", response_model=LinkedInAccountResponse)
 async def get_linkedin_account(
     account_id: uuid.UUID,
@@ -154,6 +158,7 @@ async def get_linkedin_account(
 
 
 # ── Editar ────────────────────────────────────────────────────────────
+
 
 @router.patch("/{account_id}", response_model=LinkedInAccountResponse)
 async def update_linkedin_account(
@@ -175,6 +180,7 @@ async def update_linkedin_account(
 
 # ── Remover ───────────────────────────────────────────────────────────
 
+
 @router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_linkedin_account(
     account_id: uuid.UUID,
@@ -191,6 +197,7 @@ async def delete_linkedin_account(
 
 
 # ── Status (ping) ─────────────────────────────────────────────────────
+
 
 @router.get("/{account_id}/status", response_model=LinkedInAccountStatusResponse)
 async def get_account_status(
@@ -236,6 +243,7 @@ async def get_account_status(
 
 
 # ── Helper ────────────────────────────────────────────────────────────
+
 
 async def _get_or_404(
     account_id: uuid.UUID,

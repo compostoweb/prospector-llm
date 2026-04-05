@@ -57,4 +57,17 @@ CELERY_BEAT_SCHEDULE: dict = {
         "task": "workers.content.check_scheduled_posts",
         "schedule": crontab(minute="*"),
     },
+    # Content Hub — sincronizacao Voyager Analytics — 3x/dia (08h, 14h, 20h)
+    "content-voyager-sync-morning": {
+        "task": "workers.content_voyager.sync_all_voyager",
+        "schedule": crontab(hour="8", minute="0"),
+    },
+    "content-voyager-sync-afternoon": {
+        "task": "workers.content_voyager.sync_all_voyager",
+        "schedule": crontab(hour="14", minute="0"),
+    },
+    "content-voyager-sync-evening": {
+        "task": "workers.content_voyager.sync_all_voyager",
+        "schedule": crontab(hour="20", minute="0"),
+    },
 }

@@ -1,10 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Sparkles, Copy, Check, Save, AlertTriangle, RefreshCw } from "lucide-react"
 import {
   useGeneratePost,
   useCreateContentPost,
+  useMarkThemeUsed,
   useThemeSuggestions,
   type PostPillar,
   type HookType,
@@ -39,7 +41,17 @@ const HOOK_OPTIONS: { value: HookType; label: string }[] = [
   { value: "data", label: "Dado" },
 ]
 
+function parsePillarParam(value: string | null): PostPillar | null {
+  if (value === "authority" || value === "case" || value === "vision") {
+    return value
+  }
+  return null
+}
+
 export default function GerarPage() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
   // Form state
   const [theme, setTheme] = useState("")
   const [pillar, setPillar] = useState<PostPillar>("authority")
@@ -47,6 +59,8 @@ export default function GerarPage() {
   const [variations, setVariations] = useState(3)
   const [useReferences, setUseReferences] = useState(false)
   const [temperature, setTemperature] = useState(0.8)
+  const [linkedThemeId, setLinkedThemeId] = useState<string | null>(null)
+  const [themeSyncWarning, setThemeSyncWarning] = useState<string | null>(null)
 
   // Results state
   const [results, setResults] = useState<GeneratePostVariation[]>([])
@@ -55,7 +69,30 @@ export default function GerarPage() {
 
   const generate = useGeneratePost()
   const createPost = useCreateContentPost()
+  const markThemeUsed = useMarkThemeUsed()
   const { data: suggestions } = useThemeSuggestions()
+
+  useEffect(() => {
+    const nextTheme = searchParams.get("theme")
+    const nextThemeId = searchParams.get("themeId")
+    const nextPillar = parsePillarParam(searchParams.get("pillar"))
+
+    if (!nextTheme && !nextThemeId && !nextPillar) {
+      return
+    }
+
+    if (nextTheme) {
+      setTheme(nextTheme)
+      setResults([])
+      setSavedIds(new Set())
+      setCopiedIdx(null)
+    }
+    if (nextPillar) {
+      setPillar(nextPillar)
+    }
+    setLinkedThemeId(nextThemeId)
+    setThemeSyncWarning(null)
+  }, [searchParams])
 
   async function handleGenerate() {
     const res = await generate.mutateAsync({
@@ -73,7 +110,7 @@ export default function GerarPage() {
   async function handleSave(idx: number) {
     const variation = results[idx]
     if (!variation) return
-    await createPost.mutateAsync({
+    const createdPost = await createPost.mutateAsync({
       title: `${theme.slice(0, 80)} — variação ${idx + 1}`,
       body: variation.text,
       pillar,
@@ -81,6 +118,24 @@ export default function GerarPage() {
       character_count: variation.character_count,
     })
     setSavedIds((prev) => new Set([...prev, idx]))
+
+    if (!linkedThemeId) {
+      return
+    }
+
+    try {
+      await markThemeUsed.mutateAsync({
+        themeId: linkedThemeId,
+        postId: createdPost.id,
+      })
+      setLinkedThemeId(null)
+      setThemeSyncWarning(null)
+      router.replace("/content/gerar")
+    } catch {
+      setThemeSyncWarning(
+        "O post foi salvo, mas o tema não foi marcado como usado. Você pode ajustar isso na aba Temas.",
+      )
+    }
   }
 
   async function handleCopy(idx: number) {
@@ -92,13 +147,29 @@ export default function GerarPage() {
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-6 min-h-[600px]">
+    <div className="grid min-h-150 grid-cols-1 gap-6 lg:grid-cols-[380px_1fr]">
       {/* Painel esquerdo — formulário */}
-      <div className="flex flex-col gap-5 bg-(--bg-surface) rounded-(--radius-lg) border border-(--border-default) p-5 shadow-(--shadow-sm) h-fit">
+      <div className="flex h-fit flex-col gap-5 rounded-lg border border-(--border-default) bg-(--bg-surface) p-5 shadow-(--shadow-sm)">
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-(--accent)" />
           <span className="text-sm font-medium text-(--text-primary)">Configurar geração</span>
         </div>
+
+        {linkedThemeId && (
+          <div className="rounded-md border border-(--accent)/20 bg-(--accent-subtle) px-3 py-2.5">
+            <p className="text-sm font-medium text-(--accent-subtle-fg)">Tema vindo do banco</p>
+            <p className="mt-1 text-xs text-(--accent-subtle-fg)/80">
+              Ao salvar a primeira variação, este tema será marcado como usado automaticamente.
+            </p>
+          </div>
+        )}
+
+        {themeSyncWarning && (
+          <div className="flex items-start gap-2 rounded-md border border-(--warning)/30 bg-(--warning)/5 px-3 py-2.5 text-xs text-(--warning)">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{themeSyncWarning}</span>
+          </div>
+        )}
 
         {/* Sugestões de temas */}
         {suggestions && suggestions.length > 0 && (
@@ -115,7 +186,7 @@ export default function GerarPage() {
                     setTheme(s.theme.title)
                     setPillar(s.theme.pillar)
                   }}
-                  className="flex items-start gap-2 rounded-(--radius-md) border border-(--border-subtle) bg-(--bg-overlay) p-2.5 text-left hover:border-(--accent) transition-colors"
+                  className="flex items-start gap-2 rounded-md border border-(--border-subtle) bg-(--bg-overlay) p-2.5 text-left transition-colors hover:border-(--accent)"
                 >
                   <PillarBadge pillar={s.theme.pillar} className="mt-0.5 shrink-0" />
                   <div className="min-w-0">
@@ -153,7 +224,7 @@ export default function GerarPage() {
                 type="button"
                 onClick={() => setPillar(o.value)}
                 className={cn(
-                  "flex flex-col gap-1 rounded-(--radius-md) border p-2.5 text-left transition-colors",
+                  "flex flex-col gap-1 rounded-md border p-2.5 text-left transition-colors",
                   pillar === o.value
                     ? "border-(--accent) bg-(--accent-subtle)"
                     : "border-(--border-default) hover:border-(--border-strong)",
@@ -255,14 +326,14 @@ export default function GerarPage() {
             {Array.from({ length: variations }).map((_, i) => (
               <div
                 key={i}
-                className="rounded-(--radius-lg) border border-(--border-default) bg-(--bg-surface) p-5 h-48 animate-pulse"
+                className="h-48 rounded-lg border border-(--border-default) bg-(--bg-surface) p-5 animate-pulse"
               />
             ))}
           </div>
         )}
 
         {!generate.isPending && results.length === 0 && (
-          <div className="flex items-center justify-center h-full min-h-[300px] rounded-(--radius-lg) border border-(--border-subtle) bg-(--bg-surface)">
+          <div className="flex h-full min-h-75 items-center justify-center rounded-lg border border-(--border-subtle) bg-(--bg-surface)">
             <div className="text-center">
               <Sparkles className="h-8 w-8 text-(--text-tertiary) mx-auto mb-3" />
               <p className="text-sm text-(--text-secondary)">
@@ -290,7 +361,7 @@ export default function GerarPage() {
         )}
 
         {generate.isError && (
-          <div className="flex items-center gap-2 rounded-(--radius-md) bg-(--danger-subtle) text-(--danger-subtle-fg) p-3 text-sm">
+          <div className="flex items-center gap-2 rounded-md bg-(--danger-subtle) p-3 text-sm text-(--danger-subtle-fg)">
             <AlertTriangle className="h-4 w-4 shrink-0" />
             Erro ao gerar posts. Verifique as configurações do LLM.
           </div>
@@ -324,16 +395,14 @@ function VariationCard({
   const charWarning = variation.character_count > 3000
 
   return (
-    <div className="rounded-(--radius-lg) border border-(--border-default) bg-(--bg-surface) p-5 flex flex-col gap-3 shadow-(--shadow-sm)">
+    <div className="flex flex-col gap-3 rounded-lg border border-(--border-default) bg-(--bg-surface) p-5 shadow-(--shadow-sm)">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-(--text-secondary)">
-            Variação {index + 1}
-          </span>
+          <span className="text-xs font-medium text-(--text-secondary)">Variação {index + 1}</span>
           <span
             className={cn(
-              "text-xs px-1.5 py-0.5 rounded-(--radius-md)",
+              "rounded-md px-1.5 py-0.5 text-xs",
               charWarning
                 ? "bg-(--danger-subtle) text-(--danger-subtle-fg)"
                 : "bg-(--bg-overlay) text-(--text-tertiary)",
@@ -342,7 +411,7 @@ function VariationCard({
             {variation.character_count} chars
           </span>
           {variation.hook_type_used && (
-            <span className="text-xs bg-(--accent-subtle) text-(--accent-subtle-fg) px-1.5 py-0.5 rounded-(--radius-md)">
+            <span className="rounded-md bg-(--accent-subtle) px-1.5 py-0.5 text-xs text-(--accent-subtle-fg)">
               {variation.hook_type_used}
             </span>
           )}
@@ -394,7 +463,7 @@ function VariationCard({
           {variation.violations.map((v, i) => (
             <div
               key={i}
-              className="flex items-start gap-1.5 text-xs text-(--warning-subtle-fg) bg-(--warning-subtle) rounded-(--radius-md) px-2 py-1"
+              className="flex items-start gap-1.5 rounded-md bg-(--warning-subtle) px-2 py-1 text-xs text-(--warning-subtle-fg)"
             >
               <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
               {v}

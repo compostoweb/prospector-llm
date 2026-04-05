@@ -27,18 +27,41 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, cast
 
 import structlog
 from sqlalchemy import select
 
+from core.config import settings
+from core.database import get_session
+from core.redis_client import redis_client
+from integrations.context_fetcher import context_fetcher
+from integrations.llm import LLMRegistry
+from integrations.unipile_client import unipile_client
+from services.ai_composer import AIComposer
+from services.cadence_manager import (
+    get_previous_template_channel,
+    get_template_step_config,
+    get_total_template_steps,
+)
+from services.message_template_renderer import (
+    render_message_template,
+    render_saved_email_template,
+)
 from workers.celery_app import celery_app
 
 if TYPE_CHECKING:
     from models.lead import Lead
 
 logger = structlog.get_logger()
+
+
+@dataclass
+class _DispatchResult:
+    success: bool
+    message_id: str | None = None
 
 
 @celery_app.task(
@@ -53,41 +76,23 @@ def dispatch_step(self, step_id: str, tenant_id: str) -> dict:
     Executa o envio de um step de cadência.
     Retorna dict com step_id, channel, status.
     """
-    return asyncio.get_event_loop().run_until_complete(
-        _dispatch_async(step_id, tenant_id, self)
-    )
+    return asyncio.get_event_loop().run_until_complete(_dispatch_async(step_id, tenant_id, self))
 
 
 async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: ignore[type-arg]
-    from core.database import get_session
-    from integrations.context_fetcher import context_fetcher
-    from integrations.llm import LLMRegistry
-    from integrations.tts import TTSRegistry
-    from integrations.unipile_client import unipile_client
     from models.cadence import Cadence
     from models.cadence_step import CadenceStep
     from models.enums import Channel, InteractionDirection, StepStatus
     from models.interaction import Interaction
     from models.lead import Lead
     from models.tenant import TenantIntegration
-    from services.ai_composer import AIComposer
-    from services.cadence_manager import (
-        get_previous_template_channel,
-        get_template_step_config,
-        get_total_template_steps,
-    )
-    from services.message_template_renderer import render_message_template, render_saved_email_template
-    from core.config import settings
-    from core.redis_client import redis_client
 
     tid = uuid.UUID(tenant_id)
     sid = uuid.UUID(step_id)
 
     async for db in get_session(tid):
         # ── Carrega step ─────────────────────────────────────────────
-        step_result = await db.execute(
-            select(CadenceStep).where(CadenceStep.id == sid)
-        )
+        step_result = await db.execute(select(CadenceStep).where(CadenceStep.id == sid))
         step = step_result.scalar_one_or_none()
         if not step:
             logger.warning("dispatch.step_not_found", step_id=step_id)
@@ -106,9 +111,7 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
         lead_result = await db.execute(select(Lead).where(Lead.id == step.lead_id))
         lead = lead_result.scalar_one_or_none()
 
-        cadence_result = await db.execute(
-            select(Cadence).where(Cadence.id == step.cadence_id)
-        )
+        cadence_result = await db.execute(select(Cadence).where(Cadence.id == step.cadence_id))
         cadence = cadence_result.scalar_one_or_none()
 
         if not lead or not cadence:
@@ -140,9 +143,7 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                 website_text = await context_fetcher.fetch_from_website(lead.website)
                 context["website"] = website_text
             elif lead.company:
-                company_text = await context_fetcher.search_company(
-                    lead.company, lead.website
-                )
+                company_text = await context_fetcher.search_company(lead.company, lead.website)
                 context["company_info"] = company_text
 
             # ── Composição de mensagem via LLM ────────────────────────
@@ -153,7 +154,11 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
             template_step = get_template_step_config(cadence, step.step_number)
             previous_channel = get_previous_template_channel(cadence, step.step_number)
             total_steps = get_total_template_steps(cadence)
-            configured_step_type = str(template_step.get("step_type")) if template_step and template_step.get("step_type") else None
+            configured_step_type = (
+                str(template_step.get("step_type"))
+                if template_step and template_step.get("step_type")
+                else None
+            )
             configured_message = render_message_template(
                 template_step.get("message_template") if template_step else None,
                 lead,
@@ -180,12 +185,13 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
             content_audio_url: str | None = None
             # Interaction pré-criada pelo canal EMAIL (necessário antes do envio para o pixel)
             email_interaction: Interaction | None = None
+            result: _DispatchResult
 
             if step.channel == Channel.LINKEDIN_CONNECT:
                 if getattr(cadence, "linkedin_account_id", None):
                     # Usa LinkedInRegistry com conta configurada na cadência
-                    from models.linkedin_account import LinkedInAccount as _LIA  # noqa: PLC0415
                     from integrations.linkedin import LinkedInRegistry as _LIR  # noqa: PLC0415
+                    from models.linkedin_account import LinkedInAccount as _LIA  # noqa: PLC0415
 
                     _li_acc_q = await db.execute(
                         select(_LIA).where(_LIA.id == cadence.linkedin_account_id)
@@ -194,23 +200,30 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                     if _li_account is None:
                         step.status = StepStatus.SKIPPED
                         await db.commit()
-                        return {"step_id": step_id, "status": "skipped", "reason": "linkedin_account_not_found"}
+                        return {
+                            "step_id": step_id,
+                            "status": "skipped",
+                            "reason": "linkedin_account_not_found",
+                        }
                     _li_registry = _LIR(settings=settings)
                     _li_result = await _li_registry.send_connect(
                         account=_li_account,
                         linkedin_profile_id=lead.linkedin_profile_id or "",
                         message=message_text,
                     )
-                    # Normaliza para interface compatível
-                    class _WrappedResult:
-                        success = _li_result.success
-                        message_id = _li_result.message_id
-                    result = _WrappedResult()
+                    result = _DispatchResult(
+                        success=_li_result.success,
+                        message_id=_li_result.message_id,
+                    )
                 else:
-                    result = await unipile_client.send_linkedin_connect(
+                    connect_result = await unipile_client.send_linkedin_connect(
                         account_id=linkedin_account_id,
                         linkedin_profile_id=lead.linkedin_profile_id or "",
                         message=message_text,
+                    )
+                    result = _DispatchResult(
+                        success=connect_result.success,
+                        message_id=connect_result.message_id,
                     )
 
             elif step.channel == Channel.LINKEDIN_DM:
@@ -219,6 +232,7 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                     if step.audio_file_id:
                         # Áudio pré-gravado no S3 — só passa a URL
                         from models.audio_file import AudioFile
+
                         af_result = await db.execute(
                             select(AudioFile).where(AudioFile.id == step.audio_file_id)
                         )
@@ -232,24 +246,34 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                             )
                             # Fallback: gera via TTS
                             audio_url = await _generate_tts_audio(
-                                cadence, message_text, settings, redis_client,
+                                cadence,
+                                message_text,
+                                settings,
+                                redis_client,
                             )
                     else:
                         # Gera via TTS
                         audio_url = await _generate_tts_audio(
-                            cadence, message_text, settings, redis_client,
+                            cadence,
+                            message_text,
+                            settings,
+                            redis_client,
                         )
 
-                    result = await unipile_client.send_linkedin_voice_note(
+                    voice_result = await unipile_client.send_linkedin_voice_note(
                         account_id=linkedin_account_id,
                         linkedin_profile_id=lead.linkedin_profile_id or "",
                         audio_url=audio_url,
                     )
+                    result = _DispatchResult(
+                        success=voice_result.success,
+                        message_id=voice_result.message_id,
+                    )
                     content_audio_url = audio_url
                 else:
                     if getattr(cadence, "linkedin_account_id", None):
-                        from models.linkedin_account import LinkedInAccount as _LIA  # noqa: PLC0415
                         from integrations.linkedin import LinkedInRegistry as _LIR  # noqa: PLC0415
+                        from models.linkedin_account import LinkedInAccount as _LIA  # noqa: PLC0415
 
                         _li_acc_q = await db.execute(
                             select(_LIA).where(_LIA.id == cadence.linkedin_account_id)
@@ -258,30 +282,38 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                         if _li_account is None:
                             step.status = StepStatus.SKIPPED
                             await db.commit()
-                            return {"step_id": step_id, "status": "skipped", "reason": "linkedin_account_not_found"}
+                            return {
+                                "step_id": step_id,
+                                "status": "skipped",
+                                "reason": "linkedin_account_not_found",
+                            }
                         _li_registry = _LIR(settings=settings)
                         _li_result = await _li_registry.send_dm(
                             account=_li_account,
                             linkedin_profile_id=lead.linkedin_profile_id or "",
                             message=message_text,
                         )
-
-                        class _WrappedDMResult:
-                            success = _li_result.success
-                            message_id = _li_result.message_id
-                        result = _WrappedDMResult()
+                        result = _DispatchResult(
+                            success=_li_result.success,
+                            message_id=_li_result.message_id,
+                        )
                     else:
-                        result = await unipile_client.send_linkedin_dm(
+                        dm_result = await unipile_client.send_linkedin_dm(
                             account_id=linkedin_account_id,
                             linkedin_profile_id=lead.linkedin_profile_id or "",
                             message=message_text,
                         )
+                        result = _DispatchResult(
+                            success=dm_result.success,
+                            message_id=dm_result.message_id,
+                        )
 
             elif step.channel == Channel.EMAIL:
+                import random as _random  # noqa: PLC0415
+
                 from models.email_template import EmailTemplate  # noqa: PLC0415
                 from models.email_unsubscribe import EmailUnsubscribe  # noqa: PLC0415
                 from services.email_footer import inject_tracking  # noqa: PLC0415
-                import random as _random  # noqa: PLC0415
 
                 email_to = lead.email_corporate or lead.email_personal or ""
                 if not email_to:
@@ -308,7 +340,9 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                     return {"step_id": step_id, "status": "skipped", "reason": "unsubscribed"}
 
                 subject_variants = template_step.get("subject_variants") if template_step else None
-                configured_email_template_id = template_step.get("email_template_id") if template_step else None
+                configured_email_template_id = (
+                    template_step.get("email_template_id") if template_step else None
+                )
 
                 if configured_email_template_id:
                     email_template: EmailTemplate | None = None
@@ -354,14 +388,16 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
 
                 # A/B override: se cadência tem subject_variants configurado, tem prioridade
                 if subject_variants:
-                    cleaned_variants = [str(item).strip() for item in subject_variants if str(item).strip()]
+                    cleaned_variants = [
+                        str(item).strip() for item in subject_variants if str(item).strip()
+                    ]
                     if cleaned_variants:
                         subject = _random.choice(cleaned_variants)
                 # Persiste subject para analytics de open-rate
                 step.subject_used = subject
 
                 # Pré-cria Interaction antes do envio para ter o ID para o pixel de rastreamento
-                now_pre = datetime.now(tz=timezone.utc)
+                now_pre = datetime.now(tz=UTC)
                 email_interaction = Interaction(
                     id=uuid.uuid4(),
                     tenant_id=tid,
@@ -385,9 +421,13 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                 # Usa EmailRegistry se a cadência tem email_account_id configurado
                 if getattr(cadence, "email_account_id", None):
                     from sqlalchemy import select as _sel  # noqa: PLC0415
-                    from models.email_account import EmailAccount  # noqa: PLC0415
-                    from integrations.email import EmailRegistry  # noqa: PLC0415
+
                     from core.config import settings as _cfg  # noqa: PLC0415
+                    from integrations.email import (
+                        EmailRegistry,  # noqa: PLC0415
+                        EmailSendResult,  # noqa: PLC0415
+                    )
+                    from models.email_account import EmailAccount  # noqa: PLC0415
 
                     _acc_result = await db.execute(
                         _sel(EmailAccount).where(EmailAccount.id == cadence.email_account_id)
@@ -401,16 +441,26 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                         )
                         step.status = StepStatus.SKIPPED
                         await db.commit()
-                        return {"step_id": step_id, "status": "skipped", "reason": "email_account_not_found"}
+                        return {
+                            "step_id": step_id,
+                            "status": "skipped",
+                            "reason": "email_account_not_found",
+                        }
 
                     _registry = EmailRegistry(settings=_cfg)
-                    _send_result = await _registry.send(
-                        account=_email_account,
-                        to_email=email_to,
-                        subject=subject,
-                        body_html=tracked_html,
+                    _send_result = cast(
+                        EmailSendResult,
+                        await _registry.send(
+                            account=_email_account,
+                            to_email=email_to,
+                            subject=subject,
+                            body_html=tracked_html,
+                        ),
                     )
-                    _result_mid = _send_result.message_id if _send_result.success else None
+                    result = _DispatchResult(
+                        success=_send_result.success,
+                        message_id=_send_result.message_id,
+                    )
                 else:
                     # Fallback: usa Unipile global (comportamento anterior)
                     _r = await unipile_client.send_email(
@@ -419,14 +469,14 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                         subject=subject,
                         body_html=tracked_html,
                     )
-                    _send_result = _r
-                    _result_mid = _r.message_id if _r.success else None
+                    result = _DispatchResult(success=_r.success, message_id=_r.message_id)
 
-                email_interaction.unipile_message_id = _result_mid
+                email_interaction.unipile_message_id = result.message_id if result.success else None
 
             elif step.channel == Channel.MANUAL_TASK:
                 # MANUAL_TASK: não envia mensagem — notifica admin via email
                 from services.notification import send_manual_task_notification
+
                 await send_manual_task_notification(
                     lead=lead,
                     cadence_name=cadence.name,
@@ -435,18 +485,18 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                     tenant_id=tid,
                     db=db,
                 )
-                # Fake result para manter o fluxo
-                class _FakeResult:
-                    success = True
-                    message_id = None
-                result = _FakeResult()
+                result = _DispatchResult(success=True)
 
             elif step.channel == Channel.LINKEDIN_POST_REACTION:
                 # Não usa LLM — reage diretamente ao post mais recente do lead
                 if not lead.linkedin_profile_id:
                     step.status = StepStatus.SKIPPED
                     await db.commit()
-                    return {"step_id": step_id, "status": "skipped", "reason": "no_linkedin_profile_id"}
+                    return {
+                        "step_id": step_id,
+                        "status": "skipped",
+                        "reason": "no_linkedin_profile_id",
+                    }
 
                 reacted = await unipile_client.react_to_latest_post(
                     account_id=linkedin_account_id,
@@ -467,16 +517,17 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                 # message_text fica vazio pois não é mensagem de texto
                 message_text = ""
 
-                class _FakeResult:  # type: ignore[no-redef]
-                    success = True
-                    message_id = None
-                result = _FakeResult()
+                result = _DispatchResult(success=True)
 
             elif step.channel == Channel.LINKEDIN_POST_COMMENT:
                 if not lead.linkedin_profile_id:
                     step.status = StepStatus.SKIPPED
                     await db.commit()
-                    return {"step_id": step_id, "status": "skipped", "reason": "no_linkedin_profile_id"}
+                    return {
+                        "step_id": step_id,
+                        "status": "skipped",
+                        "reason": "no_linkedin_profile_id",
+                    }
 
                 # message_text já foi gerado pelo composer (deve ser o comentário)
                 commented = await unipile_client.comment_on_latest_post(
@@ -495,20 +546,22 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                     )
                     return {"step_id": step_id, "status": "skipped", "reason": "no_recent_post"}
 
-                class _FakeResult:  # type: ignore[no-redef]
-                    success = True
-                    message_id = None
-                result = _FakeResult()
+                result = _DispatchResult(success=True)
 
             elif step.channel == Channel.LINKEDIN_INMAIL:
                 if not lead.linkedin_profile_id:
                     step.status = StepStatus.SKIPPED
                     await db.commit()
-                    return {"step_id": step_id, "status": "skipped", "reason": "no_linkedin_profile_id"}
+                    return {
+                        "step_id": step_id,
+                        "status": "skipped",
+                        "reason": "no_linkedin_profile_id",
+                    }
 
                 # Composer retorna JSON: {"subject": "...", "body": "..."}
                 try:
                     import json as _json  # noqa: PLC0415
+
                     inmail_data = _json.loads(message_text)
                     inmail_subject = inmail_data.get("subject", "")
                     inmail_body = inmail_data.get("body", message_text)
@@ -517,11 +570,15 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                     inmail_subject = ""
                     inmail_body = message_text
 
-                result = await unipile_client.send_linkedin_inmail(
+                inmail_result = await unipile_client.send_linkedin_inmail(
                     account_id=linkedin_account_id,
                     linkedin_profile_id=lead.linkedin_profile_id,
                     subject=inmail_subject,
                     message=inmail_body,
+                )
+                result = _DispatchResult(
+                    success=inmail_result.success,
+                    message_id=inmail_result.message_id,
                 )
                 # Salva o corpo efetivo como content_text
                 message_text = inmail_body
@@ -532,7 +589,7 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                 return {"step_id": step_id, "status": "skipped", "reason": "unknown_channel"}
 
             # ── Salva Interaction outbound ────────────────────────────
-            now = datetime.now(tz=timezone.utc)
+            now = datetime.now(tz=UTC)
             if email_interaction is not None:
                 # EMAIL: interaction já pré-criada e adicionada; só garante o now
                 interaction = email_interaction
@@ -582,9 +639,8 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
     return {"step_id": step_id, "status": "error", "error": "no_session"}
 
 
-def _build_email_subject(lead: "Lead", step_number: int) -> str:
+def _build_email_subject(lead: Lead, step_number: int) -> str:
     """Gera assunto do e-mail baseado na empresa e número do step."""
-    from models.lead import Lead
     company = lead.company or lead.name
     if step_number == 1:
         return f"Uma ideia para {company}"
@@ -592,10 +648,10 @@ def _build_email_subject(lead: "Lead", step_number: int) -> str:
 
 
 async def _generate_tts_audio(
-    cadence: "Cadence",  # type: ignore[name-defined]  # noqa: F821
+    cadence: Cadence,  # type: ignore[name-defined]  # noqa: F821
     text: str,
-    settings: "Settings",  # type: ignore[name-defined]  # noqa: F821
-    redis_client: "RedisClient",  # type: ignore[name-defined]  # noqa: F821
+    settings: Settings,  # type: ignore[name-defined]  # noqa: F821
+    redis_client: RedisClient,  # type: ignore[name-defined]  # noqa: F821
 ) -> str:
     """Gera áudio TTS, armazena no Redis e retorna a URL pública."""
     from integrations.tts import TTSRegistry

@@ -15,26 +15,28 @@ import asyncio
 import sys
 import uuid
 from pathlib import Path
+from typing import TypeAlias
 
 # Garante que o diretório backend está no path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import structlog
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from core.database import AsyncSessionLocal
+from models.enums import LeadSource, LeadStatus
 from models.lead import Lead
 from models.lead_list import LeadList
-from models.enums import LeadSource, LeadStatus
-
-import structlog
 
 logger = structlog.get_logger()
 
+SeedLeadValue: TypeAlias = str | float | LeadSource | LeadStatus
+SeedLeadPayload: TypeAlias = dict[str, SeedLeadValue]
+
 # ── Dados de teste ────────────────────────────────────────────────────
 
-SEED_LEADS: list[dict] = [
+SEED_LEADS: list[SeedLeadPayload] = [
     {
         "name": "Carlos Silva",
         "first_name": "Carlos",
@@ -292,13 +294,18 @@ async def seed_leads(tenant_id: uuid.UUID) -> None:
 async def main() -> None:
     from models.tenant import Tenant
 
-    # Busca o primeiro tenant ativo
+    # Busca o tenant ativo, priorizando o slug padrão configurado.
     async with AsyncSessionLocal() as session:
-        result = await session.execute(select(Tenant).limit(1))
+        result = await session.execute(
+            select(Tenant)
+            .where(Tenant.is_active.is_(True))
+            .order_by((Tenant.slug == settings.DEFAULT_TENANT_SLUG).desc(), Tenant.created_at.asc())
+            .limit(1)
+        )
         tenant = result.scalar_one_or_none()
 
     if not tenant:
-        logger.error("seed.no_tenant", msg="Nenhum tenant encontrado. Crie um tenant primeiro.")
+        logger.error("seed.no_tenant", detail="Nenhum tenant ativo encontrado. Crie ou ative um tenant primeiro.")
         sys.exit(1)
 
     logger.info("seed.starting", tenant_id=str(tenant.id), tenant_name=tenant.name)

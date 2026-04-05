@@ -32,9 +32,12 @@ router = APIRouter(prefix="/cadences", tags=["Cadences"])
 
 # ── Listagem ──────────────────────────────────────────────────────────
 
+
 @router.get("", response_model=list[CadenceResponse])
 async def list_cadences(
-    cadence_type: str | None = Query(default=None, description="Filtrar por tipo: 'mixed' | 'email_only'"),
+    cadence_type: str | None = Query(
+        default=None, description="Filtrar por tipo: 'mixed' | 'email_only'"
+    ),
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> list[CadenceResponse]:
@@ -47,6 +50,7 @@ async def list_cadences(
 
 
 # ── Criação ───────────────────────────────────────────────────────────
+
 
 @router.post("", response_model=CadenceResponse, status_code=status.HTTP_201_CREATED)
 async def create_cadence(
@@ -71,6 +75,7 @@ async def create_cadence(
         tts_pitch=body.tts_pitch,
         lead_list_id=body.lead_list_id,
         email_account_id=body.email_account_id,
+        linkedin_account_id=body.linkedin_account_id,
         target_segment=body.target_segment,
         persona_description=body.persona_description,
         offer_description=body.offer_description,
@@ -91,6 +96,7 @@ async def create_cadence(
 
 # ── Detalhes ──────────────────────────────────────────────────────────
 
+
 @router.get("/{cadence_id}", response_model=CadenceResponse)
 async def get_cadence(
     cadence_id: uuid.UUID,
@@ -103,6 +109,7 @@ async def get_cadence(
 
 # ── Atualização parcial ───────────────────────────────────────────────
 
+
 @router.patch("/{cadence_id}", response_model=CadenceResponse)
 async def update_cadence(
     cadence_id: uuid.UUID,
@@ -112,7 +119,23 @@ async def update_cadence(
 ) -> CadenceResponse:
     cadence = await _get_cadence_or_404(cadence_id, tenant_id, db)
 
-    updates = body.model_dump(exclude_unset=True, exclude={"llm", "steps_template", "tts_provider", "tts_voice_id", "lead_list_id", "email_account_id", "target_segment", "persona_description", "offer_description", "tone_instructions", "cadence_type"})
+    updates = body.model_dump(
+        exclude_unset=True,
+        exclude={
+            "llm",
+            "steps_template",
+            "tts_provider",
+            "tts_voice_id",
+            "lead_list_id",
+            "email_account_id",
+            "linkedin_account_id",
+            "target_segment",
+            "persona_description",
+            "offer_description",
+            "tone_instructions",
+            "cadence_type",
+        },
+    )
     for field, value in updates.items():
         setattr(cadence, field, value)
 
@@ -131,7 +154,12 @@ async def update_cadence(
     raw = body.model_dump(exclude_unset=True)
 
     # Campos de contexto de prospecção
-    for ctx_field in ("target_segment", "persona_description", "offer_description", "tone_instructions"):
+    for ctx_field in (
+        "target_segment",
+        "persona_description",
+        "offer_description",
+        "tone_instructions",
+    ):
         if ctx_field in raw:
             setattr(cadence, ctx_field, getattr(body, ctx_field))
 
@@ -148,6 +176,8 @@ async def update_cadence(
         cadence.lead_list_id = body.lead_list_id
     if "email_account_id" in raw:
         cadence.email_account_id = body.email_account_id
+    if "linkedin_account_id" in raw:
+        cadence.linkedin_account_id = body.linkedin_account_id
     if "cadence_type" in raw and body.cadence_type is not None:
         cadence.cadence_type = body.cadence_type
 
@@ -159,6 +189,7 @@ async def update_cadence(
 
 
 # ── Desativação ───────────────────────────────────────────────────────
+
 
 @router.delete("/{cadence_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def deactivate_cadence(
@@ -173,6 +204,7 @@ async def deactivate_cadence(
 
 
 # ── Helper ────────────────────────────────────────────────────────────
+
 
 async def _get_cadence_or_404(
     cadence_id: uuid.UUID,

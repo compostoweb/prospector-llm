@@ -9,14 +9,44 @@ configurado na cadência.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass
+from typing import Any
+
 import structlog
+
 from integrations.llm import LLMMessage, LLMRegistry, LLMResponse
 from models.cadence import Cadence
 from models.lead import Lead
 from services.outreach_playbook import PlaybookEntry, get_lead_playbook
-from services.sector_templates import get_few_shot_example
+from services.sector_templates import get_few_shot_example, get_few_shot_match
 
 logger = structlog.get_logger()
+
+PromptContext = Mapping[str, object]
+
+
+@dataclass(frozen=True)
+class CompositionContext:
+    """Metadados usados para compor uma mensagem do AI Composer."""
+
+    generation_mode: str
+    step_key: str
+    copy_method: str | None
+    playbook_sector: str | None
+    playbook_role: str | None
+    matched_role: str | None
+    few_shot_applied: bool
+    few_shot_key: str | None
+    few_shot_method: str | None
+    has_site_summary: bool
+    has_recent_posts: bool
+
+
+def serialize_composition_context(context: CompositionContext) -> dict[str, object]:
+    """Serializa o contexto de composição para logs e APIs."""
+
+    return asdict(context)
 
 COMPOSER_SYSTEM_PROMPT = """
 Você é um profissional sênior de desenvolvimento de negócios que atua em prospecção consultiva B2B de alto nível.
@@ -355,7 +385,7 @@ class AIComposer:
         lead: Lead,
         channel: str,               # "linkedin_connect" | "linkedin_dm" | "email"
         step_number: int,
-        context: dict,              # vindo de context_fetcher
+        context: PromptContext,     # vindo de context_fetcher
         cadence: Cadence,
         total_steps: int = 1,
         use_voice: bool = False,
@@ -366,22 +396,17 @@ class AIComposer:
         Gera uma mensagem personalizada para o lead/canal/step.
         Usa o provider e modelo configurados na cadência.
         """
-        user_prompt = _build_user_prompt(
-            lead,
-            channel,
-            step_number,
-            context,
+        messages, composition_context = prepare_composer_messages(
+            lead=lead,
+            channel=channel,
+            step_number=step_number,
+            context=context,
             total_steps=total_steps,
             use_voice=use_voice,
             previous_channel=previous_channel,
             cadence=cadence,
             step_type=step_type,
         )
-
-        messages = [
-            LLMMessage(role="system", content=COMPOSER_SYSTEM_PROMPT),
-            LLMMessage(role="user", content=user_prompt),
-        ]
 
         response: LLMResponse = await self._registry.complete(
             messages=messages,
@@ -390,6 +415,7 @@ class AIComposer:
             temperature=cadence.llm_temperature,
             max_tokens=cadence.llm_max_tokens,
         )
+        response.raw["composition_context"] = serialize_composition_context(composition_context)
 
         logger.info(
             "ai_composer.composed",
@@ -400,6 +426,14 @@ class AIComposer:
             model=response.model,
             tokens_in=response.input_tokens,
             tokens_out=response.output_tokens,
+            generation_mode=composition_context.generation_mode,
+            step_key=composition_context.step_key,
+            copy_method=composition_context.copy_method,
+            playbook_sector=composition_context.playbook_sector,
+            playbook_role=composition_context.playbook_role,
+            matched_role=composition_context.matched_role,
+            few_shot_applied=composition_context.few_shot_applied,
+            few_shot_key=composition_context.few_shot_key,
         )
 
         return response.text.strip()
@@ -408,7 +442,7 @@ class AIComposer:
         self,
         lead: Lead,
         step_number: int,
-        context: dict,
+        context: PromptContext,
         cadence: Cadence,
         step_type: str | None = None,
         total_steps: int = 1,
@@ -419,18 +453,16 @@ class AIComposer:
         Returns:
             Tuple[subject, body] — ambos como strings limpas.
         """
-        user_prompt = _build_user_prompt(
-            lead, "email", step_number, context,
+        messages, composition_context = prepare_composer_messages(
+            lead=lead,
+            channel="email",
+            step_number=step_number,
+            context=context,
             total_steps=total_steps,
             previous_channel=previous_channel,
             cadence=cadence,
             step_type=step_type,
         )
-
-        messages = [
-            LLMMessage(role="system", content=COMPOSER_SYSTEM_PROMPT),
-            LLMMessage(role="user", content=user_prompt),
-        ]
 
         response: LLMResponse = await self._registry.complete(
             messages=messages,
@@ -439,6 +471,7 @@ class AIComposer:
             temperature=cadence.llm_temperature,
             max_tokens=cadence.llm_max_tokens,
         )
+        response.raw["composition_context"] = serialize_composition_context(composition_context)
 
         raw = response.text.strip()
 
@@ -454,9 +487,50 @@ class AIComposer:
             subject_len=len(subject),
             tokens_in=response.input_tokens,
             tokens_out=response.output_tokens,
+            generation_mode=composition_context.generation_mode,
+            step_key=composition_context.step_key,
+            copy_method=composition_context.copy_method,
+            playbook_sector=composition_context.playbook_sector,
+            playbook_role=composition_context.playbook_role,
+            matched_role=composition_context.matched_role,
+            few_shot_applied=composition_context.few_shot_applied,
+            few_shot_key=composition_context.few_shot_key,
         )
 
         return subject, body
+
+
+def prepare_composer_messages(
+    lead: Any,
+    channel: str,
+    step_number: int,
+    context: PromptContext,
+    *,
+    total_steps: int = 1,
+    use_voice: bool = False,
+    previous_channel: str | None = None,
+    cadence: Cadence | None = None,
+    step_type: str | None = None,
+) -> tuple[list[LLMMessage], CompositionContext]:
+    """Prepara mensagens do LLM e contexto de composição para observabilidade."""
+
+    user_prompt, composition_context = _build_user_prompt(
+        lead=lead,
+        channel=channel,
+        step=step_number,
+        context=context,
+        total_steps=total_steps,
+        use_voice=use_voice,
+        previous_channel=previous_channel,
+        cadence=cadence,
+        step_type=step_type,
+    )
+
+    messages = [
+        LLMMessage(role="system", content=COMPOSER_SYSTEM_PROMPT),
+        LLMMessage(role="user", content=user_prompt),
+    ]
+    return messages, composition_context
 
 
 def _parse_email_json(raw: str, lead: object, step_number: int) -> tuple[str, str]:
@@ -489,9 +563,9 @@ def _parse_email_json(raw: str, lead: object, step_number: int) -> tuple[str, st
 
 def _select_copy_method(
     step_key: str,
-    lead: Lead,
+    lead: Any,
     playbook_entry: PlaybookEntry | None,
-    context: dict,
+    context: PromptContext,
     step_number: int = 1,
     total_steps: int = 1,
 ) -> str | None:
@@ -543,27 +617,40 @@ _COPY_METHOD_DEFINITIONS: dict[str, str] = {
 
 
 def _build_user_prompt(
-    lead: Lead,
+    lead: Any,
     channel: str,
     step: int,
-    context: dict,
+    context: PromptContext,
     total_steps: int = 1,
     use_voice: bool = False,
     previous_channel: str | None = None,
     cadence: Cadence | None = None,
     step_type: str | None = None,
-) -> str:
+) -> tuple[str, CompositionContext]:
     site_summary = context.get("site_summary", "Não disponível")
     linkedin_post = context.get("recent_linkedin_post", "Não disponível")
     news = context.get("company_news", "Nenhuma notícia recente")
+    has_site_summary = bool(site_summary and site_summary != "Não disponível")
+    lead_name = str(getattr(lead, "name", "Lead"))
+    lead_job_title = getattr(lead, "job_title", None)
+    lead_company = getattr(lead, "company", None)
+    lead_industry = getattr(lead, "industry", None)
+    lead_company_size = getattr(lead, "company_size", None)
+    lead_segment = getattr(lead, "segment", None)
+    lead_location = getattr(lead, "location", None)
+    lead_city = getattr(lead, "city", None)
+    lead_linkedin_url = getattr(lead, "linkedin_url", None)
+    recent_posts_json = getattr(lead, "linkedin_recent_posts_json", None)
 
     # Posts recentes do lead (cache armazenado no modelo)
     recent_posts_block = ""
-    if getattr(lead, "linkedin_recent_posts_json", None):
+    has_recent_posts = False
+    if recent_posts_json:
         try:
             import json as _json  # noqa: PLC0415
-            posts_data = _json.loads(lead.linkedin_recent_posts_json)  # type: ignore[arg-type]
+            posts_data = _json.loads(recent_posts_json)
             if posts_data:
+                has_recent_posts = True
                 lines = ["POSTS RECENTES DO LEAD NO LINKEDIN:"]
                 for idx, p in enumerate(posts_data[:3], 1):
                     content = (p.get("content") or "").strip()
@@ -581,16 +668,16 @@ def _build_user_prompt(
 
     # Dados ricos do lead
     lead_lines = [
-        f"Nome: {lead.name}",
-        f"Cargo: {lead.job_title or 'Não informado'}",
-        f"Empresa: {lead.company or 'Não informado'}",
-        f"Setor/indústria: {lead.industry or 'Não informado'}",
-        f"Porte da empresa: {lead.company_size or 'Não informado'}",
-        f"Segmento: {lead.segment or 'Não informado'}",
-        f"Localização: {lead.location or lead.city or 'Não informado'}",
+        f"Nome: {lead_name}",
+        f"Cargo: {lead_job_title or 'Não informado'}",
+        f"Empresa: {lead_company or 'Não informado'}",
+        f"Setor/indústria: {lead_industry or 'Não informado'}",
+        f"Porte da empresa: {lead_company_size or 'Não informado'}",
+        f"Segmento: {lead_segment or 'Não informado'}",
+        f"Localização: {lead_location or lead_city or 'Não informado'}",
     ]
-    if lead.linkedin_url:
-        lead_lines.append(f"LinkedIn: {lead.linkedin_url}")
+    if lead_linkedin_url:
+        lead_lines.append(f"LinkedIn: {lead_linkedin_url}")
 
     # ── Playbook estratégico do setor/cargo ───────────────────────────────────
     playbook_entry: PlaybookEntry | None = get_lead_playbook(lead)
@@ -643,6 +730,12 @@ Gancho de valor: {playbook_entry.gancho}"""
         channel=channel,
         step_key=step_key,
     )
+    few_shot_match = get_few_shot_match(
+        sector=playbook_entry.sector if playbook_entry else None,
+        role=playbook_entry.role if playbook_entry else None,
+        channel=channel,
+        step_key=step_key,
+    )
     if few_shot_block:
         blocks.append(f"\n{few_shot_block}")
 
@@ -659,7 +752,25 @@ Gancho de valor: {playbook_entry.gancho}"""
     blocks.append(f"\nPOSIÇÃO NA CADÊNCIA: Step {step} de {total_steps}.")
     blocks.append("\nEscreva a mensagem agora:")
 
-    return "\n".join(blocks).strip()
+    composition_context = CompositionContext(
+        generation_mode="llm",
+        step_key=step_key,
+        copy_method=copy_method,
+        playbook_sector=playbook_entry.sector if playbook_entry else None,
+        playbook_role=playbook_entry.role if playbook_entry else None,
+        matched_role=few_shot_match.matched_role if few_shot_match else None,
+        few_shot_applied=few_shot_match is not None,
+        few_shot_key=(
+            f"{few_shot_match.sector}:{few_shot_match.matched_role}:{few_shot_match.channel}:{few_shot_match.step_type}"
+            if few_shot_match
+            else None
+        ),
+        few_shot_method=few_shot_match.example.method if few_shot_match else None,
+        has_site_summary=has_site_summary,
+        has_recent_posts=has_recent_posts or bool(linkedin_post and linkedin_post != "Não disponível"),
+    )
+
+    return "\n".join(blocks).strip(), composition_context
 
 
 def resolve_step_key(

@@ -15,6 +15,8 @@ aceso exclusivamente via LLMRegistry injetado.
 
 from __future__ import annotations
 
+from typing import TypedDict
+
 from integrations.llm import LLMMessage, LLMRegistry
 from services.content.rules import (
     IDEAL_MAX_CHARS,
@@ -23,6 +25,19 @@ from services.content.rules import (
     count_characters,
     validate_post,
 )
+
+
+class ReferenceExample(TypedDict):
+    body: str
+    hook_type: str | None
+    pillar: str | None
+
+
+class GeneratedVariation(TypedDict):
+    text: str
+    character_count: int
+    hook_type_used: str
+    violations: list[str]
 
 # ── Mapeamento de pilares ─────────────────────────────────────────────
 
@@ -152,7 +167,7 @@ Retorne APENAS o texto do post melhorado.\
 
 # ── Helpers internos ──────────────────────────────────────────────────
 
-def _build_few_shot_block(references: list[dict]) -> str:
+def _build_few_shot_block(references: list[ReferenceExample]) -> str:
     """Monta bloco few-shot com posts de referência."""
     if not references:
         return ""
@@ -170,7 +185,7 @@ def _build_few_shot_block(references: list[dict]) -> str:
 def _render_system_prompt(
     author_name: str,
     author_voice: str,
-    references: list[dict],
+    references: list[ReferenceExample],
 ) -> str:
     few_shot_block = _build_few_shot_block(references)
     return _SYSTEM_PROMPT_TEMPLATE.format(
@@ -193,13 +208,13 @@ async def generate_post(
     author_name: str,
     author_voice: str,
     variations: int,
-    references: list[dict],
+    references: list[ReferenceExample],
     registry: LLMRegistry,
     provider: str,
     model: str,
     temperature: float,
     max_tokens: int = 1024,
-) -> list[dict]:
+) -> list[GeneratedVariation]:
     """
     Gera N variações de post para LinkedIn sobre um dado tema.
 
@@ -224,7 +239,7 @@ async def generate_post(
         LLMMessage(role="user", content=user_prompt),
     ]
 
-    results: list[dict] = []
+    results: list[GeneratedVariation] = []
     for _ in range(variations):
         response = await registry.complete(
             messages=messages,

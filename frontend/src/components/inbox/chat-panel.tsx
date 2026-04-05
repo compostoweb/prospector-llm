@@ -21,7 +21,6 @@ import {
   FileText,
   Download,
   Play,
-  ImageIcon,
   SmilePlus,
 } from "lucide-react"
 import Image from "next/image"
@@ -115,7 +114,10 @@ export function ChatPanel({ chatId, onToggleContact, showContact }: ChatPanelPro
       </div>
 
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto p-4" onClick={() => reactionMsgId && setReactionMsgId(null)}>
+      <div
+        className="flex-1 overflow-y-auto p-4"
+        onClick={() => reactionMsgId && setReactionMsgId(null)}
+      >
         {isLoading ? (
           <div className="flex h-full items-center justify-center">
             <Loader2 size={24} className="animate-spin text-(--text-tertiary)" />
@@ -142,11 +144,14 @@ export function ChatPanel({ chatId, onToggleContact, showContact }: ChatPanelPro
                     </div>
                   )}
                   <div
-                    className={cn("group/msg flex gap-2", msg.is_own ? "flex-row-reverse" : "flex-row")}
+                    className={cn(
+                      "group/msg flex gap-2",
+                      msg.is_own ? "flex-row-reverse" : "flex-row",
+                    )}
                   >
                     {/* Avatar */}
-                    {!msg.is_own && (
-                      attendeeAvatar ? (
+                    {!msg.is_own &&
+                      (attendeeAvatar ? (
                         <Image
                           src={attendeeAvatar}
                           alt={msg.sender_name}
@@ -159,8 +164,7 @@ export function ChatPanel({ chatId, onToggleContact, showContact }: ChatPanelPro
                         <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-(--bg-overlay)">
                           <User size={12} className="text-(--text-tertiary)" aria-hidden="true" />
                         </div>
-                      )
-                    )}
+                      ))}
 
                     {/* Bubble + reaction trigger */}
                     <div className="relative max-w-[70%]">
@@ -177,7 +181,11 @@ export function ChatPanel({ chatId, onToggleContact, showContact }: ChatPanelPro
                             {msg.sender_name}
                           </p>
                         )}
-                        {msg.text && <p className="whitespace-pre-wrap"><Linkify text={msg.text} isOwn={msg.is_own} /></p>}
+                        {msg.text && (
+                          <p className="whitespace-pre-wrap">
+                            <Linkify text={msg.text} isOwn={msg.is_own} />
+                          </p>
+                        )}
                         <MessageAttachments attachments={msg.attachments} isOwn={msg.is_own} />
                         <p
                           className={cn(
@@ -228,7 +236,12 @@ export function ChatPanel({ chatId, onToggleContact, showContact }: ChatPanelPro
 
                       {/* Existing reactions display */}
                       {msg.reactions && msg.reactions.length > 0 && (
-                        <div className={cn("mt-0.5 flex gap-1", msg.is_own ? "justify-end" : "justify-start")}>
+                        <div
+                          className={cn(
+                            "mt-0.5 flex gap-1",
+                            msg.is_own ? "justify-end" : "justify-start",
+                          )}
+                        >
                           {groupReactions(msg.reactions).map(({ emoji, count, isOwn }) => (
                             <button
                               key={emoji}
@@ -332,7 +345,13 @@ interface AttachmentItem {
   [key: string]: unknown
 }
 
-function MessageAttachments({ attachments, isOwn }: { attachments: AttachmentItem[]; isOwn: boolean }) {
+function MessageAttachments({
+  attachments,
+  isOwn,
+}: {
+  attachments: AttachmentItem[]
+  isOwn: boolean
+}) {
   if (!attachments || attachments.length === 0) return null
 
   return (
@@ -345,11 +364,8 @@ function MessageAttachments({ attachments, isOwn }: { attachments: AttachmentIte
         if (mimeType.startsWith("image/") || /\.(jpg|jpeg|png|gif|webp)$/i.test(url)) {
           return (
             <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="block">
-              <img
-                src={url}
-                alt={name}
-                className="max-h-48 max-w-full rounded-md object-contain"
-              />
+              {/* eslint-disable-next-line @next/next/no-img-element -- attachment URLs are arbitrary external assets */}
+              <img src={url} alt={name} className="max-h-48 max-w-full rounded-md object-contain" />
             </a>
           )
         }

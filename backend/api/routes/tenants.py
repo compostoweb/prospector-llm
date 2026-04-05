@@ -36,6 +36,7 @@ from schemas.tenant import (
     TenantIntegrationUpdate,
     TenantResponse,
 )
+from services.content.theme_bank import seed_theme_bank_for_tenant
 
 logger = structlog.get_logger()
 
@@ -43,6 +44,7 @@ router = APIRouter(prefix="/tenants", tags=["Tenants"])
 
 
 # ── Helper: session sem RLS (para criação de tenant) ─────────────────
+
 
 async def _get_raw_session() -> AsyncGenerator[AsyncSession, Any]:
     """
@@ -60,6 +62,7 @@ async def _get_raw_session() -> AsyncGenerator[AsyncSession, Any]:
 
 # ── Onboarding ────────────────────────────────────────────────────────
 
+
 @router.post("", response_model=TenantCreateResponse, status_code=status.HTTP_201_CREATED)
 async def create_tenant(
     body: TenantCreateRequest,
@@ -69,9 +72,7 @@ async def create_tenant(
     Cria um novo tenant e gera a api_key.
     A api_key é retornada em plaintext APENAS nesta resposta — salve-a imediatamente.
     """
-    existing = await db.execute(
-        select(Tenant).where(Tenant.slug == body.slug)
-    )
+    existing = await db.execute(select(Tenant).where(Tenant.slug == body.slug))
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -90,10 +91,14 @@ async def create_tenant(
     integration = TenantIntegration(tenant_id=tenant.id)
     db.add(integration)
 
+    seeded = await seed_theme_bank_for_tenant(db, tenant.id)
+
     await db.commit()
     await db.refresh(tenant)
 
     logger.info("tenant.created", tenant_id=str(tenant.id), slug=body.slug)
+    if seeded:
+        logger.info("content.theme_bank_seeded", tenant_id=str(tenant.id), inserted=seeded)
     return TenantCreateResponse(
         id=tenant.id,
         name=tenant.name,
@@ -105,6 +110,7 @@ async def create_tenant(
 
 
 # ── Dados do tenant autenticado ───────────────────────────────────────
+
 
 @router.get("/me", response_model=TenantResponse)
 async def get_me(
@@ -119,6 +125,7 @@ async def get_me(
 
 
 # ── Atualização de integrações ────────────────────────────────────────
+
 
 @router.put("/me/integrations", response_model=TenantIntegrationResponse)
 async def update_integrations(
@@ -144,7 +151,9 @@ async def update_integrations(
     await db.commit()
     await db.refresh(integration)
 
-    logger.info("tenant.integrations_updated", tenant_id=str(tenant_id), fields=list(updates.keys()))
+    logger.info(
+        "tenant.integrations_updated", tenant_id=str(tenant_id), fields=list(updates.keys())
+    )
     resp = TenantIntegrationResponse.model_validate(integration)
     resp.pipedrive_api_token_set = bool(integration.pipedrive_api_token)
     return resp

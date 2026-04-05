@@ -24,14 +24,17 @@ from datetime import datetime
 from sqlalchemy import (
     Boolean,
     DateTime,
-    Enum as SAEnum,
     Float,
     ForeignKey,
     Integer,
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy import (
+    Enum as SAEnum,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base, TenantMixin, TimestampMixin
@@ -72,18 +75,18 @@ class SandboxRun(Base, TenantMixin, TimestampMixin):
     )
 
     # Dry-run Pipedrive — armazena preview de deals/persons
-    pipedrive_dry_run: Mapped[dict | None] = mapped_column(
+    pipedrive_dry_run: Mapped[dict[str, object] | None] = mapped_column(
         JSONB,
         nullable=True,
         default=None,
     )
 
     # ── Relacionamentos ───────────────────────────────────────────────
-    cadence: Mapped["Cadence"] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    cadence: Mapped[Cadence] = relationship(  # type: ignore[name-defined]  # noqa: F821
         "Cadence",
         lazy="select",
     )
-    steps: Mapped[list["SandboxStep"]] = relationship(
+    steps: Mapped[list[SandboxStep]] = relationship(
         "SandboxStep",
         back_populates="sandbox_run",
         cascade="all, delete-orphan",
@@ -117,7 +120,7 @@ class SandboxStep(Base, TenantMixin, TimestampMixin):
     )
 
     # Dados do lead fictício (JSONB) — usado quando lead_id is None
-    fictitious_lead_data: Mapped[dict | None] = mapped_column(
+    fictitious_lead_data: Mapped[dict[str, object] | None] = mapped_column(
         JSONB,
         nullable=True,
         default=None,
@@ -158,6 +161,7 @@ class SandboxStep(Base, TenantMixin, TimestampMixin):
     llm_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tokens_in: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tokens_out: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    composition_context: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True, default=None)
 
     # ── Simulação de reply (inbound) ──────────────────────────────────
     simulated_reply: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -177,11 +181,11 @@ class SandboxStep(Base, TenantMixin, TimestampMixin):
     )
 
     # ── Relacionamentos ───────────────────────────────────────────────
-    sandbox_run: Mapped["SandboxRun"] = relationship(
+    sandbox_run: Mapped[SandboxRun] = relationship(
         "SandboxRun",
         back_populates="steps",
     )
-    lead: Mapped["Lead | None"] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    lead: Mapped[Lead | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
         "Lead",
         lazy="select",
     )

@@ -18,10 +18,12 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, String, Text, DateTime
+from sqlalchemy import Boolean, DateTime, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+# Campos adicionados em 034_content_li_at_sync:
+# li_at_cookie, last_voyager_sync_at
 from models.base import Base, TenantMixin, TimestampMixin
 
 
@@ -88,4 +90,16 @@ class ContentLinkedInAccount(Base, TenantMixin, TimestampMixin):
         DateTime(timezone=True),
         nullable=False,
         comment="Data/hora da primeira conexao OAuth",
+    )
+
+    # ── Voyager Analytics (Analytics pessoal via cookie, migration 034) ──
+    li_at_cookie: Mapped[str | None] = mapped_column(
+        String(2000),
+        nullable=True,
+        comment="Cookie li_at criptografado com Fernet — usado para buscar métricas via Voyager API",
+    )
+    last_voyager_sync_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp da última sincronização de métricas via Voyager API",
     )

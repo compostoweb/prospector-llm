@@ -2,7 +2,6 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useSession } from "next-auth/react"
-import { createBrowserClient } from "@/lib/api/client"
 
 // ── Tipos ─────────────────────────────────────────────────────────────
 
@@ -34,6 +33,7 @@ export interface ContentPost {
   likes: number
   comments: number
   shares: number
+  saves: number
   engagement_rate: number | null
   metrics_updated_at: string | null
   published_at: string | null
@@ -93,6 +93,17 @@ export interface ContentLinkedInAccount {
   connected_at: string
   token_expires_at: string | null
   updated_at: string
+  has_unipile: boolean
+  last_voyager_sync_at: string | null
+}
+
+export interface VoyagerSyncResponse {
+  success: boolean
+  posts_created: number
+  posts_updated: number
+  posts_skipped: number
+  error: string | null
+  synced_at: string
 }
 
 export interface GeneratePostVariation {
@@ -126,6 +137,17 @@ export interface ThemeSuggestion {
   reason: string
   lead_count: number
   sector: string
+}
+
+export interface ContentReferenceCreate {
+  body: string
+  author_name?: string | null
+  author_title?: string | null
+  hook_type?: HookType | null
+  pillar?: PostPillar | null
+  engagement_score?: number | null
+  source_url?: string | null
+  notes?: string | null
 }
 
 // ── Query Keys ────────────────────────────────────────────────────────
@@ -162,7 +184,6 @@ export function useContentPosts(filters?: {
         : undefined,
     ),
     queryFn: async () => {
-      const api = createBrowserClient(session?.accessToken)
       const params: Record<string, string> = {}
       if (filters?.status) params["status"] = filters.status
       if (filters?.pillar) params["pillar"] = filters.pillar
@@ -195,17 +216,14 @@ export function useCreateContentPost() {
       publish_date?: string | null
       week_number?: number | null
     }) => {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/posts`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session?.accessToken ?? ""}`,
-          },
-          body: JSON.stringify(body),
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/posts`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.accessToken ?? ""}`,
         },
-      )
+        body: JSON.stringify(body),
+      })
       if (!res.ok) throw new Error("Erro ao criar post")
       return res.json() as Promise<ContentPost>
     },
@@ -347,9 +365,7 @@ export function useContentThemes(filters?: { pillar?: PostPillar; used?: boolean
   const { data: session } = useSession()
   return useQuery({
     queryKey: contentKeys.themes(
-      filters
-        ? { pillar: filters.pillar, used: filters.used?.toString() }
-        : undefined,
+      filters ? { pillar: filters.pillar, used: filters.used?.toString() } : undefined,
     ),
     queryFn: async () => {
       const params: Record<string, string> = {}
@@ -372,19 +388,56 @@ export function useCreateTheme() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (body: { title: string; pillar: PostPillar }) => {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/themes`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session?.accessToken ?? ""}`,
-          },
-          body: JSON.stringify(body),
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/themes`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.accessToken ?? ""}`,
         },
-      )
+        body: JSON.stringify(body),
+      })
       if (!res.ok) throw new Error("Erro ao criar tema")
       return res.json() as Promise<ContentTheme>
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: contentKeys.all }),
+  })
+}
+
+export function useMarkThemeUsed() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ themeId, postId }: { themeId: string; postId?: string | null }) => {
+      const params = new URLSearchParams()
+      if (postId) params.set("post_id", postId)
+      const qs = params.toString()
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/themes/${themeId}/used${qs ? `?${qs}` : ""}`,
+        {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
+        },
+      )
+      if (!res.ok) throw new Error("Erro ao marcar tema como usado")
+      return res.json() as Promise<ContentTheme>
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: contentKeys.all }),
+  })
+}
+
+export function useDeleteTheme() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (themeId: string) => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/themes/${themeId}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
+        },
+      )
+      if (!res.ok) throw new Error("Erro ao excluir tema")
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: contentKeys.all }),
   })
@@ -416,10 +469,9 @@ export function useContentSettings() {
   return useQuery({
     queryKey: contentKeys.settings(),
     queryFn: async () => {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/settings`,
-        { headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` } },
-      )
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/settings`, {
+        headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
+      })
       if (!res.ok) throw new Error("Erro ao buscar configurações")
       return res.json() as Promise<ContentSettings>
     },
@@ -437,17 +489,14 @@ export function useUpdateContentSettings() {
       author_name?: string | null
       author_voice?: string | null
     }) => {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/settings`,
-        {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session?.accessToken ?? ""}`,
-          },
-          body: JSON.stringify(body),
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/settings`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.accessToken ?? ""}`,
         },
-      )
+        body: JSON.stringify(body),
+      })
       if (!res.ok) throw new Error("Erro ao atualizar configurações")
       return res.json() as Promise<ContentSettings>
     },
@@ -474,23 +523,45 @@ export function useLinkedInContentAccount() {
   })
 }
 
+export function useSyncVoyager() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/linkedin/sync`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
+        },
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail ?? "Erro ao sincronizar analytics")
+      }
+      return res.json() as Promise<VoyagerSyncResponse>
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: contentKeys.linkedinStatus() })
+      qc.invalidateQueries({ queryKey: contentKeys.all })
+    },
+  })
+}
+
 // ── Geração com IA ────────────────────────────────────────────────────
 
 export function useGeneratePost() {
   const { data: session } = useSession()
   return useMutation({
     mutationFn: async (body: GeneratePostRequest) => {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/generate`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session?.accessToken ?? ""}`,
-          },
-          body: JSON.stringify(body),
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/generate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.accessToken ?? ""}`,
         },
-      )
+        body: JSON.stringify(body),
+      })
       if (!res.ok) throw new Error("Erro ao gerar post")
       return res.json() as Promise<{ variations: GeneratePostVariation[] }>
     },
@@ -514,6 +585,65 @@ export function useImprovePost() {
       )
       if (!res.ok) throw new Error("Erro ao melhorar post")
       return res.json() as Promise<{ text: string; character_count: number; violations: string[] }>
+    },
+  })
+}
+
+// ── Referências ───────────────────────────────────────────────────────
+
+export function useContentReferences() {
+  const { data: session } = useSession()
+  return useQuery({
+    queryKey: contentKeys.references(),
+    queryFn: async () => {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/references`, {
+        headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
+      })
+      if (!res.ok) throw new Error("Erro ao buscar referências")
+      return res.json() as Promise<ContentReference[]>
+    },
+    enabled: !!session?.accessToken,
+  })
+}
+
+export function useCreateContentReference() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: ContentReferenceCreate) => {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/references`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.accessToken ?? ""}`,
+        },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error("Erro ao criar referência")
+      return res.json() as Promise<ContentReference>
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: contentKeys.references() })
+    },
+  })
+}
+
+export function useDeleteContentReference() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/references/${id}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
+        },
+      )
+      if (!res.ok) throw new Error("Erro ao excluir referência")
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: contentKeys.references() })
     },
   })
 }

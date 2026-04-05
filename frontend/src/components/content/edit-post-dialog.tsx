@@ -1,9 +1,15 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { AlertTriangle } from "lucide-react"
+import { AlertTriangle, Sparkles, Check, Clock, Send, XCircle, Trash2 } from "lucide-react"
 import {
   useUpdatePost,
+  useImprovePost,
+  useApprovePost,
+  useSchedulePost,
+  useCancelSchedule,
+  usePublishNow,
+  useDeletePost,
   type ContentPost,
   type PostPillar,
   type HookType,
@@ -46,9 +52,15 @@ interface EditPostDialogProps {
   post: ContentPost | null
   open: boolean
   onOpenChange: (open: boolean) => void
+  defaultImproveOpen?: boolean
 }
 
-export function EditPostDialog({ post, open, onOpenChange }: EditPostDialogProps) {
+export function EditPostDialog({
+  post,
+  open,
+  onOpenChange,
+  defaultImproveOpen,
+}: EditPostDialogProps) {
   const [title, setTitle] = useState("")
   const [body, setBody] = useState("")
   const [pillar, setPillar] = useState<PostPillar>("authority")
@@ -57,8 +69,23 @@ export function EditPostDialog({ post, open, onOpenChange }: EditPostDialogProps
   const [publishDate, setPublishDate] = useState("")
   const [weekNumber, setWeekNumber] = useState("")
   const [syncWarning, setSyncWarning] = useState<string | null>(null)
+  const [improveOpen, setImproveOpen] = useState(false)
+  const [instruction, setInstruction] = useState("")
 
   const updatePost = useUpdatePost()
+  const improvePost = useImprovePost()
+  const approvePost = useApprovePost()
+  const schedulePost = useSchedulePost()
+  const cancelSchedulePost = useCancelSchedule()
+  const publishNowPost = usePublishNow()
+  const deletePostMut = useDeletePost()
+
+  const isActionPending =
+    approvePost.isPending ||
+    schedulePost.isPending ||
+    cancelSchedulePost.isPending ||
+    publishNowPost.isPending ||
+    deletePostMut.isPending
 
   // Preencher form quando o post mudar
   useEffect(() => {
@@ -75,7 +102,9 @@ export function EditPostDialog({ post, open, onOpenChange }: EditPostDialogProps
     )
     setWeekNumber(post.week_number ? String(post.week_number) : "")
     setSyncWarning(null)
-  }, [post])
+    setImproveOpen(defaultImproveOpen ?? false)
+    setInstruction("")
+  }, [post, defaultImproveOpen])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -100,8 +129,17 @@ export function EditPostDialog({ post, open, onOpenChange }: EditPostDialogProps
     }
   }
 
+  async function handleImprove() {
+    if (!instruction.trim()) return
+    const result = await improvePost.mutateAsync({ body, instruction })
+    setBody(result.text)
+    setImproveOpen(false)
+    setInstruction("")
+  }
+
   const charCount = body.length
   const isOverLimit = charCount > 3000
+  const isTooShort = charCount > 0 && charCount < 900
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -131,13 +169,79 @@ export function EditPostDialog({ post, open, onOpenChange }: EditPostDialogProps
 
           <div className="grid gap-1.5">
             <div className="flex items-center justify-between">
-              <Label htmlFor="edit-body">Conteúdo</Label>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="edit-body">Conteúdo</Label>
+                <button
+                  type="button"
+                  onClick={() => setImproveOpen((v) => !v)}
+                  className="flex items-center gap-1 text-xs text-(--accent) hover:text-(--accent)/80 transition-colors"
+                >
+                  <Sparkles className="h-3 w-3" />
+                  Melhorar com IA
+                </button>
+              </div>
               <span
-                className={`text-xs ${isOverLimit ? "text-(--danger)" : "text-(--text-tertiary)"}`}
+                className={`text-xs ${
+                  isOverLimit
+                    ? "text-(--danger) font-medium"
+                    : isTooShort
+                      ? "text-amber-600 dark:text-amber-400"
+                      : "text-(--text-tertiary)"
+                }`}
               >
                 {charCount} / 3000
+                {isTooShort && " · abaixo do ideal (900–1500)"}
               </span>
             </div>
+            {improveOpen && (
+              <div className="flex flex-col gap-2 rounded-md border border-(--accent)/30 bg-(--accent)/5 p-3">
+                <p className="text-xs text-(--text-secondary)">
+                  Instrução para a IA (ex: &quot;torne mais conciso&quot;, &quot;adicione um
+                  dado&quot;):
+                </p>
+                <Textarea
+                  value={instruction}
+                  onChange={(e) => setInstruction(e.target.value)}
+                  placeholder="Ex: Reduza para 1000 caracteres mantendo o gancho"
+                  rows={2}
+                  className="resize-none text-xs"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleImprove()
+                  }}
+                />
+                <div className="flex items-center gap-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImproveOpen(false)
+                      setInstruction("")
+                    }}
+                    className="text-xs text-(--text-tertiary) hover:text-(--text-secondary)"
+                  >
+                    Cancelar
+                  </button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-7 text-xs gap-1"
+                    onClick={handleImprove}
+                    disabled={!instruction.trim() || improvePost.isPending}
+                  >
+                    {improvePost.isPending ? (
+                      <>
+                        <span className="animate-spin inline-block h-3 w-3 border-2 border-current border-t-transparent rounded-full" />
+                        Melhorando…
+                      </>
+                    ) : (
+                      <>
+                        <Check className="h-3 w-3" />
+                        Aplicar
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            )}
             <Textarea
               id="edit-body"
               value={body}
@@ -167,10 +271,7 @@ export function EditPostDialog({ post, open, onOpenChange }: EditPostDialogProps
 
             <div className="grid gap-1.5">
               <Label>Tipo de gancho</Label>
-              <Select
-                value={hookType}
-                onValueChange={(v) => setHookType(v as HookType | "none")}
-              >
+              <Select value={hookType} onValueChange={(v) => setHookType(v as HookType | "none")}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -221,19 +322,138 @@ export function EditPostDialog({ post, open, onOpenChange }: EditPostDialogProps
             />
           </div>
 
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => { setSyncWarning(null); onOpenChange(false) }}
-            >
-              {syncWarning ? "Fechar" : "Cancelar"}
-            </Button>
-            {!syncWarning && (
-              <Button type="submit" disabled={updatePost.isPending || isOverLimit}>
-                {updatePost.isPending ? "Salvando…" : "Salvar alterações"}
+          <DialogFooter className="flex flex-col gap-3 sm:flex-col">
+            {/* Status actions */}
+            {post &&
+              (post.status === "draft" ||
+                post.status === "approved" ||
+                post.status === "scheduled") && (
+                <div className="flex items-center gap-2 flex-wrap border-b border-(--border-subtle) pb-3">
+                  {post.status === "draft" && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs gap-1"
+                      disabled={isActionPending}
+                      onClick={async () => {
+                        await approvePost.mutateAsync(post.id)
+                        onOpenChange(false)
+                      }}
+                    >
+                      <Check className="h-3 w-3" />
+                      Aprovar
+                    </Button>
+                  )}
+                  {post.status === "approved" && (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs gap-1"
+                        disabled={isActionPending || !publishDate}
+                        title={
+                          !publishDate ? "Defina uma data de publicação para agendar" : undefined
+                        }
+                        onClick={async () => {
+                          // Salva data primeiro se mudou, depois agenda
+                          if (publishDate !== (post.publish_date?.slice(0, 16) ?? "")) {
+                            await updatePost.mutateAsync({
+                              postId: post.id,
+                              data: { publish_date: publishDate || null },
+                            })
+                          }
+                          await schedulePost.mutateAsync(post.id)
+                          onOpenChange(false)
+                        }}
+                      >
+                        <Clock className="h-3 w-3" />
+                        Agendar
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs gap-1"
+                        disabled={isActionPending}
+                        onClick={async () => {
+                          await publishNowPost.mutateAsync(post.id)
+                          onOpenChange(false)
+                        }}
+                      >
+                        <Send className="h-3 w-3" />
+                        Publicar agora
+                      </Button>
+                    </>
+                  )}
+                  {post.status === "scheduled" && (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs gap-1"
+                        disabled={isActionPending}
+                        onClick={async () => {
+                          await cancelSchedulePost.mutateAsync(post.id)
+                          onOpenChange(false)
+                        }}
+                      >
+                        <XCircle className="h-3 w-3" />
+                        Cancelar agendamento
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs gap-1"
+                        disabled={isActionPending}
+                        onClick={async () => {
+                          await publishNowPost.mutateAsync(post.id)
+                          onOpenChange(false)
+                        }}
+                      >
+                        <Send className="h-3 w-3" />
+                        Publicar agora
+                      </Button>
+                    </>
+                  )}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs gap-1 text-(--danger) hover:text-(--danger) ml-auto"
+                    disabled={isActionPending}
+                    onClick={async () => {
+                      await deletePostMut.mutateAsync(post.id)
+                      onOpenChange(false)
+                    }}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    Excluir
+                  </Button>
+                </div>
+              )}
+
+            {/* Save / Cancel */}
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setSyncWarning(null)
+                  onOpenChange(false)
+                }}
+              >
+                {syncWarning ? "Fechar" : "Cancelar"}
               </Button>
-            )}
+              {!syncWarning && (
+                <Button type="submit" disabled={updatePost.isPending || isOverLimit}>
+                  {updatePost.isPending ? "Salvando…" : "Salvar alterações"}
+                </Button>
+              )}
+            </div>
           </DialogFooter>
         </form>
       </DialogContent>

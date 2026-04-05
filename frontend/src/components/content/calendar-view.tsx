@@ -10,12 +10,11 @@ import {
   isSameMonth,
   addMonths,
   subMonths,
-  parseISO,
 } from "date-fns"
 import { ptBR } from "date-fns/locale"
+import { toZonedTime } from "date-fns-tz"
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react"
 import { useState } from "react"
-import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/content/post-badges"
 import { EditPostDialog } from "@/components/content/edit-post-dialog"
 import { CreatePostDialog } from "@/components/content/create-post-dialog"
@@ -45,7 +44,7 @@ export function CalendarView({ posts }: CalendarViewProps) {
   const postsByDay = new Map<string, ContentPost[]>()
   for (const post of posts) {
     if (!post.publish_date) continue
-    const key = format(parseISO(post.publish_date), "yyyy-MM-dd")
+    const key = format(toZonedTime(post.publish_date, "America/Sao_Paulo"), "yyyy-MM-dd")
     const existing = postsByDay.get(key) ?? []
     postsByDay.set(key, [...existing, post])
   }
@@ -88,10 +87,7 @@ export function CalendarView({ posts }: CalendarViewProps) {
         {/* Cabeçalho dos dias */}
         <div className="grid grid-cols-7 bg-(--bg-overlay)">
           {WEEKDAYS.map((d) => (
-            <div
-              key={d}
-              className="text-center text-xs font-medium text-(--text-tertiary) py-2"
-            >
+            <div key={d} className="text-center text-xs font-medium text-(--text-tertiary) py-2">
               {d}
             </div>
           ))}
@@ -122,9 +118,7 @@ export function CalendarView({ posts }: CalendarViewProps) {
                   <span
                     className={cn(
                       "text-xs font-medium w-5 h-5 flex items-center justify-center rounded-full",
-                      isToday
-                        ? "bg-(--accent) text-white"
-                        : "text-(--text-secondary)",
+                      isToday ? "bg-(--accent) text-white" : "text-(--text-secondary)",
                     )}
                   >
                     {format(day, "d")}
@@ -178,7 +172,11 @@ export function CalendarView({ posts }: CalendarViewProps) {
       <EditPostDialog
         post={editPost}
         open={!!editPost}
-        onOpenChange={(v) => { if (!v) setEditPost(null) }}
+        onOpenChange={(value) => {
+          if (!value) {
+            setEditPost(null)
+          }
+        }}
       />
       <CreatePostDialog
         open={createOpen}

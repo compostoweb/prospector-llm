@@ -84,7 +84,7 @@ export default function ColdEmailPage() {
             Templates
           </Link>
           <Link
-            href="/cadencias/nova"
+            href="/cadencias/nova?preset=cold-email"
             className="flex items-center gap-1.5 rounded-md bg-(--accent) px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-(--accent-hover)"
           >
             <Plus size={14} aria-hidden="true" />
@@ -259,7 +259,10 @@ export default function ColdEmailPage() {
             <p className="text-sm text-(--text-secondary)">
               Nenhuma cadência de e-mail encontrada para este período.
             </p>
-            <Link href="/cadencias/nova" className="text-sm text-(--accent) hover:underline">
+            <Link
+              href="/cadencias/nova?preset=cold-email"
+              className="text-sm text-(--accent) hover:underline"
+            >
               Criar cadência de e-mail
             </Link>
           </div>

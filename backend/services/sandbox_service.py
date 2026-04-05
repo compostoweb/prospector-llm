@@ -17,7 +17,8 @@ Responsabilidades:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 import structlog
 from sqlalchemy import func, select
@@ -30,7 +31,6 @@ from integrations.context_fetcher import ContextFetcher
 from integrations.llm import LLMMessage, LLMRegistry
 from integrations.pipedrive_client import PipedriveClient
 from models.cadence import Cadence
-from models.tenant import TenantIntegration
 from models.enums import (
     Channel,
     Intent,
@@ -42,12 +42,15 @@ from models.enums import (
 from models.lead import Lead
 from models.lead_list import lead_list_members
 from models.sandbox import SandboxRun, SandboxStep
-from services.ai_composer import AIComposer, resolve_step_key, STEP_INSTRUCTIONS
-from services.cadence_manager import cadence_manager, _resolve_template, get_template_step_config
+from models.tenant import TenantIntegration
+from services.ai_composer import prepare_composer_messages, serialize_composition_context
+from services.cadence_manager import _resolve_template, cadence_manager, get_template_step_config
 from services.message_template_renderer import render_message_template, render_saved_email_template
 from services.reply_parser import ReplyParser
 
 logger = structlog.get_logger()
+
+SandboxPayload = dict[str, Any]
 
 # ── Rate limits por canal ─────────────────────────────────────────────
 
@@ -159,7 +162,7 @@ da resposta, sem aspas, sem prefixos.
 
 
 def _utcnow() -> datetime:
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 class SandboxService:
@@ -270,7 +273,6 @@ class SandboxService:
         if not cadence:
             raise ValueError("Cadência não encontrada.")
 
-        composer = AIComposer(registry)
         context_fetcher = ContextFetcher()
 
         # Calcula total de steps por lead para instruções contextuais
@@ -279,7 +281,7 @@ class SandboxService:
 
         # Mapa de canal anterior por step_number (do template)
         prev_channel_map: dict[int, str | None] = {}
-        for idx, (ch, _day, _voice, _audio, _stype) in enumerate(template):
+        for idx, (_ch, _day, _voice, _audio, _stype) in enumerate(template):
             prev_channel_map[idx + 1] = template[idx - 1][0].value if idx > 0 else None
 
         # Ordena steps por lead + step_number para processamento sequencial
@@ -296,7 +298,7 @@ class SandboxService:
 
             try:
                 content, email_subject, llm_info = await self._compose_step(
-                    step, cadence, composer, context_fetcher, registry, db,
+                    step, cadence, context_fetcher, registry, db,
                     total_steps=total_steps,
                     previous_channel=previous_channel,
                 )
@@ -305,6 +307,7 @@ class SandboxService:
                 step.llm_model = llm_info.get("model")
                 step.tokens_in = llm_info.get("tokens_in")
                 step.tokens_out = llm_info.get("tokens_out")
+                step.composition_context = llm_info.get("composition_context")
 
                 # Subject extraído do JSON LLM em _compose_step (evita segunda chamada LLM)
                 if step.channel == Channel.EMAIL:
@@ -313,10 +316,11 @@ class SandboxService:
                     )
 
                 # Gera áudio TTS para steps com use_voice
-                if step.use_voice and step.message_content:
+                message_content = step.message_content
+                if step.use_voice and message_content:
                     try:
                         audio_url = await self._generate_tts_preview(
-                            cadence, step.message_content
+                            cadence, message_content
                         )
                         step.audio_preview_url = audio_url
                     except Exception as tts_exc:
@@ -370,7 +374,6 @@ class SandboxService:
         if temperature_override is not None:
             cadence.llm_temperature = temperature_override
 
-        composer = AIComposer(registry)
         context_fetcher = ContextFetcher()
 
         template = _resolve_template(cadence)
@@ -387,7 +390,7 @@ class SandboxService:
 
         try:
             content, email_subject, llm_info = await self._compose_step(
-                step, cadence, composer, context_fetcher, registry, db,
+                step, cadence, context_fetcher, registry, db,
                 total_steps=total_steps,
                 previous_channel=prev_channel,
             )
@@ -396,6 +399,7 @@ class SandboxService:
             step.llm_model = llm_info.get("model")
             step.tokens_in = llm_info.get("tokens_in")
             step.tokens_out = llm_info.get("tokens_out")
+            step.composition_context = llm_info.get("composition_context")
 
             # Subject extraído do JSON LLM em _compose_step (evita segunda chamada LLM)
             if step.channel == Channel.EMAIL:
@@ -404,10 +408,11 @@ class SandboxService:
                 )
 
             # Gera áudio TTS para steps com use_voice
-            if step.use_voice and step.message_content:
+            message_content = step.message_content
+            if step.use_voice and message_content:
                 try:
                     audio_url = await self._generate_tts_preview(
-                        cadence, step.message_content
+                        cadence, message_content
                     )
                     step.audio_preview_url = audio_url
                 except Exception as tts_exc:
@@ -675,7 +680,7 @@ class SandboxService:
         run_id: uuid.UUID,
         tenant_id: uuid.UUID,
         db: AsyncSession,
-    ) -> list[dict]:
+    ) -> list[SandboxPayload]:
         """Faz dry-run de integração Pipedrive para leads com intent relevante."""
         run = await self._get_run(run_id, tenant_id, db)
         client = PipedriveClient()
@@ -688,7 +693,7 @@ class SandboxService:
                 if key not in relevant_steps:
                     relevant_steps[key] = step
 
-        results: list[dict] = []
+        results: list[SandboxPayload] = []
 
         for step in relevant_steps.values():
             lead_info = await self._get_lead_info(step, db)
@@ -747,7 +752,7 @@ class SandboxService:
         run_id: uuid.UUID,
         tenant_id: uuid.UUID,
         db: AsyncSession,
-    ) -> list[dict]:
+    ) -> list[SandboxPayload]:
         """Envia leads relevantes do sandbox para o Pipedrive (person + deal + nota)."""
         run = await self._get_run(run_id, tenant_id, db)
 
@@ -781,7 +786,7 @@ class SandboxService:
                 "Simule replies antes de enviar ao Pipedrive."
             )
 
-        results: list[dict] = []
+        results: list[SandboxPayload] = []
 
         for step in relevant_steps.values():
             lead_info = await self._get_lead_info(step, db)
@@ -910,7 +915,7 @@ class SandboxService:
         lead_ids: list[uuid.UUID],
         tenant_id: uuid.UUID,
         db: AsyncSession,
-    ) -> list[dict]:
+    ) -> list[SandboxPayload]:
         """Busca leads reais e retorna lista de dicts com lead_id."""
         result = await db.execute(
             select(Lead).where(Lead.id.in_(lead_ids), Lead.tenant_id == tenant_id)
@@ -924,7 +929,7 @@ class SandboxService:
         tenant_id: uuid.UUID,
         db: AsyncSession,
         count: int,
-    ) -> list[dict]:
+    ) -> list[SandboxPayload]:
         """Busca amostra aleatória de leads da lead_list da cadência."""
         query = select(Lead).where(Lead.tenant_id == tenant_id)
 
@@ -945,7 +950,7 @@ class SandboxService:
         count: int,
         registry: LLMRegistry,
         cadence: Cadence,
-    ) -> list[dict]:
+    ) -> list[SandboxPayload]:
         """Gera leads fictícios: templates base + variações via LLM."""
         # Se count <= templates disponíveis, usa direto
         if count <= len(_FICTITIOUS_LEAD_TEMPLATES):
@@ -968,13 +973,14 @@ class SandboxService:
         )
 
         try:
-            leads_data = json.loads(response.text)
-            if not isinstance(leads_data, list):
+            parsed_leads = json.loads(response.text)
+            if not isinstance(parsed_leads, list):
                 raise ValueError("Resposta LLM não é uma lista")
+            leads_data = cast(list[dict[str, str | None]], parsed_leads)
         except (json.JSONDecodeError, ValueError):
             logger.warning("sandbox.fictitious_llm_fallback", raw=response.text[:200])
             # Fallback: usa templates
-            leads_data = _FICTITIOUS_LEAD_TEMPLATES[:count]
+            leads_data = cast(list[dict[str, str | None]], _FICTITIOUS_LEAD_TEMPLATES[:count])
 
         return [
             {"lead_id": None, "fictitious_data": lead}
@@ -985,13 +991,12 @@ class SandboxService:
         self,
         step: SandboxStep,
         cadence: Cadence,
-        composer: AIComposer,
         context_fetcher: ContextFetcher,
         registry: LLMRegistry,
         db: AsyncSession,
         total_steps: int = 1,
         previous_channel: str | None = None,
-    ) -> tuple[str, str | None, dict]:
+    ) -> tuple[str, str | None, SandboxPayload]:
         """Compõe mensagem para um step usando o mesmo pipeline do dispatch.
 
         Returns:
@@ -999,11 +1004,12 @@ class SandboxService:
             email_subject é preenchido apenas para Canal EMAIL (extraído do JSON LLM).
         """
         template_step = get_template_step_config(cadence, step.step_number)
-        llm_bypassed_info = {
+        llm_bypassed_info: dict[str, Any] = {
             "provider": None,
             "model": None,
             "tokens_in": None,
             "tokens_out": None,
+            "composition_context": None,
         }
 
         # Rastreia company/name para fallback do parser de email
@@ -1027,45 +1033,24 @@ class SandboxService:
             _company = lead.company
             _name = lead.name
 
-            context: dict = {}
+            context: dict[str, str] = {}
             if lead.website:
                 site_content = await context_fetcher.fetch_from_website(lead.website)
                 context["site_summary"] = site_content
             elif lead.company:
                 search_content = await context_fetcher.search_company(lead.company)
                 context["site_summary"] = search_content
-
-            # Usa AIComposer diretamente
-            from integrations.llm import LLMResponse
-
-            user_prompt = _build_sandbox_user_prompt(
-                name=lead.name,
-                company=lead.company,
-                segment=lead.segment,
-                linkedin_url=lead.linkedin_url,
-                channel=step.channel.value,
-                step_number=step.step_number,
-                context=context,
-                total_steps=total_steps,
-                use_voice=step.use_voice,
-                previous_channel=previous_channel,
-                job_title=lead.job_title,
-                industry=lead.industry,
-                company_size=lead.company_size,
-                location=lead.location or lead.city,
-                cadence=cadence,
-                step_type=step.step_type,
-            )
         else:
             # Lead fictício
             from types import SimpleNamespace
 
-            fdata = step.fictitious_lead_data or {}
+            fdata = cast(dict[str, str | None], step.fictitious_lead_data or {})
+            fictitious_name = fdata.get("name") or "Lead Teste"
             lead_proxy = SimpleNamespace(
-                name=fdata.get("name", "Lead Teste"),
+                name=fictitious_name,
                 company=fdata.get("company"),
-                first_name=fdata.get("name", "Lead Teste").split(" ")[0],
-                last_name=" ".join(fdata.get("name", "Lead Teste").split(" ")[1:]),
+                first_name=fictitious_name.split(" ")[0],
+                last_name=" ".join(fictitious_name.split(" ")[1:]),
                 job_title=fdata.get("job_title"),
                 industry=fdata.get("industry"),
                 city=fdata.get("city"),
@@ -1076,33 +1061,29 @@ class SandboxService:
                 email=fdata.get("email"),
             )
             _company = fdata.get("company")
-            _name = fdata.get("name", "Lead Teste")
-            context = {"site_summary": f"Empresa fictícia: {fdata.get('company', 'N/A')} - Setor: {fdata.get('industry', 'N/A')}"}
+            _name = fictitious_name
+            context = {
+                "site_summary": f"Empresa fictícia: {fdata.get('company') or 'N/A'} - Setor: {fdata.get('industry') or 'N/A'}"
+            }
 
-            user_prompt = _build_sandbox_user_prompt(
-                name=fdata.get("name", "Lead Teste"),
-                company=fdata.get("company"),
-                segment=fdata.get("industry"),
-                linkedin_url=fdata.get("linkedin_url"),
-                channel=step.channel.value,
-                step_number=step.step_number,
-                context=context,
-                total_steps=total_steps,
-                use_voice=step.use_voice,
-                previous_channel=previous_channel,
-                job_title=fdata.get("job_title"),
-                industry=fdata.get("industry"),
-                company_size=fdata.get("company_size"),
-                location=fdata.get("city"),
-                cadence=cadence,
-                step_type=step.step_type,
-            )
+        messages, composition_context = prepare_composer_messages(
+            lead=lead_proxy,
+            channel=step.channel.value,
+            step_number=step.step_number,
+            context=context,
+            total_steps=total_steps,
+            use_voice=step.use_voice,
+            previous_channel=previous_channel,
+            cadence=cadence,
+            step_type=step.step_type,
+        )
+        composition_context_data = serialize_composition_context(composition_context)
 
         configured_message = render_message_template(
             template_step.get("message_template") if template_step else None,
             lead_proxy,
         )
-        subject_variants = template_step.get("subject_variants") if template_step else None
+        subject_variants = cast(list[object], template_step.get("subject_variants") or []) if template_step else []
         configured_email_template_id = template_step.get("email_template_id") if template_step else None
 
         if step.channel == Channel.EMAIL and configured_email_template_id:
@@ -1122,25 +1103,26 @@ class SandboxService:
 
             if email_template is not None:
                 subject, body = render_saved_email_template(email_template, lead_proxy)
-                cleaned_variants = [str(item).strip() for item in (subject_variants or []) if str(item).strip()]
+                cleaned_variants = [str(item).strip() for item in subject_variants if str(item).strip()]
                 if cleaned_variants:
                     subject = cleaned_variants[0]
+                llm_bypassed_info["composition_context"] = {
+                    **composition_context_data,
+                    "generation_mode": "email_template",
+                }
                 return body, subject, llm_bypassed_info
 
         if configured_message:
             email_subject: str | None = None
             if step.channel == Channel.EMAIL:
-                cleaned_variants = [str(item).strip() for item in (subject_variants or []) if str(item).strip()]
+                cleaned_variants = [str(item).strip() for item in subject_variants if str(item).strip()]
                 if cleaned_variants:
                     email_subject = cleaned_variants[0]
+            llm_bypassed_info["composition_context"] = {
+                **composition_context_data,
+                "generation_mode": "message_template",
+            }
             return configured_message, email_subject, llm_bypassed_info
-
-        from services.ai_composer import COMPOSER_SYSTEM_PROMPT
-
-        messages = [
-            LLMMessage(role="system", content=COMPOSER_SYSTEM_PROMPT),
-            LLMMessage(role="user", content=user_prompt),
-        ]
 
         from integrations.llm import LLMResponse
 
@@ -1152,17 +1134,19 @@ class SandboxService:
             max_tokens=cadence.llm_max_tokens,
         )
 
-        llm_info = {
+        llm_info: SandboxPayload = {
             "provider": response.provider,
             "model": response.model,
             "tokens_in": response.input_tokens,
             "tokens_out": response.output_tokens,
+            "composition_context": composition_context_data,
         }
 
         # Para EMAIL: instrução já pede JSON {subject, body} — extrai aqui para evitar segunda chamada LLM
         if step.channel == Channel.EMAIL:
-            from services.ai_composer import _parse_email_json
             from types import SimpleNamespace
+
+            from services.ai_composer import _parse_email_json
 
             _lead_proxy = SimpleNamespace(company=_company, name=_name)
             email_subject, email_body = _parse_email_json(
@@ -1235,7 +1219,7 @@ class SandboxService:
         )
         return response.text.strip()
 
-    async def _get_lead_info(self, step: SandboxStep, db: AsyncSession) -> dict:
+    async def _get_lead_info(self, step: SandboxStep, db: AsyncSession) -> SandboxPayload:
         """Retorna info do lead (real ou fictício)."""
         if step.lead_id:
             lead = await db.get(Lead, step.lead_id)
@@ -1249,9 +1233,9 @@ class SandboxService:
                     "linkedin_url": lead.linkedin_url,
                 }
         # Fictício ou lead não encontrado
-        fdata = step.fictitious_lead_data or {}
+        fdata = cast(dict[str, str | None], step.fictitious_lead_data or {})
         return {
-            "name": fdata.get("name", "Lead Teste"),
+            "name": fdata.get("name") or "Lead Teste",
             "company": fdata.get("company"),
             "job_title": fdata.get("job_title"),
             "email": fdata.get("email"),
@@ -1274,19 +1258,28 @@ class SandboxService:
             model=settings.REPLY_PARSER_MODEL,
         )
 
-        result = await parser.classify(reply_text, lead_name)
+        result = cast(dict[str, object], await parser.classify(reply_text, lead_name))
 
         step.simulated_reply = reply_text
-        step.simulated_intent = Intent(result.get("intent", "neutral").lower())
-        step.simulated_confidence = result.get("confidence", 0.0)
-        step.simulated_reply_summary = result.get("summary")
+        step.simulated_intent = Intent(str(result.get("intent", "neutral")).lower())
+        confidence_raw = result.get("confidence", 0.0)
+        if isinstance(confidence_raw, (int, float, str)):
+            step.simulated_confidence = float(confidence_raw or 0.0)
+        else:
+            step.simulated_confidence = 0.0
+        summary = result.get("summary")
+        step.simulated_reply_summary = str(summary) if summary else None
 
         await db.flush()
+
+        intent_value: str | None = None
+        if step.simulated_intent is not None:
+            intent_value = cast(Intent, step.simulated_intent).value
 
         logger.info(
             "sandbox.reply_simulated",
             step_id=str(step.id),
-            intent=step.simulated_intent.value if step.simulated_intent else None,
+            intent=intent_value,
             confidence=step.simulated_confidence,
         )
 
@@ -1311,81 +1304,5 @@ class SandboxService:
                 return check_dt
             check_dt += timedelta(days=1)
         return check_dt  # fallback: 30 dias depois
-
-
-# ── Helper para montar prompt ─────────────────────────────────────────
-
-def _build_sandbox_user_prompt(
-    name: str,
-    company: str | None,
-    segment: str | None,
-    linkedin_url: str | None,
-    channel: str,
-    step_number: int,
-    context: dict,
-    total_steps: int = 1,
-    use_voice: bool = False,
-    previous_channel: str | None = None,
-    job_title: str | None = None,
-    industry: str | None = None,
-    company_size: str | None = None,
-    location: str | None = None,
-    cadence: Cadence | None = None,
-    step_type: str | None = None,
-) -> str:
-    site_summary = context.get("site_summary", "Não disponível")
-
-    step_key = resolve_step_key(
-        channel, step_number, total_steps, use_voice, previous_channel, step_type=step_type,
-    )
-    step_instruction = STEP_INSTRUCTIONS.get(step_key, "")
-
-    # Dados ricos do lead
-    lead_lines = [
-        f"Nome: {name}",
-        f"Cargo: {job_title or 'Não informado'}",
-        f"Empresa: {company or 'Não informado'}",
-        f"Setor/indústria: {industry or 'Não informado'}",
-        f"Porte da empresa: {company_size or 'Não informado'}",
-        f"Segmento: {segment or 'Não informado'}",
-        f"Localização: {location or 'Não informado'}",
-    ]
-    if linkedin_url:
-        lead_lines.append(f"LinkedIn: {linkedin_url}")
-
-    # Contexto da cadência (segmento-alvo, persona, oferta)
-    cadence_context_lines: list[str] = []
-    if cadence:
-        if cadence.target_segment:
-            cadence_context_lines.append(f"Segmento-alvo desta campanha: {cadence.target_segment}")
-        if cadence.persona_description:
-            cadence_context_lines.append(f"Persona ideal: {cadence.persona_description}")
-        if cadence.offer_description:
-            cadence_context_lines.append(f"O que oferecemos (use com sutileza, SÓ em steps avançados): {cadence.offer_description}")
-        if cadence.tone_instructions:
-            cadence_context_lines.append(f"Instruções extras de tom: {cadence.tone_instructions}")
-
-    cadence_block = "\n".join(cadence_context_lines) if cadence_context_lines else "Não configurado"
-
-    return f"""
-{step_instruction}
-
----
-
-DADOS DO LEAD:
-{chr(10).join(lead_lines)}
-
-CONTEXTO DA CAMPANHA:
-{cadence_block}
-
-PESQUISA SOBRE A EMPRESA:
-{site_summary}
-
-POSIÇÃO NA CADÊNCIA: Step {step_number} de {total_steps}.
-
-Escreva a mensagem agora:
-""".strip()
-
-
 # Singleton
 sandbox_service = SandboxService()

@@ -2,11 +2,22 @@
 
 import { useEffect, useState } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
-import { ExternalLink, Linkedin, CheckCircle, AlertCircle, Loader2, Save } from "lucide-react"
+import {
+  ExternalLink,
+  Linkedin,
+  CheckCircle,
+  AlertCircle,
+  Loader2,
+  Save,
+  AlertTriangle,
+  BarChart2,
+  RefreshCw,
+} from "lucide-react"
 import {
   useContentSettings,
   useUpdateContentSettings,
   useLinkedInContentAccount,
+  useSyncVoyager,
 } from "@/lib/api/hooks/use-content"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -20,6 +31,7 @@ export default function ConfiguracoesPage() {
   const { data: settings, isLoading } = useContentSettings()
   const update = useUpdateContentSettings()
   const { data: linkedinAccount, isLoading: loadingLinkedin } = useLinkedInContentAccount()
+  const syncVoyager = useSyncVoyager()
   const { data: session } = useSession()
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -27,6 +39,7 @@ export default function ConfiguracoesPage() {
 
   // Banner de resultado do OAuth LinkedIn
   const [banner, setBanner] = useState<{ type: "success" | "error"; message: string } | null>(null)
+  const [syncResult, setSyncResult] = useState<{ created: number; updated: number } | null>(null)
 
   useEffect(() => {
     const connected = searchParams.get("linkedin_connected")
@@ -85,6 +98,24 @@ export default function ConfiguracoesPage() {
     const json = await res.json()
     if (json.url) {
       window.location.href = json.url
+    }
+  }
+
+  const [syncError, setSyncError] = useState<string | null>(null)
+
+  async function handleSyncNow() {
+    setSyncError(null)
+    setSyncResult(null)
+    try {
+      const result = await syncVoyager.mutateAsync()
+      if (!result.success) {
+        setSyncError(result.error ?? "Erro desconhecido na sincronização")
+        return
+      }
+      setSyncResult({ created: result.posts_created, updated: result.posts_updated })
+      setTimeout(() => setSyncResult(null), 10000)
+    } catch {
+      // erro HTTP mostrado via syncVoyager.isError
     }
   }
 
@@ -153,6 +184,15 @@ export default function ConfiguracoesPage() {
           <p className="text-xs text-(--text-tertiary)">
             Quanto mais detalhado, mais fiel ao seu estilo será o conteúdo gerado.
           </p>
+          {!form.author_voice && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+              <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              <span>
+                Configure sua voz para que a IA gere posts no seu estilo. Sem isso, será usado um
+                template genérico.
+              </span>
+            </div>
+          )}
         </div>
       </section>
 
@@ -237,13 +277,87 @@ export default function ConfiguracoesPage() {
         </div>
       </section>
 
+      {/* Analytics — sincronização de métricas via Unipile */}
+      {linkedinAccount?.is_active && (
+        <section className="lg:col-span-2 bg-(--bg-surface) rounded-lg border border-(--border-default) p-5 shadow-(--shadow-sm) flex flex-col gap-4">
+          <div className="flex items-center gap-2">
+            <BarChart2 className="h-4 w-4 text-(--text-secondary)" />
+            <h2 className="text-sm font-semibold text-(--text-primary)">Analytics</h2>
+            <span className="ml-auto text-xs px-1.5 py-0.5 rounded bg-(--accent-subtle) text-(--accent-fg)">
+              Perfil pessoal
+            </span>
+          </div>
+
+          {linkedinAccount.has_unipile ? (
+            <>
+              <p className="text-sm text-(--text-secondary)">
+                Importação automática de métricas (impressões, reações, comentários,
+                compartilhamentos) dos seus posts do LinkedIn via conta Unipile conectada.
+              </p>
+
+              <div className="flex items-center gap-3 pt-1 border-t border-(--border-default)">
+                <div className="flex-1">
+                  <p className="text-xs text-(--text-secondary)">
+                    Sincronização automática: 3x/dia (08h, 14h, 20h)
+                  </p>
+                  {linkedinAccount.last_voyager_sync_at && (
+                    <p className="text-xs text-(--text-tertiary)">
+                      Último sync:{" "}
+                      {new Date(linkedinAccount.last_voyager_sync_at).toLocaleString("pt-BR")}
+                    </p>
+                  )}
+                  {syncResult && (
+                    <p className="text-xs text-(--success)">
+                      Sync concluído: {syncResult.created} posts importados, {syncResult.updated}{" "}
+                      métricas atualizadas
+                    </p>
+                  )}
+                  {syncError && <p className="text-xs text-(--danger)">{syncError}</p>}
+                  {syncVoyager.isError && (
+                    <p className="text-xs text-(--danger)">
+                      {syncVoyager.error instanceof Error
+                        ? syncVoyager.error.message
+                        : "Erro no sync"}
+                    </p>
+                  )}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSyncNow}
+                  disabled={syncVoyager.isPending}
+                  className="gap-1.5 shrink-0"
+                >
+                  {syncVoyager.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  )}
+                  Sincronizar agora
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+              <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              <span>
+                Para importar métricas dos seus posts, conecte sua conta LinkedIn via Unipile em{" "}
+                <a
+                  href="/configuracoes/linkedin-accounts"
+                  className="underline font-medium hover:text-amber-900 dark:hover:text-amber-100"
+                >
+                  Configurações do Sistema → Contas LinkedIn
+                </a>
+                .
+              </span>
+            </div>
+          )}
+        </section>
+      )}
+
       {/* Footer — botão salvar */}
       <div className="lg:col-span-2 flex justify-end">
-        <Button
-          onClick={handleSave}
-          disabled={!isDirty || update.isPending}
-          className="gap-2"
-        >
+        <Button onClick={handleSave} disabled={!isDirty || update.isPending} className="gap-2">
           {update.isPending ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />

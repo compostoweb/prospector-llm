@@ -866,6 +866,110 @@ class UnipileClient:
     async def __aexit__(self, *_: object) -> None:
         await self.aclose()
 
+    # ── Own Profile ───────────────────────────────────────────────────
+
+    async def get_own_profile(self, account_id: str) -> dict:
+        """
+        Busca perfil do dono da conta via GET /users/me.
+        Retorna dict com provider_id, public_identifier, first_name, etc.
+        Raises RuntimeError com detalhes se falhar.
+        """
+        try:
+            response = await self._client.get(
+                "/users/me",
+                params={"account_id": account_id},
+            )
+        except Exception as exc:
+            logger.error(
+                "unipile.own_profile.connection_error",
+                account_id=account_id,
+                error=str(exc),
+            )
+            raise RuntimeError(
+                f"Falha de conexao com Unipile: {type(exc).__name__}: {exc}"
+            ) from exc
+
+        if response.status_code != 200:
+            body = response.text[:500]
+            logger.warning(
+                "unipile.own_profile.error",
+                account_id=account_id,
+                status=response.status_code,
+                body=body,
+            )
+            raise RuntimeError(
+                f"Unipile GET /users/me retornou {response.status_code}: {body}"
+            )
+        return response.json()
+
+    # ── Own Posts with Metrics (Content Hub Analytics) ─────────────────
+
+    async def get_own_posts_with_metrics(
+        self,
+        account_id: str,
+        identifier: str,
+        limit: int = 50,
+    ) -> list[dict]:
+        """
+        Busca posts do usuario com metricas completas via Unipile.
+        GET /users/{identifier}/posts
+
+        Retorna lista de dicts com: id, social_id, text, date,
+        reaction_counter, comment_counter, repost_counter,
+        impressions_counter, share_url, etc.
+
+        Diferente de get_lead_posts: nao usa cache, retorna todas as metricas,
+        e busca mais posts (ate 100).
+        """
+        all_posts: list[dict] = []
+        cursor: str | None = None
+
+        while len(all_posts) < limit:
+            batch_limit = min(limit - len(all_posts), 100)
+            params: dict[str, str | int] = {
+                "account_id": account_id,
+                "limit": batch_limit,
+            }
+            if cursor:
+                params["cursor"] = cursor
+
+            try:
+                response = await self._client.get(
+                    f"/users/{identifier}/posts",
+                    params=params,
+                )
+            except Exception as exc:
+                logger.error(
+                    "unipile.own_posts.connection_error",
+                    identifier=identifier,
+                    error=str(exc),
+                )
+                raise RuntimeError(
+                    f"Falha de conexao com Unipile: {type(exc).__name__}: {exc}"
+                ) from exc
+
+            if response.status_code != 200:
+                body = response.text[:500]
+                logger.warning(
+                    "unipile.own_posts.error",
+                    identifier=identifier,
+                    status=response.status_code,
+                    body=body,
+                )
+                raise RuntimeError(
+                    f"Unipile GET /users/{identifier}/posts retornou {response.status_code}: {body}"
+                )
+            data = response.json()
+            items = data.get("items", [])
+            if not items:
+                break
+            all_posts.extend(items)
+            cursor = data.get("cursor")
+            if not cursor:
+                break
+
+        return all_posts[:limit]
+
     # ── LinkedIn Posts ────────────────────────────────────────────────
 
     _POSTS_CACHE_TTL = 14400  # 4h

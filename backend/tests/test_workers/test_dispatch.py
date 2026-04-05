@@ -4,31 +4,34 @@ tests/test_workers/test_dispatch.py
 Testes unitários para workers/dispatch._dispatch_async().
 
 Estratégia:
-  - Não chama o método Celery (.delay) — testa _dispatch_async diretamente
-  - Banco de dados real (via fixture db do conftest) para criar fixtures
-  - Integrações externas (Unipile, Speechify, ContextFetcher, LLMRegistry)
-    são mockadas com AsyncMock para isolar o worker
-  - Valida estados finais: step.status, Interaction criada, retorno do dict
+    - Não chama o método Celery (.delay) — testa _dispatch_async diretamente
+    - Usa sessão assíncrona fake em memória para evitar dependência de asyncpg
+    - Integrações externas (Unipile, ContextFetcher, LLMRegistry)
+        são mockadas com AsyncMock para isolar o worker
+    - Valida estados finais: step.status, Interaction criada, retorno do dict
 
 Cobre:
-  - Step não encontrado → {"status": "not_found"}
-  - Step já processado (idempotência) → retorna status atual sem reprocessar
-  - Canal LINKEDIN_CONNECT → envia connect, cria Interaction, step=SENT
-  - Canal LINKEDIN_DM (texto) → envia DM, cria Interaction, step=SENT
-  - Canal EMAIL → envia email, cria Interaction, step=SENT
-  - EMAIL sem endereço cadastrado no lead → step=SKIPPED
-  - Falha no envio → step=FAILED após MaxRetriesExceededError
+    - Step não encontrado → {"status": "not_found"}
+    - Step já processado (idempotência) → retorna status atual sem reprocessar
+    - Canal LINKEDIN_CONNECT → envia connect, cria Interaction, step=SENT
+    - Canal LINKEDIN_DM (texto) → envia DM, cria Interaction, step=SENT
+    - Canal EMAIL → envia email, cria Interaction, step=SENT
+    - EMAIL sem endereço cadastrado no lead → step=SKIPPED
+    - Falha no envio → step=FAILED após MaxRetriesExceededError
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import operators
+from sqlalchemy.sql.elements import BinaryExpression, BooleanClauseList
 
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
@@ -36,8 +39,141 @@ from models.email_template import EmailTemplate
 from models.enums import Channel, LeadStatus, StepStatus
 from models.interaction import Interaction
 from models.lead import Lead
+from models.tenant import Tenant, TenantIntegration
 
 pytestmark = pytest.mark.asyncio
+
+
+class _FakeScalarResult:
+    def __init__(self, value: object | None) -> None:
+        self._value = value
+
+    def scalar_one_or_none(self) -> object | None:
+        return self._value
+
+
+class _SingleSessionIterator:
+    def __init__(self, db: Any) -> None:
+        self._db = db
+        self._yielded = False
+
+    def __aiter__(self) -> _SingleSessionIterator:
+        return self
+
+    async def __anext__(self) -> Any:
+        if self._yielded:
+            raise StopAsyncIteration
+
+        self._yielded = True
+        return self._db
+
+
+class FakeAsyncSession:
+    def __init__(self) -> None:
+        self._items: dict[type[Any], list[Any]] = {}
+
+    def add(self, obj: object) -> None:
+        _apply_column_defaults(obj)
+        bucket = self._items.setdefault(type(obj), [])
+        if obj not in bucket:
+            bucket.append(obj)
+
+    def add_all(self, objects: list[object]) -> None:
+        for obj in objects:
+            self.add(obj)
+
+    async def execute(self, statement) -> _FakeScalarResult:  # type: ignore[no-untyped-def]
+        entity = statement.column_descriptions[0].get("entity")
+        candidates = list(self._items.get(entity, [])) if entity is not None else []
+
+        for criterion in getattr(statement, "_where_criteria", ()):  # noqa: SLF001
+            candidates = [item for item in candidates if _matches_criterion(item, criterion)]
+
+        return _FakeScalarResult(candidates[0] if candidates else None)
+
+    async def flush(self) -> None:
+        return None
+
+    async def commit(self) -> None:
+        return None
+
+    async def refresh(self, obj: object) -> None:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+
+def _matches_criterion(obj: object, criterion: object) -> bool:
+    if isinstance(criterion, BooleanClauseList):
+        return all(_matches_criterion(obj, clause) for clause in criterion.clauses)
+
+    if not isinstance(criterion, BinaryExpression):
+        return True
+
+    field_name = getattr(criterion.left, "key", None)
+    if field_name is None:
+        field_name = getattr(criterion.left, "name", None)
+    if not isinstance(field_name, str):
+        return True
+
+    current_value = getattr(obj, field_name, None)
+    expected_value = getattr(criterion.right, "value", criterion.right)
+
+    if criterion.operator is operators.eq:
+        return current_value == expected_value
+    if criterion.operator is operators.is_:
+        return current_value is expected_value or current_value == expected_value
+
+    return True
+
+
+def _apply_column_defaults(obj: object) -> None:
+    mapper = getattr(obj, "__mapper__", None)
+    if mapper is None:
+        return
+
+    for column in mapper.columns:
+        if getattr(obj, column.key, None) is not None:
+            continue
+
+        default = column.default
+        if default is None:
+            continue
+
+        if getattr(default, "is_scalar", False):
+            setattr(obj, column.key, default.arg)
+            continue
+
+        if getattr(default, "is_callable", False):
+            try:
+                value = default.arg()
+            except TypeError:
+                value = default.arg(None)
+            setattr(obj, column.key, value)
+
+
+@pytest.fixture
+def tenant_id() -> uuid.UUID:
+    return uuid.uuid4()
+
+
+@pytest.fixture
+def db() -> FakeAsyncSession:
+    return FakeAsyncSession()
+
+
+@pytest.fixture
+def tenant(db: FakeAsyncSession, tenant_id: uuid.UUID) -> Tenant:
+    instance = Tenant(
+        id=tenant_id,
+        name="Tenant Teste",
+        slug=f"tenant-dispatch-{tenant_id.hex[:12]}",
+    )
+    db.add(instance)
+    db.add(TenantIntegration(tenant_id=tenant_id))
+    return instance
+
 
 # ── Factories de objetos de teste ─────────────────────────────────────
 
@@ -45,18 +181,19 @@ pytestmark = pytest.mark.asyncio
 def _make_lead(
     tenant_id: uuid.UUID,
     *,
-    linkedin_profile_id: str = "li_profile_123",
+    linkedin_profile_id: str | None = None,
     email_corporate: str | None = "lead@empresa.com",
     email_personal: str | None = None,
     website: str | None = None,
 ) -> Lead:
+    unique_suffix = uuid.uuid4().hex[:10]
     return Lead(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         name="João Silva",
         company="Acme Corp",
-        linkedin_url="https://linkedin.com/in/joao",
-        linkedin_profile_id=linkedin_profile_id,
+        linkedin_url=f"https://linkedin.com/in/{unique_suffix}",
+        linkedin_profile_id=linkedin_profile_id or f"li_profile_{unique_suffix}",
         email_corporate=email_corporate,
         email_personal=email_personal,
         website=website,
@@ -95,12 +232,13 @@ def _make_step(
         step_number=1,
         day_offset=0,
         use_voice=use_voice,
-        scheduled_at=datetime.now(tz=timezone.utc) - timedelta(minutes=5),
+        scheduled_at=datetime.now(tz=UTC) - timedelta(minutes=5),
         status=status,
     )
 
 
 # ── Mock de SendResult ─────────────────────────────────────────────────
+
 
 def _send_result(message_id: str = "msg_abc123") -> MagicMock:
     r = MagicMock()
@@ -109,7 +247,27 @@ def _send_result(message_id: str = "msg_abc123") -> MagicMock:
     return r
 
 
+def _mock_worker_session(db: AsyncSession):
+    async def _fake_commit() -> None:
+        await db.flush()
+
+    db.commit = AsyncMock(side_effect=_fake_commit)  # type: ignore[method-assign]
+
+    def _fake_session(_tid: object) -> _SingleSessionIterator:
+        return _SingleSessionIterator(db)
+
+    return _fake_session
+
+
+def _make_task_mock() -> MagicMock:
+    task_mock = MagicMock()
+    task_mock.retry.side_effect = lambda *args, **kwargs: kwargs.get("exc")
+    task_mock.MaxRetriesExceededError = RuntimeError
+    return task_mock
+
+
 # ── Testes ────────────────────────────────────────────────────────────
+
 
 async def test_dispatch_step_not_found(
     db: AsyncSession,
@@ -119,8 +277,10 @@ async def test_dispatch_step_not_found(
     """Step inexistente retorna not_found sem explodir."""
     from workers.dispatch import _dispatch_async
 
-    task_mock = MagicMock()
-    result = await _dispatch_async(str(uuid.uuid4()), str(tenant_id), task_mock)
+    with patch("workers.dispatch.get_session", new=_mock_worker_session(db)):
+        task_mock = _make_task_mock()
+        result = await _dispatch_async(str(uuid.uuid4()), str(tenant_id), task_mock)
+
     assert result["status"] == "not_found"
 
 
@@ -138,8 +298,10 @@ async def test_dispatch_idempotency_already_sent(
     db.add_all([lead, cadence, step])
     await db.flush()
 
-    task_mock = MagicMock()
-    result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
+    with patch("workers.dispatch.get_session", new=_mock_worker_session(db)):
+        task_mock = _make_task_mock()
+        result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
+
     assert result["status"] == "sent"  # retorna o status existente
 
 
@@ -158,18 +320,13 @@ async def test_dispatch_linkedin_connect_creates_interaction(
     await db.flush()
 
     with (
-        patch("workers.dispatch.get_session") as mock_get_session,
+        patch("workers.dispatch.get_session", new=_mock_worker_session(db)),
         patch("workers.dispatch.context_fetcher") as mock_ctx,
         patch("workers.dispatch.AIComposer") as mock_composer_cls,
         patch("workers.dispatch.unipile_client") as mock_unipile,
         patch("workers.dispatch.LLMRegistry"),
         patch("workers.dispatch.redis_client"),
     ):
-        # get_session deve entregar o db de teste
-        async def _fake_session(_tid):
-            yield db
-
-        mock_get_session.side_effect = _fake_session
         mock_ctx.fetch_from_website = AsyncMock(return_value="site text")
         mock_ctx.search_company = AsyncMock(return_value="company info")
 
@@ -179,7 +336,7 @@ async def test_dispatch_linkedin_connect_creates_interaction(
 
         mock_unipile.send_linkedin_connect = AsyncMock(return_value=_send_result())
 
-        task_mock = MagicMock()
+        task_mock = _make_task_mock()
         result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
 
     assert result["status"] == "sent"
@@ -191,9 +348,7 @@ async def test_dispatch_linkedin_connect_creates_interaction(
     assert step.sent_at is not None
 
     # Verifica Interaction criada
-    intr_result = await db.execute(
-        select(Interaction).where(Interaction.lead_id == lead.id)
-    )
+    intr_result = await db.execute(select(Interaction).where(Interaction.lead_id == lead.id))
     interaction = intr_result.scalar_one_or_none()
     assert interaction is not None
     assert interaction.direction == "outbound"
@@ -217,17 +372,13 @@ async def test_dispatch_linkedin_dm_text(
     await db.flush()
 
     with (
-        patch("workers.dispatch.get_session") as mock_get_session,
+        patch("workers.dispatch.get_session", new=_mock_worker_session(db)),
         patch("workers.dispatch.context_fetcher") as mock_ctx,
         patch("workers.dispatch.AIComposer") as mock_composer_cls,
         patch("workers.dispatch.unipile_client") as mock_unipile,
         patch("workers.dispatch.LLMRegistry"),
         patch("workers.dispatch.redis_client"),
     ):
-        async def _fake_session(_tid):
-            yield db
-
-        mock_get_session.side_effect = _fake_session
         mock_ctx.fetch_from_website = AsyncMock(return_value=None)
         mock_ctx.search_company = AsyncMock(return_value=None)
 
@@ -237,7 +388,7 @@ async def test_dispatch_linkedin_dm_text(
 
         mock_unipile.send_linkedin_dm = AsyncMock(return_value=_send_result("dm_msg_456"))
 
-        task_mock = MagicMock()
+        task_mock = _make_task_mock()
         result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
 
     assert result["status"] == "sent"
@@ -262,33 +413,33 @@ async def test_dispatch_email_sent(
     await db.flush()
 
     with (
-        patch("workers.dispatch.get_session") as mock_get_session,
+        patch("workers.dispatch.get_session", new=_mock_worker_session(db)),
         patch("workers.dispatch.context_fetcher") as mock_ctx,
         patch("workers.dispatch.AIComposer") as mock_composer_cls,
         patch("workers.dispatch.unipile_client") as mock_unipile,
         patch("workers.dispatch.LLMRegistry"),
         patch("workers.dispatch.redis_client"),
     ):
-        async def _fake_session(_tid):
-            yield db
-
-        mock_get_session.side_effect = _fake_session
         mock_ctx.fetch_from_website = AsyncMock(return_value=None)
         mock_ctx.search_company = AsyncMock(return_value=None)
 
         composer_instance = MagicMock()
-        composer_instance.compose = AsyncMock(return_value="Corpo do email aqui.")
+        composer_instance.compose_email = AsyncMock(
+            return_value=("Assunto gerado", "Corpo do email aqui.")
+        )
         mock_composer_cls.return_value = composer_instance
 
         mock_unipile.send_email = AsyncMock(return_value=_send_result("email_msg_789"))
 
-        task_mock = MagicMock()
+        task_mock = _make_task_mock()
         result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
 
     assert result["status"] == "sent"
+    composer_instance.compose_email.assert_awaited_once()
     mock_unipile.send_email.assert_awaited_once()
     call_kwargs = mock_unipile.send_email.call_args.kwargs
     assert call_kwargs["to_email"] == "joao@acme.com"
+    assert call_kwargs["subject"] == "Assunto gerado"
     assert "body_html" in call_kwargs
 
 
@@ -315,17 +466,13 @@ async def test_dispatch_email_manual_template_body_is_used(
     await db.flush()
 
     with (
-        patch("workers.dispatch.get_session") as mock_get_session,
+        patch("workers.dispatch.get_session", new=_mock_worker_session(db)),
         patch("workers.dispatch.context_fetcher") as mock_ctx,
         patch("workers.dispatch.AIComposer") as mock_composer_cls,
         patch("workers.dispatch.unipile_client") as mock_unipile,
         patch("workers.dispatch.LLMRegistry"),
         patch("workers.dispatch.redis_client"),
     ):
-        async def _fake_session(_tid):
-            yield db
-
-        mock_get_session.side_effect = _fake_session
         mock_ctx.fetch_from_website = AsyncMock(return_value=None)
         mock_ctx.search_company = AsyncMock(return_value=None)
 
@@ -335,7 +482,7 @@ async def test_dispatch_email_manual_template_body_is_used(
 
         mock_unipile.send_email = AsyncMock(return_value=_send_result("email_msg_manual"))
 
-        task_mock = MagicMock()
+        task_mock = _make_task_mock()
         result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
 
     assert result["status"] == "sent"
@@ -377,7 +524,7 @@ async def test_dispatch_email_saved_template_and_subject_variants(
     await db.flush()
 
     with (
-        patch("workers.dispatch.get_session") as mock_get_session,
+        patch("workers.dispatch.get_session", new=_mock_worker_session(db)),
         patch("workers.dispatch.context_fetcher") as mock_ctx,
         patch("workers.dispatch.AIComposer") as mock_composer_cls,
         patch("workers.dispatch.unipile_client") as mock_unipile,
@@ -385,10 +532,6 @@ async def test_dispatch_email_saved_template_and_subject_variants(
         patch("workers.dispatch.redis_client"),
         patch("random.choice", return_value="Variante B"),
     ):
-        async def _fake_session(_tid):
-            yield db
-
-        mock_get_session.side_effect = _fake_session
         mock_ctx.fetch_from_website = AsyncMock(return_value=None)
         mock_ctx.search_company = AsyncMock(return_value=None)
 
@@ -398,7 +541,7 @@ async def test_dispatch_email_saved_template_and_subject_variants(
 
         mock_unipile.send_email = AsyncMock(return_value=_send_result("email_msg_template"))
 
-        task_mock = MagicMock()
+        task_mock = _make_task_mock()
         result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
 
     assert result["status"] == "sent"
@@ -427,17 +570,13 @@ async def test_dispatch_email_no_address_skips(
     await db.flush()
 
     with (
-        patch("workers.dispatch.get_session") as mock_get_session,
+        patch("workers.dispatch.get_session", new=_mock_worker_session(db)),
         patch("workers.dispatch.context_fetcher") as mock_ctx,
         patch("workers.dispatch.AIComposer") as mock_composer_cls,
         patch("workers.dispatch.unipile_client"),
         patch("workers.dispatch.LLMRegistry"),
         patch("workers.dispatch.redis_client"),
     ):
-        async def _fake_session(_tid):
-            yield db
-
-        mock_get_session.side_effect = _fake_session
         mock_ctx.fetch_from_website = AsyncMock(return_value=None)
         mock_ctx.search_company = AsyncMock(return_value=None)
 
@@ -445,7 +584,7 @@ async def test_dispatch_email_no_address_skips(
         composer_instance.compose = AsyncMock(return_value="texto")
         mock_composer_cls.return_value = composer_instance
 
-        task_mock = MagicMock()
+        task_mock = _make_task_mock()
         result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
 
     assert result["status"] == "skipped"
@@ -470,17 +609,13 @@ async def test_dispatch_failure_marks_step_failed(
     await db.flush()
 
     with (
-        patch("workers.dispatch.get_session") as mock_get_session,
+        patch("workers.dispatch.get_session", new=_mock_worker_session(db)),
         patch("workers.dispatch.context_fetcher") as mock_ctx,
         patch("workers.dispatch.AIComposer") as mock_composer_cls,
         patch("workers.dispatch.unipile_client") as mock_unipile,
         patch("workers.dispatch.LLMRegistry"),
         patch("workers.dispatch.redis_client"),
     ):
-        async def _fake_session(_tid):
-            yield db
-
-        mock_get_session.side_effect = _fake_session
         mock_ctx.fetch_from_website = AsyncMock(return_value=None)
         mock_ctx.search_company = AsyncMock(return_value=None)
 
@@ -488,14 +623,11 @@ async def test_dispatch_failure_marks_step_failed(
         composer_instance.compose = AsyncMock(return_value="texto")
         mock_composer_cls.return_value = composer_instance
 
-        mock_unipile.send_linkedin_connect = AsyncMock(
-            side_effect=Exception("Unipile offline")
-        )
+        mock_unipile.send_linkedin_connect = AsyncMock(side_effect=Exception("Unipile offline"))
 
         # Simula MaxRetriesExceededError após retry
-        task_mock = MagicMock()
-        task_mock.retry.side_effect = Exception("MaxRetriesExceededError")
-        task_mock.MaxRetriesExceededError = Exception
+        task_mock = _make_task_mock()
+        task_mock.retry.side_effect = RuntimeError("MaxRetriesExceededError")
 
         result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
 

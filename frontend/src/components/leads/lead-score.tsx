@@ -1,7 +1,7 @@
 ﻿import { cn, scoreVariant } from "@/lib/utils"
 
 interface LeadScoreProps {
-  score: number
+  score: number | null
   size?: "sm" | "md"
   showLabel?: boolean
   className?: string
@@ -20,10 +20,11 @@ const ringColors: Record<ReturnType<typeof scoreVariant>, string> = {
 }
 
 export function LeadScore({ score, size = "md", showLabel = false, className }: LeadScoreProps) {
-  const variant = scoreVariant(score)
+  const normalizedScore = Math.max(0, Math.min(score ?? 0, 100))
+  const variant = scoreVariant(normalizedScore)
   const radius = size === "sm" ? 10 : 14
   const circumference = 2 * Math.PI * radius
-  const dashOffset = circumference - (score / 100) * circumference
+  const dashOffset = circumference - (normalizedScore / 100) * circumference
 
   return (
     <div className={cn("flex items-center gap-1.5", className)}>
@@ -70,7 +71,7 @@ export function LeadScore({ score, size = "md", showLabel = false, className }: 
             size === "sm" ? "text-[10px]" : "text-[11px]",
           )}
         >
-          {score}
+          {normalizedScore}
         </span>
       </div>
 

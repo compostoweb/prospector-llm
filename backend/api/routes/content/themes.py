@@ -12,7 +12,7 @@ DELETE /content/themes/{id}      — deletar (apenas is_custom=True)
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -84,13 +84,15 @@ async def create_theme(
 @router.patch("/{theme_id}/used", response_model=ContentThemeResponse)
 async def mark_theme_used(
     theme_id: uuid.UUID,
-    post_id: uuid.UUID | None = Query(default=None, description="ID do post em que o tema foi usado"),
+    post_id: uuid.UUID | None = Query(
+        default=None, description="ID do post em que o tema foi usado"
+    ),
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> ContentThemeResponse:
     theme = await _get_theme_or_404(theme_id, tenant_id, db)
     theme.used = True
-    theme.used_at = datetime.now(timezone.utc)
+    theme.used_at = datetime.now(UTC)
     if post_id:
         theme.used_in_post_id = post_id
     await db.commit()

@@ -1,1 +1,1 @@
-export { default } from "./content-page"
+export { default } from "./content-dashboard-page"

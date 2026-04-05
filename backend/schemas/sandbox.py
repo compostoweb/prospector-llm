@@ -21,7 +21,6 @@ from models.enums import (
     SandboxStepStatus,
 )
 
-
 # ── Dados de lead fictício ────────────────────────────────────────────
 
 
@@ -88,6 +87,22 @@ class SimulateReplyRequest(BaseModel):
 # ── Response schemas ──────────────────────────────────────────────────
 
 
+class CompositionContextResponse(BaseModel):
+    """Metadados de observabilidade usados pelo AI Composer."""
+
+    generation_mode: str
+    step_key: str
+    copy_method: str | None
+    playbook_sector: str | None
+    playbook_role: str | None
+    matched_role: str | None
+    few_shot_applied: bool
+    few_shot_key: str | None
+    few_shot_method: str | None
+    has_site_summary: bool
+    has_recent_posts: bool
+
+
 class SandboxStepResponse(BaseModel):
     """Representação de um step do sandbox na API."""
 
@@ -113,6 +128,7 @@ class SandboxStepResponse(BaseModel):
     llm_model: str | None
     tokens_in: int | None
     tokens_out: int | None
+    composition_context: CompositionContextResponse | None = None
 
     # Simulação de reply
     simulated_reply: str | None

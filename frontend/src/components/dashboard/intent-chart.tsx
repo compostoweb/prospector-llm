@@ -73,10 +73,18 @@ export function IntentChart({ data, isLoading }: IntentChartProps) {
             fontSize: 12,
             color: "var(--text-primary)",
           }}
-          formatter={(value: number, _name: string, props: { payload: { percentage: number } }) => [
-            `${value} (${props.payload.percentage}%)`,
-            "Respostas",
-          ]}
+          formatter={(value, _name, item) => {
+            const percentage =
+              item &&
+              typeof item.payload === "object" &&
+              item.payload !== null &&
+              "percentage" in item.payload &&
+              typeof item.payload.percentage === "number"
+                ? item.payload.percentage
+                : 0
+
+            return [`${value} (${percentage}%)`, "Respostas"]
+          }}
         />
         <Legend
           wrapperStyle={{ fontSize: 11, color: "var(--text-secondary)" }}
