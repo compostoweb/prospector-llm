@@ -33,6 +33,7 @@ from api.routes import email_templates as email_templates_router
 from api.routes import email_tracking as email_tracking_router
 from api.routes import inbox as inbox_router
 from api.routes import lead_lists as lead_lists_router
+from api.routes import lead_analysis as lead_analysis_router
 from api.routes import leads as leads_router
 from api.routes import linkedin_accounts as linkedin_accounts_router
 from api.routes import llm as llm_router
@@ -243,6 +244,7 @@ app.include_router(llm_router.router)
 app.include_router(pipedrive_router.router)
 app.include_router(tts_router.router)
 app.include_router(leads_router.router)
+app.include_router(lead_analysis_router.router)
 app.include_router(lead_lists_router.router)
 app.include_router(cadences_router.router)
 app.include_router(sandbox_router.router)

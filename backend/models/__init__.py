@@ -26,3 +26,4 @@ from models.content_settings import ContentSettings  # noqa: F401
 from models.content_reference import ContentReference  # noqa: F401
 from models.content_publish_log import ContentPublishLog  # noqa: F401
 from models.content_linkedin_account import ContentLinkedInAccount  # noqa: F401
+from models.anthropic_batch_job import AnthropicBatchJob  # noqa: F401

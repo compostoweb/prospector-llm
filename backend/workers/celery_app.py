@@ -34,6 +34,19 @@ celery_app = Celery(
     "prospector",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
+    include=[
+        "workers.capture",
+        "workers.enrich",
+        "workers.cadence",
+        "workers.dispatch",
+        "workers.content",
+        "workers.content_voyager",
+        "workers.linkedin_poll",
+        "workers.email_inbox_poll",
+        "workers.warmup",
+        "workers.connection_check",
+        "workers.anthropic_batch",
+    ],
 )
 
 # ── Filas e exchanges ─────────────────────────────────────────────────

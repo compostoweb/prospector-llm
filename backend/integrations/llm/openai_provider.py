@@ -24,6 +24,7 @@ logger = structlog.get_logger()
 _CHAT_PREFIXES = (
     "gpt-4",
     "gpt-3.5",
+    "gpt-5",
     "o1",
     "o3",
     "o4",
@@ -38,6 +39,7 @@ _KNOWN_PRICES: dict[str, tuple[float, float]] = {
     "gpt-4.1":               (2.00,   8.00),
     "gpt-4.1-mini":          (0.40,   1.60),
     "gpt-4.1-nano":          (0.10,   0.40),
+    "gpt-5":                  (0.0,    0.0),   # preco a ser confirmado
     "o1":                    (15.00,  60.00),
     "o1-mini":               (3.00,   12.00),
     "o3":                    (10.00,  40.00),

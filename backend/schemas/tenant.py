@@ -68,6 +68,18 @@ class TenantIntegrationUpdate(BaseModel):
     limit_linkedin_dm: int | None = Field(default=None, ge=1, le=100)
     limit_email: int | None = Field(default=None, ge=1, le=500)
 
+    # LLM — padrão do sistema
+    llm_default_provider: str | None = Field(default=None, max_length=50)
+    llm_default_model: str | None = Field(default=None, max_length=100)
+    llm_default_temperature: float | None = Field(default=None, ge=0.0, le=1.0)
+    llm_default_max_tokens: int | None = Field(default=None, ge=64, le=8192)
+
+    # LLM — padrão Cold Email
+    cold_email_llm_provider: str | None = Field(default=None, max_length=50)
+    cold_email_llm_model: str | None = Field(default=None, max_length=100)
+    cold_email_llm_temperature: float | None = Field(default=None, ge=0.0, le=1.0)
+    cold_email_llm_max_tokens: int | None = Field(default=None, ge=64, le=8192)
+
 
 class TenantIntegrationResponse(BaseModel):
     """Dados das integrações do tenant (sem expor tokens sensíveis em texto limpo)."""
@@ -90,4 +102,14 @@ class TenantIntegrationResponse(BaseModel):
     limit_linkedin_connect: int
     limit_linkedin_dm: int
     limit_email: int
+    # LLM — padrão do sistema
+    llm_default_provider: str
+    llm_default_model: str
+    llm_default_temperature: float
+    llm_default_max_tokens: int
+    # LLM — padrão Cold Email
+    cold_email_llm_provider: str
+    cold_email_llm_model: str
+    cold_email_llm_temperature: float
+    cold_email_llm_max_tokens: int
     created_at: datetime

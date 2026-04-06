@@ -26,6 +26,7 @@ import structlog
 from core.config import Settings
 from core.redis_client import RedisClient
 from integrations.llm.base import LLMMessage, LLMProvider, LLMResponse, ModelInfo
+from integrations.llm.anthropic_provider import AnthropicProvider
 from integrations.llm.gemini_provider import GeminiProvider
 from integrations.llm.openai_provider import OpenAIProvider
 
@@ -49,8 +50,15 @@ class LLMRegistry:
             self._providers["gemini"] = GeminiProvider(api_key=settings.GEMINI_API_KEY)
             logger.info("llm.registry.provider_loaded", provider="gemini")
 
+        if settings.ANTHROPIC_API_KEY:
+            self._providers["anthropic"] = AnthropicProvider(api_key=settings.ANTHROPIC_API_KEY)
+            logger.info("llm.registry.provider_loaded", provider="anthropic")
+
         if not self._providers:
-            raise RuntimeError("Nenhum provedor LLM configurado. Configure OPENAI_API_KEY ou GEMINI_API_KEY.")
+            raise RuntimeError(
+                "Nenhum provedor LLM configurado. "
+                "Configure OPENAI_API_KEY, GEMINI_API_KEY ou ANTHROPIC_API_KEY."
+            )
 
     # ------------------------------------------------------------------
     # Completions

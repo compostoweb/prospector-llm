@@ -22,21 +22,43 @@ from typing import AsyncGenerator
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from core.config import settings
 
 logger = structlog.get_logger()
 
-# Engine assíncrono — pool padrão do SQLAlchemy (5 conns, max_overflow=10)
+# ── Engine para API (Uvicorn) ─────────────────────────────────────────
+# Pool padrão do SQLAlchemy (5 conns, max_overflow=10).
+# Seguro porque o Uvicorn mantém um único event loop durante toda a vida.
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
     pool_pre_ping=True,
 )
 
-# Session factory
+# Session factory — para uso na API (Uvicorn)
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autoflush=False,
+    autocommit=False,
+)
+
+# ── Engine para Workers (Celery) ──────────────────────────────────────
+# NullPool: cada session abre e fecha uma conexão real.
+# Necessário porque asyncio.run() cria/destrói event loops —
+# conexões pooladas ficam vinculadas ao loop anterior e quebram.
+worker_engine = create_async_engine(
+    settings.DATABASE_URL,
+    echo=False,
+    poolclass=NullPool,
+)
+
+# Session factory — para uso em workers Celery
+WorkerSessionLocal = async_sessionmaker(
+    bind=worker_engine,
     class_=AsyncSession,
     expire_on_commit=False,
     autoflush=False,
@@ -57,6 +79,26 @@ async def get_session(tenant_id: uuid.UUID) -> AsyncGenerator[AsyncSession, None
             # Injeta o tenant_id no contexto da transação para o RLS do PostgreSQL.
             # SET LOCAL não aceita parâmetros bind ($1) no asyncpg — interpolamos
             # diretamente. Seguro: tenant_id é uuid.UUID validado (só hex + hifens).
+            tid = str(tenant_id)
+            await session.execute(text(f"SET LOCAL app.current_tenant_id = '{tid}'"))
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
+async def get_worker_session(tenant_id: uuid.UUID) -> AsyncGenerator[AsyncSession, None]:
+    """
+    Versão de get_session para uso em workers Celery (NullPool).
+
+    Mesma lógica de RLS, mas usa worker_engine que não mantém pool de conexões.
+    Seguro com asyncio.run() que cria/destrói event loops a cada chamada.
+    """
+    async with WorkerSessionLocal() as session:
+        try:
             tid = str(tenant_id)
             await session.execute(text(f"SET LOCAL app.current_tenant_id = '{tid}'"))
             yield session

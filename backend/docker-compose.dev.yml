@@ -72,6 +72,20 @@ services:
     command: celery -A workers.celery_app worker -Q enrich -c 2 --loglevel=info
     restart: unless-stopped
 
+  worker-content:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    env_file: .env.dev
+    environment:
+      - ENV=dev
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+    command: celery -A workers.celery_app worker -Q content -c 2 --loglevel=info
+    restart: unless-stopped
+
   beat:
     build:
       context: .

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { Sparkles, Check, Wand2, RefreshCw, ChevronDown } from "lucide-react"
+import { localDateToUTC } from "@/lib/date"
 import {
   useCreateContentPost,
   useImprovePost,
@@ -93,7 +94,7 @@ export function CreatePostDialog({
       hook_type: hookType === "none" ? null : hookType,
       hashtags: hashtags || null,
       character_count: body.length,
-      publish_date: publishDate || null,
+      publish_date: publishDate ? localDateToUTC(publishDate) : null,
       week_number: weekNumber ? parseInt(weekNumber, 10) : null,
     })
     // Auto-approve + schedule when date is provided

@@ -57,6 +57,11 @@ CELERY_BEAT_SCHEDULE: dict = {
         "task": "workers.content.check_scheduled_posts",
         "schedule": crontab(minute="*"),
     },
+    # Polling de batches Anthropic em andamento — a cada 5 minutos
+    "poll-anthropic-batches": {
+        "task": "workers.anthropic_batch.poll_anthropic_batches",
+        "schedule": crontab(minute="*/5"),
+    },
     # Content Hub — sincronizacao Voyager Analytics — 3x/dia (08h, 14h, 20h)
     "content-voyager-sync-morning": {
         "task": "workers.content_voyager.sync_all_voyager",

@@ -88,7 +88,25 @@ export function useLLMProviders() {
   })
 }
 
-/** Mutation para testar um modelo com prompt simples */
+/** Mutation para forçar re-sincronização dos modelos (force_refresh=true) */
+export function useSyncLLMModels() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (): Promise<ModelInfo[]> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.GET("/llm/models?force_refresh=true" as never)
+      if (error) throw new Error("Falha ao sincronizar modelos")
+      return (data as ModelInfo[]) ?? []
+    },
+    onSuccess: (fresh) => {
+      // Atualiza o cache local com os dados recém-buscados da API
+      queryClient.setQueryData(["llm", "models"], fresh)
+      void queryClient.invalidateQueries({ queryKey: ["llm", "providers"] })
+    },
+  })
+}
 export function useTestModel() {
   const { data: session } = useSession()
   const queryClient = useQueryClient()

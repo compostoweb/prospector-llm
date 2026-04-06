@@ -60,7 +60,7 @@ def run_apify_maps(
     if not tenant_id:
         raise ValueError("tenant_id é obrigatório para captura de leads")
 
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         _run_apify_maps_async(queries, max_items, tenant_id, self)
     )
 
@@ -93,7 +93,7 @@ def run_apify_linkedin(
     if not tenant_id:
         raise ValueError("tenant_id é obrigatório para captura de leads")
 
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         _run_apify_linkedin_async(titles, locations, max_items, tenant_id, self)
     )
 
@@ -155,13 +155,13 @@ async def _persist_leads(
     Ignora leads sem identificador único (linkedin_url e website ausentes).
     Usa INSERT ... ON CONFLICT DO NOTHING para evitar duplicatas por linkedin_url.
     """
-    from core.database import get_session
+    from core.database import get_worker_session
 
     tid = uuid.UUID(tenant_id)
     inserted = 0
     skipped = 0
 
-    async for db in get_session(tid):
+    async for db in get_worker_session(tid):
         for raw in leads_raw:
             # Descarta leads sem nenhum identificador usável
             if not raw.linkedin_url and not raw.website:

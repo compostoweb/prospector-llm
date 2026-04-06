@@ -589,6 +589,27 @@ export function useImprovePost() {
   })
 }
 
+export function useVaryTheme() {
+  const { data: session } = useSession()
+  return useMutation({
+    mutationFn: async (body: { theme_title: string; pillar: string }) => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/generate/vary-theme`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session?.accessToken ?? ""}`,
+          },
+          body: JSON.stringify(body),
+        },
+      )
+      if (!res.ok) throw new Error("Erro ao gerar variação")
+      return res.json() as Promise<{ variation: string }>
+    },
+  })
+}
+
 // ── Referências ───────────────────────────────────────────────────────
 
 export function useContentReferences() {

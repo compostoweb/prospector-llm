@@ -110,6 +110,9 @@ ESTRUTURA ESPERADA:
 [FECHAMENTO — 1-2 linhas com conclusão ou aprendizado]
 
 [CTA — pergunta leve]
+
+
+
 #hashtag1 #hashtag2 #hashtag3
 {few_shot_block}
 Retorne APENAS o texto do post. Sem explicações, sem prefácio, sem aspas.\

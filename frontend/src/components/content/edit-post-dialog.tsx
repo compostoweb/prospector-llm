@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react"
 import { AlertTriangle, Sparkles, Check, Clock, Send, XCircle, Trash2 } from "lucide-react"
+import { format } from "date-fns"
+import { toZonedTime } from "date-fns-tz"
+import { localDateToUTC } from "@/lib/date"
 import {
   useUpdatePost,
   useImprovePost,
@@ -97,7 +100,7 @@ export function EditPostDialog({
     setHashtags(post.hashtags ?? "")
     setPublishDate(
       post.publish_date
-        ? post.publish_date.slice(0, 16) // "YYYY-MM-DDTHH:mm"
+        ? format(toZonedTime(post.publish_date, "America/Sao_Paulo"), "yyyy-MM-dd'T'HH:mm")
         : "",
     )
     setWeekNumber(post.week_number ? String(post.week_number) : "")
@@ -118,7 +121,7 @@ export function EditPostDialog({
         hook_type: hookType === "none" ? null : hookType,
         hashtags: hashtags || null,
         character_count: body.length,
-        publish_date: publishDate || null,
+        publish_date: publishDate ? localDateToUTC(publishDate) : null,
         week_number: weekNumber ? parseInt(weekNumber, 10) : null,
       },
     })

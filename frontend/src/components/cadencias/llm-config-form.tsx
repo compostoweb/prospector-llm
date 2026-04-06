@@ -1,19 +1,22 @@
 ﻿"use client"
 
+import { useState } from "react"
 import { useLLMModels } from "@/lib/api/hooks/use-llm-models"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+  Command,
+  CommandInput,
+  CommandList,
+  CommandEmpty,
+  CommandItem,
+} from "@/components/ui/command"
+import { Check, ChevronsUpDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-interface LLMConfig {
-  llm_provider: "openai" | "gemini"
+export interface LLMConfig {
+  llm_provider: "openai" | "gemini" | "anthropic"
   llm_model: string
   llm_temperature: number
   llm_max_tokens: number
@@ -24,19 +27,20 @@ interface LLMConfigFormProps {
   onChange: (config: LLMConfig) => void
 }
 
-const PROVIDER_OPTIONS: LLMConfig["llm_provider"][] = ["openai", "gemini"]
+const PROVIDER_OPTIONS: LLMConfig["llm_provider"][] = ["openai", "gemini", "anthropic"]
 
 export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
   const { data, isLoading } = useLLMModels()
+  const [open, setOpen] = useState(false)
 
   const configuredProviders = new Set(
-    PROVIDER_OPTIONS.filter((provider) => (data?.providers ?? []).includes(provider)),
+    PROVIDER_OPTIONS.filter((provider) => (data?.providers ?? [] as string[]).includes(provider)),
   )
   const currentProviderModels = data?.byProvider[value.llm_provider] ?? []
+  const selectedModel = currentProviderModels.find((m) => m.id === value.llm_model)
 
   function update<K extends keyof LLMConfig>(key: K, val: LLMConfig[K]) {
     const updated = { ...value, [key]: val }
-    // Se mudou o provider, reset do modelo
     if (key === "llm_provider" && val !== value.llm_provider) {
       const firstModel = data?.byProvider[val as string]?.[0]?.id
       updated.llm_model = firstModel ?? ""
@@ -50,8 +54,9 @@ export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
         Configuração LLM
       </p>
 
-      {/* Provider */}
+      {/* Provider + Modelo */}
       <div className="grid grid-cols-2 gap-3">
+        {/* Provider */}
         <div>
           <label className="mb-1 block text-xs font-medium text-(--text-secondary)">Provider</label>
           <div className="flex gap-2">
@@ -62,37 +67,71 @@ export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
                 onClick={() => update("llm_provider", p)}
                 disabled={configuredProviders.size > 0 && !configuredProviders.has(p)}
                 className={cn(
-                  "flex-1 rounded-md border py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                  "flex-1 rounded-md border py-2 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50",
                   value.llm_provider === p
-                    ? "border-(--accent) bg-(--accent-subtle) text-(--accent-subtle-fg)"
-                    : "border-(--border-default) bg-(--bg-surface) text-(--text-secondary) hover:bg-(--bg-overlay)",
+                    ? "border-(--accent) bg-(--accent) text-white"
+                    : "border-(--border-default) bg-(--bg-surface) text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--bg-overlay)",
                 )}
               >
-                {p === "openai" ? "OpenAI" : "Gemini"}
+                {p === "openai" ? "OpenAI" : p === "gemini" ? "Gemini" : "Anthropic"}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Modelo */}
+        {/* Modelo — Combobox com busca */}
         <div>
           <Label className="mb-1 block text-xs">Modelo</Label>
-          <Select
-            value={value.llm_model}
-            onValueChange={(v) => update("llm_model", v)}
-            disabled={isLoading || currentProviderModels.length === 0}
-          >
-            <SelectTrigger className="h-8 text-xs">
-              <SelectValue placeholder={isLoading ? "Carregando…" : "Selecione"} />
-            </SelectTrigger>
-            <SelectContent>
-              {currentProviderModels.map((m) => (
-                <SelectItem key={m.id} value={m.id} className="text-xs">
-                  {m.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                title="Selecionar modelo"
+                disabled={isLoading || currentProviderModels.length === 0}
+                className={cn(
+                  "flex h-8 w-full items-center justify-between rounded-md border border-(--border-default)",
+                  "bg-(--bg-surface) px-3 text-xs text-(--text-primary) transition-colors",
+                  "hover:bg-(--bg-overlay) disabled:cursor-not-allowed disabled:opacity-50",
+                  "focus:outline-none focus:ring-2 focus:ring-(--accent)",
+                )}
+              >
+                <span className="truncate">
+                  {isLoading
+                    ? "Carregando…"
+                    : (selectedModel?.name ?? value.llm_model) || "Selecione…"}
+                </span>
+                <ChevronsUpDown size={12} className="ml-1 shrink-0 text-(--text-disabled)" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-72 p-0">
+              <Command>
+                <CommandInput placeholder="Buscar modelo…" />
+                <CommandList>
+                  <CommandEmpty>Nenhum modelo encontrado.</CommandEmpty>
+                  {currentProviderModels.map((m) => (
+                    <CommandItem
+                      key={m.id}
+                      value={m.id}
+                      keywords={[m.name, m.id]}
+                      onSelect={() => {
+                        update("llm_model", m.id)
+                        setOpen(false)
+                      }}
+                    >
+                      <Check
+                        size={12}
+                        className={cn(
+                          "shrink-0",
+                          m.id === value.llm_model ? "opacity-100" : "opacity-0",
+                        )}
+                      />
+                      <span className="flex-1 truncate font-mono">{m.id}</span>
+                    </CommandItem>
+                  ))}
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
@@ -132,6 +171,17 @@ export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
           onChange={(e) => update("llm_max_tokens", Number(e.target.value))}
           className="h-8 text-xs"
         />
+        <p className="mt-1.5 text-[10px] text-(--text-disabled) leading-snug">
+          ≈{" "}
+          <span className="font-medium text-(--text-tertiary)">
+            {Math.round(value.llm_max_tokens * 0.75).toLocaleString("pt-BR")}
+          </span>{" "}
+          palavras &nbsp;·&nbsp;
+          <span className="font-medium text-(--text-tertiary)">
+            {Math.round(value.llm_max_tokens * 4).toLocaleString("pt-BR")}
+          </span>{" "}
+          caracteres por resposta
+        </p>
       </div>
     </div>
   )

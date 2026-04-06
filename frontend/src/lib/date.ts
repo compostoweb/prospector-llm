@@ -1,6 +1,6 @@
 import { format } from "date-fns"
 import { ptBR } from "date-fns/locale"
-import { toZonedTime } from "date-fns-tz"
+import { toZonedTime, fromZonedTime } from "date-fns-tz"
 
 const TZ = "America/Sao_Paulo"
 
@@ -11,4 +11,13 @@ export function formatDateBR(
 ): string {
   const zonedDate = toZonedTime(isoString, TZ)
   return format(zonedDate, fmt, { locale: ptBR })
+}
+
+/**
+ * Converte valor de datetime-local (interpretado como horário SP)
+ * para ISO string UTC para enviar ao backend.
+ * Ex: "2026-04-05T20:25" → "2026-04-05T23:25:00.000Z"
+ */
+export function localDateToUTC(datetimeLocal: string): string {
+  return fromZonedTime(datetimeLocal, TZ).toISOString()
 }

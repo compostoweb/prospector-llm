@@ -56,36 +56,27 @@ def cadence_tick(self) -> dict:
     Tick da cadência — executado pelo Beat a cada minuto.
     Enfileira dispatch_step para cada step pendente que passou do horário.
     """
-    return asyncio.get_event_loop().run_until_complete(_tick_async())
+    return asyncio.run(_tick_async())
 
 
 async def _tick_async() -> dict:
-    from core.database import get_session
+    from core.database import get_worker_session, WorkerSessionLocal
     from core.redis_client import redis_client
 
     dispatched = 0
     skipped = 0
 
     # Busca todos os tenants ativos (sem filtro RLS — é a task de sistema)
-    # Usa session sem tenant_id para listar tenants
-    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-    from core.config import settings
-
-    engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    async with session_factory() as root_session:
+    async with WorkerSessionLocal() as root_session:
         result = await root_session.execute(
             select(Tenant).where(Tenant.is_active.is_(True))
         )
         tenants: list[Tenant] = list(result.scalars().all())
 
-    await engine.dispose()
-
     for tenant in tenants:
         tid = tenant.id
         try:
-            async for db in get_session(tid):
+            async for db in get_worker_session(tid):
                 now = datetime.now(tz=timezone.utc)
 
                 # Busca steps pendentes e vencidos deste tenant

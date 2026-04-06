@@ -43,7 +43,7 @@ _EXPIRY_DAYS = 14
 )
 def check_pending_connections(self) -> dict:
     """Verifica status de conexões LinkedIn pendentes."""
-    return asyncio.get_event_loop().run_until_complete(_check_async())
+    return asyncio.run(_check_async())
 
 
 async def _check_async() -> dict:

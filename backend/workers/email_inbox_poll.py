@@ -44,7 +44,7 @@ logger = structlog.get_logger()
 )
 def email_inbox_poll_tick(self) -> dict:
     """Polling de inbox de e-mail para contas google_oauth e smtp."""
-    return asyncio.get_event_loop().run_until_complete(_poll_all())
+    return asyncio.run(_poll_all())
 
 
 async def _poll_all() -> dict:

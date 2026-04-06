@@ -51,20 +51,20 @@ def publish_to_linkedin(self, post_id: str, tenant_id: str) -> dict:
 
     Seguro para retry — verifica status antes de agir.
     """
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         _publish_async(post_id, tenant_id, self)
     )
 
 
 async def _publish_async(post_id: str, tenant_id: str, task) -> dict:  # type: ignore[type-arg]
-    from core.database import get_session
+    from core.database import get_worker_session
     from services.content.publisher import publish_now
     from services.content.linkedin_client import LinkedInClientError
 
     tid = uuid.UUID(tenant_id)
     pid = uuid.UUID(post_id)
 
-    async for db in get_session(tid):
+    async for db in get_worker_session(tid):
         # Verifica status atual antes de publicar (idempotencia)
         from sqlalchemy import select
         from models.content_post import ContentPost
@@ -136,20 +136,20 @@ def cancel_linkedin_post(self, post_id: str, tenant_id: str) -> dict:
     """
     Cancela agendamento de um post (scheduled → approved).
     """
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         _cancel_async(post_id, tenant_id, self)
     )
 
 
 async def _cancel_async(post_id: str, tenant_id: str, task) -> dict:  # type: ignore[type-arg]
-    from core.database import get_session
+    from core.database import get_worker_session
     from services.content.publisher import cancel_schedule
     from services.content.linkedin_client import LinkedInClientError
 
     tid = uuid.UUID(tenant_id)
     pid = uuid.UUID(post_id)
 
-    async for db in get_session(tid):
+    async for db in get_worker_session(tid):
         try:
             await cancel_schedule(db, post_id=pid, tenant_id=tid)
             return {"status": "cancelled", "post_id": post_id}
@@ -175,18 +175,18 @@ def check_scheduled_posts() -> dict:
     Executada pelo Celery Beat a cada minuto.
     Enfileira publish_to_linkedin para cada post elegivel.
     """
-    return asyncio.get_event_loop().run_until_complete(_check_scheduled_async())
+    return asyncio.run(_check_scheduled_async())
 
 
 async def _check_scheduled_async() -> dict:
     from sqlalchemy import select
-    from core.database import AsyncSessionLocal
+    from core.database import WorkerSessionLocal
     from models.content_post import ContentPost
 
     now = datetime.now(timezone.utc)
 
     # Usa sessao sem RLS para varrer todos os tenants (task global do Beat)
-    async with AsyncSessionLocal() as db:
+    async with WorkerSessionLocal() as db:
         result = await db.execute(
             select(ContentPost.id, ContentPost.tenant_id)
             .where(

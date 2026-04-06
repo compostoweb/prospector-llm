@@ -35,7 +35,7 @@ import structlog
 from sqlalchemy import select
 
 from core.config import settings
-from core.database import get_session
+from core.database import get_worker_session
 from core.redis_client import redis_client
 from integrations.context_fetcher import context_fetcher
 from integrations.llm import LLMRegistry
@@ -76,7 +76,7 @@ def dispatch_step(self, step_id: str, tenant_id: str) -> dict:
     Executa o envio de um step de cadência.
     Retorna dict com step_id, channel, status.
     """
-    return asyncio.get_event_loop().run_until_complete(_dispatch_async(step_id, tenant_id, self))
+    return asyncio.run(_dispatch_async(step_id, tenant_id, self))
 
 
 async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: ignore[type-arg]
@@ -90,7 +90,7 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
     tid = uuid.UUID(tenant_id)
     sid = uuid.UUID(step_id)
 
-    async for db in get_session(tid):
+    async for db in get_worker_session(tid):
         # ── Carrega step ─────────────────────────────────────────────
         step_result = await db.execute(select(CadenceStep).where(CadenceStep.id == sid))
         step = step_result.scalar_one_or_none()

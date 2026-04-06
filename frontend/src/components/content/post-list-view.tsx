@@ -30,6 +30,7 @@ import {
   type ContentPost,
 } from "@/lib/api/hooks/use-content"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,6 +38,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 export type SortKey = "recent" | "impressions" | "likes" | "comments" | "saves" | "engagement"
 
@@ -77,13 +88,156 @@ function getLinkedInUrl(urn: string | null): string | null {
 
 export function PostListView({ posts, sortBy, onSortChange }: PostListViewProps) {
   const [editPost, setEditPost] = useState<ContentPost | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+
   const sortedPosts = sortPosts(posts, sortBy)
+  const allSelected = sortedPosts.length > 0 && sortedPosts.every((p) => selectedIds.has(p.id))
+  const someSelected = !allSelected && sortedPosts.some((p) => selectedIds.has(p.id))
+
+  const approveMut = useApprovePost()
+  const scheduleMut = useSchedulePost()
+  const cancelMut = useCancelSchedule()
+  const deleteMut = useDeletePost()
+
+  function toggleAll() {
+    if (allSelected) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(sortedPosts.map((p) => p.id)))
+    }
+  }
+
+  function toggleOne(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  async function bulkApprove() {
+    const ids = sortedPosts
+      .filter((p) => selectedIds.has(p.id) && p.status === "draft")
+      .map((p) => p.id)
+    await Promise.all(ids.map((id) => approveMut.mutateAsync(id)))
+    setSelectedIds(new Set())
+  }
+
+  async function bulkSchedule() {
+    const ids = sortedPosts
+      .filter((p) => selectedIds.has(p.id) && p.status === "approved" && !!p.publish_date)
+      .map((p) => p.id)
+    await Promise.all(ids.map((id) => scheduleMut.mutateAsync(id)))
+    setSelectedIds(new Set())
+  }
+
+  async function bulkCancel() {
+    const ids = sortedPosts
+      .filter((p) => selectedIds.has(p.id) && p.status === "scheduled")
+      .map((p) => p.id)
+    await Promise.all(ids.map((id) => cancelMut.mutateAsync(id)))
+    setSelectedIds(new Set())
+  }
+
+  async function bulkDelete() {
+    const ids = Array.from(selectedIds)
+    await Promise.all(ids.map((id) => deleteMut.mutateAsync(id)))
+    setSelectedIds(new Set())
+    setShowDeleteConfirm(false)
+  }
+
+  const canApprove = sortedPosts.some((p) => selectedIds.has(p.id) && p.status === "draft")
+  const canSchedule = sortedPosts.some(
+    (p) => selectedIds.has(p.id) && p.status === "approved" && !!p.publish_date,
+  )
+  const canCancel = sortedPosts.some((p) => selectedIds.has(p.id) && p.status === "scheduled")
+
+  const gridCols =
+    "grid-cols-[32px_1fr_100px_90px_70px_70px_70px_70px_70px_36px_130px]"
 
   return (
     <>
+      {/* Bulk toolbar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-2 px-4 py-2 rounded-lg border border-(--border-default) bg-(--bg-surface) shadow-sm mb-2 text-xs">
+          <span className="text-(--text-secondary) font-medium mr-1">
+            {selectedIds.size} selecionado{selectedIds.size !== 1 ? "s" : ""}
+          </span>
+          <div className="flex items-center gap-1.5 flex-1">
+            {canApprove && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs gap-1.5"
+                onClick={bulkApprove}
+                disabled={approveMut.isPending}
+              >
+                <Check className="h-3 w-3" />
+                Aprovar
+              </Button>
+            )}
+            {canSchedule && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs gap-1.5"
+                onClick={bulkSchedule}
+                disabled={scheduleMut.isPending}
+              >
+                <Clock className="h-3 w-3" />
+                Agendar
+              </Button>
+            )}
+            {canCancel && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs gap-1.5"
+                onClick={bulkCancel}
+                disabled={cancelMut.isPending}
+              >
+                <XCircle className="h-3 w-3" />
+                Cancelar agendamento
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs gap-1.5 text-(--danger) hover:text-(--danger) border-(--danger) hover:border-(--danger)"
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={deleteMut.isPending}
+            >
+              <Trash2 className="h-3 w-3" />
+              Excluir
+            </Button>
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs text-(--text-tertiary)"
+            onClick={() => setSelectedIds(new Set())}
+          >
+            Limpar seleção
+          </Button>
+        </div>
+      )}
+
       <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) overflow-hidden shadow-sm">
         {/* Header */}
-        <div className="grid grid-cols-[1fr_100px_90px_70px_70px_70px_70px_70px_36px_130px] gap-2 px-4 py-2.5 border-b border-(--border-default) bg-(--bg-overlay) text-xs font-medium text-(--text-tertiary) uppercase tracking-wide">
+        <div
+          className={cn(
+            "grid gap-2 px-4 py-2.5 border-b border-(--border-default) bg-(--bg-overlay) text-xs font-medium text-(--text-tertiary) uppercase tracking-wide items-center",
+            gridCols,
+          )}
+        >
+          <Checkbox
+            checked={allSelected ? true : someSelected ? "indeterminate" : false}
+            onCheckedChange={toggleAll}
+            aria-label="Selecionar todos"
+            className="ml-0.5"
+          />
           <span>Post</span>
           <span>Status</span>
           <span>Pilar</span>
@@ -113,7 +267,14 @@ export function PostListView({ posts, sortBy, onSortChange }: PostListViewProps)
           </div>
         ) : (
           sortedPosts.map((post) => (
-            <PostRow key={post.id} post={post} onEdit={() => setEditPost(post)} />
+            <PostRow
+              key={post.id}
+              post={post}
+              onEdit={() => setEditPost(post)}
+              isSelected={selectedIds.has(post.id)}
+              onToggleSelect={() => toggleOne(post.id)}
+              gridCols={gridCols}
+            />
           ))
         )}
       </div>
@@ -127,6 +288,28 @@ export function PostListView({ posts, sortBy, onSortChange }: PostListViewProps)
           }}
         />
       )}
+
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir posts selecionados?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação não pode ser desfeita. {selectedIds.size} post
+              {selectedIds.size !== 1 ? "s" : ""} será{selectedIds.size !== 1 ? "ão" : ""}{" "}
+              permanentemente excluído{selectedIds.size !== 1 ? "s" : ""}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-(--danger) hover:bg-(--danger) text-white"
+              onClick={bulkDelete}
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }
@@ -179,7 +362,19 @@ const STATUS_TRANSITIONS: Record<
   failed: [],
 }
 
-function PostRow({ post, onEdit }: { post: ContentPost; onEdit: () => void }) {
+function PostRow({
+  post,
+  onEdit,
+  isSelected,
+  onToggleSelect,
+  gridCols,
+}: {
+  post: ContentPost
+  onEdit: () => void
+  isSelected: boolean
+  onToggleSelect: () => void
+  gridCols: string
+}) {
   const linkedInUrl = getLinkedInUrl(post.linkedin_post_urn)
   const dateStr = post.published_at ?? post.publish_date
 
@@ -209,7 +404,21 @@ function PostRow({ post, onEdit }: { post: ContentPost; onEdit: () => void }) {
   const transitions = STATUS_TRANSITIONS[post.status] ?? []
 
   return (
-    <div className="grid grid-cols-[1fr_100px_90px_70px_70px_70px_70px_70px_36px_130px] gap-2 px-4 py-3 border-b border-(--border-default) last:border-b-0 hover:bg-(--bg-overlay) transition-colors items-center text-xs">
+    <div
+      className={cn(
+        "grid gap-2 px-4 py-3 border-b border-(--border-default) last:border-b-0 hover:bg-(--bg-overlay) transition-colors items-center text-xs",
+        gridCols,
+        isSelected && "bg-(--accent-subtle)",
+      )}
+    >
+      {/* Checkbox */}
+      <Checkbox
+        checked={isSelected}
+        onCheckedChange={onToggleSelect}
+        aria-label="Selecionar post"
+        className="ml-0.5"
+      />
+
       {/* Title + date + time */}
       <div className="flex flex-col gap-0.5 min-w-0">
         <button

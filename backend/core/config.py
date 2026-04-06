@@ -97,6 +97,10 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str | None = None
     GEMINI_DEFAULT_MODEL: str = "gemini-2.5-flash"
 
+    # ── LLM — Anthropic ───────────────────────────────────────────────
+    ANTHROPIC_API_KEY: str | None = None
+    ANTHROPIC_DEFAULT_MODEL: str = "claude-sonnet-4-6"
+
     # ── LLM — Reply parser (config global, não por cadência) ──────────
     REPLY_PARSER_PROVIDER: str = "openai"
     REPLY_PARSER_MODEL: str = "gpt-4o-mini"

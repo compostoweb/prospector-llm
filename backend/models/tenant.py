@@ -17,7 +17,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base
@@ -107,6 +107,42 @@ class TenantIntegration(Base):
     limit_linkedin_connect: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
     limit_linkedin_dm: Mapped[int] = mapped_column(Integer, default=40, nullable=False)
     limit_email: Mapped[int] = mapped_column(Integer, default=300, nullable=False)
+
+    # ── LLM — padrão do sistema ───────────────────────────────────────
+    llm_default_provider: Mapped[str] = mapped_column(
+        String(50), default="openai", nullable=False,
+        comment="Provedor LLM padrão ao criar novas cadências",
+    )
+    llm_default_model: Mapped[str] = mapped_column(
+        String(100), default="gpt-4o-mini", nullable=False,
+        comment="Modelo LLM padrão ao criar novas cadências",
+    )
+    llm_default_temperature: Mapped[float] = mapped_column(
+        Float, default=0.7, nullable=False,
+        comment="Temperatura LLM padrão (0.0–1.0)",
+    )
+    llm_default_max_tokens: Mapped[int] = mapped_column(
+        Integer, default=1024, nullable=False,
+        comment="Max tokens LLM padrão (64–8192)",
+    )
+
+    # ── LLM — padrão Cold Email ───────────────────────────────────────
+    cold_email_llm_provider: Mapped[str] = mapped_column(
+        String(50), default="openai", nullable=False,
+        comment="Provedor LLM padrão para campanhas de cold email",
+    )
+    cold_email_llm_model: Mapped[str] = mapped_column(
+        String(100), default="gpt-4o-mini", nullable=False,
+        comment="Modelo LLM padrão para campanhas de cold email",
+    )
+    cold_email_llm_temperature: Mapped[float] = mapped_column(
+        Float, default=0.7, nullable=False,
+        comment="Temperatura LLM para cold email (0.0–1.0)",
+    )
+    cold_email_llm_max_tokens: Mapped[int] = mapped_column(
+        Integer, default=512, nullable=False,
+        comment="Max tokens LLM para cold email (64–8192)",
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

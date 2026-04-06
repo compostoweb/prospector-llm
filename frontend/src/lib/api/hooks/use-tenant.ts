@@ -22,6 +22,16 @@ export interface TenantIntegration {
   limit_linkedin_connect: number
   limit_linkedin_dm: number
   limit_email: number
+  // LLM — padrão do sistema
+  llm_default_provider: string
+  llm_default_model: string
+  llm_default_temperature: number
+  llm_default_max_tokens: number
+  // LLM — padrão Cold Email
+  cold_email_llm_provider: string
+  cold_email_llm_model: string
+  cold_email_llm_temperature: number
+  cold_email_llm_max_tokens: number
   created_at: string
 }
 
@@ -49,6 +59,16 @@ export interface UpdateIntegrationsBody {
   limit_linkedin_connect?: number
   limit_linkedin_dm?: number
   limit_email?: number
+  // LLM — padrão do sistema
+  llm_default_provider?: string
+  llm_default_model?: string
+  llm_default_temperature?: number
+  llm_default_max_tokens?: number
+  // LLM — padrão Cold Email
+  cold_email_llm_provider?: string
+  cold_email_llm_model?: string
+  cold_email_llm_temperature?: number
+  cold_email_llm_max_tokens?: number
 }
 
 // ── Hooks ─────────────────────────────────────────────────────────────

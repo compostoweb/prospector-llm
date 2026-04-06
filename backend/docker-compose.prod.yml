@@ -77,6 +77,19 @@ services:
     command: celery -A workers.celery_app worker -Q enrich -c 2 --loglevel=warning
     restart: always
 
+  worker-content:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    env_file: .env.prod
+    environment:
+      - ENV=prod
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A workers.celery_app worker -Q content -c 2 --loglevel=warning
+    restart: always
+
   beat:
     build:
       context: .

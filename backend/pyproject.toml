@@ -37,6 +37,9 @@ dependencies = [
     # NÃO usar google-generativeai — descontinuado em novembro/2025
     "google-genai>=1.0.0",
 
+    # Anthropic SDK oficial
+    "anthropic>=0.89.0",
+
     # Speechify / provedor de voz
     # ElevenLabs:  pip install elevenlabs>=1.9.0
     # PlayHT:      pip install pyht>=0.1.0

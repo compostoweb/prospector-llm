@@ -47,14 +47,14 @@ def warmup_tick() -> dict[str, Any]:
 
 
 async def _warmup_tick_async() -> dict[str, Any]:
-    from core.database import AsyncSessionLocal  # noqa: PLC0415
+    from core.database import WorkerSessionLocal  # noqa: PLC0415
     from core.redis_client import redis_client  # noqa: PLC0415
 
     today = date.today().isoformat()
     enqueued = 0
     skipped = 0
 
-    async with AsyncSessionLocal() as db:
+    async with WorkerSessionLocal() as db:
         # Busca todos os tenants ativos
         tenant_result = await db.execute(
             select(Tenant.id).where(Tenant.is_active.is_(True))
@@ -62,7 +62,7 @@ async def _warmup_tick_async() -> dict[str, Any]:
         tenant_ids = [row.id for row in tenant_result]
 
     for tenant_id in tenant_ids:
-        async with AsyncSessionLocal() as db:
+        async with WorkerSessionLocal() as db:
             # Busca campanhas ativas do tenant
             camp_result = await db.execute(
                 select(WarmupCampaign).where(
@@ -120,13 +120,13 @@ async def _warmup_run_campaign_async(
     tenant_id: str,
 ) -> dict[str, Any]:
     import uuid  # noqa: PLC0415
-    from core.database import AsyncSessionLocal  # noqa: PLC0415
+    from core.database import WorkerSessionLocal  # noqa: PLC0415
     from services.warmup_service import run_daily_warmup  # noqa: PLC0415
 
     _campaign_id = uuid.UUID(campaign_id)
     _tenant_id = uuid.UUID(tenant_id)
 
-    async with AsyncSessionLocal() as db:
+    async with WorkerSessionLocal() as db:
         # Injeta tenant para RLS
         await db.execute(
             __import__("sqlalchemy").text(

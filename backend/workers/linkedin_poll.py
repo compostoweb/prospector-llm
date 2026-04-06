@@ -41,7 +41,7 @@ _CURSOR_TTL = 60 * 60 * 24 * 7  # 7 dias
 )
 def linkedin_poll_tick(self) -> dict:
     """Polling de inbox LinkedIn para contas nativas."""
-    return asyncio.get_event_loop().run_until_complete(_poll_async())
+    return asyncio.run(_poll_async())
 
 
 async def _poll_async() -> dict:

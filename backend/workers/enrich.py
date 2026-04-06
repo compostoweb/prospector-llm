@@ -56,7 +56,7 @@ def enrich_pending_batch(
 
     Retorna: {"processed": N, "enriched": M, "failed": K}
     """
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         _enrich_batch_async(tenant_id, batch_size, self)
     )
 
@@ -79,7 +79,7 @@ def enrich_lead(
 
     Retorna: {"lead_id": lead_id, "status": "enriched"|"failed"}
     """
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         _enrich_single_async(lead_id, tenant_id, self)
     )
 
@@ -89,14 +89,14 @@ async def _enrich_single_async(
     tenant_id: str,
     task,
 ) -> dict:
-    from core.database import get_session
+    from core.database import get_worker_session
 
     tid = uuid.UUID(tenant_id)
     lid = uuid.UUID(lead_id)
     email_finder = EmailFinderService()
 
     try:
-        async for db in get_session(tid):
+        async for db in get_worker_session(tid):
             result = await db.execute(
                 select(Lead).where(Lead.id == lid, Lead.tenant_id == tid)
             )
@@ -128,7 +128,7 @@ async def _enrich_batch_async(
     batch_size: int,
     task,
 ) -> dict:
-    from core.database import get_session
+    from core.database import get_worker_session
 
     tid = uuid.UUID(tenant_id)
     email_finder = EmailFinderService()
@@ -137,7 +137,7 @@ async def _enrich_batch_async(
     failed_count = 0
 
     try:
-        async for db in get_session(tid):
+        async for db in get_worker_session(tid):
             # Busca lote de leads RAW
             result = await db.execute(
                 select(Lead)

@@ -118,3 +118,29 @@ class Lead(Base, TenantMixin, TimestampMixin):
         default=None,
         comment="Se preenchido, e-mails para este lead são pulados (bounce detectado).",
     )
+
+    # ── Análise LLM (Anthropic Batch API) ────────────────────────────
+    llm_icp_score: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+        default=None,
+        comment="Score de fit ICP (0–100) avaliado pelo LLM via Batch API",
+    )
+    llm_icp_reasoning: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        default=None,
+        comment="Justificativa do score de ICP gerada pelo LLM",
+    )
+    llm_personalization_notes: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        default=None,
+        comment="Ângulos de personalização sugeridos pelo LLM para abordagem",
+    )
+    llm_analyzed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+        comment="Timestamp da última análise LLM via Batch API",
+    )

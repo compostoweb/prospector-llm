@@ -1,8 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
-import { Mail, Send, Eye, MessageSquare, UserMinus, Plus, FileText, Flame } from "lucide-react"
+import { Mail, Send, Eye, MessageSquare, UserMinus, Plus, FileText, Flame, Sparkles, Loader2 } from "lucide-react"
 import {
   LineChart,
   Line,
@@ -18,9 +18,25 @@ import {
   useEmailCadences,
   useEmailOverTime,
 } from "@/lib/api/hooks/use-email-analytics"
+import { useTenant, useUpdateIntegrations } from "@/lib/api/hooks/use-tenant"
+import { LLMConfigForm, type LLMConfig } from "@/components/cadencias/llm-config-form"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
 type Days = 7 | 30 | 90
+
+const DEFAULT_COLD_EMAIL_LLM = {
+  llm_provider: "openai" as const,
+  llm_model: "gpt-4o-mini",
+  llm_temperature: 0.7,
+  llm_max_tokens: 512,
+}
 
 function KPICard({
   icon: Icon,
@@ -54,8 +70,91 @@ function KPICard({
   )
 }
 
+// ── Modal de configuração de IA ────────────────────────────────────────
+
+function ColdEmailAIModal({
+  open,
+  onClose,
+}: {
+  open: boolean
+  onClose: () => void
+}) {
+  const { data: tenant } = useTenant()
+  const updateIntegrations = useUpdateIntegrations()
+  const integration = tenant?.integration
+
+  const [llmConfig, setLlmConfig] = useState<LLMConfig>(DEFAULT_COLD_EMAIL_LLM)
+
+  // Sincroniza quando os dados do tenant carregam
+  useEffect(() => {
+    if (integration) {
+      setLlmConfig({
+        llm_provider: (integration.cold_email_llm_provider ?? DEFAULT_COLD_EMAIL_LLM.llm_provider) as "openai" | "gemini",
+        llm_model: integration.cold_email_llm_model ?? DEFAULT_COLD_EMAIL_LLM.llm_model,
+        llm_temperature: integration.cold_email_llm_temperature ?? DEFAULT_COLD_EMAIL_LLM.llm_temperature,
+        llm_max_tokens: integration.cold_email_llm_max_tokens ?? DEFAULT_COLD_EMAIL_LLM.llm_max_tokens,
+      })
+    }
+  }, [integration])
+
+  async function handleSave() {
+    try {
+      await updateIntegrations.mutateAsync({
+        cold_email_llm_provider: llmConfig.llm_provider,
+        cold_email_llm_model: llmConfig.llm_model,
+        cold_email_llm_temperature: llmConfig.llm_temperature,
+        cold_email_llm_max_tokens: llmConfig.llm_max_tokens,
+      })
+      toast.success("Configuração de IA para Cold Email salva.")
+      onClose()
+    } catch {
+      toast.error("Erro ao salvar configuração.")
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles size={16} className="text-(--accent)" />
+            IA — Cold Email
+          </DialogTitle>
+          <p className="text-xs text-(--text-secondary)">
+            Modelo padrão usado ao criar novas campanhas de e-mail.
+          </p>
+        </DialogHeader>
+        <div className="py-2">
+          <LLMConfigForm value={llmConfig} onChange={setLlmConfig} />
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-(--border-default) px-4 py-2 text-sm text-(--text-secondary) hover:bg-(--bg-overlay)"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={updateIntegrations.isPending}
+            className="flex items-center gap-1.5 rounded-md bg-(--accent) px-4 py-2 text-sm font-medium text-(--accent-fg) hover:opacity-90 disabled:opacity-50"
+          >
+            {updateIntegrations.isPending ? <Loader2 size={14} className="animate-spin" /> : null}
+            Salvar configuração
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── Página principal ──────────────────────────────────────────────────
+
 export default function ColdEmailPage() {
   const [days, setDays] = useState<Days>(30)
+  const [aiModalOpen, setAiModalOpen] = useState(false)
   const { data: stats, isLoading: loadingStats } = useEmailStats(days)
   const { data: cadences, isLoading: loadingCadences } = useEmailCadences(days)
   const { data: overTime } = useEmailOverTime(days)
@@ -83,6 +182,14 @@ export default function ColdEmailPage() {
             <FileText size={14} aria-hidden="true" />
             Templates
           </Link>
+          <button
+            type="button"
+            onClick={() => setAiModalOpen(true)}
+            className="flex items-center gap-1.5 rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-sm font-medium text-(--text-primary) transition-colors hover:bg-(--bg-overlay)"
+          >
+            <Sparkles size={14} aria-hidden="true" />
+            IA
+          </button>
           <Link
             href="/cadencias/nova?preset=cold-email"
             className="flex items-center gap-1.5 rounded-md bg-(--accent) px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-(--accent-hover)"
@@ -93,7 +200,8 @@ export default function ColdEmailPage() {
         </div>
       </div>
 
-      {/* Filtro de período */}
+      <ColdEmailAIModal open={aiModalOpen} onClose={() => setAiModalOpen(false)} />
+
       <div className="flex gap-1 rounded-md border border-(--border-default) bg-(--bg-overlay) p-1 w-fit">
         {([7, 30, 90] as Days[]).map((d) => (
           <button

@@ -1,15 +1,39 @@
 "use client"
 
-import { useState } from "react"
+import React, { useState, useRef } from "react"
+import { localDateToUTC } from "@/lib/date"
+import {
+  addMonths,
+  startOfMonth,
+  startOfDay,
+  endOfMonth,
+  startOfWeek,
+  eachWeekOfInterval,
+  endOfWeek,
+  addDays,
+  setHours,
+  setMinutes,
+  isBefore,
+  isAfter,
+  format,
+  isSameMonth,
+} from "date-fns"
+import { ptBR } from "date-fns/locale"
 import {
   Sparkles,
   ArrowLeft,
   ArrowRight,
   Check,
-  Copy,
   RefreshCw,
   AlertTriangle,
   Calendar,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  Shuffle,
+  ArrowLeftRight,
 } from "lucide-react"
 import {
   useGeneratePost,
@@ -18,11 +42,11 @@ import {
   useContentThemes,
   useMarkThemeUsed,
   useThemeSuggestions,
+  useVaryTheme,
   useApprovePost,
   useSchedulePost,
   type PostPillar,
   type HookType,
-  type GeneratePostVariation,
   type ContentTheme,
 } from "@/lib/api/hooks/use-content"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -43,12 +67,6 @@ import { cn } from "@/lib/utils"
 
 // ── Constants ─────────────────────────────────────────────────────────
 
-const PILLAR_OPTIONS: { value: PostPillar; label: string; desc: string }[] = [
-  { value: "authority", label: "Autoridade", desc: "Ponto de vista diferenciado" },
-  { value: "case", label: "Caso", desc: "História com resultado concreto" },
-  { value: "vision", label: "Visão", desc: "Tendência ou futuro do setor" },
-]
-
 const HOOK_OPTIONS: { value: HookType; label: string }[] = [
   { value: "loop_open", label: "Loop aberto" },
   { value: "contrarian", label: "Contrário" },
@@ -58,7 +76,18 @@ const HOOK_OPTIONS: { value: HookType; label: string }[] = [
   { value: "data", label: "Dado" },
 ]
 
-const STEP_LABELS = ["Tema", "Configurar", "Variações", "Editar", "Agendar"]
+const STEP_LABELS = ["Planejar", "Temas", "Configurar", "Gerar", "Revisar", "Agendar"]
+
+const PILLAR_CYCLE: PostPillar[] = ["authority", "case", "vision"]
+
+// Day-of-week offsets from Monday (weekStartsOn: 1) by posts/week
+const DAY_PREFS: Record<number, number[]> = {
+  1: [1], // Tue
+  2: [1, 3], // Tue, Thu
+  3: [0, 1, 3], // Mon, Tue, Thu
+  4: [0, 1, 2, 3], // Mon–Thu
+  5: [0, 1, 2, 3, 4], // Mon–Fri
+}
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -67,45 +96,139 @@ interface AiContentWizardProps {
   onOpenChange: (open: boolean) => void
 }
 
-interface WizardState {
-  // Step 1: Theme
-  themeSource: "bank" | "suggestions" | "free"
-  selectedThemeId: string | null
-  freeTheme: string
+interface PlanSlot {
+  weekNum: number
   pillar: PostPillar
-  // Step 2: Config
+  themeSource: "bank" | "free"
+  themeId: string | null
+  freeTheme: string
+  generatedText: string | null
+  hookUsed: string | null
+  charCount: number
+  violations: string[]
+  editedBody: string | null
+  title: string
+  publishDate: string
+  genStatus: "pending" | "done" | "error"
+  genError: string | null
+}
+
+interface WizardState {
+  targetMonth: string
+  postsPerWeek: number
+  planSlots: PlanSlot[]
   hookType: HookType | "auto"
-  variations: number
   temperature: number
   useReferences: boolean
-  // Step 3: Variations
-  results: GeneratePostVariation[]
-  chosenIndex: number | null
-  // Step 4: Edit
-  body: string
-  title: string
-  hashtags: string
-  // Step 5: Schedule
-  publishDate: string
-  weekNumber: string
+  generating: boolean
+  genProgress: number
+  expandedSlot: number | null
 }
 
 const INITIAL_STATE: WizardState = {
-  themeSource: "bank",
-  selectedThemeId: null,
-  freeTheme: "",
-  pillar: "authority",
+  targetMonth: "",
+  postsPerWeek: 2,
+  planSlots: [],
   hookType: "auto",
-  variations: 3,
   temperature: 0.8,
   useReferences: false,
-  results: [],
-  chosenIndex: null,
-  body: "",
-  title: "",
-  hashtags: "",
-  publishDate: "",
-  weekNumber: "",
+  generating: false,
+  genProgress: 0,
+  expandedSlot: null,
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────
+
+function getMonthOptions(): { value: string; label: string }[] {
+  const now = new Date()
+  return [0, 1, 2, 3].map((offset) => {
+    const date = addMonths(now, offset)
+    return {
+      value: format(date, "yyyy-MM"),
+      label: format(date, "MMMM yyyy", { locale: ptBR }),
+    }
+  })
+}
+
+function getWeeksOfMonth(monthStr: string): { weekNum: number; start: Date; end: Date }[] {
+  const [y, m] = monthStr.split("-").map(Number)
+  const ms = startOfMonth(new Date(y!, m! - 1, 1))
+  const me = endOfMonth(ms)
+  const weeks = eachWeekOfInterval({ start: ms, end: me }, { weekStartsOn: 1 })
+  return weeks.map((ws, i) => ({
+    weekNum: i + 1,
+    start: isBefore(ws, ms) ? ms : ws,
+    end: isAfter(endOfWeek(ws, { weekStartsOn: 1 }), me) ? me : endOfWeek(ws, { weekStartsOn: 1 }),
+  }))
+}
+
+function buildPlanSlots(monthStr: string, postsPerWeek: number): PlanSlot[] {
+  const weeks = getWeeksOfMonth(monthStr)
+  const now = new Date()
+  const [y, m] = monthStr.split("-").map(Number)
+  const monthDate = new Date(y!, m! - 1, 1)
+  const isCurrentMonth = isSameMonth(now, monthDate)
+  // For the current month, find which week we're in and skip past weeks
+  const currentWeekStart = startOfWeek(now, { weekStartsOn: 1 })
+
+  const slots: PlanSlot[] = []
+  let pi = 0
+  for (const week of weeks) {
+    // Skip weeks with no plannable future days (end is today or earlier)
+    const tomorrow = addDays(startOfDay(now), 1)
+    if (isCurrentMonth && isBefore(week.end, tomorrow)) continue
+    for (let p = 0; p < postsPerWeek; p++) {
+      slots.push({
+        weekNum: week.weekNum,
+        pillar: PILLAR_CYCLE[pi % 3]!,
+        themeSource: "free",
+        themeId: null,
+        freeTheme: "",
+        generatedText: null,
+        hookUsed: null,
+        charCount: 0,
+        violations: [],
+        editedBody: null,
+        title: "",
+        publishDate: "",
+        genStatus: "pending",
+        genError: null,
+      })
+      pi++
+    }
+  }
+  return slots
+}
+
+function buildSuggestedDates(
+  slots: PlanSlot[],
+  monthStr: string,
+  postsPerWeek: number,
+): PlanSlot[] {
+  const now = new Date()
+  const [y, m] = monthStr.split("-").map(Number)
+  const ms = startOfMonth(new Date(y!, m! - 1, 1))
+  const me = endOfMonth(ms)
+  const weeks = eachWeekOfInterval({ start: ms, end: me }, { weekStartsOn: 1 })
+  const prefs = DAY_PREFS[postsPerWeek] ?? [1]
+  const updated = slots.map((s) => ({ ...s }))
+  let si = 0
+  for (const ws of weeks) {
+    for (const dayOff of prefs) {
+      if (si >= updated.length) break
+      const date = addDays(ws, dayOff)
+      if (isBefore(date, ms) || isAfter(date, me)) continue
+      const dateAt9 = setHours(setMinutes(date, 0), 9)
+      // Skip dates already in the past
+      if (isBefore(dateAt9, now)) continue
+      updated[si] = {
+        ...updated[si]!,
+        publishDate: format(dateAt9, "yyyy-MM-dd'T'HH:mm"),
+      }
+      si++
+    }
+  }
+  return updated
 }
 
 // ── Main Component ────────────────────────────────────────────────────
@@ -113,9 +236,9 @@ const INITIAL_STATE: WizardState = {
 export function AiContentWizard({ open, onOpenChange }: AiContentWizardProps) {
   const [step, setStep] = useState(1)
   const [state, setState] = useState<WizardState>(INITIAL_STATE)
-  const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
-  const [improveOpen, setImproveOpen] = useState(false)
-  const [instruction, setInstruction] = useState("")
+  const [improveInstruction, setImproveInstruction] = useState("")
+  const [creatingProgress, setCreatingProgress] = useState(0)
+  const [isCreating, setIsCreating] = useState(false)
 
   const generate = useGeneratePost()
   const improve = useImprovePost()
@@ -124,128 +247,231 @@ export function AiContentWizard({ open, onOpenChange }: AiContentWizardProps) {
   const approvePost = useApprovePost()
   const schedulePost = useSchedulePost()
   const { data: themes } = useContentThemes({ used: false })
-  const { data: suggestions } = useThemeSuggestions()
+  const { data: allThemes } = useContentThemes()
+
+  const abortRef = useRef(false)
 
   function update(partial: Partial<WizardState>) {
     setState((prev) => ({ ...prev, ...partial }))
   }
 
+  function updateSlot(index: number, partial: Partial<PlanSlot>) {
+    setState((prev) => {
+      const slots = prev.planSlots.map((s, i) => (i === index ? { ...s, ...partial } : s))
+      return { ...prev, planSlots: slots }
+    })
+  }
+
   function handleClose() {
+    abortRef.current = true
     onOpenChange(false)
     setTimeout(() => {
       setStep(1)
       setState(INITIAL_STATE)
-      setCopiedIdx(null)
-      setImproveOpen(false)
-      setInstruction("")
+      setImproveInstruction("")
+      setCreatingProgress(0)
+      setIsCreating(false)
+      abortRef.current = false
     }, 200)
-  }
-
-  function getThemeText(): string {
-    if (state.themeSource === "bank" || state.themeSource === "suggestions") {
-      const t =
-        themes?.find((th) => th.id === state.selectedThemeId) ??
-        suggestions?.find((s) => s.theme.id === state.selectedThemeId)?.theme
-      return t?.title ?? ""
-    }
-    return state.freeTheme
   }
 
   function canAdvance(): boolean {
     switch (step) {
       case 1:
-        return state.themeSource === "free"
-          ? state.freeTheme.trim().length >= 3
-          : !!state.selectedThemeId
+        return state.targetMonth !== "" && state.planSlots.length > 0
       case 2:
-        return true
+        return state.planSlots.every(
+          (s) =>
+            (s.themeSource === "bank" && s.themeId) ||
+            (s.themeSource === "free" && s.freeTheme.trim().length >= 3),
+        )
       case 3:
-        return state.chosenIndex !== null
+        return true
       case 4:
-        return state.body.trim().length > 0 && state.title.trim().length > 0
+        return !state.generating && state.planSlots.some((s) => s.genStatus === "done")
       case 5:
+        return state.planSlots.some((s) => s.genStatus === "done")
+      case 6:
         return true
       default:
         return false
     }
   }
 
-  async function handleGenerate() {
-    const res = await generate.mutateAsync({
-      theme: getThemeText(),
-      pillar: state.pillar,
-      hook_type: state.hookType === "auto" ? null : state.hookType,
-      variations: state.variations,
-      use_references: state.useReferences,
-      temperature: state.temperature,
-    })
-    update({ results: res.variations, chosenIndex: null })
-    setStep(3)
-  }
+  // ── Batch generation ──────────────────────────────────
 
-  function handleChooseVariation(idx: number) {
-    const variation = state.results[idx]
-    if (!variation) return
-    update({
-      chosenIndex: idx,
-      body: variation.text,
-      title: state.title || getThemeText().slice(0, 80),
-    })
-    setStep(4)
-  }
+  async function startGeneration() {
+    const CONCURRENCY = 3
+    const slotsSnapshot = state.planSlots
+    setState((prev) => ({ ...prev, generating: true, genProgress: 0 }))
+    abortRef.current = false
 
-  async function handleCopy(idx: number) {
-    const variation = state.results[idx]
-    if (!variation) return
-    await navigator.clipboard.writeText(variation.text)
-    setCopiedIdx(idx)
-    setTimeout(() => setCopiedIdx(null), 2000)
-  }
+    const pending = slotsSnapshot
+      .map((s, i) => ({ slot: s, index: i }))
+      .filter(({ slot }) => slot.genStatus !== "done")
 
-  async function handleImprove() {
-    if (!instruction.trim()) return
-    const res = await improve.mutateAsync({ body: state.body, instruction })
-    update({ body: res.text })
-    setImproveOpen(false)
-    setInstruction("")
-  }
+    let done = 0
+    for (let i = 0; i < pending.length; i += CONCURRENCY) {
+      if (abortRef.current) break
+      const chunk = pending.slice(i, i + CONCURRENCY)
+      const results = await Promise.allSettled(
+        chunk.map(async ({ slot, index }) => {
+          const themeText =
+            slot.themeSource === "bank"
+              ? (themes?.find((t) => t.id === slot.themeId)?.title ?? slot.freeTheme)
+              : slot.freeTheme
+          const res = await generate.mutateAsync({
+            theme: themeText,
+            pillar: slot.pillar,
+            hook_type: state.hookType === "auto" ? null : state.hookType,
+            variations: 1,
+            use_references: state.useReferences,
+            temperature: state.temperature,
+          })
+          const v = res.variations[0]
+          if (!v) throw new Error("Nenhuma variação retornada")
+          return { index, variation: v }
+        }),
+      )
 
-  async function handleCreate(withDate: boolean) {
-    const hookUsed =
-      state.chosenIndex !== null ? state.results[state.chosenIndex]?.hook_type_used : null
-    const createdPost = await createPost.mutateAsync({
-      title: state.title,
-      body: state.body,
-      pillar: state.pillar,
-      hook_type: (hookUsed as HookType) || null,
-      hashtags: state.hashtags || null,
-      character_count: state.body.length,
-      publish_date: withDate && state.publishDate ? state.publishDate : null,
-      week_number: state.weekNumber ? parseInt(state.weekNumber, 10) : null,
-    })
-    // Auto-approve + schedule when date is provided
-    if (withDate && state.publishDate) {
-      try {
-        await approvePost.mutateAsync(createdPost.id)
-        await schedulePost.mutateAsync(createdPost.id)
-      } catch {
-        // post created as draft, user can schedule manually
-      }
+      results.forEach((r, j) => {
+        done++
+        if (r.status === "fulfilled") {
+          const { index, variation } = r.value
+          const slot = slotsSnapshot[index]!
+          updateSlot(index, {
+            generatedText: variation.text,
+            hookUsed: variation.hook_type_used,
+            charCount: variation.character_count,
+            violations: variation.violations,
+            genStatus: "done",
+            genError: null,
+            title: slot.freeTheme,
+          })
+        } else {
+          const failedItem = chunk[j]
+          if (failedItem) {
+            updateSlot(failedItem.index, {
+              genStatus: "error",
+              genError: r.reason instanceof Error ? r.reason.message : "Erro desconhecido",
+            })
+          }
+        }
+        setState((prev) => ({ ...prev, genProgress: done }))
+      })
     }
-    if (state.selectedThemeId) {
-      try {
-        await markThemeUsed.mutateAsync({ themeId: state.selectedThemeId, postId: createdPost.id })
-      } catch {
-        // não bloqueia criação
-      }
+
+    setState((prev) => ({ ...prev, generating: false }))
+  }
+
+  // ── Retry single ──
+
+  async function handleRetrySlot(index: number) {
+    const slot = state.planSlots[index]
+    if (!slot) return
+    updateSlot(index, { genStatus: "pending", genError: null })
+
+    const themeText =
+      slot.themeSource === "bank"
+        ? (themes?.find((t) => t.id === slot.themeId)?.title ?? slot.freeTheme)
+        : slot.freeTheme
+
+    try {
+      const res = await generate.mutateAsync({
+        theme: themeText,
+        pillar: slot.pillar,
+        hook_type: state.hookType === "auto" ? null : state.hookType,
+        variations: 1,
+        use_references: state.useReferences,
+        temperature: state.temperature,
+      })
+      const v = res.variations[0]
+      if (!v) throw new Error("Nenhuma variação retornada")
+      updateSlot(index, {
+        generatedText: v.text,
+        hookUsed: v.hook_type_used,
+        charCount: v.character_count,
+        violations: v.violations,
+        genStatus: "done",
+        genError: null,
+        title: slot.freeTheme,
+      })
+    } catch (err) {
+      updateSlot(index, {
+        genStatus: "error",
+        genError: err instanceof Error ? err.message : "Erro desconhecido",
+      })
     }
+  }
+
+  // ── Improve slot ──
+
+  async function handleImproveSlot(index: number) {
+    if (!improveInstruction.trim()) return
+    const slot = state.planSlots[index]
+    if (!slot) return
+    const body = slot.editedBody ?? slot.generatedText ?? ""
+    const res = await improve.mutateAsync({ body, instruction: improveInstruction })
+    updateSlot(index, { editedBody: res.text, charCount: res.character_count })
+    setImproveInstruction("")
+  }
+
+  // ── Re-generate single ──
+
+  async function handleRegenSlot(index: number) {
+    updateSlot(index, { genStatus: "pending", genError: null, editedBody: null })
+    await handleRetrySlot(index)
+  }
+
+  // ── Create all ──
+
+  async function handleCreateAll(withDates: boolean) {
+    setIsCreating(true)
+    setCreatingProgress(0)
+
+    const doneSlots = state.planSlots.filter((s) => s.genStatus === "done")
+    let done = 0
+
+    for (const slot of doneSlots) {
+      try {
+        const body = slot.editedBody ?? slot.generatedText ?? ""
+        const createdPost = await createPost.mutateAsync({
+          title: slot.title,
+          body,
+          pillar: slot.pillar,
+          hook_type: (slot.hookUsed as HookType) || null,
+          character_count: body.length,
+          publish_date: withDates && slot.publishDate ? localDateToUTC(slot.publishDate) : null,
+        })
+        if (withDates && slot.publishDate) {
+          try {
+            await approvePost.mutateAsync(createdPost.id)
+            await schedulePost.mutateAsync(createdPost.id)
+          } catch {
+            // Created as draft if scheduling fails
+          }
+        }
+        if (slot.themeId) {
+          try {
+            await markThemeUsed.mutateAsync({ themeId: slot.themeId, postId: createdPost.id })
+          } catch {
+            // Non-blocking
+          }
+        }
+      } catch {
+        // Skip failed slot
+      }
+      done++
+      setCreatingProgress(done)
+    }
+
     handleClose()
   }
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="max-w-5xl max-h-[95vh] overflow-y-auto min-h-[50vh]">
+        <DialogHeader className="pb-4">
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-(--accent)" />
             Planejar e gerar com IA
@@ -295,51 +521,45 @@ export function AiContentWizard({ open, onOpenChange }: AiContentWizardProps) {
 
         {/* Step Content */}
         <div className="min-h-75">
-          {step === 1 && (
-            <ThemeStep
-              state={state}
-              update={update}
-              themes={themes ?? []}
-              suggestions={suggestions ?? []}
-            />
-          )}
+          {step === 1 && <PlanStep state={state} update={update} />}
           {step === 2 && (
-            <ConfigStep
+            <ThemePlanStep
               state={state}
-              update={update}
-              themeText={getThemeText()}
-              isGenerating={generate.isPending}
-              onGenerate={handleGenerate}
-              generateError={generate.isError}
+              updateSlot={updateSlot}
+              themes={themes ?? []}
+              allThemes={allThemes ?? []}
             />
           )}
-          {step === 3 && (
-            <VariationsStep
-              results={state.results}
-              copiedIdx={copiedIdx}
-              onChoose={handleChooseVariation}
-              onCopy={handleCopy}
-              onRegenerate={() => setStep(2)}
-            />
-          )}
-          {step === 4 && (
-            <EditStep
+          {step === 3 && <BatchConfigStep state={state} update={update} />}
+          {step === 4 && <BatchGenerateStep state={state} onRetry={handleRetrySlot} />}
+          {step === 5 && (
+            <BatchReviewStep
               state={state}
-              update={update}
-              improveOpen={improveOpen}
-              setImproveOpen={setImproveOpen}
-              instruction={instruction}
-              setInstruction={setInstruction}
-              onImprove={handleImprove}
+              updateSlot={updateSlot}
+              expandedSlot={state.expandedSlot}
+              setExpandedSlot={(idx) => update({ expandedSlot: idx })}
+              improveInstruction={improveInstruction}
+              setImproveInstruction={setImproveInstruction}
+              onImprove={handleImproveSlot}
+              onRegen={handleRegenSlot}
               isImproving={improve.isPending}
             />
           )}
-          {step === 5 && (
-            <ScheduleStep
+          {step === 6 && (
+            <BatchScheduleStep
               state={state}
-              update={update}
-              isCreating={createPost.isPending}
-              onCreate={handleCreate}
+              updateSlot={updateSlot}
+              onSuggestDates={() => {
+                const updated = buildSuggestedDates(
+                  state.planSlots,
+                  state.targetMonth,
+                  state.postsPerWeek,
+                )
+                update({ planSlots: updated })
+              }}
+              isCreating={isCreating}
+              creatingProgress={creatingProgress}
+              onCreate={handleCreateAll}
             />
           )}
         </div>
@@ -347,7 +567,7 @@ export function AiContentWizard({ open, onOpenChange }: AiContentWizardProps) {
         {/* Footer Navigation */}
         <div className="flex items-center justify-between pt-3 border-t border-(--border-subtle)">
           <div>
-            {step > 1 && step !== 3 && (
+            {step > 1 && !state.generating && !isCreating && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -358,27 +578,78 @@ export function AiContentWizard({ open, onOpenChange }: AiContentWizardProps) {
                 Voltar
               </Button>
             )}
-            {step === 3 && (
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs"
+              onClick={handleClose}
+              disabled={state.generating || isCreating}
+            >
+              Cancelar
+            </Button>
+            {step >= 4 && step < 6 && !state.generating && (
               <Button
                 variant="ghost"
                 size="sm"
-                className="gap-1 text-xs"
-                onClick={() => setStep(1)}
+                className="text-xs"
+                onClick={() => {
+                  abortRef.current = true
+                  setState((prev) => ({
+                    ...prev,
+                    planSlots: prev.planSlots.map((s) => ({
+                      ...s,
+                      genStatus: "pending" as const,
+                      genError: null,
+                      generatedText: null,
+                      editedBody: null,
+                    })),
+                    generating: false,
+                    genProgress: 0,
+                  }))
+                  setStep(1)
+                }}
               >
-                <ArrowLeft className="h-3.5 w-3.5" />
                 Recomeçar
               </Button>
             )}
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="text-xs" onClick={handleClose}>
-              Cancelar
-            </Button>
-            {(step === 1 || step === 4) && (
+            {step <= 2 && (
               <Button
                 size="sm"
                 className="gap-1 text-xs"
                 onClick={() => setStep(step + 1)}
+                disabled={!canAdvance()}
+              >
+                Próximo
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {step === 3 && (
+              <Button
+                size="sm"
+                className="gap-1 text-xs"
+                onClick={() => {
+                  setStep(4)
+                  startGeneration()
+                }}
+                disabled={!canAdvance()}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                Gerar posts
+              </Button>
+            )}
+            {step === 4 && !state.generating && canAdvance() && (
+              <Button size="sm" className="gap-1 text-xs" onClick={() => setStep(5)}>
+                Próximo
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {step === 5 && (
+              <Button
+                size="sm"
+                className="gap-1 text-xs"
+                onClick={() => setStep(6)}
                 disabled={!canAdvance()}
               >
                 Próximo
@@ -392,172 +663,426 @@ export function AiContentWizard({ open, onOpenChange }: AiContentWizardProps) {
   )
 }
 
-// ── Step 1: Theme ─────────────────────────────────────────────────────
+// ── Step 1: Plan ──────────────────────────────────────────────────────
 
-interface ThemeStepProps {
+interface PlanStepProps {
   state: WizardState
   update: (p: Partial<WizardState>) => void
-  themes: ContentTheme[]
-  suggestions: { theme: ContentTheme; reason: string; lead_count: number; sector: string }[]
 }
 
-function ThemeStep({ state, update, themes, suggestions }: ThemeStepProps) {
+function PlanStep({ state, update }: PlanStepProps) {
+  const monthOptions = getMonthOptions()
+
+  function handleMonthChange(month: string) {
+    const slots = month ? buildPlanSlots(month, state.postsPerWeek) : []
+    update({ targetMonth: month, planSlots: slots })
+  }
+
+  function handlePostsPerWeekChange(n: number) {
+    const slots = state.targetMonth ? buildPlanSlots(state.targetMonth, n) : []
+    update({ postsPerWeek: n, planSlots: slots })
+  }
+
+  // Check if current month is selected
+  const isCurrentMonth = state.targetMonth === format(new Date(), "yyyy-MM")
+
+  // Total weeks in month vs slots generated (to show skipped weeks info)
+  const totalWeeks = state.targetMonth ? getWeeksOfMonth(state.targetMonth).length : 0
+
+  // Group by week for preview
+  const weekGroups = new Map<number, PlanSlot[]>()
+  for (const s of state.planSlots) {
+    const arr = weekGroups.get(s.weekNum) ?? []
+    arr.push(s)
+    weekGroups.set(s.weekNum, arr)
+  }
+
+  const skippedWeeks = totalWeeks - weekGroups.size
+
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-(--text-secondary)">
-        Escolha um tema do banco, use uma sugestão inteligente ou escreva livremente.
+        Selecione o mês e quantos posts por semana deseja gerar.
       </p>
 
-      {/* Source tabs */}
-      <div className="flex items-center gap-1 rounded-md border border-(--border-default) p-0.5 w-fit">
-        {(
-          [
-            { key: "bank", label: "Banco de temas" },
-            { key: "suggestions", label: "Sugestões IA" },
-            { key: "free", label: "Tema livre" },
-          ] as const
-        ).map(({ key, label }) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => update({ themeSource: key, selectedThemeId: null })}
-            className={cn(
-              "text-xs px-3 py-1.5 rounded transition-colors",
-              state.themeSource === key
-                ? "bg-(--accent) text-white"
-                : "text-(--text-secondary) hover:bg-(--bg-overlay)",
-            )}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-1.5">
+          <Label>Mês alvo</Label>
+          <Select value={state.targetMonth} onValueChange={handleMonthChange}>
+            <SelectTrigger className="text-sm">
+              <SelectValue placeholder="Selecione o mês" />
+            </SelectTrigger>
+            <SelectContent>
+              {monthOptions.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  <span className="capitalize">{o.label}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-1.5">
+          <Label>Posts por semana</Label>
+          <Select
+            value={String(state.postsPerWeek)}
+            onValueChange={(v) => handlePostsPerWeekChange(parseInt(v, 10))}
           >
-            {label}
-          </button>
-        ))}
+            <SelectTrigger className="text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <SelectItem key={n} value={String(n)}>
+                  {n} post{n > 1 ? "s" : ""} / semana
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
-      {/* Bank */}
-      {state.themeSource === "bank" && (
-        <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
-          {themes.length === 0 ? (
-            <p className="text-xs text-(--text-tertiary) py-4 text-center">
-              Nenhum tema disponível. Crie temas na aba Temas ou use tema livre.
+      {state.planSlots.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-medium text-(--text-secondary) uppercase tracking-wide">
+            Preview — {state.planSlots.length} posts em {weekGroups.size} semanas
+          </p>
+          {isCurrentMonth && skippedWeeks > 0 && (
+            <p className="text-[11px] text-(--text-tertiary)">
+              {skippedWeeks} semana{skippedWeeks > 1 ? "s" : ""} já passou
+              {skippedWeeks > 1 ? "ram" : ""} — somente semanas restantes serão planejadas.
             </p>
-          ) : (
-            themes.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => update({ selectedThemeId: t.id, pillar: t.pillar })}
-                className={cn(
-                  "flex items-start gap-2 rounded-md border p-2.5 text-left transition-colors",
-                  state.selectedThemeId === t.id
-                    ? "border-(--accent) bg-(--accent-subtle)"
-                    : "border-(--border-subtle) hover:border-(--accent)/50",
-                )}
-              >
-                <PillarBadge pillar={t.pillar} className="mt-0.5 shrink-0" />
-                <span className="text-xs text-(--text-primary)">{t.title}</span>
-              </button>
-            ))
           )}
-        </div>
-      )}
-
-      {/* Suggestions */}
-      {state.themeSource === "suggestions" && (
-        <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
-          {suggestions.length === 0 ? (
-            <p className="text-xs text-(--text-tertiary) py-4 text-center">
-              Nenhuma sugestão disponível. Sugestões são baseadas nos seus leads ativos.
-            </p>
-          ) : (
-            suggestions.map((s, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => update({ selectedThemeId: s.theme.id, pillar: s.theme.pillar })}
-                className={cn(
-                  "flex items-start gap-2 rounded-md border p-2.5 text-left transition-colors",
-                  state.selectedThemeId === s.theme.id
-                    ? "border-(--accent) bg-(--accent-subtle)"
-                    : "border-(--border-subtle) hover:border-(--accent)/50",
-                )}
+          <div className="grid grid-cols-2 gap-2 max-h-52 overflow-y-auto">
+            {Array.from(weekGroups.entries()).map(([weekNum, slots]) => (
+              <div
+                key={weekNum}
+                className="rounded-md border border-(--border-subtle) bg-(--bg-overlay) p-2.5"
               >
-                <PillarBadge pillar={s.theme.pillar} className="mt-0.5 shrink-0" />
-                <div className="min-w-0">
-                  <p className="text-xs font-medium text-(--text-primary) truncate">
-                    {s.theme.title}
-                  </p>
-                  <p className="text-[11px] text-(--text-tertiary)">{s.reason}</p>
+                <p className="text-xs font-medium text-(--text-primary) mb-1.5">Semana {weekNum}</p>
+                <div className="flex flex-wrap gap-1">
+                  {slots.map((s, i) => (
+                    <PillarBadge key={i} pillar={s.pillar} />
+                  ))}
                 </div>
-              </button>
-            ))
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Step 2: Theme Plan ────────────────────────────────────────────────
+
+interface ThemePlanStepProps {
+  state: WizardState
+  updateSlot: (index: number, partial: Partial<PlanSlot>) => void
+  themes: ContentTheme[]
+  allThemes: ContentTheme[]
+}
+
+function ThemePlanStep({ state, updateSlot, themes, allThemes }: ThemePlanStepProps) {
+  const {
+    data: suggestions,
+    isFetching: isSuggesting,
+    refetch: fetchSuggestions,
+  } = useThemeSuggestions()
+  const { mutateAsync: varyTheme } = useVaryTheme()
+  const [loadingVariations, setLoadingVariations] = React.useState<Set<number>>(new Set())
+
+  const weekGroups = new Map<number, { slot: PlanSlot; index: number }[]>()
+  state.planSlots.forEach((s, i) => {
+    const arr = weekGroups.get(s.weekNum) ?? []
+    arr.push({ slot: s, index: i })
+    weekGroups.set(s.weekNum, arr)
+  })
+
+  // Build lookup for bank theme status
+  const themeMap = new Map(allThemes.map((t) => [t.id, t]))
+
+  // Count available unused themes
+  const usedIdsInSlots = new Set(state.planSlots.filter((s) => s.themeId).map((s) => s.themeId))
+  const availableCount = themes.filter((t) => !usedIdsInSlots.has(t.id)).length
+  const emptySlots = state.planSlots.filter(
+    (s) => !s.themeId && s.freeTheme.trim().length < 3,
+  ).length
+
+  function cyclePillar(index: number) {
+    const slot = state.planSlots[index]
+    if (!slot) return
+    const ci = PILLAR_CYCLE.indexOf(slot.pillar)
+    const next = PILLAR_CYCLE[(ci + 1) % 3]!
+    updateSlot(index, { pillar: next })
+  }
+
+  function fillFromBank() {
+    const usedIds = new Set(state.planSlots.filter((s) => s.themeId).map((s) => s.themeId))
+    const available: Record<PostPillar, ContentTheme[]> = {
+      authority: [],
+      case: [],
+      vision: [],
+    }
+    for (const t of themes) {
+      if (!usedIds.has(t.id)) {
+        available[t.pillar].push(t)
+      }
+    }
+
+    for (let i = 0; i < state.planSlots.length; i++) {
+      const slot = state.planSlots[i]!
+      if (slot.themeId || slot.freeTheme.trim().length >= 3) continue
+      const pool = available[slot.pillar]
+      if (pool.length > 0) {
+        const theme = pool.shift()!
+        updateSlot(i, {
+          themeSource: "bank",
+          themeId: theme.id,
+          freeTheme: theme.title,
+        })
+      }
+    }
+  }
+
+  async function handleGenerateAndFill() {
+    const result = await fetchSuggestions()
+    if (!result.data || result.data.length === 0) return
+
+    // Collect all theme titles and IDs already in slots
+    const usedTitles = new Set(
+      state.planSlots
+        .filter((s) => s.freeTheme.trim().length >= 3)
+        .map((s) => s.freeTheme.trim().toLowerCase()),
+    )
+    const usedIds = new Set(state.planSlots.filter((s) => s.themeId).map((s) => s.themeId))
+
+    // Deduplicate suggestions pool by theme ID
+    const pool = result.data.filter((s, i, arr) => {
+      if (usedIds.has(s.theme.id)) return false
+      if (usedTitles.has(s.theme.title.trim().toLowerCase())) return false
+      return arr.findIndex((x) => x.theme.id === s.theme.id) === i
+    })
+
+    for (let i = 0; i < state.planSlots.length; i++) {
+      const slot = state.planSlots[i]!
+      if (slot.themeId || slot.freeTheme.trim().length >= 3) continue
+      if (pool.length === 0) break
+
+      // Prefer a suggestion matching the slot's pillar
+      const matchIdx = pool.findIndex((s) => s.theme.pillar === slot.pillar)
+      const idx = matchIdx >= 0 ? matchIdx : 0
+      const suggestion = pool.splice(idx, 1)[0]!
+
+      usedTitles.add(suggestion.theme.title.trim().toLowerCase())
+      usedIds.add(suggestion.theme.id)
+      updateSlot(i, {
+        themeSource: "bank",
+        themeId: suggestion.theme.id,
+        freeTheme: suggestion.theme.title,
+        pillar: suggestion.theme.pillar,
+      })
+    }
+  }
+
+  /** AI variation: call LLM to rephrase/re-angle the current slot theme */
+  async function handleAIVariation(index: number) {
+    const slot = state.planSlots[index]
+    if (!slot) return
+    const currentTitle = slot.freeTheme.trim()
+    if (currentTitle.length < 3) return
+
+    setLoadingVariations((prev) => new Set(prev).add(index))
+    try {
+      const result = await varyTheme({ theme_title: currentTitle, pillar: slot.pillar })
+      if (result.variation) {
+        updateSlot(index, {
+          themeSource: "free",
+          themeId: null,
+          freeTheme: result.variation,
+        })
+      }
+    } finally {
+      setLoadingVariations((prev) => {
+        const next = new Set(prev)
+        next.delete(index)
+        return next
+      })
+    }
+  }
+
+  /** Rotate this slot to a different unused bank theme for the same pillar */
+  function handleVariation(index: number) {
+    const slot = state.planSlots[index]
+    if (!slot) return
+
+    // Gather all IDs currently assigned (except this slot)
+    const otherIds = new Set(
+      state.planSlots.filter((s, i) => i !== index && s.themeId).map((s) => s.themeId),
+    )
+
+    // Find unused themes for this pillar
+    const pool = themes.filter(
+      (t) => t.pillar === slot.pillar && !otherIds.has(t.id) && t.id !== slot.themeId,
+    )
+    // If no same-pillar themes, try any pillar
+    const candidate = pool[0] ?? themes.find((t) => !otherIds.has(t.id) && t.id !== slot.themeId)
+
+    if (candidate) {
+      updateSlot(index, {
+        themeSource: "bank",
+        themeId: candidate.id,
+        freeTheme: candidate.title,
+        pillar: candidate.pillar,
+      })
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm text-(--text-secondary)">
+            Defina o tema de cada post. Clique no pilar para alternar.
+          </p>
+          <p className="text-[11px] text-(--text-tertiary) mt-0.5">
+            {availableCount} tema{availableCount !== 1 ? "s" : ""} disponíve
+            {availableCount !== 1 ? "is" : "l"} no banco
+            {emptySlots > 0 &&
+              ` · ${emptySlots} slot${emptySlots !== 1 ? "s" : ""} vazio${emptySlots !== 1 ? "s" : ""}`}
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {themes.length > 0 && (
+            <Button variant="outline" size="sm" className="text-xs gap-1" onClick={fillFromBank}>
+              Preencher com banco
+            </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-xs gap-1"
+            onClick={handleGenerateAndFill}
+            disabled={isSuggesting}
+          >
+            {isSuggesting ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Gerando…
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-3 w-3" />
+                Sugerir com IA
+              </>
+            )}
+          </Button>
         </div>
-      )}
+      </div>
 
-      {/* Free */}
-      {state.themeSource === "free" && (
-        <Textarea
-          value={state.freeTheme}
-          onChange={(e) => update({ freeTheme: e.target.value })}
-          placeholder="Ex: Como reduzir o tempo de onboarding de clientes sem contratar mais pessoas"
-          rows={3}
-          className="resize-none text-sm"
-        />
-      )}
+      <div className="flex flex-col gap-3 max-h-96 overflow-y-auto pr-1">
+        {Array.from(weekGroups.entries()).map(([weekNum, items]) => (
+          <div key={weekNum}>
+            <p className="text-xs font-medium text-(--text-tertiary) uppercase tracking-wide mb-1.5">
+              Semana {weekNum}
+            </p>
+            <div className="flex flex-col gap-2">
+              {items.map(({ slot, index }) => {
+                const bankTheme = slot.themeId ? themeMap.get(slot.themeId) : null
+                return (
+                  <div
+                    key={index}
+                    className="flex items-center gap-2 rounded-md border border-(--border-subtle) p-2 min-w-0"
+                  >
+                    {/* Pillar toggle — highlighted as clickable */}
+                    <button
+                      type="button"
+                      onClick={() => cyclePillar(index)}
+                      title="Clique para alternar pilar"
+                      className="shrink-0 group relative"
+                    >
+                      <PillarBadge
+                        pillar={slot.pillar}
+                        className="ring-1 ring-(--border-default) group-hover:ring-2 group-hover:ring-(--accent) cursor-pointer transition-all"
+                      />
+                      <ArrowLeftRight className="absolute -bottom-1 -right-1 h-2.5 w-2.5 text-(--text-tertiary) group-hover:text-(--accent) bg-(--bg-surface) rounded-full" />
+                    </button>
 
-      {/* Pillar */}
-      <div className="grid gap-2">
-        <Label>Pilar</Label>
-        <div className="grid grid-cols-3 gap-2">
-          {PILLAR_OPTIONS.map((o) => (
-            <button
-              key={o.value}
-              type="button"
-              onClick={() => update({ pillar: o.value })}
-              className={cn(
-                "flex flex-col gap-1 rounded-md border p-2.5 text-left transition-colors",
-                state.pillar === o.value
-                  ? "border-(--accent) bg-(--accent-subtle)"
-                  : "border-(--border-default) hover:border-(--border-strong)",
-              )}
-            >
-              <span className="text-xs font-medium text-(--text-primary)">{o.label}</span>
-              <span className="text-[11px] text-(--text-tertiary) leading-tight">{o.desc}</span>
-            </button>
-          ))}
-        </div>
+                    <Input
+                      value={slot.freeTheme}
+                      onChange={(e) =>
+                        updateSlot(index, {
+                          freeTheme: e.target.value,
+                          themeSource: "free",
+                          themeId: null,
+                        })
+                      }
+                      placeholder="Tema do post..."
+                      className="flex-1 h-8 text-xs"
+                    />
+
+                    {/* Bank status badge */}
+                    {slot.themeId && bankTheme && (
+                      <span
+                        className={cn(
+                          "text-[10px] px-1.5 py-0.5 rounded-full shrink-0 font-medium",
+                          bankTheme.used
+                            ? "bg-(--warning-subtle) text-(--warning-subtle-fg)"
+                            : "bg-(--success-subtle) text-(--success-subtle-fg)",
+                        )}
+                      >
+                        {bankTheme.used ? "já utilizado" : "disponível"}
+                      </span>
+                    )}
+
+                    {/* Variation button */}
+                    <button
+                      type="button"
+                      onClick={() => handleVariation(index)}
+                      title="Trocar por tema do banco"
+                      className="shrink-0 p-1 rounded-md text-(--text-tertiary) hover:text-(--accent) hover:bg-(--bg-overlay) transition-colors"
+                    >
+                      <Shuffle className="h-3.5 w-3.5" />
+                    </button>
+
+                    {/* AI variation button */}
+                    <button
+                      type="button"
+                      onClick={() => handleAIVariation(index)}
+                      disabled={loadingVariations.has(index) || slot.freeTheme.trim().length < 3}
+                      title="Gerar variação com IA"
+                      className="shrink-0 p-1 rounded-md text-(--text-tertiary) hover:text-(--accent) hover:bg-(--bg-overlay) transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {loadingVariations.has(index) ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )
 }
 
-// ── Step 2: Config ────────────────────────────────────────────────────
+// ── Step 3: Config ────────────────────────────────────────────────────
 
-interface ConfigStepProps {
+interface BatchConfigStepProps {
   state: WizardState
   update: (p: Partial<WizardState>) => void
-  themeText: string
-  isGenerating: boolean
-  onGenerate: () => void
-  generateError: boolean
 }
 
-function ConfigStep({
-  state,
-  update,
-  themeText,
-  isGenerating,
-  onGenerate,
-  generateError,
-}: ConfigStepProps) {
+function BatchConfigStep({ state, update }: BatchConfigStepProps) {
   return (
     <div className="flex flex-col gap-4">
-      {/* Theme summary */}
       <div className="rounded-md border border-(--accent)/20 bg-(--accent-subtle) px-3 py-2.5">
-        <div className="flex items-center gap-2">
-          <PillarBadge pillar={state.pillar} className="shrink-0" />
-          <p className="text-xs font-medium text-(--accent-subtle-fg) truncate">{themeText}</p>
-        </div>
+        <p className="text-xs text-(--accent-subtle-fg)">
+          Configurações aplicadas a <strong>{state.planSlots.length} posts</strong>
+        </p>
       </div>
 
       {/* Hook type */}
@@ -581,39 +1106,19 @@ function ConfigStep({
         </Select>
       </div>
 
-      {/* Variations + temperature */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="grid gap-1.5">
-          <Label>Variações</Label>
-          <Select
-            value={String(state.variations)}
-            onValueChange={(v) => update({ variations: parseInt(v, 10) })}
-          >
-            <SelectTrigger className="text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {[1, 2, 3, 4, 5].map((n) => (
-                <SelectItem key={n} value={String(n)}>
-                  {n} variação{n > 1 ? "ões" : ""}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="grid gap-1.5">
-          <Label>Criatividade: {state.temperature.toFixed(1)}</Label>
-          <input
-            aria-label="Nível de criatividade"
-            type="range"
-            min={0}
-            max={1}
-            step={0.1}
-            value={state.temperature}
-            onChange={(e) => update({ temperature: parseFloat(e.target.value) })}
-            className="mt-2 w-full accent-(--accent)"
-          />
-        </div>
+      {/* Temperature */}
+      <div className="grid gap-1.5">
+        <Label>Criatividade: {state.temperature.toFixed(1)}</Label>
+        <input
+          aria-label="Nível de criatividade"
+          type="range"
+          min={0}
+          max={1}
+          step={0.1}
+          value={state.temperature}
+          onChange={(e) => update({ temperature: parseFloat(e.target.value) })}
+          className="mt-2 w-full accent-(--accent)"
+        />
       </div>
 
       {/* References */}
@@ -627,134 +1132,251 @@ function ConfigStep({
           onCheckedChange={(v) => update({ useReferences: v })}
         />
       </div>
-
-      {generateError && (
-        <div className="flex items-center gap-2 rounded-md bg-(--danger-subtle) p-3 text-xs text-(--danger-subtle-fg)">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          Erro ao gerar. Verifique as configurações LLM.
-        </div>
-      )}
-
-      {/* Generate button */}
-      <Button onClick={onGenerate} disabled={isGenerating} className="gap-2">
-        {isGenerating ? (
-          <>
-            <RefreshCw className="h-4 w-4 animate-spin" />
-            Gerando {state.variations} variação{state.variations > 1 ? "ões" : ""}…
-          </>
-        ) : (
-          <>
-            <Sparkles className="h-4 w-4" />
-            Gerar {state.variations} variação{state.variations > 1 ? "ões" : ""}
-          </>
-        )}
-      </Button>
     </div>
   )
 }
 
-// ── Step 3: Variations ────────────────────────────────────────────────
+// ── Step 4: Batch Generate ────────────────────────────────────────────
 
-interface VariationsStepProps {
-  results: GeneratePostVariation[]
-  copiedIdx: number | null
-  onChoose: (idx: number) => void
-  onCopy: (idx: number) => void
-  onRegenerate: () => void
+interface BatchGenerateStepProps {
+  state: WizardState
+  onRetry: (index: number) => void
 }
 
-function VariationsStep({
-  results,
-  copiedIdx,
-  onChoose,
-  onCopy,
-  onRegenerate,
-}: VariationsStepProps) {
+function BatchGenerateStep({ state, onRetry }: BatchGenerateStepProps) {
+  const total = state.planSlots.length
+  const done = state.planSlots.filter((s) => s.genStatus === "done").length
+  const errors = state.planSlots.filter((s) => s.genStatus === "error").length
+  const pct = total > 0 ? Math.round(((done + errors) / total) * 100) : 0
+
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-4">
+      {state.generating ? (
+        <div className="flex items-center gap-2 text-sm text-(--text-primary)">
+          <Loader2 className="h-4 w-4 animate-spin text-(--accent)" />
+          Gerando: {state.genProgress} de {total}…
+        </div>
+      ) : (
         <p className="text-sm text-(--text-secondary)">
-          {results.length} variação{results.length > 1 ? "ões" : ""} gerada
-          {results.length > 1 ? "s" : ""}
+          {done} de {total} gerados com sucesso
+          {errors > 0 && <span className="text-(--danger)"> · {errors} com erro</span>}
         </p>
-        <Button variant="outline" size="sm" className="text-xs gap-1" onClick={onRegenerate}>
-          <RefreshCw className="h-3 w-3" />
-          Re-gerar
-        </Button>
+      )}
+
+      {/* Progress bar */}
+      <div className="h-2 rounded-full bg-(--bg-overlay) overflow-hidden">
+        <div
+          className="h-full rounded-full bg-(--accent) transition-all duration-300"
+          style={{ width: `${pct}%` }}
+        />
       </div>
 
-      <div className="flex flex-col gap-3 max-h-100 overflow-y-auto">
-        {results.map((variation, idx) => {
-          const charWarning = variation.character_count > 3000
+      {/* Slot list */}
+      <div className="flex flex-col gap-1.5 max-h-72 overflow-y-auto">
+        {state.planSlots.map((slot, i) => (
+          <div
+            key={i}
+            className="flex items-center gap-2 rounded-md border border-(--border-subtle) px-3 py-2 text-xs"
+          >
+            {slot.genStatus === "done" && (
+              <CheckCircle2 className="h-3.5 w-3.5 text-(--success) shrink-0" />
+            )}
+            {slot.genStatus === "error" && (
+              <XCircle className="h-3.5 w-3.5 text-(--danger) shrink-0" />
+            )}
+            {slot.genStatus === "pending" && (
+              <Loader2 className="h-3.5 w-3.5 text-(--text-tertiary) animate-spin shrink-0" />
+            )}
+            <PillarBadge pillar={slot.pillar} className="shrink-0" />
+            <span className="text-(--text-primary) line-clamp-2 flex-1 min-w-0">
+              {slot.freeTheme || "(sem tema)"}
+            </span>
+            {slot.genStatus === "done" && (
+              <span className="text-(--text-tertiary) shrink-0">{slot.charCount} chars</span>
+            )}
+            {slot.genStatus === "error" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-[11px] gap-1 shrink-0"
+                onClick={() => onRetry(i)}
+              >
+                <RefreshCw className="h-3 w-3" />
+                Tentar
+              </Button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Step 5: Batch Review ──────────────────────────────────────────────
+
+interface BatchReviewStepProps {
+  state: WizardState
+  updateSlot: (index: number, partial: Partial<PlanSlot>) => void
+  expandedSlot: number | null
+  setExpandedSlot: (idx: number | null) => void
+  improveInstruction: string
+  setImproveInstruction: (v: string) => void
+  onImprove: (index: number) => void
+  onRegen: (index: number) => void
+  isImproving: boolean
+}
+
+function BatchReviewStep({
+  state,
+  updateSlot,
+  expandedSlot,
+  setExpandedSlot,
+  improveInstruction,
+  setImproveInstruction,
+  onImprove,
+  onRegen,
+  isImproving,
+}: BatchReviewStepProps) {
+  const doneSlots = state.planSlots
+    .map((s, i) => ({ slot: s, index: i }))
+    .filter(({ slot }) => slot.genStatus === "done")
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-sm text-(--text-secondary)">
+        Revise e edite os {doneSlots.length} posts gerados.
+      </p>
+
+      <div className="flex flex-col gap-2 max-h-96 overflow-y-auto pr-1">
+        {doneSlots.map(({ slot, index }) => {
+          const isExpanded = expandedSlot === index
+          const body = slot.editedBody ?? slot.generatedText ?? ""
+          const isOverLimit = body.length > 3000
+
           return (
             <div
-              key={idx}
-              className="flex flex-col gap-2 rounded-lg border border-(--border-default) bg-(--bg-surface) p-4 shadow-(--shadow-sm)"
+              key={index}
+              className="rounded-lg border border-(--border-default) bg-(--bg-surface) shadow-(--shadow-sm)"
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-medium text-(--text-secondary)">
-                    Variação {idx + 1}
-                  </span>
-                  <span
-                    className={cn(
-                      "rounded-md px-1.5 py-0.5 text-xs",
-                      charWarning
-                        ? "bg-(--danger-subtle) text-(--danger-subtle-fg)"
-                        : "bg-(--bg-overlay) text-(--text-tertiary)",
-                    )}
-                  >
-                    {variation.character_count} chars
-                  </span>
-                  {variation.hook_type_used && (
-                    <span className="rounded-md bg-(--accent-subtle) px-1.5 py-0.5 text-xs text-(--accent-subtle-fg)">
-                      {variation.hook_type_used}
-                    </span>
+              {/* Header */}
+              <button
+                type="button"
+                onClick={() => setExpandedSlot(isExpanded ? null : index)}
+                className="flex items-center gap-2 w-full p-3 text-left"
+              >
+                {isExpanded ? (
+                  <ChevronDown className="h-3.5 w-3.5 text-(--text-tertiary) shrink-0" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5 text-(--text-tertiary) shrink-0" />
+                )}
+                <PillarBadge pillar={slot.pillar} className="shrink-0" />
+                <span className="text-xs font-medium text-(--text-primary) line-clamp-2 flex-1 min-w-0">
+                  <span className="text-(--text-tertiary) mr-1">Sem {slot.weekNum} ·</span>
+                  {slot.freeTheme || slot.title || `Post ${slot.weekNum}`}
+                </span>
+                <span
+                  className={cn(
+                    "text-[11px] shrink-0",
+                    isOverLimit ? "text-(--danger)" : "text-(--text-tertiary)",
                   )}
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-xs gap-1"
-                    onClick={() => onCopy(idx)}
-                  >
-                    {copiedIdx === idx ? (
-                      <>
-                        <Check className="h-3.5 w-3.5 text-(--success)" />
-                        Copiado
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="h-3.5 w-3.5" />
-                        Copiar
-                      </>
-                    )}
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="h-7 px-2 text-xs gap-1"
-                    onClick={() => onChoose(idx)}
-                  >
-                    <Check className="h-3.5 w-3.5" />
-                    Escolher
-                  </Button>
-                </div>
-              </div>
-              <pre className="text-xs text-(--text-primary) whitespace-pre-wrap font-sans leading-relaxed max-h-32 overflow-y-auto">
-                {variation.text}
-              </pre>
-              {variation.violations.length > 0 && (
-                <div className="flex flex-col gap-1">
-                  {variation.violations.map((v, i) => (
-                    <div
-                      key={i}
-                      className="flex items-start gap-1.5 rounded-md bg-(--warning-subtle) px-2 py-1 text-xs text-(--warning-subtle-fg)"
+                >
+                  {body.length} chars
+                </span>
+              </button>
+
+              {/* Expanded body */}
+              {isExpanded && (
+                <div className="px-3 pb-3 flex flex-col gap-2 border-t border-(--border-subtle) pt-2">
+                  {/* Title */}
+                  <Input
+                    value={slot.title}
+                    onChange={(e) => updateSlot(index, { title: e.target.value })}
+                    placeholder="Título interno"
+                    className="h-8 text-xs"
+                  />
+
+                  {/* Body */}
+                  <Textarea
+                    value={body}
+                    onChange={(e) =>
+                      updateSlot(index, {
+                        editedBody: e.target.value,
+                        charCount: e.target.value.length,
+                      })
+                    }
+                    rows={8}
+                    className="resize-none font-mono text-xs"
+                  />
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-between">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[11px] gap-1"
+                      onClick={() => onRegen(index)}
                     >
-                      <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
-                      {v}
+                      <RefreshCw className="h-3 w-3" />
+                      Re-gerar
+                    </Button>
+                    <span
+                      className={cn(
+                        "text-[11px]",
+                        isOverLimit ? "text-(--danger) font-medium" : "text-(--text-tertiary)",
+                      )}
+                    >
+                      {body.length} / 3.000
+                    </span>
+                  </div>
+
+                  {/* Improve */}
+                  <div className="flex flex-col gap-2 rounded-md border border-(--accent)/30 bg-(--accent)/5 p-2.5">
+                    <div className="flex items-center gap-1 text-xs text-(--accent)">
+                      <Sparkles className="h-3 w-3" />
+                      Melhorar com IA
                     </div>
-                  ))}
+                    <div className="flex gap-2">
+                      <Input
+                        value={improveInstruction}
+                        onChange={(e) => setImproveInstruction(e.target.value)}
+                        placeholder="Ex: Reduza para 1000 chars mantendo o gancho"
+                        className="flex-1 h-7 text-xs"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                            onImprove(index)
+                          }
+                        }}
+                      />
+                      <Button
+                        size="sm"
+                        className="h-7 text-[11px] gap-1"
+                        onClick={() => onImprove(index)}
+                        disabled={!improveInstruction.trim() || isImproving}
+                      >
+                        {isImproving ? (
+                          <RefreshCw className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Check className="h-3 w-3" />
+                        )}
+                        Aplicar
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Violations */}
+                  {slot.violations.length > 0 && (
+                    <div className="flex flex-col gap-1">
+                      {slot.violations.map((v, vi) => (
+                        <div
+                          key={vi}
+                          className="flex items-start gap-1.5 rounded-md bg-(--warning-subtle) px-2 py-1 text-xs text-(--warning-subtle-fg)"
+                        >
+                          <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
+                          {v}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -765,232 +1387,71 @@ function VariationsStep({
   )
 }
 
-// ── Step 4: Edit ──────────────────────────────────────────────────────
+// ── Step 6: Batch Schedule ────────────────────────────────────────────
 
-interface EditStepProps {
+interface BatchScheduleStepProps {
   state: WizardState
-  update: (p: Partial<WizardState>) => void
-  improveOpen: boolean
-  setImproveOpen: (v: boolean) => void
-  instruction: string
-  setInstruction: (v: string) => void
-  onImprove: () => void
-  isImproving: boolean
-}
-
-function EditStep({
-  state,
-  update,
-  improveOpen,
-  setImproveOpen,
-  instruction,
-  setInstruction,
-  onImprove,
-  isImproving,
-}: EditStepProps) {
-  const charCount = state.body.length
-  const isOverLimit = charCount > 3000
-  const isTooShort = charCount > 0 && charCount < 900
-
-  return (
-    <div className="flex flex-col gap-4">
-      {/* Title */}
-      <div className="grid gap-1.5">
-        <Label htmlFor="wiz-title">Título interno</Label>
-        <Input
-          id="wiz-title"
-          value={state.title}
-          onChange={(e) => update({ title: e.target.value })}
-          placeholder="Ex: Semana 5 · Tema principal"
-          required
-        />
-      </div>
-
-      {/* Body */}
-      <div className="grid gap-1.5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Label htmlFor="wiz-body">Texto do post</Label>
-            <button
-              type="button"
-              onClick={() => setImproveOpen(!improveOpen)}
-              className="flex items-center gap-1 text-xs text-(--accent) hover:text-(--accent)/80 transition-colors"
-            >
-              <Sparkles className="h-3 w-3" />
-              Melhorar com IA
-            </button>
-          </div>
-          <span
-            className={cn(
-              "text-xs",
-              isOverLimit
-                ? "text-(--danger) font-medium"
-                : isTooShort
-                  ? "text-amber-600 dark:text-amber-400"
-                  : "text-(--text-tertiary)",
-            )}
-          >
-            {charCount} / 3.000
-            {isTooShort && " · abaixo do ideal (900–1500)"}
-          </span>
-        </div>
-
-        {improveOpen && (
-          <div className="flex flex-col gap-2 rounded-md border border-(--accent)/30 bg-(--accent)/5 p-3">
-            <p className="text-xs text-(--text-secondary)">Instrução para a IA:</p>
-            <Textarea
-              value={instruction}
-              onChange={(e) => setInstruction(e.target.value)}
-              placeholder="Ex: Reduza para 1000 caracteres mantendo o gancho"
-              rows={2}
-              className="resize-none text-xs"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  onImprove()
-                }
-              }}
-            />
-            <div className="flex items-center gap-2 justify-end">
-              <button
-                type="button"
-                onClick={() => {
-                  setImproveOpen(false)
-                  setInstruction("")
-                }}
-                className="text-xs text-(--text-tertiary) hover:text-(--text-secondary)"
-              >
-                Cancelar
-              </button>
-              <Button
-                type="button"
-                size="sm"
-                className="h-7 text-xs gap-1"
-                onClick={onImprove}
-                disabled={!instruction.trim() || isImproving}
-              >
-                {isImproving ? (
-                  <>
-                    <RefreshCw className="h-3 w-3 animate-spin" />
-                    Melhorando…
-                  </>
-                ) : (
-                  <>
-                    <Check className="h-3 w-3" />
-                    Aplicar
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        <Textarea
-          id="wiz-body"
-          value={state.body}
-          onChange={(e) => update({ body: e.target.value })}
-          placeholder="Texto do post gerado pela IA..."
-          rows={10}
-          className="resize-none font-mono text-sm"
-        />
-      </div>
-
-      {/* Hashtags */}
-      <div className="grid gap-1.5">
-        <Label htmlFor="wiz-hashtags">Hashtags</Label>
-        <Input
-          id="wiz-hashtags"
-          value={state.hashtags}
-          onChange={(e) => update({ hashtags: e.target.value })}
-          placeholder="#ia #processos #automacao"
-        />
-      </div>
-    </div>
-  )
-}
-
-// ── Step 5: Schedule ──────────────────────────────────────────────────
-
-interface ScheduleStepProps {
-  state: WizardState
-  update: (p: Partial<WizardState>) => void
+  updateSlot: (index: number, partial: Partial<PlanSlot>) => void
+  onSuggestDates: () => void
   isCreating: boolean
-  onCreate: (withDate: boolean) => void
+  creatingProgress: number
+  onCreate: (withDates: boolean) => void
 }
 
-function ScheduleStep({ state, update, isCreating, onCreate }: ScheduleStepProps) {
-  const charCount = state.body.length
-  const hookUsed =
-    state.chosenIndex !== null ? state.results[state.chosenIndex]?.hook_type_used : null
+function BatchScheduleStep({
+  state,
+  updateSlot,
+  onSuggestDates,
+  isCreating,
+  creatingProgress,
+  onCreate,
+}: BatchScheduleStepProps) {
+  const doneSlots = state.planSlots
+    .map((s, i) => ({ slot: s, index: i }))
+    .filter(({ slot }) => slot.genStatus === "done")
+  const allHaveDates = doneSlots.every(({ slot }) => slot.publishDate)
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Summary */}
-      <div className="rounded-md border border-(--border-default) bg-(--bg-overlay) p-3">
-        <p className="text-xs font-medium text-(--text-secondary) uppercase tracking-wide mb-2">
-          Resumo do post
-        </p>
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <div>
-            <span className="text-(--text-tertiary)">Título:</span>{" "}
-            <span className="text-(--text-primary) font-medium">{state.title}</span>
-          </div>
-          <div>
-            <span className="text-(--text-tertiary)">Pilar:</span>{" "}
-            <PillarBadge pillar={state.pillar} />
-          </div>
-          <div>
-            <span className="text-(--text-tertiary)">Caracteres:</span>{" "}
-            <span
-              className={cn(
-                "font-medium",
-                charCount > 3000 ? "text-(--danger)" : "text-(--text-primary)",
-              )}
-            >
-              {charCount}
-            </span>
-          </div>
-          {hookUsed && (
-            <div>
-              <span className="text-(--text-tertiary)">Gancho:</span>{" "}
-              <span className="text-(--text-primary)">{hookUsed}</span>
-            </div>
-          )}
-        </div>
-        <div className="mt-2 pt-2 border-t border-(--border-subtle)">
-          <pre className="text-xs text-(--text-secondary) whitespace-pre-wrap font-sans leading-relaxed max-h-20 overflow-y-auto">
-            {state.body.slice(0, 200)}
-            {state.body.length > 200 && "…"}
-          </pre>
-        </div>
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-(--text-secondary)">Agende os {doneSlots.length} posts.</p>
+        <Button variant="outline" size="sm" className="text-xs gap-1" onClick={onSuggestDates}>
+          <Calendar className="h-3 w-3" />
+          Sugerir datas
+        </Button>
       </div>
 
-      {/* Date/Time */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="grid gap-1.5">
-          <Label htmlFor="wiz-date">Data de publicação</Label>
-          <Input
-            id="wiz-date"
-            type="datetime-local"
-            value={state.publishDate}
-            onChange={(e) => update({ publishDate: e.target.value })}
-          />
-        </div>
-        <div className="grid gap-1.5">
-          <Label htmlFor="wiz-week">Semana</Label>
-          <Input
-            id="wiz-week"
-            type="number"
-            min={1}
-            max={54}
-            value={state.weekNumber}
-            onChange={(e) => update({ weekNumber: e.target.value })}
-            placeholder="1–54"
-          />
-        </div>
+      {/* Slot dates */}
+      <div className="flex flex-col gap-2 max-h-72 overflow-y-auto pr-1">
+        {doneSlots.map(({ slot, index }) => (
+          <div
+            key={index}
+            className="flex items-center gap-2 rounded-md border border-(--border-subtle) px-3 py-2"
+          >
+            <PillarBadge pillar={slot.pillar} className="shrink-0" />
+            <span className="text-xs text-(--text-primary) line-clamp-2 flex-1 min-w-0">
+              <span className="text-(--text-tertiary) mr-1">Sem {slot.weekNum} ·</span>
+              {slot.freeTheme || slot.title || `Post ${index + 1}`}
+            </span>
+            <Input
+              type="datetime-local"
+              value={slot.publishDate}
+              onChange={(e) => updateSlot(index, { publishDate: e.target.value })}
+              className="w-48 h-7 text-xs shrink-0"
+            />
+          </div>
+        ))}
       </div>
+
+      {isCreating && (
+        <div className="flex items-center gap-2 text-sm text-(--text-primary)">
+          <Loader2 className="h-4 w-4 animate-spin text-(--accent)" />
+          Criando: {creatingProgress} de {doneSlots.length}…
+        </div>
+      )}
 
       <p className="text-xs text-(--text-tertiary)">
-        Ao criar com data, o post será automaticamente aprovado e agendado.
+        Posts agendados são automaticamente aprovados. Sem data, serão criados como rascunho.
       </p>
 
       {/* Actions */}
@@ -1002,9 +1463,9 @@ function ScheduleStep({ state, update, isCreating, onCreate }: ScheduleStepProps
           onClick={() => onCreate(false)}
           disabled={isCreating}
         >
-          {isCreating ? "Criando…" : "Criar rascunho"}
+          {isCreating ? "Criando…" : "Criar rascunhos"}
         </Button>
-        {state.publishDate && (
+        {allHaveDates && (
           <Button
             size="sm"
             className="text-xs gap-1"
@@ -1012,7 +1473,7 @@ function ScheduleStep({ state, update, isCreating, onCreate }: ScheduleStepProps
             disabled={isCreating}
           >
             <Calendar className="h-3.5 w-3.5" />
-            {isCreating ? "Agendando…" : "Agendar publicação"}
+            {isCreating ? "Agendando…" : "Criar e agendar todos"}
           </Button>
         )}
       </div>

@@ -36,16 +36,16 @@ logger = structlog.get_logger()
 )
 def sync_tenant_voyager(self, tenant_id: str) -> dict:  # type: ignore[type-arg]
     """Sincroniza analytics Voyager para um tenant especifico."""
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         _sync_tenant_async(tenant_id, self)
     )
 
 
 async def _sync_tenant_async(tenant_id: str, task) -> dict:  # type: ignore[type-arg]
-    from core.database import AsyncSessionLocal
+    from core.database import WorkerSessionLocal
     from services.content.voyager_sync_service import sync_voyager_for_tenant
 
-    async with AsyncSessionLocal() as db:
+    async with WorkerSessionLocal() as db:
         try:
             result = await sync_voyager_for_tenant(
                 tenant_id=tenant_id,
@@ -81,17 +81,17 @@ def sync_all_voyager() -> dict:  # type: ignore[type-arg]
     Itera todos os tenants ativos com li_at configurado e dispara sincronizacao.
     Executado pelo Celery Beat 3x/dia.
     """
-    return asyncio.get_event_loop().run_until_complete(_sync_all_async())
+    return asyncio.run(_sync_all_async())
 
 
 async def _sync_all_async() -> dict:
     from sqlalchemy import select
 
-    from core.database import AsyncSessionLocal
+    from core.database import WorkerSessionLocal
     from models.linkedin_account import LinkedInAccount
 
     dispatched = 0
-    async with AsyncSessionLocal() as db:
+    async with WorkerSessionLocal() as db:
         stmt = select(LinkedInAccount.tenant_id).where(
             LinkedInAccount.is_active.is_(True),
             LinkedInAccount.unipile_account_id.is_not(None),

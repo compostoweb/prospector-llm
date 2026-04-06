@@ -15,7 +15,7 @@ import { ptBR } from "date-fns/locale"
 import { toZonedTime } from "date-fns-tz"
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react"
 import { useState } from "react"
-import { StatusBadge } from "@/components/content/post-badges"
+import { StatusBadge, PillarBadge } from "@/components/content/post-badges"
 import { EditPostDialog } from "@/components/content/edit-post-dialog"
 import { CreatePostDialog } from "@/components/content/create-post-dialog"
 import { type ContentPost } from "@/lib/api/hooks/use-content"
@@ -127,7 +127,7 @@ export function CalendarView({ posts }: CalendarViewProps) {
                     type="button"
                     aria-label={`Criar post em ${format(day, "dd/MM")}`}
                     onClick={() => handleDayClick(day)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-(--accent-subtle) text-(--text-tertiary)"
+                    className="p-0.5 rounded-full bg-(--success-subtle) text-(--success) hover:bg-(--success) hover:text-white transition-colors"
                   >
                     <Plus className="h-3 w-3" />
                   </button>
@@ -140,9 +140,25 @@ export function CalendarView({ posts }: CalendarViewProps) {
                       key={post.id}
                       type="button"
                       onClick={() => setEditPost(post)}
-                      className="text-left truncate text-[10px] px-1 py-0.5 rounded bg-(--accent-subtle) text-(--accent-subtle-fg) hover:opacity-80 transition-opacity leading-tight"
+                      className="text-left text-[10px] px-1 py-0.5 rounded bg-(--accent-subtle) text-(--accent-subtle-fg) hover:opacity-80 transition-opacity leading-tight w-full"
                     >
-                      {post.title}
+                      {post.pillar && (
+                        <span
+                          className={cn(
+                            "inline-block shrink-0 text-[9px] font-semibold px-1 py-0 rounded-full mr-0.5 align-middle",
+                            post.pillar === "authority" && "bg-(--accent)/20 text-(--accent)",
+                            post.pillar === "case" && "bg-(--success)/20 text-(--success)",
+                            post.pillar === "vision" && "bg-(--warning)/20 text-(--warning)",
+                          )}
+                        >
+                          {post.pillar === "authority"
+                            ? "Aut"
+                            : post.pillar === "case"
+                              ? "Caso"
+                              : "Vis"}
+                        </span>
+                      )}
+                      <span className="line-clamp-3 wrap-break-word">{post.title}</span>
                     </button>
                   ))}
                   {dayPosts.length > 3 && (

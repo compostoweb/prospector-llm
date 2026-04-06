@@ -16,11 +16,12 @@ from models.enums import CadenceMode, Channel, StepType
 
 # Combinações válidas: provider → lista de prefixos de model aceitos
 # Serve para validação básica — a lista completa vem da API dos providers
-_VALID_PROVIDERS = {"openai", "gemini"}
+_VALID_PROVIDERS = {"openai", "gemini", "anthropic"}
 
 _PROVIDER_MODEL_PREFIXES: dict[str, tuple[str, ...]] = {
     "openai": ("gpt-", "o1", "o3", "o4"),
     "gemini": ("gemini-",),
+    "anthropic": ("claude-",),
 }
 
 
@@ -29,11 +30,11 @@ class LLMConfigSchema(BaseModel):
 
     provider: str = Field(
         default="openai",
-        description="Provedor LLM: openai | gemini",
+        description="Provedor LLM: openai | gemini | anthropic",
     )
     model: str = Field(
         default="gpt-4o-mini",
-        description="ID do modelo. Ex: gpt-4o-mini, gemini-2.5-flash, gemini-2.5-flash-lite",
+        description="ID do modelo. Ex: gpt-4o-mini, gemini-2.5-flash, claude-haiku-4-5",
     )
     temperature: float = Field(
         default=0.7,

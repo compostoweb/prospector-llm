@@ -5,6 +5,7 @@ Endpoints de geração de conteúdo com IA:
   POST /content/generate               — gera N variações de post
   POST /content/generate/improve       — melhora um post existente
   POST /content/generate/suggest-themes — sugere temas com base nos leads
+  POST /content/generate/vary-theme    — gera variação de um tema com IA
 """
 
 from __future__ import annotations
@@ -37,6 +38,8 @@ from schemas.content import (
     ImprovePostRequest,
     ImprovePostResponse,
     ThemeSuggestion,
+    VaryThemeRequest,
+    VaryThemeResponse,
 )
 from services.content.llm_generator import (
     GeneratedVariation,
@@ -284,20 +287,25 @@ async def suggest_themes(
     if not top_sectors:
         return []
 
-    # Para cada setor, busca temas não utilizados
+    # Para cada setor, busca temas não utilizados (sem repetir IDs)
     suggestions: list[ThemeSuggestion] = []
+    seen_theme_ids: set[uuid.UUID] = set()
     for industry, lead_count in top_sectors:
         themes_result = await db.execute(
             select(ContentTheme)
             .where(
                 ContentTheme.tenant_id == tenant_id,
                 ContentTheme.used.is_(False),
+                ContentTheme.id.notin_(seen_theme_ids) if seen_theme_ids else True,
             )
             .order_by(ContentTheme.created_at.asc())
-            .limit(2)
+            .limit(8)
         )
         themes = themes_result.scalars().all()
         for theme in themes:
+            if theme.id in seen_theme_ids:
+                continue
+            seen_theme_ids.add(theme.id)
             suggestions.append(
                 ThemeSuggestion(
                     theme=ContentThemeResponse.model_validate(theme),
@@ -308,3 +316,57 @@ async def suggest_themes(
             )
 
     return suggestions
+
+
+# ── POST /content/generate/vary-theme ────────────────────────────────
+
+
+PILLAR_LABELS = {
+    "authority": "Autoridade",
+    "case": "Caso de sucesso",
+    "vision": "Visão de mercado",
+}
+
+
+@router.post(
+    "/vary-theme",
+    response_model=VaryThemeResponse,
+    summary="Gera uma variação de um tema com IA",
+)
+async def vary_theme(
+    body: VaryThemeRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    registry: LLMRegistry = Depends(get_llm_registry),
+) -> VaryThemeResponse:
+    """
+    Recebe o título de um tema e retorna uma variação com ângulo diferente,
+    mantendo o mesmo pilar e essência do assunto original.
+    """
+    pillar_label = PILLAR_LABELS.get(body.pillar, body.pillar)
+
+    prompt = (
+        f"Você é um especialista em marketing de conteúdo B2B para LinkedIn.\n"
+        f"Pilar: {pillar_label}\n"
+        f"Tema original: {body.theme_title}\n\n"
+        "Crie UMA variação desse tema com um ângulo ou abordagem diferente, "
+        "mantendo a essência e o pilar. "
+        "Responda apenas com o novo título do tema, sem explicações, aspas ou formatação extra. "
+        "Máximo 120 caracteres."
+    )
+
+    from integrations.llm import LLMMessage  # local import para evitar circular
+
+    messages = [LLMMessage(role="user", content=prompt)]
+
+    response = await registry.complete(
+        messages=messages,
+        provider=settings.CONTENT_GEN_PROVIDER,
+        model=settings.CONTENT_GEN_MODEL,
+        temperature=0.9,
+        max_tokens=128,
+    )
+
+    variation = response.text.strip().strip('"').strip("'").strip()
+    logger.info("vary_theme.done", tenant_id=tenant_id, original=body.theme_title)
+
+    return VaryThemeResponse(variation=variation)

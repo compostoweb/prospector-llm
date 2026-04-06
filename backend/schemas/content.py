@@ -288,3 +288,12 @@ class ThemeSuggestion(BaseModel):
     reason: str
     lead_count: int
     sector: str
+
+
+class VaryThemeRequest(BaseModel):
+    theme_title: str = Field(..., min_length=3, max_length=300)
+    pillar: str = Field(..., pattern="^(authority|case|vision)$")
+
+
+class VaryThemeResponse(BaseModel):
+    variation: str
