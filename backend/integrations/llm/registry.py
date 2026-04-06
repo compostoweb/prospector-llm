@@ -25,8 +25,8 @@ import structlog
 
 from core.config import Settings
 from core.redis_client import RedisClient
-from integrations.llm.base import LLMMessage, LLMProvider, LLMResponse, ModelInfo
 from integrations.llm.anthropic_provider import AnthropicProvider
+from integrations.llm.base import LLMMessage, LLMProvider, LLMResponse, ModelInfo
 from integrations.llm.gemini_provider import GeminiProvider
 from integrations.llm.openai_provider import OpenAIProvider
 
@@ -37,7 +37,6 @@ _MODELS_CACHE_TTL = int(timedelta(hours=1).total_seconds())
 
 
 class LLMRegistry:
-
     def __init__(self, settings: Settings, redis: RedisClient) -> None:
         self._redis = redis
         self._providers: dict[str, LLMProvider] = {}
@@ -143,14 +142,32 @@ class LLMRegistry:
         return list(self._providers.keys())
 
     # ------------------------------------------------------------------
+    # Geração de imagem
+    # ------------------------------------------------------------------
+
+    async def generate_image(
+        self,
+        prompt: str,
+        aspect_ratio: str = "4:5",
+        image_size: str = "1K",
+    ) -> bytes:
+        """
+        Gera imagem via Gemini Nano Banana 2 (gemini-3.1-flash-image-preview).
+        Levanta ValueError se Gemini não estiver configurado.
+        """
+        gemini = self._get_provider("gemini")
+        return await gemini.generate_image(  # type: ignore[attr-defined]
+            prompt=prompt,
+            aspect_ratio=aspect_ratio,
+            image_size=image_size,
+        )
+
+    # ------------------------------------------------------------------
     # Helpers internos
     # ------------------------------------------------------------------
 
     def _get_provider(self, provider: str) -> LLMProvider:
         if provider not in self._providers:
             available = list(self._providers.keys())
-            raise ValueError(
-                f"Provedor '{provider}' não configurado. "
-                f"Disponíveis: {available}"
-            )
+            raise ValueError(f"Provedor '{provider}' não configurado. Disponíveis: {available}")
         return self._providers[provider]

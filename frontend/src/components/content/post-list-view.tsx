@@ -17,6 +17,8 @@ import {
   XCircle,
   Trash2,
   ChevronDown,
+  ImageIcon,
+  VideoIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { StatusBadge, PillarBadge } from "@/components/content/post-badges"
@@ -154,8 +156,7 @@ export function PostListView({ posts, sortBy, onSortChange }: PostListViewProps)
   )
   const canCancel = sortedPosts.some((p) => selectedIds.has(p.id) && p.status === "scheduled")
 
-  const gridCols =
-    "grid-cols-[32px_1fr_100px_90px_70px_70px_70px_70px_70px_36px_130px]"
+  const gridCols = "grid-cols-[32px_1fr_100px_90px_70px_70px_70px_70px_70px_36px_130px]"
 
   return (
     <>
@@ -421,13 +422,24 @@ function PostRow({
 
       {/* Title + date + time */}
       <div className="flex flex-col gap-0.5 min-w-0">
-        <button
-          type="button"
-          onClick={onEdit}
-          className="text-sm font-medium text-(--text-primary) truncate text-left cursor-pointer hover:text-(--accent) transition-colors"
-        >
-          {post.title}
-        </button>
+        <div className="flex items-center gap-1.5 min-w-0">
+          <button
+            type="button"
+            onClick={onEdit}
+            className="text-sm font-medium text-(--text-primary) truncate text-left cursor-pointer hover:text-(--accent) transition-colors"
+          >
+            {post.title}
+          </button>
+          {post.image_url && (
+            <ImageIcon
+              className="h-3 w-3 shrink-0 text-(--text-tertiary)"
+              aria-label="Tem imagem"
+            />
+          )}
+          {post.video_url && (
+            <VideoIcon className="h-3 w-3 shrink-0 text-(--text-tertiary)" aria-label="Tem vídeo" />
+          )}
+        </div>
         {dateStr && (
           <span className="text-xs text-(--text-tertiary)">
             {formatDateBR(dateStr, "dd MMM yyyy 'às' HH:mm")}

@@ -32,14 +32,30 @@ const RECONNECT_DELAYS = [1_000, 2_000, 4_000, 8_000, 30_000] // backoff escalon
 
 // Chaves do TanStack Query que cada evento deve invalidar
 const INVALIDATION_MAP: Partial<Record<WSEventType, string[][]>> = {
-  "lead.replied": [["leads"], ["dashboard", "stats"]],
+  "lead.replied": [
+    ["leads"],
+    ["dashboard", "stats"],
+    ["analytics", "recent-replies"],
+    ["analytics", "intents"],
+    ["analytics", "channels"],
+    ["analytics", "funnel"],
+  ],
   "lead.enriched": [["leads"]],
   "lead.score_updated": [["leads"]],
-  "step.sent": [["leads"], ["cadences"]],
+  "step.sent": [
+    ["leads"],
+    ["cadences"],
+    ["dashboard", "stats"],
+    ["analytics", "channels"],
+    ["analytics", "email"],
+  ],
   "step.failed": [["leads"], ["cadences"]],
-  "cadence.finished": [["cadences"]],
-  "connection.accepted": [["leads"], ["manual-tasks"]],
-  "inbox.new_message": [["inbox", "conversations"], ["inbox", "messages"]],
+  "cadence.finished": [["cadences"], ["analytics", "funnel"], ["analytics", "performance"]],
+  "connection.accepted": [["leads"], ["manual-tasks"], ["dashboard", "stats"]],
+  "inbox.new_message": [
+    ["inbox", "conversations"],
+    ["inbox", "messages"],
+  ],
 }
 
 // ── Hook principal ────────────────────────────────────────────────────

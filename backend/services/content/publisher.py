@@ -17,8 +17,9 @@ por endpoints HTTP de publicacao imediata.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+import httpx
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +34,7 @@ logger = structlog.get_logger()
 
 # ── Decriptacao de token ──────────────────────────────────────────────
 
+
 def _maybe_decrypt(value: str) -> str:
     """
     Decripta o valor com Fernet caso LINKEDIN_ACCOUNT_ENCRYPTION_KEY esteja definida.
@@ -43,7 +45,7 @@ def _maybe_decrypt(value: str) -> str:
     if not settings.LINKEDIN_ACCOUNT_ENCRYPTION_KEY:
         return value
     try:
-        from cryptography.fernet import Fernet, InvalidToken
+        from cryptography.fernet import Fernet
 
         fernet = Fernet(settings.LINKEDIN_ACCOUNT_ENCRYPTION_KEY.encode())
         return fernet.decrypt(value.encode()).decode()
@@ -53,6 +55,15 @@ def _maybe_decrypt(value: str) -> str:
 
 
 # ── Helpers internos ──────────────────────────────────────────────────
+
+
+async def _download_url(url: str) -> bytes:
+    """Baixa conteúdo de uma URL pública (ex: MinIO) para bytes."""
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+        return response.content
+
 
 async def _load_post_and_account(
     db: AsyncSession,
@@ -112,6 +123,7 @@ def _write_publish_log(
 
 # ── Funcoes publicas ──────────────────────────────────────────────────
 
+
 async def publish_now(
     db: AsyncSession,
     *,
@@ -139,7 +151,55 @@ async def publish_now(
             access_token=access_token,
             person_urn=account.person_urn,
         ) as client:
-            li_response = await client.create_post(post.body)
+            # ── Upload de mídia (se necessário) ──────────────────────
+            media_urn: str | None = None
+            media_category: str = "NONE"
+
+            if post.image_url and not post.linkedin_image_urn:
+                try:
+                    image_bytes = await _download_url(post.image_url)
+                    post.linkedin_image_urn = await client.upload_image(image_bytes)
+                    logger.info(
+                        "content.publisher.image_uploaded",
+                        post_id=str(post_id),
+                        urn=post.linkedin_image_urn,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "content.publisher.image_upload_failed",
+                        post_id=str(post_id),
+                        error=str(exc),
+                    )
+
+            if post.video_url and not post.linkedin_video_urn:
+                try:
+                    video_bytes = await _download_url(post.video_url)
+                    post.linkedin_video_urn = await client.upload_video(video_bytes)
+                    logger.info(
+                        "content.publisher.video_uploaded",
+                        post_id=str(post_id),
+                        urn=post.linkedin_video_urn,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "content.publisher.video_upload_failed",
+                        post_id=str(post_id),
+                        error=str(exc),
+                    )
+
+            # Prioriza vídeo sobre imagem se ambos existirem
+            if post.linkedin_video_urn:
+                media_urn = post.linkedin_video_urn
+                media_category = "VIDEO"
+            elif post.linkedin_image_urn:
+                media_urn = post.linkedin_image_urn
+                media_category = "IMAGE"
+
+            li_response = await client.create_post(
+                post.body,
+                media_urn=media_urn,
+                media_category=media_category,
+            )
     except LinkedInClientError as exc:
         # Grava falha e propaga
         post.status = "failed"
@@ -161,15 +221,11 @@ async def publish_now(
         raise
 
     # Extrai URN da resposta: header X-RestLi-Id ou campo id
-    post_urn = (
-        li_response.get("id")
-        or li_response.get("value", {}).get("id")
-        or ""
-    )
+    post_urn = li_response.get("id") or li_response.get("value", {}).get("id") or ""
     post.status = "published"
     post.linkedin_post_urn = post_urn or None
     post.linkedin_scheduled_id = None
-    post.published_at = datetime.now(timezone.utc)
+    post.published_at = datetime.now(UTC)
     post.error_message = None
 
     _write_publish_log(
@@ -209,17 +265,15 @@ async def schedule_post(
     post, _account = await _load_post_and_account(db, post_id, tenant_id)
 
     if post.status != "approved":
-        raise ValueError(
-            f"Post deve estar aprovado para agendar. Status atual: {post.status}"
-        )
+        raise ValueError(f"Post deve estar aprovado para agendar. Status atual: {post.status}")
     if not post.publish_date:
         raise ValueError("Post precisa de publish_date para ser agendado.")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     publish_date = post.publish_date
     # Normaliza para tz-aware se vier sem timezone
     if publish_date.tzinfo is None:
-        publish_date = publish_date.replace(tzinfo=timezone.utc)
+        publish_date = publish_date.replace(tzinfo=UTC)
 
     if publish_date <= now:
         raise ValueError("publish_date deve ser no futuro para agendar.")
@@ -259,9 +313,7 @@ async def cancel_schedule(
     post, account = await _load_post_and_account(db, post_id, tenant_id)
 
     if post.status != "scheduled":
-        raise ValueError(
-            f"Post deve estar agendado para cancelar. Status atual: {post.status}"
-        )
+        raise ValueError(f"Post deve estar agendado para cancelar. Status atual: {post.status}")
 
     # Cancela no LinkedIn se tiver URN de post agendado
     if post.linkedin_scheduled_id:

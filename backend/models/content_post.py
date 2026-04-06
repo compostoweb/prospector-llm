@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Integer, Numeric, String, Text, DateTime
+from sqlalchemy import DateTime, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -115,6 +115,23 @@ class ContentPost(Base, TenantMixin, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+
+    # ── Mídia: Imagem ─────────────────────────────────────────────────
+    image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_s3_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_style: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, comment="clean | with_text | infographic"
+    )
+    image_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_aspect_ratio: Mapped[str | None] = mapped_column(
+        String(10), nullable=True, comment="4:5 | 1:1 | 16:9"
+    )
+    linkedin_image_urn: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ── Mídia: Vídeo ──────────────────────────────────────────────────
+    video_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    video_s3_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    linkedin_video_urn: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # ── Controle ──────────────────────────────────────────────────────
     published_at: Mapped[str | None] = mapped_column(

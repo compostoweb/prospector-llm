@@ -260,6 +260,27 @@ async def get_dashboard_stats(
             return 100.0 if current > 0 else 0.0
         return round(((current - previous) / previous) * 100, 1)
 
+    # Leads enrolled no período atual vs anterior
+    # Usa scheduled_at do step 1 (day_offset=0) como proxy da data de enrollment
+    enrolled_trend_q = await db.execute(
+        select(
+            func.count(func.distinct(CadenceStep.lead_id))
+            .filter(
+                CadenceStep.step_number == 1,
+                CadenceStep.scheduled_at >= period_start,
+            )
+            .label("current"),
+            func.count(func.distinct(CadenceStep.lead_id))
+            .filter(
+                CadenceStep.step_number == 1,
+                CadenceStep.scheduled_at >= prev_period_start,
+                CadenceStep.scheduled_at < period_start,
+            )
+            .label("previous"),
+        ).where(CadenceStep.tenant_id == tenant_id)
+    )
+    enrolled_trend_row = enrolled_trend_q.one()
+
     logger.debug("analytics.dashboard", tenant_id=str(tenant_id), days=days)
     return DashboardStatsResponse(
         leads_total=leads_total,
@@ -274,7 +295,9 @@ async def get_dashboard_stats(
         replies_period=replies_period,
         conversion_rate=conversion_rate,
         leads_total_trend=_trend(lead_trend_row.current or 0, lead_trend_row.previous or 0),
-        leads_in_cadence_trend=0.0,  # Status snapshot, no period comparison
+        leads_in_cadence_trend=_trend(
+            enrolled_trend_row.current or 0, enrolled_trend_row.previous or 0
+        ),
         leads_converted_trend=0.0,
         steps_sent_trend=_trend(steps_sent_period, steps_prev_period),
         replies_trend=_trend(replies_period, replies_prev_period),
@@ -815,8 +838,11 @@ class EmailStatsResponse(BaseModel):
     opened: int = 0
     replied: int = 0
     unsubscribed: int = 0
+    bounced: int = 0
     open_rate: float = 0.0
     reply_rate: float = 0.0
+    bounce_rate: float = 0.0
+    unsubscribe_rate: float = 0.0
 
 
 class EmailCadenceItem(BaseModel):
@@ -825,6 +851,7 @@ class EmailCadenceItem(BaseModel):
     sent: int = 0
     opened: int = 0
     replied: int = 0
+    bounced: int = 0
     open_rate: float = 0.0
     reply_rate: float = 0.0
 
@@ -897,8 +924,19 @@ async def get_email_stats(
     )
     unsubscribed = unsub_q.scalar() or 0
 
+    # Bounces detectados no período
+    bounced_q = await db.execute(
+        select(func.count(Lead.id)).where(
+            Lead.tenant_id == tenant_id,
+            Lead.email_bounced_at >= since,
+        )
+    )
+    bounced = bounced_q.scalar() or 0
+
     open_rate = round((opened / sent) * 100, 1) if sent > 0 else 0.0
     reply_rate = round((replied / sent) * 100, 1) if sent > 0 else 0.0
+    bounce_rate = round((bounced / sent) * 100, 1) if sent > 0 else 0.0
+    unsubscribe_rate = round((unsubscribed / sent) * 100, 1) if sent > 0 else 0.0
 
     logger.debug("analytics.email.stats", tenant_id=str(tenant_id), days=days)
     return EmailStatsResponse(
@@ -906,8 +944,11 @@ async def get_email_stats(
         opened=opened,
         replied=replied,
         unsubscribed=unsubscribed,
+        bounced=bounced,
         open_rate=open_rate,
         reply_rate=reply_rate,
+        bounce_rate=bounce_rate,
+        unsubscribe_rate=unsubscribe_rate,
     )
 
 
@@ -985,11 +1026,30 @@ async def get_email_cadences_stats(
     )
     replied_map = {row.cadence_id: row.replied for row in replied_q.all()}
 
+    # Bounces por cadência (via CadenceStep.lead_id + Lead)
+    bounced_q = await db.execute(
+        select(
+            CadenceStep.cadence_id,
+            func.count(Lead.id).label("bounced"),
+        )
+        .join(Lead, Lead.id == CadenceStep.lead_id)
+        .where(
+            CadenceStep.cadence_id.in_(cadence_ids),
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.channel == Channel.EMAIL,
+            Lead.email_bounced_at.is_not(None),
+            Lead.email_bounced_at >= since,
+        )
+        .group_by(CadenceStep.cadence_id)
+    )
+    bounced_map = {row.cadence_id: row.bounced for row in bounced_q.all()}
+
     result = []
     for row in step_rows:
         sent = row.sent or 0
         opened = opened_map.get(row.cadence_id, 0)
         replied = replied_map.get(row.cadence_id, 0)
+        bounced = bounced_map.get(row.cadence_id, 0)
         result.append(
             EmailCadenceItem(
                 cadence_id=str(row.cadence_id),
@@ -997,6 +1057,7 @@ async def get_email_cadences_stats(
                 sent=sent,
                 opened=opened,
                 replied=replied,
+                bounced=bounced,
                 open_rate=round((opened / sent) * 100, 1) if sent > 0 else 0.0,
                 reply_rate=round((replied / sent) * 100, 1) if sent > 0 else 0.0,
             )

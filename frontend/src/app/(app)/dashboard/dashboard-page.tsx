@@ -9,6 +9,8 @@ import {
   MessageSquare,
   TrendingUp,
   Archive,
+  ClipboardList,
+  Mail,
 } from "lucide-react"
 import { StatCard } from "@/components/dashboard/stat-card"
 import { ChannelChart } from "@/components/dashboard/channel-chart"
@@ -17,6 +19,7 @@ import { FunnelChart } from "@/components/dashboard/funnel-chart"
 import { IntentChart } from "@/components/dashboard/intent-chart"
 import { CadencePerformanceTable } from "@/components/dashboard/cadence-performance"
 import { PeriodFilter } from "@/components/dashboard/period-filter"
+import { EmailStatsCard } from "@/components/dashboard/email-stats-card"
 import {
   useDashboardStats,
   useChannelBreakdown,
@@ -24,7 +27,9 @@ import {
   useIntentBreakdown,
   useFunnel,
   useCadencePerformance,
+  useEmailStats,
 } from "@/lib/api/hooks/use-analytics"
+import { useManualTaskStats } from "@/lib/api/hooks/use-manual-tasks"
 
 function trendProps(value: number | undefined): { trend?: { value: number; label: string } } {
   if (value == null || value === 0) return {}
@@ -40,6 +45,8 @@ export default function DashboardPage() {
   const { data: intents, isLoading: loadingIntents } = useIntentBreakdown(days)
   const { data: funnel, isLoading: loadingFunnel } = useFunnel()
   const { data: cadences, isLoading: loadingCadences } = useCadencePerformance(days)
+  const { data: emailStats, isLoading: loadingEmail } = useEmailStats(days)
+  const { data: taskStats } = useManualTaskStats()
 
   return (
     <div className="space-y-6">
@@ -52,8 +59,8 @@ export default function DashboardPage() {
         <PeriodFilter value={days} onChange={setDays} />
       </div>
 
-      {/* Stat cards — 5 itens */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+      {/* Stat cards — 6 itens */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <StatCard
           label="Total de leads"
           value={loadingStats ? "—" : (stats?.leads_total ?? 0)}
@@ -64,6 +71,7 @@ export default function DashboardPage() {
           label="Em cadência"
           value={loadingStats ? "—" : (stats?.leads_in_cadence ?? 0)}
           icon={GitBranch}
+          {...trendProps(stats?.leads_in_cadence_trend)}
         />
         <StatCard
           label="Convertidos"
@@ -84,6 +92,14 @@ export default function DashboardPage() {
           icon={MessageSquare}
           {...trendProps(stats?.replies_trend)}
           {...(stats ? { description: `${stats.replies_today} hoje` } : {})}
+        />
+        <StatCard
+          label="Tarefas pendentes"
+          value={taskStats?.pending ?? 0}
+          icon={ClipboardList}
+          {...(taskStats
+            ? { description: `${taskStats.content_generated} prontas para envio` }
+            : {})}
         />
       </div>
 
@@ -113,6 +129,17 @@ export default function DashboardPage() {
         </h2>
         <ChannelChart data={channels ?? []} isLoading={loadingChannels} />
       </div>
+
+      {/* Email stats — só exibe se houver envios */}
+      {(loadingEmail || (emailStats?.sent ?? 0) > 0) && (
+        <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-5 shadow-(--shadow-sm)">
+          <h2 className="mb-4 flex items-center gap-1.5 text-sm font-semibold text-(--text-primary)">
+            <Mail size={15} aria-hidden="true" />
+            Desempenho de e-mail — últimos {days} dias
+          </h2>
+          <EmailStatsCard data={emailStats!} isLoading={loadingEmail} />
+        </div>
+      )}
 
       {/* Performance cadências + Respostas recentes */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

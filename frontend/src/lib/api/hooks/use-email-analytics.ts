@@ -11,8 +11,11 @@ export interface EmailStats {
   opened: number
   replied: number
   unsubscribed: number
+  bounced: number
   open_rate: number
   reply_rate: number
+  bounce_rate: number
+  unsubscribe_rate: number
 }
 
 export interface EmailCadenceItem {
@@ -21,6 +24,7 @@ export interface EmailCadenceItem {
   sent: number
   opened: number
   replied: number
+  bounced: number
   open_rate: number
   reply_rate: number
 }

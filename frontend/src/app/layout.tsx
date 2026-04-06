@@ -4,6 +4,7 @@ import { SessionProvider } from "next-auth/react"
 import { ThemeProvider } from "next-themes"
 import { ReactQueryProvider } from "@/components/providers/react-query-provider"
 import { auth } from "@/lib/auth/config"
+import { Toaster } from "sonner"
 import "@/styles/globals.css"
 
 // ── Fonte ─────────────────────────────────────────────────────────────
@@ -41,7 +42,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <SessionProvider session={session}>
           <ThemeProvider attribute="data-theme" defaultTheme="system" enableSystem>
-            <ReactQueryProvider>{children}</ReactQueryProvider>
+            <ReactQueryProvider>
+              {children}
+              <Toaster richColors position="bottom-right" />
+            </ReactQueryProvider>
           </ThemeProvider>
         </SessionProvider>
       </body>

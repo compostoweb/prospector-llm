@@ -152,6 +152,7 @@ export function useCadence(id: string) {
       return data as Cadence
     },
     enabled: !!session?.accessToken && !!id,
+    refetchInterval: 5 * 60 * 1000,
   })
 }
 

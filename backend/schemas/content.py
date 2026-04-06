@@ -27,6 +27,7 @@ PublishAction = Literal["schedule", "publish", "cancel", "fail"]
 # ContentPost
 # ─────────────────────────────────────────────────────────────────────
 
+
 class ContentPostCreate(BaseModel):
     title: str = Field(..., max_length=255)
     body: str = Field(..., min_length=1)
@@ -75,6 +76,15 @@ class ContentPostResponse(BaseModel):
     week_number: int | None
     linkedin_post_urn: str | None
     linkedin_scheduled_id: str | None
+    image_url: str | None
+    image_s3_key: str | None
+    image_style: str | None
+    image_prompt: str | None
+    image_aspect_ratio: str | None
+    linkedin_image_urn: str | None
+    video_url: str | None
+    video_s3_key: str | None
+    linkedin_video_urn: str | None
     impressions: int
     likes: int
     comments: int
@@ -93,6 +103,7 @@ class ContentPostResponse(BaseModel):
 # ─────────────────────────────────────────────────────────────────────
 # ContentTheme
 # ─────────────────────────────────────────────────────────────────────
+
 
 class ContentThemeCreate(BaseModel):
     title: str = Field(..., max_length=255)
@@ -117,6 +128,7 @@ class ContentThemeResponse(BaseModel):
 # ─────────────────────────────────────────────────────────────────────
 # ContentSettings
 # ─────────────────────────────────────────────────────────────────────
+
 
 class ContentSettingsUpdate(BaseModel):
     default_publish_time: str | None = Field(
@@ -145,6 +157,7 @@ class ContentSettingsResponse(BaseModel):
 # ─────────────────────────────────────────────────────────────────────
 # ContentReference
 # ─────────────────────────────────────────────────────────────────────
+
 
 class ContentReferenceCreate(BaseModel):
     body: str = Field(..., min_length=1)
@@ -178,6 +191,7 @@ class ContentReferenceResponse(BaseModel):
 # ContentPublishLog
 # ─────────────────────────────────────────────────────────────────────
 
+
 class ContentPublishLogResponse(BaseModel):
     model_config = {"from_attributes": True}
 
@@ -193,6 +207,7 @@ class ContentPublishLogResponse(BaseModel):
 # ─────────────────────────────────────────────────────────────────────
 # LinkedIn OAuth
 # ─────────────────────────────────────────────────────────────────────
+
 
 class LinkedInAuthUrl(BaseModel):
     url: str
@@ -217,7 +232,10 @@ class ContentLinkedInAccountResponse(BaseModel):
 
     @classmethod
     def from_orm_with_computed(
-        cls, obj: object, *, has_unipile: bool = False,
+        cls,
+        obj: object,
+        *,
+        has_unipile: bool = False,
     ) -> ContentLinkedInAccountResponse:
         """Popula campos computados a partir do model + flag externa."""
         data = cls.model_validate(obj)
@@ -229,6 +247,7 @@ class ContentLinkedInAccountResponse(BaseModel):
 # ─────────────────────────────────────────────────────────────────────
 # Analytics Sync
 # ─────────────────────────────────────────────────────────────────────
+
 
 class VoyagerSyncResponse(BaseModel):
     success: bool
@@ -242,6 +261,7 @@ class VoyagerSyncResponse(BaseModel):
 # ─────────────────────────────────────────────────────────────────────
 # Sprint 3 — Geração com IA
 # ─────────────────────────────────────────────────────────────────────
+
 
 class GeneratePostRequest(BaseModel):
     theme: str = Field(..., min_length=3, max_length=500)
@@ -297,3 +317,25 @@ class VaryThemeRequest(BaseModel):
 
 class VaryThemeResponse(BaseModel):
     variation: str
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Geração de imagem (Nano Banana 2)
+# ─────────────────────────────────────────────────────────────────────
+
+ImageStyle = Literal["clean", "with_text", "infographic"]
+ImageSubType = Literal["metrics", "steps", "comparison"]
+ImageAspectRatio = Literal["4:5", "1:1", "16:9"]
+
+
+class GeneratePostImageRequest(BaseModel):
+    post_id: uuid.UUID
+    style: ImageStyle
+    aspect_ratio: ImageAspectRatio = "4:5"
+    sub_type: ImageSubType | None = None
+    custom_prompt: str | None = Field(default=None, max_length=1000)
+
+
+class GeneratePostImageResponse(BaseModel):
+    image_url: str
+    image_prompt: str

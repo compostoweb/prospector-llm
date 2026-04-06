@@ -67,10 +67,19 @@ export function PostCard({ post }: PostCardProps) {
     <>
       <div
         className={cn(
-          "rounded-lg border border-(--border-default) bg-(--bg-surface) p-4 flex flex-col gap-3 shadow-(--shadow-sm)",
+          "rounded-lg border border-(--border-default) bg-(--bg-surface) p-4 flex flex-col gap-3 shadow-(--shadow-sm) overflow-hidden",
           post.status === "failed" && "border-(--danger)",
         )}
       >
+        {/* Thumbnail da imagem, se existir */}
+        {post.image_url && (
+          <img
+            src={post.image_url}
+            alt=""
+            className="-mx-4 -mt-4 w-[calc(100%+2rem)] h-32 object-cover"
+          />
+        )}
+
         {/* Cabeçalho */}
         <div className="flex items-start justify-between gap-3">
           <div className="flex flex-col gap-1 min-w-0">

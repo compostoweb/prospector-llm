@@ -32,6 +32,8 @@ from models.enums import LeadStatus
 from models.lead import Lead
 from schemas.content import (
     ContentThemeResponse,
+    GeneratePostImageRequest,
+    GeneratePostImageResponse,
     GeneratePostRequest,
     GeneratePostResponse,
     GeneratePostVariation,
@@ -370,3 +372,93 @@ async def vary_theme(
     logger.info("vary_theme.done", tenant_id=tenant_id, original=body.theme_title)
 
     return VaryThemeResponse(variation=variation)
+
+
+# ── POST /content/generate/image ─────────────────────────────────────
+
+
+@router.post(
+    "/image",
+    response_model=GeneratePostImageResponse,
+    summary="Gera imagem para o post via Gemini Nano Banana 2",
+)
+async def generate_post_image(
+    body: GeneratePostImageRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+    registry: LLMRegistry = Depends(get_llm_registry),
+) -> GeneratePostImageResponse:
+    """
+    Gera imagem usando gemini-3.1-flash-image-preview (Nano Banana 2).
+
+    Faz upload para S3/MinIO e atualiza os campos de imagem do post.
+    Retorna image_url e o prompt usado (para referência ou regeneração).
+    """
+    from integrations.s3_client import S3Client
+    from services.content.image_generator import generate_post_image as svc_generate_image
+
+    result = await db.execute(
+        select(ContentPost).where(
+            ContentPost.id == body.post_id,
+            ContentPost.tenant_id == tenant_id,
+        )
+    )
+    post = result.scalar_one_or_none()
+    if post is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post não encontrado.")
+
+    # Deleta imagem anterior do S3 se existir
+    if post.image_s3_key:
+        try:
+            S3Client().delete_object(post.image_s3_key)
+        except Exception:
+            pass
+
+    try:
+        image_bytes, prompt_used = await svc_generate_image(
+            post=post,
+            style=body.style,
+            registry=registry,
+            aspect_ratio=body.aspect_ratio,
+            sub_type=body.sub_type,
+            custom_prompt=body.custom_prompt,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Falha na geração de imagem: {exc}",
+        ) from exc
+    except Exception as exc:
+        exc_str = str(exc)
+        if "429" in exc_str or "RESOURCE_EXHAUSTED" in exc_str:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Cota da API Gemini esgotada. Verifique seu plano e billing em ai.google.dev.",
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Erro ao gerar imagem: {exc}",
+        ) from exc
+
+    s3_key = f"images/{tenant_id}/{body.post_id}.png"
+    s3 = S3Client()
+    image_url = s3.upload_bytes(image_bytes, s3_key, "image/png")
+
+    post.image_url = image_url
+    post.image_s3_key = s3_key
+    post.image_style = body.style
+    post.image_prompt = prompt_used
+    post.image_aspect_ratio = body.aspect_ratio
+    post.linkedin_image_urn = None  # URN anterior inválido após nova imagem
+
+    await db.commit()
+
+    logger.info(
+        "content.image_generated",
+        post_id=str(body.post_id),
+        tenant_id=str(tenant_id),
+        style=body.style,
+        aspect_ratio=body.aspect_ratio,
+    )
+
+    return GeneratePostImageResponse(image_url=image_url, image_prompt=prompt_used)

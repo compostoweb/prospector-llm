@@ -15,7 +15,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, Float, String, Text
+from sqlalchemy import Boolean, DateTime, Float, String, Text
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base, TenantMixin, TimestampMixin
@@ -117,6 +118,12 @@ class Lead(Base, TenantMixin, TimestampMixin):
         nullable=True,
         default=None,
         comment="Se preenchido, e-mails para este lead são pulados (bounce detectado).",
+    )
+    email_bounce_type: Mapped[str | None] = mapped_column(
+        String(10),
+        nullable=True,
+        default=None,
+        comment="Tipo do bounce: 'hard' (permanente) ou 'soft' (temporário).",
     )
 
     # ── Análise LLM (Anthropic Batch API) ────────────────────────────

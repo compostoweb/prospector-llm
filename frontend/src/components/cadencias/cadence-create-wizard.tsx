@@ -455,11 +455,17 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-export function CadenceCreateWizard() {
+export function CadenceCreateWizard({
+  defaultPreset,
+}: {
+  defaultPreset?: Exclude<PresetId, "custom">
+}) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { status } = useSession()
-  const requestedPreset = getPresetById(resolvePresetId(searchParams.get("preset")))
+  const requestedPreset = getPresetById(
+    defaultPreset ?? resolvePresetId(searchParams.get("preset")),
+  )
   const createCadence = useCreateCadence()
   const { data: lists, error: leadListsError, isLoading: loadingLeadLists } = useLeadLists()
   const { data: emailAccountsData } = useEmailAccounts()
@@ -537,24 +543,24 @@ export function CadenceCreateWizard() {
   const readinessItems: ReadinessItem[] = [
     {
       title: "Listas de leads",
-      countLabel:
-        isListsPending
-          ? "Carregando listas..."
-          : leadListsError
-            ? "Falha ao carregar listas"
-            : lists && lists.length > 0
-          ? `${lists.length} lista${lists.length === 1 ? "" : "s"} pronta${lists.length === 1 ? "" : "s"}`
-          : "Nenhuma lista criada",
-      description:
-        leadListsError
-          ? "A API não retornou as listas do tenant atual. Confirme se o backend está ativo e recarregue a página."
-          : leadListId && totalLeads > 0
+      countLabel: isListsPending
+        ? "Carregando listas..."
+        : leadListsError
+          ? "Falha ao carregar listas"
+          : lists && lists.length > 0
+            ? `${lists.length} lista${lists.length === 1 ? "" : "s"} pronta${lists.length === 1 ? "" : "s"}`
+            : "Nenhuma lista criada",
+      description: leadListsError
+        ? "A API não retornou as listas do tenant atual. Confirme se o backend está ativo e recarregue a página."
+        : leadListId && totalLeads > 0
           ? `${selectedLeadList?.name ?? "Lista selecionada"} com ${totalLeads} leads disponíveis para prévia e operação.`
           : "Vincular uma lista deixa o sandbox útil e já define a audiência inicial da cadência.",
       href: "/listas",
       icon: Users,
       state:
-        leadListsError || (!isListsPending && (!lists || lists.length === 0)) ? "attention" : "ready",
+        leadListsError || (!isListsPending && (!lists || lists.length === 0))
+          ? "attention"
+          : "ready",
     },
     {
       title: "Contas de e-mail",
@@ -1084,16 +1090,18 @@ export function CadenceCreateWizard() {
                         </p>
                       ) : leadListsError ? (
                         <p className="text-xs text-(--danger)">
-                          Não foi possível carregar as listas agora. Recarregue a página depois de confirmar o backend.
+                          Não foi possível carregar as listas agora. Recarregue a página depois de
+                          confirmar o backend.
                         </p>
                       ) : lists && lists.length === 0 ? (
                         <p className="text-xs text-(--text-tertiary)">
-                          Não existe nenhuma lista no tenant atual. Você ainda pode salvar a cadência e vincular leads depois.
+                          Não existe nenhuma lista no tenant atual. Você ainda pode salvar a
+                          cadência e vincular leads depois.
                         </p>
                       ) : (
                         <p className="text-xs text-(--text-tertiary)">
-                          Sem lista vinculada, você ainda consegue salvar a cadência, mas a audiência
-                          só aparece depois que os leads forem inscritos manualmente.
+                          Sem lista vinculada, você ainda consegue salvar a cadência, mas a
+                          audiência só aparece depois que os leads forem inscritos manualmente.
                         </p>
                       )}
                     </div>

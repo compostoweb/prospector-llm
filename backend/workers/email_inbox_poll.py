@@ -26,7 +26,7 @@ import email as email_lib
 import imaplib
 import re
 import uuid as uuid_mod
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -162,6 +162,7 @@ async def _poll_gmail_oauth(
 
         sender_email = _extract_gmail_sender(msg_data)
         body = _extract_gmail_body(msg_data)
+        subject = _extract_gmail_subject(msg_data)
 
         if not sender_email or sender_email.lower() == account.email_address.lower():
             continue  # ignora mensagens próprias
@@ -171,6 +172,7 @@ async def _poll_gmail_oauth(
             from_email=sender_email,
             body=body,
             message_id=msg_id,
+            subject=subject,
             session_factory=session_factory,
         )
         processed += 1
@@ -179,10 +181,10 @@ async def _poll_gmail_oauth(
     if new_history_id != account.gmail_history_id:
         async with session_factory() as db:
             from sqlalchemy import select  # noqa: PLC0415
+
             from models.email_account import EmailAccount  # noqa: PLC0415
-            result = await db.execute(
-                select(EmailAccount).where(EmailAccount.id == account.id)
-            )
+
+            result = await db.execute(select(EmailAccount).where(EmailAccount.id == account.id))
             acc = result.scalar_one_or_none()
             if acc:
                 acc.gmail_history_id = str(new_history_id)
@@ -219,11 +221,10 @@ async def _gmail_bootstrap_history_id(
     if history_id:
         async with session_factory() as db:
             from sqlalchemy import select  # noqa: PLC0415
+
             from models.email_account import EmailAccount  # noqa: PLC0415
 
-            result = await db.execute(
-                select(EmailAccount).where(EmailAccount.id == account.id)
-            )
+            result = await db.execute(select(EmailAccount).where(EmailAccount.id == account.id))
             acc = result.scalar_one_or_none()
             if acc:
                 acc.gmail_history_id = history_id
@@ -286,10 +287,12 @@ async def _gmail_fetch_since_history(
                 label_ids = msg.get("labelIds", [])
                 # Só mensagens na INBOX que não são do remetente
                 if "INBOX" in label_ids and "SENT" not in label_ids:
-                    messages.append({
-                        "id": msg.get("id"),
-                        "historyId": data.get("historyId", history_id),
-                    })
+                    messages.append(
+                        {
+                            "id": msg.get("id"),
+                            "historyId": data.get("historyId", history_id),
+                        }
+                    )
 
     return messages
 
@@ -317,6 +320,12 @@ def _extract_gmail_sender(msg_data: dict) -> str:
     if match:
         return match.group(1).strip().lower()
     return from_header.strip().lower()
+
+
+def _extract_gmail_subject(msg_data: dict) -> str:
+    """Extrai assunto da mensagem Gmail."""
+    headers = msg_data.get("payload", {}).get("headers", [])
+    return next((h["value"] for h in headers if h["name"].lower() == "subject"), "")
 
 
 def _extract_gmail_body(msg_data: dict) -> str:
@@ -407,6 +416,7 @@ async def _poll_smtp_imap(
         sender_email = msg_data.get("from", "").lower()
         body = msg_data.get("body", "")
         uid = msg_data.get("uid", "")
+        subject = msg_data.get("subject", "")
 
         if not sender_email or sender_email == account.email_address.lower():
             continue
@@ -416,6 +426,7 @@ async def _poll_smtp_imap(
             from_email=sender_email,
             body=body,
             message_id=f"imap:{account.id}:{uid}",
+            subject=subject,
             session_factory=session_factory,
         )
         new_last_uid = uid
@@ -425,11 +436,10 @@ async def _poll_smtp_imap(
     if new_last_uid != last_uid:
         async with session_factory() as db:
             from sqlalchemy import select  # noqa: PLC0415
+
             from models.email_account import EmailAccount  # noqa: PLC0415
 
-            result = await db.execute(
-                select(EmailAccount).where(EmailAccount.id == account.id)
-            )
+            result = await db.execute(select(EmailAccount).where(EmailAccount.id == account.id))
             acc = result.scalar_one_or_none()
             if acc:
                 acc.imap_last_uid = str(new_last_uid)
@@ -494,6 +504,9 @@ def _imap_fetch_messages(
             match = re.search(r"<([^>]+)>", from_header)
             from_email = match.group(1).strip().lower() if match else from_header.strip().lower()
 
+            # Extrai assunto
+            subject = msg.get("Subject", "")
+
             # Extrai corpo texto
             body = ""
             if msg.is_multipart():
@@ -510,7 +523,7 @@ def _imap_fetch_messages(
                 except Exception:
                     pass
 
-            messages.append({"uid": uid, "from": from_email, "body": body})
+            messages.append({"uid": uid, "from": from_email, "body": body, "subject": subject})
 
         return messages
     finally:
@@ -529,25 +542,31 @@ async def _process_email_reply(
     body: str,
     message_id: str,
     session_factory: Any,
+    subject: str = "",
 ) -> None:
     """
     Processa uma resposta de e-mail recebida:
-      1. Encontra o lead pelo remetente
-      2. Verifica se há step EMAIL enviado para esse lead
-      3. Roda ReplyParser
-      4. Salva Interaction INBOUND
-      5. Atualiza step + lead
+      1. Detecta NDR/bounce por remetente e subject
+      2. Encontra o lead pelo remetente
+      3. Verifica se há step EMAIL enviado para esse lead
+      4. Roda ReplyParser
+      5. Salva Interaction INBOUND
+      6. Atualiza step + lead
     """
     from sqlalchemy import select  # noqa: PLC0415
-    from sqlalchemy.orm import selectinload  # noqa: PLC0415
 
     from core.config import settings  # noqa: PLC0415
     from core.redis_client import redis_client  # noqa: PLC0415
     from integrations.llm import LLMRegistry  # noqa: PLC0415
     from models.cadence_step import CadenceStep  # noqa: PLC0415
-    from models.enums import Channel, Intent, InteractionDirection, LeadStatus, StepStatus  # noqa: PLC0415
+    from models.enums import (  # noqa: PLC0415
+        Channel,
+        Intent,
+        InteractionDirection,
+        LeadStatus,
+        StepStatus,
+    )
     from models.interaction import Interaction  # noqa: PLC0415
-    from models.lead import Lead  # noqa: PLC0415
     from services.reply_parser import ReplyParser  # noqa: PLC0415
 
     if not body.strip():
@@ -556,12 +575,28 @@ async def _process_email_reply(
     async with session_factory() as db:
         # Idempotência: verifica se message_id já foi processado
         existing = await db.execute(
-            select(Interaction.id).where(
-                Interaction.unipile_message_id == message_id
-            ).limit(1)
+            select(Interaction.id).where(Interaction.unipile_message_id == message_id).limit(1)
         )
         if existing.scalar_one_or_none():
             return
+
+        # ── Detecção de NDR/bounce ANTES de tudo ─────────────────────
+        if _is_ndr_message(from_email=from_email, subject=subject, body=body):
+            # Tentamos associar o bounce ao lead a partir do corpo do NDR —
+            # que normalmente inclui o endereço original do destinatário.
+            bounced_email = _extract_bounced_email(body)
+            if bounced_email:
+                lead = await _find_lead_by_email(bounced_email, tenant_id, db)
+                if lead and lead.email_bounced_at is None:
+                    lead.email_bounced_at = datetime.now(tz=UTC)
+                    lead.email_bounce_type = "hard"
+                    await db.commit()
+                    logger.info(
+                        "email_inbox_poll.bounce_detected",
+                        lead_id=str(lead.id),
+                        bounced_email=bounced_email,
+                    )
+            return  # NDRs não entram no Reply Parser
 
         # Busca lead pelo e-mail do remetente
         lead = await _find_lead_by_email(from_email, tenant_id, db)
@@ -615,7 +650,7 @@ async def _process_email_reply(
             content_text=body,
             intent=intent,
             unipile_message_id=message_id,
-            created_at=datetime.now(tz=timezone.utc),
+            created_at=datetime.now(tz=UTC),
         )
         db.add(interaction)
 
@@ -641,6 +676,7 @@ async def _process_email_reply(
         # Notificação
         if intent in (Intent.INTEREST, Intent.OBJECTION):
             from services.notification import send_reply_notification  # noqa: PLC0415
+
             await send_reply_notification(
                 lead=lead,
                 intent=intent.value,
@@ -651,14 +687,18 @@ async def _process_email_reply(
 
         # Broadcast WebSocket
         from api.routes.ws import broadcast_event  # noqa: PLC0415
-        await broadcast_event(str(tenant_id), {
-            "type": "new_message",
-            "lead_id": str(lead.id),
-            "lead_name": lead.name,
-            "channel": Channel.EMAIL.value,
-            "intent": intent.value,
-            "text_preview": body[:100],
-        })
+
+        await broadcast_event(
+            str(tenant_id),
+            {
+                "type": "new_message",
+                "lead_id": str(lead.id),
+                "lead_name": lead.name,
+                "channel": Channel.EMAIL.value,
+                "intent": intent.value,
+                "text_preview": body[:100],
+            },
+        )
 
 
 async def _find_lead_by_email(
@@ -668,15 +708,96 @@ async def _find_lead_by_email(
 ) -> Any | None:
     """Busca lead pelo e-mail (corporativo ou pessoal)."""
     from sqlalchemy import or_, select  # noqa: PLC0415
+
     from models.lead import Lead  # noqa: PLC0415
 
     result = await db.execute(
-        select(Lead).where(
+        select(Lead)
+        .where(
             Lead.tenant_id == tenant_id,
             or_(
                 Lead.email_corporate == email,
                 Lead.email_personal == email,
             ),
-        ).limit(1)
+        )
+        .limit(1)
     )
     return result.scalar_one_or_none()
+
+
+# ── NDR / Bounce detection ────────────────────────────────────────────
+
+# Remetentes típicos de mensagens de bounce (case-insensitive)
+_NDR_SENDERS = (
+    "mailer-daemon@",
+    "postmaster@",
+    "mail-daemon@",
+    "mailerdaemon@",
+    "noreply@bounce",
+    "bounce@",
+    "no-reply@bounce",
+)
+
+# Keywords no subject que indicam bounce permanente
+_NDR_SUBJECTS = (
+    "delivery status notification",
+    "delivery failure",
+    "mail delivery failed",
+    "mail delivery failure",
+    "undeliverable",
+    "returned mail",
+    "failure notice",
+    "non-delivery report",
+    "unable to deliver",
+    "message not delivered",
+    "entrega falhou",
+    "mensagem não entregue",
+)
+
+
+def _is_ndr_message(from_email: str, subject: str, body: str) -> bool:
+    """
+    Heurística para detectar NDR/DSN (Non-Delivery Report).
+
+    Verifica:
+      1. Remetente é mailer-daemon / postmaster
+      2. Subject contém keywords de bounce
+      3. Corpo contém header DSN 'Content-Type: message/delivery-status'
+    """
+    sender = from_email.lower()
+    if any(sender.startswith(ndr) for ndr in _NDR_SENDERS):
+        return True
+
+    subject_lc = subject.lower()
+    if any(kw in subject_lc for kw in _NDR_SUBJECTS):
+        return True
+
+    body_lc = body.lower()
+    if "content-type: message/delivery-status" in body_lc:
+        return True
+
+    return False
+
+
+def _extract_bounced_email(body: str) -> str | None:
+    """
+    Tenta extrair o endereço destinatário original do corpo do NDR.
+
+    DSN headers comuns:
+      Final-Recipient: rfc822; destinatario@domain.com
+      X-Failed-Recipients: destinatario@domain.com
+      To: destinatario@domain.com  (em email original embutido)
+    """
+    patterns = [
+        r"final-recipient:\s*rfc822;\s*([^\s\r\n]+)",
+        r"x-failed-recipients?:\s*([^\s\r\n,]+)",
+        r"original-recipient:\s*rfc822;\s*([^\s\r\n]+)",
+    ]
+    body_lc = body.lower()
+    for pattern in patterns:
+        match = re.search(pattern, body_lc)
+        if match:
+            addr = match.group(1).strip().strip("<>")
+            if "@" in addr:
+                return addr
+    return None

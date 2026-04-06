@@ -18,9 +18,10 @@ POST   /content/posts/{id}/publish-now  — publica imediatamente (approved | sc
 from __future__ import annotations
 
 import uuid
+from datetime import UTC
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,6 +43,7 @@ router = APIRouter(prefix="/posts", tags=["Content Hub — Posts"])
 
 # ── Helper ────────────────────────────────────────────────────────────
 
+
 async def _get_post_or_404(
     post_id: uuid.UUID,
     tenant_id: uuid.UUID,
@@ -61,9 +63,14 @@ async def _get_post_or_404(
 
 # ── Listagem ──────────────────────────────────────────────────────────
 
+
 @router.get("", response_model=list[ContentPostResponse])
 async def list_posts(
-    post_status: str | None = Query(default=None, alias="status", description="draft | approved | scheduled | published | failed"),
+    post_status: str | None = Query(
+        default=None,
+        alias="status",
+        description="draft | approved | scheduled | published | failed",
+    ),
     pillar: str | None = Query(default=None, description="authority | case | vision"),
     week_number: int | None = Query(default=None, ge=1, le=54),
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
@@ -82,6 +89,7 @@ async def list_posts(
 
 
 # ── Criacao ───────────────────────────────────────────────────────────
+
 
 @router.post("", response_model=ContentPostResponse, status_code=status.HTTP_201_CREATED)
 async def create_post(
@@ -111,6 +119,7 @@ async def create_post(
 
 # ── Detalhe ───────────────────────────────────────────────────────────
 
+
 @router.get("/{post_id}", response_model=ContentPostResponse)
 async def get_post(
     post_id: uuid.UUID,
@@ -122,6 +131,7 @@ async def get_post(
 
 
 # ── Atualizacao ───────────────────────────────────────────────────────
+
 
 @router.put("/{post_id}", response_model=ContentPostResponse)
 async def update_post(
@@ -142,16 +152,19 @@ async def update_post(
 
     response = ContentPostResponse.model_validate(post)
     if was_published:
-        response = response.model_copy(update={
-            "linkedin_sync_warning": (
-                "Post atualizado localmente. A API do LinkedIn não permite "
-                "editar o conteúdo de posts já publicados — o texto no LinkedIn permanece inalterado."
-            )
-        })
+        response = response.model_copy(
+            update={
+                "linkedin_sync_warning": (
+                    "Post atualizado localmente. A API do LinkedIn não permite "
+                    "editar o conteúdo de posts já publicados — o texto no LinkedIn permanece inalterado."
+                )
+            }
+        )
     return response
 
 
 # ── Delete ────────────────────────────────────────────────────────────
+
 
 @router.delete("/{post_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_post(
@@ -166,7 +179,7 @@ async def delete_post(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Erro ao deletar post no LinkedIn (API {exc.status_code}): {exc.detail}. "
-                   "O post local não foi removido.",
+            "O post local não foi removido.",
         ) from exc
     await db.delete(post)
     await db.commit()
@@ -174,6 +187,7 @@ async def delete_post(
 
 
 # ── Aprovacao ─────────────────────────────────────────────────────────
+
 
 @router.patch("/{post_id}/approve", response_model=ContentPostResponse)
 async def approve_post(
@@ -196,6 +210,7 @@ async def approve_post(
 
 # ── Metricas manuais ──────────────────────────────────────────────────
 
+
 @router.post("/{post_id}/metrics", response_model=ContentPostResponse)
 async def update_metrics(
     post_id: uuid.UUID,
@@ -203,7 +218,7 @@ async def update_metrics(
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> ContentPostResponse:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     post = await _get_post_or_404(post_id, tenant_id, db)
     post.impressions = body.impressions
@@ -212,7 +227,7 @@ async def update_metrics(
     post.shares = body.shares
     if body.engagement_rate is not None:
         post.engagement_rate = body.engagement_rate
-    post.metrics_updated_at = datetime.now(timezone.utc)
+    post.metrics_updated_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(post)
     logger.info("content.post_metrics_updated", post_id=str(post_id), tenant_id=str(tenant_id))
@@ -220,6 +235,7 @@ async def update_metrics(
 
 
 # ── Agendamento ───────────────────────────────────────────────────────
+
 
 @router.post("/{post_id}/schedule", response_model=ContentPostResponse)
 async def schedule_post(
@@ -283,8 +299,8 @@ async def publish_now(
     Requer post.status == approved | scheduled.
     Requer conta LinkedIn ativa conectada.
     """
-    from services.content.publisher import publish_now as svc_publish
     from services.content.linkedin_client import LinkedInClientError
+    from services.content.publisher import publish_now as svc_publish
 
     try:
         post = await svc_publish(db, post_id=post_id, tenant_id=tenant_id)
@@ -297,3 +313,132 @@ async def publish_now(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     logger.info("content.post_published_api", post_id=str(post_id), tenant_id=str(tenant_id))
     return ContentPostResponse.model_validate(post)
+
+
+# ── Imagem gerada por IA ──────────────────────────────────────────────
+
+
+@router.delete(
+    "/{post_id}/image",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+    summary="Remove a imagem do post (S3 + campos do banco)",
+)
+async def delete_post_image(
+    post_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> None:
+    from integrations.s3_client import S3Client
+
+    post = await _get_post_or_404(post_id, tenant_id, db)
+
+    if post.image_s3_key:
+        try:
+            S3Client().delete_object(post.image_s3_key)
+        except Exception:
+            pass
+
+    post.image_url = None
+    post.image_s3_key = None
+    post.image_style = None
+    post.image_prompt = None
+    post.image_aspect_ratio = None
+    post.linkedin_image_urn = None
+
+    await db.commit()
+    logger.info("content.post_image_deleted", post_id=str(post_id), tenant_id=str(tenant_id))
+
+
+# ── Upload de vídeo ───────────────────────────────────────────────────
+
+_MAX_VIDEO_SIZE = 500 * 1024 * 1024  # 500 MB
+
+
+@router.post(
+    "/{post_id}/upload-video",
+    response_model=ContentPostResponse,
+    summary="Faz upload de vídeo MP4 para o post",
+)
+async def upload_post_video(
+    post_id: uuid.UUID,
+    file: UploadFile = File(...),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> ContentPostResponse:
+    """
+    Aceita apenas video/mp4. Tamanho máximo: 500 MB.
+    Salva no S3 e atualiza post.video_url + post.video_s3_key.
+    """
+    from integrations.s3_client import S3Client
+
+    if file.content_type not in ("video/mp4", "video/quicktime"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Formato inválido. Apenas video/mp4 é aceito.",
+        )
+
+    post = await _get_post_or_404(post_id, tenant_id, db)
+
+    video_bytes = await file.read()
+
+    if len(video_bytes) > _MAX_VIDEO_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Vídeo excede o limite de 500 MB.",
+        )
+
+    # Remove vídeo anterior do S3
+    if post.video_s3_key:
+        try:
+            S3Client().delete_object(post.video_s3_key)
+        except Exception:
+            pass
+
+    s3_key = f"videos/{tenant_id}/{post_id}.mp4"
+    s3 = S3Client()
+    video_url = s3.upload_bytes(video_bytes, s3_key, "video/mp4")
+
+    post.video_url = video_url
+    post.video_s3_key = s3_key
+    post.linkedin_video_urn = None  # URN inválido após novo upload
+
+    await db.commit()
+    await db.refresh(post)
+
+    logger.info(
+        "content.post_video_uploaded",
+        post_id=str(post_id),
+        tenant_id=str(tenant_id),
+        size_bytes=len(video_bytes),
+    )
+    return ContentPostResponse.model_validate(post)
+
+
+@router.delete(
+    "/{post_id}/video",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+    summary="Remove o vídeo do post (S3 + campos do banco)",
+)
+async def delete_post_video(
+    post_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> None:
+    from integrations.s3_client import S3Client
+
+    post = await _get_post_or_404(post_id, tenant_id, db)
+
+    if post.video_s3_key:
+        try:
+            S3Client().delete_object(post.video_s3_key)
+        except Exception:
+            pass
+
+    post.video_url = None
+    post.video_s3_key = None
+    post.linkedin_video_urn = None
+
+    await db.commit()
+    logger.info("content.post_video_deleted", post_id=str(post_id), tenant_id=str(tenant_id))

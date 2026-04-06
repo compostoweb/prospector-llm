@@ -16,6 +16,8 @@ Lista modelos dinamicamente via client.models.list() + filtra apenas chat models
 
 from __future__ import annotations
 
+import base64
+
 import structlog
 from google import genai
 from google.genai import types
@@ -29,13 +31,13 @@ logger = structlog.get_logger()
 # Fonte oficial: https://ai.google.dev/gemini-api/docs/pricing
 # → price_is_estimated=True em ModelInfo
 _GEMINI_PRICES: dict[str, tuple[float, float]] = {
-    "gemini-2.5-pro":         (1.25,  10.00),   # até 200k tokens; acima 2.50/15.00
-    "gemini-2.5-flash":       (0.30,   2.50),   # com thinking; sem: 0.15/0.60
-    "gemini-2.5-flash-lite":  (0.10,   0.40),
-    "gemini-2.0-flash":       (0.10,   0.40),
-    "gemini-3-flash":         (0.15,   0.60),   # preview — sujeito a alteração
-    "gemini-3.1-pro":         (1.25,  10.00),   # preview
-    "gemini-3.1-flash":       (0.15,   0.60),   # preview
+    "gemini-2.5-pro": (1.25, 10.00),  # até 200k tokens; acima 2.50/15.00
+    "gemini-2.5-flash": (0.30, 2.50),  # com thinking; sem: 0.15/0.60
+    "gemini-2.5-flash-lite": (0.10, 0.40),
+    "gemini-2.0-flash": (0.10, 0.40),
+    "gemini-3-flash": (0.15, 0.60),  # preview — sujeito a alteração
+    "gemini-3.1-pro": (1.25, 10.00),  # preview
+    "gemini-3.1-flash": (0.15, 0.60),  # preview
 }
 
 # Modelos que NÃO são de chat/text generation — filtrar da lista
@@ -79,7 +81,6 @@ def _friendly_name(model_id: str) -> str:
 
 
 class GeminiProvider(LLMProvider):
-
     def __init__(self, api_key: str) -> None:
         # google-genai SDK GA — usa GEMINI_API_KEY diretamente
         self._client = genai.Client(api_key=api_key)
@@ -110,9 +111,7 @@ class GeminiProvider(LLMProvider):
                 system_instruction = msg.content
                 continue
             role = "user" if msg.role == "user" else "model"
-            contents.append(
-                types.Content(role=role, parts=[types.Part(text=msg.content)])
-            )
+            contents.append(types.Content(role=role, parts=[types.Part(text=msg.content)]))
 
         config = types.GenerateContentConfig(
             temperature=temperature,
@@ -176,3 +175,45 @@ class GeminiProvider(LLMProvider):
         models.sort(key=lambda m: m.id, reverse=True)
         logger.info("gemini.models.listed", count=len(models))
         return models
+
+    async def generate_image(
+        self,
+        prompt: str,
+        aspect_ratio: str = "4:5",
+        image_size: str = "1K",
+    ) -> bytes:
+        """
+        Gera uma imagem via Nano Banana 2 (gemini-3.1-flash-image-preview).
+
+        Retorna os bytes raw da imagem PNG.
+        aspect_ratio: '4:5' | '1:1' | '16:9'
+        image_size: '512' | '1K' | '2K' | '4K'
+        """
+        logger.debug("gemini.generate_image", aspect_ratio=aspect_ratio, image_size=image_size)
+
+        response = await self._client.aio.models.generate_content(
+            model="gemini-3.1-flash-image-preview",
+            contents=[prompt],
+            config=types.GenerateContentConfig(
+                response_modalities=["IMAGE"],
+                image_config=types.ImageConfig(
+                    aspect_ratio=aspect_ratio,
+                    image_size=image_size,
+                ),
+            ),
+        )
+
+        # O modelo 3.1 Flash Image usa Thinking por padrão — gera partes
+        # intermediárias marcadas como `thought=True`. Precisamos pegar apenas
+        # a última parte de imagem que NÃO seja de pensamento.
+        image_bytes: bytes | None = None
+        for part in response.parts:
+            if part.inline_data and part.inline_data.data and not getattr(part, "thought", False):
+                image_bytes = base64.b64decode(part.inline_data.data)
+
+        if image_bytes is None:
+            raise ValueError("Gemini nao retornou imagem na resposta.")
+
+        logger.info("gemini.image_generated", size_bytes=len(image_bytes))
+        return image_bytes
+

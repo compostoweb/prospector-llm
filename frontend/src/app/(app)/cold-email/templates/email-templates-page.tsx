@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Plus, FileText, Edit2, Trash2, X } from "lucide-react"
+import { Plus, FileText, Edit2, Trash2, X, Eye, EyeOff } from "lucide-react"
 import {
   useEmailTemplates,
   useCreateEmailTemplate,
@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { cn } from "@/lib/utils"
 
 interface TemplateFormProps {
   initial?: EmailTemplate | undefined
@@ -32,6 +33,7 @@ function TemplateForm({ initial, onClose }: TemplateFormProps) {
   const [description, setDescription] = useState(initial?.description ?? "")
   const [error, setError] = useState<string | null>(null)
 
+  const [showPreview, setShowPreview] = useState(false)
   const isLoading = create.isPending || update.isPending
 
   async function handleSubmit(e: React.FormEvent) {
@@ -72,89 +74,141 @@ function TemplateForm({ initial, onClose }: TemplateFormProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-2xl rounded-lg border border-(--border-default) bg-(--bg-surface) shadow-(--shadow-lg)">
-        <div className="flex items-center justify-between border-b border-(--border-default) px-5 py-4">
-          <h2 className="font-semibold text-(--text-primary)">
-            {initial ? "Editar Template" : "Novo Template"}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-(--text-tertiary) hover:text-(--text-primary)"
-            aria-label="Fechar"
-          >
-            <X size={16} aria-hidden="true" />
-          </button>
+      <div
+        className={cn(
+          "flex w-full overflow-hidden rounded-lg border border-(--border-default) bg-(--bg-surface) shadow-(--shadow-lg) transition-all",
+          showPreview ? "max-w-5xl" : "max-w-2xl",
+        )}
+      >
+        {/* ── Form ───────────────────────────────────────────────── */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between border-b border-(--border-default) px-5 py-4">
+            <h2 className="font-semibold text-(--text-primary)">
+              {initial ? "Editar Template" : "Novo Template"}
+            </h2>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setShowPreview((v) => !v)}
+                title={showPreview ? "Fechar preview" : "Pré-visualizar HTML"}
+                className="rounded p-1.5 text-(--text-tertiary) hover:bg-(--bg-overlay) hover:text-(--text-primary)"
+              >
+                {showPreview ? (
+                  <EyeOff size={15} aria-hidden="true" />
+                ) : (
+                  <Eye size={15} aria-hidden="true" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded p-1.5 text-(--text-tertiary) hover:bg-(--bg-overlay) hover:text-(--text-primary)"
+                aria-label="Fechar"
+              >
+                <X size={16} aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+
+          <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4 p-5">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="tmpl-name">Nome</Label>
+                <Input
+                  id="tmpl-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Ex: Primeiro contato SaaS"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="tmpl-category">Categoria</Label>
+                <Input
+                  id="tmpl-category"
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  placeholder="Ex: prospecção, follow-up"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="tmpl-subject">Assunto</Label>
+              <Input
+                id="tmpl-subject"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                placeholder="Ex: Ideia para {{company}}"
+              />
+              <p className="text-xs text-(--text-tertiary)">
+                Use {`{{name}}`}, {`{{company}}`}, {`{{job_title}}`} como variáveis dinâmicas.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="tmpl-desc">Descrição (opcional)</Label>
+              <Input
+                id="tmpl-desc"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Descreva quando usar este template"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="tmpl-body">Corpo HTML</Label>
+              <Textarea
+                id="tmpl-body"
+                value={bodyHtml}
+                onChange={(e) => setBodyHtml(e.target.value)}
+                rows={10}
+                placeholder="<p>Olá {{name}},</p><p>...</p>"
+                className="font-mono text-xs"
+              />
+            </div>
+
+            {error && <p className="text-sm text-red-500">{error}</p>}
+
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={onClose}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={isLoading}>
+                {isLoading ? "Salvando…" : initial ? "Salvar alterações" : "Criar template"}
+              </Button>
+            </div>
+          </form>
         </div>
 
-        <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4 p-5">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="tmpl-name">Nome</Label>
-              <Input
-                id="tmpl-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Ex: Primeiro contato SaaS"
-              />
+        {/* ── Preview ─────────────────────────────────────────────── */}
+        {showPreview && (
+          <div className="w-105 shrink-0 border-l border-(--border-default) flex flex-col">
+            <div className="border-b border-(--border-default) px-4 py-3">
+              <p className="text-xs font-medium text-(--text-secondary)">Preview</p>
+              {subject && (
+                <p className="mt-0.5 text-sm font-medium text-(--text-primary) truncate">
+                  {subject}
+                </p>
+              )}
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="tmpl-category">Categoria</Label>
-              <Input
-                id="tmpl-category"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                placeholder="Ex: prospecção, follow-up"
-              />
+            <div className="flex-1 overflow-hidden bg-white">
+              {bodyHtml.trim() ? (
+                <iframe
+                  title="Preview do e-mail"
+                  srcDoc={bodyHtml}
+                  sandbox="allow-same-origin"
+                  className="h-full min-h-105 w-full border-0"
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center p-6 text-center">
+                  <p className="text-sm text-gray-400">
+                    Digite o HTML do corpo para visualizar o preview.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="tmpl-subject">Assunto</Label>
-            <Input
-              id="tmpl-subject"
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              placeholder="Ex: Ideia para {{company}}"
-            />
-            <p className="text-xs text-(--text-tertiary)">
-              Use {`{{name}}`}, {`{{company}}`}, {`{{job_title}}`} como variáveis dinâmicas.
-            </p>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="tmpl-desc">Descrição (opcional)</Label>
-            <Input
-              id="tmpl-desc"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Descreva quando usar este template"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="tmpl-body">Corpo HTML</Label>
-            <Textarea
-              id="tmpl-body"
-              value={bodyHtml}
-              onChange={(e) => setBodyHtml(e.target.value)}
-              rows={10}
-              placeholder="<p>Olá {{name}},</p><p>...</p>"
-              className="font-mono text-xs"
-            />
-          </div>
-
-          {error && <p className="text-sm text-(--danger)">{error}</p>}
-
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancelar
-            </Button>
-            <Button type="submit" disabled={isLoading}>
-              {isLoading ? "Salvando…" : initial ? "Salvar alterações" : "Criar template"}
-            </Button>
-          </div>
-        </form>
+        )}
       </div>
     </div>
   )

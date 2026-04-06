@@ -79,6 +79,7 @@ export function useCadenceAnalytics(cadenceId: string, days = 30) {
       return data as CadenceAnalytics
     },
     staleTime: 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
     enabled: !!session?.accessToken && !!cadenceId,
   })
 }

@@ -29,6 +29,17 @@ export interface ContentPost {
   week_number: number | null
   linkedin_post_urn: string | null
   linkedin_scheduled_id: string | null
+  // Mídia: imagem
+  image_url: string | null
+  image_s3_key: string | null
+  image_style: string | null
+  image_prompt: string | null
+  image_aspect_ratio: string | null
+  linkedin_image_urn: string | null
+  // Mídia: vídeo
+  video_url: string | null
+  video_s3_key: string | null
+  linkedin_video_urn: string | null
   impressions: number
   likes: number
   comments: number
@@ -666,5 +677,108 @@ export function useDeleteContentReference() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: contentKeys.references() })
     },
+  })
+}
+
+// ── Imagem gerada por IA ──────────────────────────────────────────────
+
+export type ImageStyle = "clean" | "with_text" | "infographic"
+export type ImageSubType = "metrics" | "steps" | "comparison"
+export type ImageAspectRatio = "4:5" | "1:1" | "16:9"
+
+export interface GeneratePostImageRequest {
+  post_id: string
+  style: ImageStyle
+  aspect_ratio?: ImageAspectRatio
+  sub_type?: ImageSubType | null
+  custom_prompt?: string | null
+}
+
+export function useGeneratePostImage() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: GeneratePostImageRequest) => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/generate/image`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session?.accessToken ?? ""}`,
+          },
+          body: JSON.stringify(body),
+        },
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { detail?: string }).detail ?? "Erro ao gerar imagem")
+      }
+      return res.json() as Promise<{ image_url: string; image_prompt: string }>
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: contentKeys.all }),
+  })
+}
+
+export function useDeletePostImage() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (postId: string) => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/posts/${postId}/image`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
+        },
+      )
+      if (!res.ok) throw new Error("Erro ao excluir imagem")
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: contentKeys.all }),
+  })
+}
+
+// ── Upload de vídeo ───────────────────────────────────────────────────
+
+export function useUploadPostVideo() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ postId, file }: { postId: string; file: File }) => {
+      const formData = new FormData()
+      formData.append("file", file)
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/posts/${postId}/upload-video`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
+          body: formData,
+        },
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { detail?: string }).detail ?? "Erro ao fazer upload do vídeo")
+      }
+      return res.json() as Promise<ContentPost>
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: contentKeys.all }),
+  })
+}
+
+export function useDeletePostVideo() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (postId: string) => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/posts/${postId}/video`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
+        },
+      )
+      if (!res.ok) throw new Error("Erro ao excluir vídeo")
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: contentKeys.all }),
   })
 }

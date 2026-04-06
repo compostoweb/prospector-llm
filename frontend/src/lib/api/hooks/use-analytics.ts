@@ -62,6 +62,18 @@ export interface CadencePerformance {
   reply_rate: number
 }
 
+export interface EmailStats {
+  sent: number
+  opened: number
+  replied: number
+  unsubscribed: number
+  bounced: number
+  open_rate: number
+  reply_rate: number
+  bounce_rate: number
+  unsubscribe_rate: number
+}
+
 // ── Hooks ─────────────────────────────────────────────────────────────
 
 export function useDashboardStats(days = 30) {
@@ -93,6 +105,7 @@ export function useChannelBreakdown(days = 30) {
       return (data as ChannelBreakdown[]) ?? []
     },
     staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
     enabled: !!session?.accessToken,
   })
 }
@@ -125,6 +138,7 @@ export function useIntentBreakdown(days = 30) {
       return (data as IntentBreakdown[]) ?? []
     },
     staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
     enabled: !!session?.accessToken,
   })
 }
@@ -141,6 +155,7 @@ export function useFunnel() {
       return (data as FunnelItem[]) ?? []
     },
     staleTime: 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
     enabled: !!session?.accessToken,
   })
 }
@@ -157,6 +172,24 @@ export function useCadencePerformance(days = 30) {
       return (data as CadencePerformance[]) ?? []
     },
     staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    enabled: !!session?.accessToken,
+  })
+}
+
+export function useEmailStats(days = 30) {
+  const { data: session } = useSession()
+
+  return useQuery({
+    queryKey: ["analytics", "email", days],
+    queryFn: async (): Promise<EmailStats> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.GET(`/analytics/email/stats?days=${days}` as never)
+      if (error) throw new Error("Falha ao carregar estatísticas de e-mail")
+      return data as EmailStats
+    },
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
     enabled: !!session?.accessToken,
   })
 }
