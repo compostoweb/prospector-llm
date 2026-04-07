@@ -1,7 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import Link from "next/link"
+import { isSameMonth, parseISO, startOfMonth, subMonths, format } from "date-fns"
+import { ptBR } from "date-fns/locale"
 import { Plus, Filter, Sparkles, LayoutGrid, List } from "lucide-react"
 import { useContentPosts, type PostStatus, type PostPillar } from "@/lib/api/hooks/use-content"
 import { PostCard } from "@/components/content/post-card"
@@ -35,14 +37,41 @@ const PILLAR_OPTIONS: { value: PostPillar | "all"; label: string }[] = [
 export default function ContentPostsPage() {
   const [statusFilter, setStatusFilter] = useState<PostStatus | "all">("all")
   const [pillarFilter, setPillarFilter] = useState<PostPillar | "all">("all")
+  const [monthFilter, setMonthFilter] = useState<string>("") // "2026-04" format
   const [createOpen, setCreateOpen] = useState(false)
   const [view, setView] = useState<"list" | "grid">("list")
   const [sortBy, setSortBy] = useState<SortKey>("recent")
 
-  const { data: posts, isLoading } = useContentPosts({
+  const { data: allPosts, isLoading } = useContentPosts({
     ...(statusFilter !== "all" && { status: statusFilter }),
     ...(pillarFilter !== "all" && { pillar: pillarFilter }),
   })
+
+  // Filtro de mês client-side — mesma prioridade de data que o PostListView usa para exibir
+  const posts = useMemo(() => {
+    if (!allPosts || !monthFilter) return allPosts
+    return allPosts.filter((post) => {
+      const dateStr = post.published_at ?? post.publish_date ?? post.created_at
+      if (!dateStr) return false
+      try {
+        return isSameMonth(parseISO(dateStr), parseISO(monthFilter + "-01"))
+      } catch {
+        return false
+      }
+    })
+  }, [allPosts, monthFilter])
+
+  // Últimos 12 meses como opções de Select
+  const monthOptions = useMemo(() => {
+    const now = new Date()
+    return Array.from({ length: 12 }, (_, i) => {
+      const d = startOfMonth(subMonths(now, i))
+      return {
+        value: format(d, "yyyy-MM"),
+        label: format(d, "MMM yyyy", { locale: ptBR }),
+      }
+    })
+  }, [])
 
   return (
     <div className="flex flex-col gap-5">
@@ -75,6 +104,25 @@ export default function ContentPostsPage() {
             </SelectTrigger>
             <SelectContent>
               {PILLAR_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value} className="text-xs">
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={monthFilter || "all"}
+            onValueChange={(v) => setMonthFilter(v === "all" ? "" : v)}
+          >
+            <SelectTrigger className="h-8 w-36 text-xs">
+              <SelectValue placeholder="Todos os meses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all" className="text-xs">
+                Todos os meses
+              </SelectItem>
+              {monthOptions.map((o) => (
                 <SelectItem key={o.value} value={o.value} className="text-xs">
                   {o.label}
                 </SelectItem>

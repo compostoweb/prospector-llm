@@ -83,39 +83,20 @@ export function ThemesBoard() {
 
   const [pillarFilter, setPillarFilter] = useState<PostPillar | "all">("all")
   const [usageFilter, setUsageFilter] = useState<UsageFilter>("all")
+  const [searchQuery, setSearchQuery] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
   const [title, setTitle] = useState("")
   const [createPillar, setCreatePillar] = useState<PostPillar>("authority")
 
-  const filteredThemes = themes
-    .filter((theme) => {
-      if (pillarFilter !== "all" && theme.pillar !== pillarFilter) {
-        return false
-      }
-      if (usageFilter === "fresh") {
-        return !theme.used
-      }
-      if (usageFilter === "used") {
-        return theme.used
-      }
-      return true
-    })
-    .sort((left, right) => {
-      if (left.used !== right.used) {
-        return left.used ? 1 : -1
-      }
-
-      const pillarOrder: Record<PostPillar, number> = {
-        authority: 0,
-        case: 1,
-        vision: 2,
-      }
-      if (pillarOrder[left.pillar] !== pillarOrder[right.pillar]) {
-        return pillarOrder[left.pillar] - pillarOrder[right.pillar]
-      }
-
-      return left.title.localeCompare(right.title, "pt-BR")
-    })
+  const filteredThemes = themes.filter((theme) => {
+    if (pillarFilter !== "all" && theme.pillar !== pillarFilter) return false
+    if (usageFilter === "fresh") return !theme.used
+    if (usageFilter === "used") return theme.used
+    if (searchQuery.trim()) {
+      return theme.title.toLowerCase().includes(searchQuery.trim().toLowerCase())
+    }
+    return true
+  })
 
   const totalThemes = themes.length
   const availableThemes = themes.filter((theme) => !theme.used).length
@@ -151,7 +132,8 @@ export function ThemesBoard() {
             com IA.
           </p>
           <p className="mt-2 text-xs text-(--text-tertiary)">
-            O banco inicial é carregado automaticamente com os temas estratégicos da Composto Web e o histórico já publicado.
+            O banco inicial é carregado automaticamente com os temas estratégicos da Composto Web e
+            o histórico já publicado.
           </p>
         </div>
 
@@ -166,6 +148,13 @@ export function ThemesBoard() {
           <Filter className="h-4 w-4" />
           <span className="text-xs font-medium uppercase tracking-wide">Filtros</span>
         </div>
+
+        <Input
+          placeholder="Buscar tema…"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="h-8 w-52 text-xs"
+        />
 
         <Select
           value={pillarFilter}
@@ -212,19 +201,17 @@ export function ThemesBoard() {
           </div>
         </div>
       ) : (
-        <div className="grid gap-3 xl:grid-cols-2">
-          {filteredThemes.map((theme) => (
-            <ThemeCard
-              key={theme.id}
-              theme={theme}
-              isMarking={markThemeUsed.isPending && markThemeUsed.variables?.themeId === theme.id}
-              isDeleting={deleteTheme.isPending && deleteTheme.variables === theme.id}
-              onGenerate={() => router.push(buildGenerateRoute(theme))}
-              onMarkUsed={() => markThemeUsed.mutate({ themeId: theme.id })}
-              onDelete={() => deleteTheme.mutate(theme.id)}
-            />
-          ))}
-        </div>
+        <ThemePillarBoard
+          themes={filteredThemes}
+          pillarFilter={pillarFilter}
+          isMarking={markThemeUsed.isPending}
+          markingId={markThemeUsed.isPending ? markThemeUsed.variables?.themeId : undefined}
+          isDeleting={deleteTheme.isPending}
+          deletingId={deleteTheme.isPending ? deleteTheme.variables : undefined}
+          onGenerate={(theme) => router.push(buildGenerateRoute(theme))}
+          onMarkUsed={(themeId) => markThemeUsed.mutate({ themeId })}
+          onDelete={(themeId) => deleteTheme.mutate(themeId)}
+        />
       )}
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
@@ -288,6 +275,104 @@ export function ThemesBoard() {
   )
 }
 
+const PILLAR_COLUMNS: Array<{
+  pillar: PostPillar
+  label: string
+  headerClass: string
+  borderClass: string
+}> = [
+  {
+    pillar: "authority",
+    label: "Autoridade",
+    headerClass:
+      "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800",
+    borderClass: "border-l-blue-400",
+  },
+  {
+    pillar: "case",
+    label: "Caso",
+    headerClass:
+      "bg-green-50 text-green-700 border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800",
+    borderClass: "border-l-green-400",
+  },
+  {
+    pillar: "vision",
+    label: "Visão",
+    headerClass:
+      "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800",
+    borderClass: "border-l-orange-400",
+  },
+]
+
+function ThemePillarBoard({
+  themes,
+  pillarFilter,
+  isMarking,
+  markingId,
+  isDeleting,
+  deletingId,
+  onGenerate,
+  onMarkUsed,
+  onDelete,
+}: {
+  themes: ContentTheme[]
+  pillarFilter: PostPillar | "all"
+  isMarking: boolean
+  markingId: string | undefined
+  isDeleting: boolean
+  deletingId: string | undefined
+  onGenerate: (theme: ContentTheme) => void
+  onMarkUsed: (themeId: string) => void
+  onDelete: (themeId: string) => void
+}) {
+  const visibleColumns =
+    pillarFilter === "all"
+      ? PILLAR_COLUMNS
+      : PILLAR_COLUMNS.filter((c) => c.pillar === pillarFilter)
+
+  return (
+    <div className={cn("grid gap-4", pillarFilter === "all" ? "md:grid-cols-3" : "md:grid-cols-1")}>
+      {visibleColumns.map((col) => {
+        const colThemes = themes
+          .filter((t) => t.pillar === col.pillar)
+          .sort((a, b) => {
+            if (a.used !== b.used) return a.used ? 1 : -1
+            return a.title.localeCompare(b.title, "pt-BR")
+          })
+        return (
+          <div key={col.pillar} className="flex flex-col gap-2">
+            <div
+              className={cn(
+                "flex items-center justify-between rounded-lg border px-3 py-2",
+                col.headerClass,
+              )}
+            >
+              <span className="text-xs font-semibold uppercase tracking-wide">{col.label}</span>
+              <span className="text-xs font-medium">{colThemes.length}</span>
+            </div>
+            {colThemes.length === 0 ? (
+              <p className="py-6 text-center text-xs text-(--text-tertiary)">Nenhum tema</p>
+            ) : (
+              colThemes.map((theme) => (
+                <ThemeCard
+                  key={theme.id}
+                  theme={theme}
+                  borderClass={col.borderClass}
+                  isMarking={isMarking && markingId === theme.id}
+                  isDeleting={isDeleting && deletingId === theme.id}
+                  onGenerate={() => onGenerate(theme)}
+                  onMarkUsed={() => onMarkUsed(theme.id)}
+                  onDelete={() => onDelete(theme.id)}
+                />
+              ))
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function SummaryCard({
   label,
   value,
@@ -313,6 +398,7 @@ function SummaryCard({
 
 function ThemeCard({
   theme,
+  borderClass,
   isMarking,
   isDeleting,
   onGenerate,
@@ -320,6 +406,7 @@ function ThemeCard({
   onDelete,
 }: {
   theme: ContentTheme
+  borderClass: string
   isMarking: boolean
   isDeleting: boolean
   onGenerate: () => void
@@ -327,11 +414,15 @@ function ThemeCard({
   onDelete: () => void
 }) {
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-(--border-default) bg-(--bg-surface) p-5 shadow-(--shadow-sm)">
-      <div className="flex items-start justify-between gap-3">
+    <div
+      className={cn(
+        "flex flex-col gap-3 rounded-lg border-l-4 border border-(--border-default) bg-(--bg-surface) p-4 shadow-(--shadow-sm)",
+        borderClass,
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <PillarBadge pillar={theme.pillar} />
+          <div className="flex flex-wrap items-center gap-1.5">
             <span
               className={cn(
                 "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
@@ -344,11 +435,13 @@ function ThemeCard({
             </span>
             {theme.is_custom && (
               <span className="inline-flex items-center rounded-full bg-(--bg-overlay) px-2 py-0.5 text-xs font-medium text-(--text-secondary)">
-                Customizado
+                Custom
               </span>
             )}
           </div>
-          <h3 className="mt-3 text-base font-semibold text-(--text-primary)">{theme.title}</h3>
+          <h3 className="mt-2 text-sm font-semibold text-(--text-primary) leading-snug">
+            {theme.title}
+          </h3>
         </div>
 
         {theme.is_custom && (
@@ -370,20 +463,14 @@ function ThemeCard({
         )}
       </div>
 
-      <div className="grid gap-2 text-xs text-(--text-tertiary) sm:grid-cols-3">
-        <div>
-          <p className="font-medium uppercase tracking-wide">Criado em</p>
-          <p className="mt-1 text-(--text-secondary)">{formatDate(theme.created_at)}</p>
-        </div>
+      <div className="grid gap-2 text-xs text-(--text-tertiary) grid-cols-2">
         <div>
           <p className="font-medium uppercase tracking-wide">Último uso</p>
-          <p className="mt-1 text-(--text-secondary)">{formatDate(theme.used_at)}</p>
+          <p className="mt-0.5 text-(--text-secondary)">{formatDate(theme.used_at)}</p>
         </div>
         <div>
           <p className="font-medium uppercase tracking-wide">Origem</p>
-          <p className="mt-1 text-(--text-secondary)">
-            {theme.is_custom ? "Criado no app" : "Base do sistema"}
-          </p>
+          <p className="mt-0.5 text-(--text-secondary)">{theme.is_custom ? "App" : "Sistema"}</p>
         </div>
       </div>
 

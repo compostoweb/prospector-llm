@@ -1,13 +1,22 @@
 "use client"
 
-import { useState } from "react"
-import { useUpdateCadence, type Cadence, type CadenceStep } from "@/lib/api/hooks/use-cadences"
+import { useCallback, useState } from "react"
+import { AnimatePresence } from "framer-motion"
+import {
+  useUpdateCadence,
+  type Cadence,
+  type CadenceStep,
+  type CadenceChannel,
+  type CadenceStepLayout,
+} from "@/lib/api/hooks/use-cadences"
 import { useLeadList } from "@/lib/api/hooks/use-lead-lists"
-import { CadenceSteps } from "@/components/cadencias/cadence-steps"
+import { useAudioFiles } from "@/lib/api/hooks/use-audio-files"
+import { useEmailTemplates } from "@/lib/api/hooks/use-email-templates"
+import { CadenceFlowCanvas } from "@/components/cadencias/cadence-flow-canvas"
+import { StepEditorSidebar } from "@/components/cadencias/step-editor-sidebar"
 import { Button } from "@/components/ui/button"
-import { ListTodo, AlertCircle, CheckCircle2 } from "lucide-react"
+import { AlertCircle, CheckCircle2, FlaskConical } from "lucide-react"
 import Link from "next/link"
-import { FlaskConical } from "lucide-react"
 
 interface CadenceStepsEditorProps {
   cadence: Cadence
@@ -15,10 +24,150 @@ interface CadenceStepsEditorProps {
 
 export function CadenceStepsEditor({ cadence }: CadenceStepsEditorProps) {
   const updateCadence = useUpdateCadence()
+
   const [steps, setSteps] = useState<CadenceStep[]>(cadence.steps_template ?? [])
-  const { data: leadListDetail } = useLeadList(cadence.lead_list_id ?? "")
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+
+  // Dados para o editor de passos
+  const { data: leadListDetail } = useLeadList(cadence.lead_list_id ?? "")
+  const { data: audioFilesData } = useAudioFiles()
+  const { data: emailTemplatesData } = useEmailTemplates(undefined, true)
+
+  const leads = leadListDetail?.leads
+  const audioFiles = audioFilesData?.items ?? []
+  const emailTemplates = emailTemplatesData ?? []
+
+  // ─── Handlers de mutação de passos ───────────────────────────────
+
+  const handleAddStep = useCallback(
+    (channel?: CadenceChannel) => {
+      const defaultChannel: CadenceChannel =
+        cadence.cadence_type === "email_only" ? "email" : "linkedin_dm"
+      const newStep: CadenceStep = {
+        channel: channel ?? defaultChannel,
+        day_offset: steps.length === 0 ? 0 : 3,
+        message_template: "",
+        use_voice: false,
+        audio_file_id: null,
+        step_type: null,
+        subject_variants: null,
+        email_template_id: null,
+        layout: null,
+      }
+      const updated = [...steps, newStep]
+      setSteps(updated)
+      setSelectedIndex(updated.length - 1)
+    },
+    [steps, cadence.cadence_type],
+  )
+
+  const handleInsertAfter = useCallback(
+    (afterIndex: number) => {
+      const newStep: CadenceStep = {
+        channel: cadence.cadence_type === "email_only" ? "email" : "linkedin_dm",
+        day_offset: 1,
+        message_template: "",
+        use_voice: false,
+        audio_file_id: null,
+        step_type: null,
+        subject_variants: null,
+        email_template_id: null,
+        layout: null,
+      }
+      const updated = [...steps.slice(0, afterIndex + 1), newStep, ...steps.slice(afterIndex + 1)]
+      setSteps(updated)
+      setSelectedIndex(afterIndex + 1)
+    },
+    [steps, cadence.cadence_type],
+  )
+
+  const handleDeleteStep = useCallback(
+    (index: number) => {
+      const updated = steps.filter((_, i) => i !== index)
+      setSteps(updated)
+      if (selectedIndex === index) setSelectedIndex(null)
+      else if (selectedIndex !== null && selectedIndex > index) setSelectedIndex(selectedIndex - 1)
+    },
+    [steps, selectedIndex],
+  )
+
+  const handleDuplicateStep = useCallback(
+    (index: number) => {
+      const src = steps[index]
+      if (!src) return
+      const copy: CadenceStep = {
+        ...src,
+        layout: src.layout ? { x: src.layout.x + 40, y: src.layout.y + 40 } : null,
+      }
+      const updated = [...steps.slice(0, index + 1), copy, ...steps.slice(index + 1)]
+      setSteps(updated)
+      setSelectedIndex(index + 1)
+    },
+    [steps],
+  )
+
+  const handleMoveUp = useCallback(
+    (index: number) => {
+      if (index === 0) return
+      const updated = [...steps]
+      const tmp = updated[index - 1] as CadenceStep
+      updated[index - 1] = updated[index] as CadenceStep
+      updated[index] = tmp
+      setSteps(updated)
+      setSelectedIndex(index - 1)
+    },
+    [steps],
+  )
+
+  const handleMoveDown = useCallback(
+    (index: number) => {
+      if (index >= steps.length - 1) return
+      const updated = [...steps]
+      const tmp = updated[index] as CadenceStep
+      updated[index] = updated[index + 1] as CadenceStep
+      updated[index + 1] = tmp
+      setSteps(updated)
+      setSelectedIndex(index + 1)
+    },
+    [steps],
+  )
+
+  const handleUpdateStep = useCallback(
+    (field: keyof CadenceStep, value: unknown) => {
+      if (selectedIndex === null) return
+      setSteps((prev) =>
+        prev.map((s, i) => {
+          if (i !== selectedIndex) return s
+          const next = { ...s, [field]: value }
+          // Reset dependências ao trocar canal
+          if (field === "channel") {
+            if (value !== "linkedin_dm") {
+              next.use_voice = false
+              next.audio_file_id = null
+            }
+            if (value !== "email") {
+              next.email_template_id = null
+              next.subject_variants = null
+            }
+            next.step_type = null
+          }
+          if (field === "use_voice" && value === false) next.audio_file_id = null
+          return next
+        }),
+      )
+    },
+    [selectedIndex],
+  )
+
+  const handleStepPositionChange = useCallback((index: number, layout: CadenceStepLayout) => {
+    setSteps((prev) =>
+      prev.map((step, currentIndex) => (currentIndex === index ? { ...step, layout } : step)),
+    )
+  }, [])
+
+  // ─── Save ─────────────────────────────────────────────────────────
 
   async function handleSave() {
     setError(null)
@@ -66,65 +215,100 @@ export function CadenceStepsEditor({ cadence }: CadenceStepsEditorProps) {
     }
   }
 
+  const selectedStep = selectedIndex !== null ? (steps[selectedIndex] ?? null) : null
+
+  // ─── Render ───────────────────────────────────────────────────────
+
   return (
-    <div className="overflow-hidden rounded-xl border border-(--border-default) bg-(--bg-surface) shadow-(--shadow-sm)">
-      {/* Header */}
-      <div className="flex items-center gap-3 border-b border-(--border-subtle) bg-(--bg-overlay) px-5 py-3.5">
-        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-(--accent-subtle)">
-          <ListTodo size={13} className="text-(--accent)" />
-        </span>
-        <div className="flex-1">
-          <p className="text-sm font-semibold text-(--text-primary)">Passos da cadência</p>
-          <p className="text-xs text-(--text-tertiary)">
+    <div className="flex flex-col gap-0">
+      {/* Toolbar superior */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-[--text-primary]">
             {steps.length === 0
               ? "Nenhum passo adicionado"
-              : `${steps.length} passo${steps.length > 1 ? "s" : ""} configurado${steps.length > 1 ? "s" : ""}`}
+              : `${steps.length} passo${steps.length > 1 ? "s" : ""}`}
           </p>
+          <p className="text-xs text-[--text-tertiary]">
+            Clique num nó para editar · use ↑↓ para reordenar
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {error && (
+            <span className="flex items-center gap-1.5 text-sm text-[--danger]">
+              <AlertCircle size={14} />
+              {error}
+            </span>
+          )}
+          {saved && (
+            <span className="flex items-center gap-1.5 text-sm text-[--success]">
+              <CheckCircle2 size={14} />
+              Salvo!
+            </span>
+          )}
+
+          <Link href={`/cadencias/${cadence.id}/sandbox`}>
+            <Button type="button" variant="outline" className="gap-1.5">
+              <FlaskConical size={14} />
+              Sandbox
+            </Button>
+          </Link>
+
+          <Button
+            type="button"
+            onClick={handleSave}
+            disabled={updateCadence.isPending}
+            className="min-w-28"
+          >
+            {updateCadence.isPending ? "Salvando…" : "Salvar passos"}
+          </Button>
         </div>
       </div>
 
-      {/* Steps editor */}
-      <div className="p-5">
-        <CadenceSteps
-          value={steps}
-          onChange={setSteps}
-          ttsProvider={cadence.tts_provider}
-          ttsVoiceId={cadence.tts_voice_id}
-          ttsSpeed={cadence.tts_speed}
-          ttsPitch={cadence.tts_pitch}
-          leads={leadListDetail?.leads}
-        />
-      </div>
-
-      {/* Footer */}
-      <div className="flex flex-wrap items-center gap-3 border-t border-(--border-subtle) px-5 py-4">
-        <Button
-          type="button"
-          onClick={handleSave}
-          disabled={updateCadence.isPending}
-          className="min-w-32"
+      {/* Área canvas + sidebar */}
+      <div className="flex h-[calc(100vh-240px)] min-h-125 items-stretch gap-4">
+        {/* Canvas — encolhe quando sidebar aberta */}
+        <div
+          className={
+            selectedStep !== null
+              ? "min-w-0 flex-1 h-full overflow-hidden"
+              : "w-full h-full overflow-hidden"
+          }
         >
-          {updateCadence.isPending ? "Salvando…" : "Salvar passos"}
-        </Button>
-        <Link href={`/cadencias/${cadence.id}/sandbox`}>
-          <Button type="button" variant="outline">
-            <FlaskConical size={14} aria-hidden="true" />
-            Testar no Sandbox
-          </Button>
-        </Link>
+          <CadenceFlowCanvas
+            steps={steps}
+            selectedIndex={selectedIndex}
+            onSelectStep={setSelectedIndex}
+            onStepPositionChange={handleStepPositionChange}
+            onAddStep={handleAddStep}
+            onInsertAfter={handleInsertAfter}
+            onDeleteStep={handleDeleteStep}
+            onDuplicateStep={handleDuplicateStep}
+            onMoveUp={handleMoveUp}
+            onMoveDown={handleMoveDown}
+          />
+        </div>
 
-        {error && (
-          <span className="flex items-center gap-1.5 text-sm text-(--danger)">
-            <AlertCircle size={14} />
-            {error}
-          </span>
-        )}
-        {saved && (
-          <span className="flex items-center gap-1.5 text-sm text-(--success)">
-            <CheckCircle2 size={14} />
-            Passos salvos com sucesso!
-          </span>
-        )}
+        {/* Sidebar de edição */}
+        <AnimatePresence>
+          {selectedStep !== null && selectedIndex !== null && (
+            <StepEditorSidebar
+              key={`sidebar-${selectedIndex}`}
+              step={selectedStep}
+              index={selectedIndex}
+              onUpdate={handleUpdateStep}
+              onClose={() => setSelectedIndex(null)}
+              ttsProvider={cadence.tts_provider}
+              ttsVoiceId={cadence.tts_voice_id}
+              ttsSpeed={cadence.tts_speed}
+              ttsPitch={cadence.tts_pitch}
+              leads={leads ?? []}
+              emailTemplates={emailTemplates}
+              audioFiles={audioFiles}
+            />
+          )}
+        </AnimatePresence>
       </div>
     </div>
   )

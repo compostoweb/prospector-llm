@@ -30,6 +30,11 @@ export type CadenceChannel =
   | "email"
   | "manual_task"
 
+export interface CadenceStepLayout {
+  x: number
+  y: number
+}
+
 export interface CadenceStep {
   channel: CadenceChannel
   day_offset: number
@@ -39,6 +44,7 @@ export interface CadenceStep {
   step_type: StepType | null
   subject_variants?: string[] | null
   email_template_id?: string | null
+  layout?: CadenceStepLayout | null
 }
 
 export interface Cadence {

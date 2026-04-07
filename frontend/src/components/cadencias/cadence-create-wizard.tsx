@@ -1281,7 +1281,15 @@ export function CadenceCreateWizard({
               </Card>
 
               <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                <LLMConfigForm value={llmConfig} onChange={setLlmConfig} />
+                <LLMConfigForm
+                  value={llmConfig}
+                  onChange={(cfg) =>
+                    setLlmConfig({
+                      ...cfg,
+                      llm_provider: cfg.llm_provider as WizardLLMConfig["llm_provider"],
+                    })
+                  }
+                />
                 <TTSConfigForm
                   value={ttsConfig}
                   onChange={setTtsConfig}

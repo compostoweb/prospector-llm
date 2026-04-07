@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { BookOpen, Plus, Trash2, ExternalLink, Loader2 } from "lucide-react"
+import { BookOpen, Filter, Plus, Trash2, ExternalLink, Loader2 } from "lucide-react"
 import {
   useContentReferences,
   useCreateContentReference,
@@ -46,6 +46,10 @@ const HOOK_OPTIONS: { value: HookType; label: string }[] = [
   { value: "data", label: "Dado" },
 ]
 
+const HOOK_LABEL: Record<HookType, string> = Object.fromEntries(
+  HOOK_OPTIONS.map((o) => [o.value, o.label]),
+) as Record<HookType, string>
+
 function emptyForm(): ContentReferenceCreate {
   return {
     body: "",
@@ -66,6 +70,14 @@ export function ReferencesList() {
 
   const [sheetOpen, setSheetOpen] = useState(false)
   const [form, setForm] = useState<ContentReferenceCreate>(emptyForm())
+  const [pillarFilter, setPillarFilter] = useState<PostPillar | "all">("all")
+  const [hookFilter, setHookFilter] = useState<HookType | "all">("all")
+
+  const filteredRefs = (references ?? []).filter((ref) => {
+    if (pillarFilter !== "all" && ref.pillar !== pillarFilter) return false
+    if (hookFilter !== "all" && ref.hook_type !== hookFilter) return false
+    return true
+  })
 
   function handleChange(field: keyof ContentReferenceCreate, value: string | number | null) {
     setForm((prev) => ({ ...prev, [field]: value === "" ? null : value }))
@@ -95,6 +107,44 @@ export function ReferencesList() {
         </Button>
       </div>
 
+      {/* Filtros */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Filter className="h-4 w-4 text-(--text-tertiary)" />
+        <Select
+          value={pillarFilter}
+          onValueChange={(v) => setPillarFilter(v as PostPillar | "all")}
+        >
+          <SelectTrigger className="h-8 w-40 text-xs">
+            <SelectValue placeholder="Todos os pilares" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all" className="text-xs">
+              Todos os pilares
+            </SelectItem>
+            {PILLAR_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value} className="text-xs">
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={hookFilter} onValueChange={(v) => setHookFilter(v as HookType | "all")}>
+          <SelectTrigger className="h-8 w-44 text-xs">
+            <SelectValue placeholder="Todos os ganchos" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all" className="text-xs">
+              Todos os ganchos
+            </SelectItem>
+            {HOOK_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value} className="text-xs">
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       {/* Lista */}
       {isLoading ? (
         <div className="flex items-center justify-center h-40">
@@ -108,9 +158,13 @@ export function ReferencesList() {
             Adicione posts que servem de inspiração para o estilo e formato.
           </p>
         </div>
+      ) : filteredRefs.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-2 py-8 text-center">
+          <p className="text-sm text-(--text-tertiary)">Nenhuma referência com esses filtros.</p>
+        </div>
       ) : (
-        <div className="grid gap-3">
-          {references.map((ref) => (
+        <div className="grid gap-3 md:grid-cols-2">
+          {filteredRefs.map((ref) => (
             <ReferenceCard
               key={ref.id}
               reference={ref}
@@ -293,32 +347,76 @@ interface ReferenceCardProps {
 function ReferenceCard({ reference, onDelete, isDeleting }: ReferenceCardProps) {
   const [expanded, setExpanded] = useState(false)
 
+  const initials = (reference.author_name ?? "?")
+    .split(" ")
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase()
+
   return (
-    <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-4 flex flex-col gap-2 shadow-sm">
-      {/* Cabeçalho */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex flex-col gap-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            {reference.pillar && <PillarBadge pillar={reference.pillar} />}
-            {reference.hook_type && (
-              <span className="inline-flex items-center rounded-full border border-(--border-default) px-2 py-0.5 text-xs text-(--text-tertiary)">
-                {reference.hook_type.replace("_", " ")}
-              </span>
-            )}
-            {reference.engagement_score !== null && (
-              <span className="text-xs text-(--text-tertiary)">
-                ⚡ {reference.engagement_score}/100
-              </span>
-            )}
-          </div>
-          {(reference.author_name || reference.author_title) && (
-            <p className="text-xs text-(--text-secondary)">
-              {[reference.author_name, reference.author_title].filter(Boolean).join(" · ")}
+    <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-4 flex flex-col gap-3 shadow-sm">
+      {/* Autor */}
+      <div className="flex items-center gap-3">
+        <div className="h-8 w-8 rounded-full bg-(--accent)/15 text-(--accent) flex items-center justify-center text-xs font-bold shrink-0">
+          {initials}
+        </div>
+        <div className="min-w-0">
+          {reference.author_name && (
+            <p className="text-sm font-semibold text-(--text-primary) truncate leading-tight">
+              {reference.author_name}
+            </p>
+          )}
+          {reference.author_title && (
+            <p className="text-xs text-(--text-tertiary) truncate leading-tight">
+              {reference.author_title}
             </p>
           )}
         </div>
+      </div>
 
-        <div className="flex items-center gap-1 shrink-0">
+      {/* Barra de engajamento */}
+      {reference.engagement_score !== null && (
+        <div className="flex items-center gap-2">
+          <div className="flex-1 h-1.5 bg-(--bg-overlay) rounded-full overflow-hidden">
+            <div
+              className={`h-full bg-(--accent) rounded-full transition-all [--bar-w:${reference.engagement_score}%] w-(--bar-w)`}
+            />
+          </div>
+          <span className="text-xs text-(--text-tertiary) tabular-nums shrink-0">
+            {reference.engagement_score}/100
+          </span>
+        </div>
+      )}
+
+      {/* Corpo do post */}
+      <button type="button" className="text-left" onClick={() => setExpanded((v) => !v)}>
+        <p
+          className={`text-sm text-(--text-secondary) whitespace-pre-wrap leading-relaxed ${!expanded ? "line-clamp-3" : ""}`}
+        >
+          {reference.body}
+        </p>
+        <span className="text-xs text-(--accent) mt-1 inline-block">
+          {expanded ? "Recolher" : `${reference.body.length} chars · Ver tudo`}
+        </span>
+      </button>
+
+      {/* Notas */}
+      {reference.notes && (
+        <p className="text-xs text-(--text-tertiary) italic border-t border-(--border-default) pt-2">
+          {reference.notes}
+        </p>
+      )}
+
+      {/* Footer */}
+      <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-(--border-default)">
+        {reference.pillar && <PillarBadge pillar={reference.pillar} />}
+        {reference.hook_type && (
+          <span className="inline-flex items-center rounded-full border border-(--border-default) px-2 py-0.5 text-xs text-(--text-tertiary)">
+            {HOOK_LABEL[reference.hook_type]}
+          </span>
+        )}
+        <div className="flex items-center gap-1 ml-auto">
           {reference.source_url && (
             <a
               href={reference.source_url}
@@ -345,29 +443,6 @@ function ReferenceCard({ reference, onDelete, isDeleting }: ReferenceCardProps) 
           </button>
         </div>
       </div>
-
-      {/* Preview do texto */}
-      <button
-        type="button"
-        className="text-left cursor-pointer"
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <p
-          className={`text-sm text-(--text-secondary) whitespace-pre-wrap ${!expanded ? "line-clamp-3" : ""}`}
-        >
-          {reference.body}
-        </p>
-        <span className="text-xs text-(--accent) mt-1">
-          {expanded ? "Recolher" : `${reference.body.length} chars · Ver tudo`}
-        </span>
-      </button>
-
-      {/* Notas */}
-      {reference.notes && (
-        <p className="text-xs text-(--text-tertiary) italic border-t border-(--border-default) pt-2 mt-1">
-          {reference.notes}
-        </p>
-      )}
     </div>
   )
 }

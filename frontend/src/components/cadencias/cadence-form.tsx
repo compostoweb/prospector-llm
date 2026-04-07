@@ -5,7 +5,7 @@ import { useCreateCadence, useUpdateCadence } from "@/lib/api/hooks/use-cadences
 import { useLeadLists } from "@/lib/api/hooks/use-lead-lists"
 import { useEmailAccounts } from "@/lib/api/hooks/use-email-accounts"
 import { useLinkedInAccounts } from "@/lib/api/hooks/use-linkedin-accounts"
-import { LLMConfigForm } from "@/components/cadencias/llm-config-form"
+import { LLMConfigForm, type LLMConfig } from "@/components/cadencias/llm-config-form"
 import { TTSConfigForm, type TTSConfig } from "@/components/cadencias/tts-config-form"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -183,8 +183,8 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
     cadence?.cadence_type ?? "mixed",
   )
   const [leadListId, setLeadListId] = useState(cadence?.lead_list_id ?? "")
-  const [llmConfig, setLlmConfig] = useState({
-    llm_provider: cadence?.llm_provider ?? DEFAULT_LLM.llm_provider,
+  const [llmConfig, setLlmConfig] = useState<LLMConfig>({
+    llm_provider: (cadence?.llm_provider ?? DEFAULT_LLM.llm_provider) as LLMConfig["llm_provider"],
     llm_model: cadence?.llm_model ?? DEFAULT_LLM.llm_model,
     llm_temperature: cadence?.llm_temperature ?? DEFAULT_LLM.llm_temperature,
     llm_max_tokens: cadence?.llm_max_tokens ?? DEFAULT_LLM.llm_max_tokens,
@@ -218,7 +218,10 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
   const isLoading = createCadence.isPending || updateCadence.isPending
   const isEdit = !!cadence
   const hasContextFilled = !!(
-    targetSegment || personaDescription || offerDescription || toneInstructions
+    targetSegment ||
+    personaDescription ||
+    offerDescription ||
+    toneInstructions
   )
 
   // Na edição, preserva os passos existentes da cadência (gerenciados pela aba Passos)
@@ -239,7 +242,7 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
       mode,
       cadence_type: cadenceType,
       llm: {
-        provider: llmConfig.llm_provider,
+        provider: llmConfig.llm_provider as "openai" | "gemini",
         model: llmConfig.llm_model,
         temperature: llmConfig.llm_temperature,
         max_tokens: llmConfig.llm_max_tokens,

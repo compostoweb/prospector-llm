@@ -57,7 +57,7 @@ class LLMConfigSchema(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_model_matches_provider(self) -> "LLMConfigSchema":
+    def validate_model_matches_provider(self) -> LLMConfigSchema:
         prefixes = _PROVIDER_MODEL_PREFIXES.get(self.provider, ())
         if prefixes and not any(self.model.startswith(p) for p in prefixes):
             raise ValueError(
@@ -67,12 +67,21 @@ class LLMConfigSchema(BaseModel):
         return self
 
 
+class StepLayoutMetadata(BaseModel):
+    """Metadados de posicionamento visual do step no editor."""
+
+    x: float = Field(default=0.0, description="Posição X do nó no canvas")
+    y: float = Field(default=0.0, description="Posição Y do nó no canvas")
+
+
 class StepTemplateItem(BaseModel):
     """Um step dentro do template customizado de cadência."""
 
     channel: Channel
     day_offset: int = Field(..., ge=0, le=90, description="Dias após enrollment")
-    message_template: str | None = Field(default=None, description="Template de mensagem com variáveis")
+    message_template: str | None = Field(
+        default=None, description="Template de mensagem com variáveis"
+    )
     use_voice: bool = Field(default=False, description="Enviar voice note (só linkedin_dm)")
     audio_file_id: str | None = Field(
         default=None,
@@ -96,9 +105,13 @@ class StepTemplateItem(BaseModel):
         default=None,
         description="ID de EmailTemplate salvo. Se preenchido, usa o corpo do template ao invés de LLM.",
     )
+    layout: StepLayoutMetadata | None = Field(
+        default=None,
+        description="Posição visual persistida do step no editor ReactFlow.",
+    )
 
     @model_validator(mode="after")
-    def voice_only_for_dm(self) -> "StepTemplateItem":
+    def voice_only_for_dm(self) -> StepTemplateItem:
         if self.use_voice and self.channel != Channel.LINKEDIN_DM:
             raise ValueError("use_voice só é permitido para linkedin_dm")
         if self.audio_file_id and not self.use_voice:
@@ -107,7 +120,7 @@ class StepTemplateItem(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def step_type_matches_channel(self) -> "StepTemplateItem":
+    def step_type_matches_channel(self) -> StepTemplateItem:
         """Valida que o step_type é compatível com o canal selecionado."""
         if self.step_type is None:
             return self
@@ -215,7 +228,9 @@ class CadenceCreateRequest(BaseModel):
 
     @field_validator("steps_template")
     @classmethod
-    def validate_steps_not_empty(cls, v: list[StepTemplateItem] | None) -> list[StepTemplateItem] | None:
+    def validate_steps_not_empty(
+        cls, v: list[StepTemplateItem] | None
+    ) -> list[StepTemplateItem] | None:
         if v is not None and len(v) == 0:
             raise ValueError("steps_template não pode ser uma lista vazia")
         return v

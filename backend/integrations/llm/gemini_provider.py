@@ -16,8 +16,6 @@ Lista modelos dinamicamente via client.models.list() + filtra apenas chat models
 
 from __future__ import annotations
 
-import base64
-
 import structlog
 from google import genai
 from google.genai import types
@@ -206,14 +204,15 @@ class GeminiProvider(LLMProvider):
         # O modelo 3.1 Flash Image usa Thinking por padrão — gera partes
         # intermediárias marcadas como `thought=True`. Precisamos pegar apenas
         # a última parte de imagem que NÃO seja de pensamento.
+        # NOTA: inline_data.data já é bytes puro (o SDK decodifica o base64
+        # automaticamente) — não chamar base64.b64decode().
         image_bytes: bytes | None = None
         for part in response.parts:
             if part.inline_data and part.inline_data.data and not getattr(part, "thought", False):
-                image_bytes = base64.b64decode(part.inline_data.data)
+                image_bytes = bytes(part.inline_data.data)
 
         if image_bytes is None:
             raise ValueError("Gemini nao retornou imagem na resposta.")
 
         logger.info("gemini.image_generated", size_bytes=len(image_bytes))
         return image_bytes
-
