@@ -210,6 +210,7 @@ export function useContentPosts(filters?: {
       return res.json() as Promise<ContentPost[]>
     },
     enabled: !!session?.accessToken,
+    refetchInterval: 5 * 60 * 1000, // 5 min
   })
 }
 
@@ -676,6 +677,39 @@ export function useDeleteContentReference() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: contentKeys.references() })
+    },
+  })
+}
+
+// ── Analyze Reference URL with AI ────────────────────────────────────────────
+
+export interface AnalyzeUrlResult {
+  body: string
+  author_name: string | null
+  author_title: string | null
+  hook_type: HookType | null
+  pillar: PostPillar | null
+  engagement_score: number | null
+  notes: string | null
+}
+
+export function useAnalyzeReferenceUrl() {
+  const { data: session } = useSession()
+  return useMutation({
+    mutationFn: async (url: string): Promise<AnalyzeUrlResult> => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/references/analyze-url`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session?.accessToken ?? ""}`,
+          },
+          body: JSON.stringify({ url }),
+        },
+      )
+      if (!res.ok) throw new Error("Não foi possível analisar a URL")
+      return res.json()
     },
   })
 }

@@ -22,10 +22,11 @@ from datetime import UTC
 
 import structlog
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.dependencies import get_effective_tenant_id, get_session_flexible
+from api.dependencies import get_effective_tenant_id, get_session_flexible, get_session_no_auth
 from models.content_post import ContentPost
 from schemas.content import (
     ContentPostCreate,
@@ -442,3 +443,36 @@ async def delete_post_video(
 
     await db.commit()
     logger.info("content.post_video_deleted", post_id=str(post_id), tenant_id=str(tenant_id))
+
+
+# ── Proxy de imagem (S3 privado) ────────────────────────────────────────────────
+
+
+@router.get(
+    "/{post_id}/image",
+    summary="Retorna a imagem do post (proxy do S3 privado)",
+    response_class=StreamingResponse,
+    include_in_schema=True,
+)
+async def get_post_image(
+    post_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session_no_auth),
+) -> StreamingResponse:
+    import io
+
+    from integrations.s3_client import S3Client
+
+    result = await db.execute(select(ContentPost).where(ContentPost.id == post_id))
+    post = result.scalar_one_or_none()
+    if post is None or not post.image_s3_key:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Imagem não encontrada")
+
+    try:
+        data, content_type = S3Client().get_bytes(post.image_s3_key)
+    except Exception as exc:
+        logger.error("content.post_image_proxy_error", post_id=str(post_id), error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="Erro ao buscar imagem"
+        ) from exc
+
+    return StreamingResponse(io.BytesIO(data), media_type=content_type)

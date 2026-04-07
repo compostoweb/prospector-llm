@@ -424,12 +424,14 @@ async def generate_post_image(
             custom_prompt=body.custom_prompt,
         )
     except ValueError as exc:
+        logger.warning("content.image_generation_failed", error=str(exc), post_id=str(body.post_id))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Falha na geração de imagem: {exc}",
         ) from exc
     except Exception as exc:
         exc_str = str(exc)
+        logger.error("content.image_generation_error", error=exc_str, post_id=str(body.post_id))
         if "429" in exc_str or "RESOURCE_EXHAUSTED" in exc_str:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,

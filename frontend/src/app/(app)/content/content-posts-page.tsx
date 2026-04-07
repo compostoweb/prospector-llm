@@ -4,8 +4,9 @@ import { useMemo, useState } from "react"
 import Link from "next/link"
 import { isSameMonth, parseISO, startOfMonth, subMonths, format } from "date-fns"
 import { ptBR } from "date-fns/locale"
-import { Plus, Filter, Sparkles, LayoutGrid, List } from "lucide-react"
-import { useContentPosts, type PostStatus, type PostPillar } from "@/lib/api/hooks/use-content"
+import { Plus, Filter, Sparkles, LayoutGrid, List, RefreshCw } from "lucide-react"
+import { toast } from "sonner"
+import { useContentPosts, useSyncVoyager, type PostStatus, type PostPillar } from "@/lib/api/hooks/use-content"
 import { PostCard } from "@/components/content/post-card"
 import { PostListView, type SortKey } from "@/components/content/post-list-view"
 import { Button } from "@/components/ui/button"
@@ -46,6 +47,7 @@ export default function ContentPostsPage() {
     ...(statusFilter !== "all" && { status: statusFilter }),
     ...(pillarFilter !== "all" && { pillar: pillarFilter }),
   })
+  const syncVoyager = useSyncVoyager()
 
   // Filtro de mês client-side — mesma prioridade de data que o PostListView usa para exibir
   const posts = useMemo(() => {
@@ -152,6 +154,21 @@ export default function ContentPostsPage() {
             </button>
           </div>
 
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs gap-1.5"
+            disabled={syncVoyager.isPending}
+            onClick={() =>
+              syncVoyager.mutate(undefined, {
+                onSuccess: () => toast.success("Métricas sincronizadas"),
+                onError: (err) => toast.error(err instanceof Error ? err.message : "Erro ao sincronizar"),
+              })
+            }
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${syncVoyager.isPending ? "animate-spin" : ""}`} />
+            {syncVoyager.isPending ? "Sincronizando…" : "Sincronizar métricas"}
+          </Button>
           <Button asChild variant="outline" size="sm" className="h-8 text-xs gap-1.5">
             <Link href="/content/gerar">
               <Sparkles className="h-3.5 w-3.5" />

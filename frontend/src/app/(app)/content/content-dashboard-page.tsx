@@ -34,10 +34,13 @@ import {
   MessageCircle,
   Calendar,
   Bookmark,
+  RefreshCw,
 } from "lucide-react"
-import { useContentPosts, useContentSettings, type ContentPost } from "@/lib/api/hooks/use-content"
+import { useContentPosts, useContentSettings, useSyncVoyager, type ContentPost } from "@/lib/api/hooks/use-content"
 import { PillarBadge } from "@/components/content/post-badges"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { toast } from "sonner"
 
 // ── Paleta consistente com o design system ──────────────────────────
 const COLORS = {
@@ -176,6 +179,7 @@ export default function ContentDashboardPage() {
   const { data: allPosts = [], isLoading } = useContentPosts()
   const { data: settings } = useContentSettings()
   const [period, setPeriod] = useState<PeriodKey>("all")
+  const syncVoyager = useSyncVoyager()
 
   const posts = useMemo(() => filterByPeriod(allPosts, period), [allPosts, period])
 
@@ -335,25 +339,42 @@ export default function ContentDashboardPage() {
   return (
     <div className="flex flex-col gap-6 pb-8">
       {/* ── Filtro de período ────────────────────────────────────── */}
-      <div className="flex items-center gap-2">
-        <Calendar className="h-4 w-4 text-(--text-tertiary)" />
-        <div className="flex items-center rounded-md border border-(--border-default) overflow-hidden h-8">
-          {PERIOD_OPTIONS.map((opt) => (
-            <button
-              key={opt.key}
-              type="button"
-              onClick={() => setPeriod(opt.key)}
-              className={cn(
-                "px-3 h-full text-xs font-medium transition-colors",
-                period === opt.key
-                  ? "bg-(--accent) text-white"
-                  : "text-(--text-secondary) hover:bg-(--bg-overlay)",
-              )}
-            >
-              {opt.label}
-            </button>
-          ))}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Calendar className="h-4 w-4 text-(--text-tertiary)" />
+          <div className="flex items-center rounded-md border border-(--border-default) overflow-hidden h-8">
+            {PERIOD_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => setPeriod(opt.key)}
+                className={cn(
+                  "px-3 h-full text-xs font-medium transition-colors",
+                  period === opt.key
+                    ? "bg-(--accent) text-white"
+                    : "text-(--text-secondary) hover:bg-(--bg-overlay)",
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 text-xs gap-1.5"
+          disabled={syncVoyager.isPending}
+          onClick={() =>
+            syncVoyager.mutate(undefined, {
+              onSuccess: () => toast.success("Métricas sincronizadas"),
+              onError: (err) => toast.error(err instanceof Error ? err.message : "Erro ao sincronizar"),
+            })
+          }
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${syncVoyager.isPending ? "animate-spin" : ""}`} />
+          {syncVoyager.isPending ? "Sincronizando…" : "Sincronizar métricas"}
+        </Button>
       </div>
 
       {/* ── Row 1: Stat cards ──────────────────────────────────────── */}

@@ -1,11 +1,21 @@
 "use client"
 
 import { useState } from "react"
-import { BookOpen, Filter, Plus, Trash2, ExternalLink, Loader2 } from "lucide-react"
+import {
+  BookOpen,
+  Filter,
+  Plus,
+  Trash2,
+  ExternalLink,
+  Loader2,
+  Sparkles,
+  CheckCircle2,
+} from "lucide-react"
 import {
   useContentReferences,
   useCreateContentReference,
   useDeleteContentReference,
+  useAnalyzeReferenceUrl,
   type ContentReference,
   type ContentReferenceCreate,
   type PostPillar,
@@ -67,11 +77,14 @@ export function ReferencesList() {
   const { data: references, isLoading } = useContentReferences()
   const createRef = useCreateContentReference()
   const deleteRef = useDeleteContentReference()
+  const analyzeUrl = useAnalyzeReferenceUrl()
 
   const [sheetOpen, setSheetOpen] = useState(false)
   const [form, setForm] = useState<ContentReferenceCreate>(emptyForm())
   const [pillarFilter, setPillarFilter] = useState<PostPillar | "all">("all")
   const [hookFilter, setHookFilter] = useState<HookType | "all">("all")
+  const [urlInput, setUrlInput] = useState("")
+  const [aiAnalyzed, setAiAnalyzed] = useState(false)
 
   const filteredRefs = (references ?? []).filter((ref) => {
     if (pillarFilter !== "all" && ref.pillar !== pillarFilter) return false
@@ -83,11 +96,30 @@ export function ReferencesList() {
     setForm((prev) => ({ ...prev, [field]: value === "" ? null : value }))
   }
 
+  async function handleAnalyzeUrl() {
+    if (!urlInput.trim()) return
+    const result = await analyzeUrl.mutateAsync(urlInput.trim())
+    setForm((prev) => ({
+      ...prev,
+      body: result.body ?? prev.body,
+      author_name: result.author_name ?? prev.author_name,
+      author_title: result.author_title ?? prev.author_title,
+      hook_type: result.hook_type ?? prev.hook_type,
+      pillar: result.pillar ?? prev.pillar,
+      engagement_score: result.engagement_score ?? prev.engagement_score,
+      notes: result.notes ?? prev.notes,
+      source_url: urlInput.trim(),
+    }))
+    setAiAnalyzed(true)
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.body.trim()) return
     await createRef.mutateAsync(form)
     setForm(emptyForm())
+    setUrlInput("")
+    setAiAnalyzed(false)
     setSheetOpen(false)
   }
 
@@ -176,13 +208,73 @@ export function ReferencesList() {
       )}
 
       {/* Dialog de criação */}
-      <Dialog open={sheetOpen} onOpenChange={setSheetOpen}>
+      <Dialog
+        open={sheetOpen}
+        onOpenChange={(open) => {
+          setSheetOpen(open)
+          if (!open) {
+            setForm(emptyForm())
+            setUrlInput("")
+            setAiAnalyzed(false)
+          }
+        }}
+      >
         <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Nova referência</DialogTitle>
           </DialogHeader>
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-4 py-4">
+            {/* URL + AI Analysis */}
+            <div className="rounded-lg border border-(--border-default) bg-(--bg-subtle) p-3 flex flex-col gap-2">
+              <Label
+                htmlFor="ref-url-input"
+                className="text-xs font-medium text-(--text-secondary)"
+              >
+                Cole a URL do post para análise com IA
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  id="ref-url-input"
+                  type="url"
+                  value={urlInput}
+                  onChange={(e) => {
+                    setUrlInput(e.target.value)
+                    setAiAnalyzed(false)
+                  }}
+                  placeholder="https://linkedin.com/posts/..."
+                  className="text-sm flex-1"
+                  disabled={analyzeUrl.isPending}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 shrink-0"
+                  onClick={handleAnalyzeUrl}
+                  disabled={!urlInput.trim() || analyzeUrl.isPending}
+                >
+                  {analyzeUrl.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5" />
+                  )}
+                  {analyzeUrl.isPending ? "Analisando…" : "Analisar com IA"}
+                </Button>
+              </div>
+              {analyzeUrl.isError && (
+                <p className="text-xs text-(--danger)">
+                  Não foi possível extrair o conteúdo da URL. Preencha manualmente.
+                </p>
+              )}
+              {aiAnalyzed && (
+                <div className="flex items-center gap-1.5 text-xs text-(--success, green)">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Dados extraídos com IA — revise antes de salvar
+                </div>
+              )}
+            </div>
+
             <div className="grid gap-1.5">
               <Label htmlFor="ref-body">Texto do post *</Label>
               <Textarea
@@ -313,7 +405,12 @@ export function ReferencesList() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setSheetOpen(false)}
+                onClick={() => {
+                  setSheetOpen(false)
+                  setForm(emptyForm())
+                  setUrlInput("")
+                  setAiAnalyzed(false)
+                }}
                 disabled={createRef.isPending}
               >
                 Cancelar

@@ -201,18 +201,27 @@ class GeminiProvider(LLMProvider):
             ),
         )
 
-        # O modelo 3.1 Flash Image usa Thinking por padrão — gera partes
-        # intermediárias marcadas como `thought=True`. Precisamos pegar apenas
-        # a última parte de imagem que NÃO seja de pensamento.
-        # NOTA: inline_data.data já é bytes puro (o SDK decodifica o base64
-        # automaticamente) — não chamar base64.b64decode().
+        # O modelo 3.1 Flash Image usa Thinking por padrão — thoughts são ocultos
+        # por padrão (includeThoughts=False). Partes com inline_data sem thought=True
+        # são as imagens finais geradas.
+        # NOTA: inline_data.data já é bytes puro (SDK decodifica base64 automaticamente).
+        parts = response.parts or []
         image_bytes: bytes | None = None
-        for part in response.parts:
-            if part.inline_data and part.inline_data.data and not getattr(part, "thought", False):
+        text_parts: list[str] = []
+        for part in parts:
+            if part.text:
+                text_parts.append(part.text)
+            elif part.inline_data and part.inline_data.data and not getattr(part, "thought", False):
                 image_bytes = bytes(part.inline_data.data)
 
         if image_bytes is None:
-            raise ValueError("Gemini nao retornou imagem na resposta.")
+            detail = "; ".join(text_parts) if text_parts else "resposta vazia"
+            logger.warning(
+                "gemini.image_no_data",
+                response_text=detail[:500],
+                parts_count=len(parts),
+            )
+            raise ValueError(f"Gemini nao retornou imagem na resposta: {detail[:200]}")
 
         logger.info("gemini.image_generated", size_bytes=len(image_bytes))
         return image_bytes

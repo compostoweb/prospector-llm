@@ -86,6 +86,13 @@ class S3Client:
             logger.error("s3.delete_error", key=key, error=str(exc))
             raise
 
+    def get_bytes(self, key: str) -> tuple[bytes, str]:
+        """Retorna (conteúdo, content_type) de um objeto do bucket."""
+        response = self._client.get_object(Bucket=self._bucket, Key=key)
+        data: bytes = response["Body"].read()
+        content_type: str = response.get("ContentType", "application/octet-stream")
+        return data, content_type
+
     def get_public_url(self, key: str) -> str:
         """Retorna a URL pública para um objeto."""
         return f"{self._endpoint}/{self._bucket}/{key}"
