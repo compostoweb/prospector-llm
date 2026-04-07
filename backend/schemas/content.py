@@ -163,6 +163,7 @@ class ContentReferenceCreate(BaseModel):
     body: str = Field(..., min_length=1)
     author_name: str | None = Field(default=None, max_length=150)
     author_title: str | None = Field(default=None, max_length=200)
+    author_company: str | None = Field(default=None, max_length=200)
     hook_type: HookType | None = None
     pillar: PostPillar | None = None
     engagement_score: int | None = Field(default=None, ge=0)
@@ -177,6 +178,7 @@ class ContentReferenceResponse(BaseModel):
     tenant_id: uuid.UUID
     author_name: str | None
     author_title: str | None
+    author_company: str | None
     body: str
     hook_type: str | None
     pillar: str | None

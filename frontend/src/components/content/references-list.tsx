@@ -65,6 +65,7 @@ function emptyForm(): ContentReferenceCreate {
     body: "",
     author_name: null,
     author_title: null,
+    author_company: null,
     hook_type: null,
     pillar: null,
     engagement_score: null,
@@ -104,6 +105,7 @@ export function ReferencesList() {
       body: result.body ?? prev.body,
       author_name: result.author_name ?? prev.author_name,
       author_title: result.author_title ?? prev.author_title,
+      author_company: result.author_company ?? prev.author_company,
       hook_type: result.hook_type ?? prev.hook_type,
       pillar: result.pillar ?? prev.pillar,
       engagement_score: result.engagement_score ?? prev.engagement_score,
@@ -284,7 +286,7 @@ export function ReferencesList() {
                 placeholder="Cole aqui o texto completo do post de referência..."
                 rows={8}
                 required
-                className="resize-none text-sm font-mono"
+                className="resize-none text-sm leading-relaxed font-sans whitespace-pre-wrap"
               />
               <p className="text-xs text-(--text-tertiary) text-right">{form.body.length} chars</p>
             </div>
@@ -308,6 +310,16 @@ export function ReferencesList() {
                   placeholder="Ex: CEO de SaaS"
                 />
               </div>
+            </div>
+
+            <div className="grid gap-1.5">
+              <Label htmlFor="ref-author_company">Empresa</Label>
+              <Input
+                id="ref-author_company"
+                value={form.author_company ?? ""}
+                onChange={(e) => handleChange("author_company", e.target.value)}
+                placeholder="Ex: Resultados Digitais"
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -376,17 +388,6 @@ export function ReferencesList() {
               <p className="text-xs text-(--text-tertiary)">
                 Avaliação subjetiva do desempenho (0 = baixo, 100 = viral).
               </p>
-            </div>
-
-            <div className="grid gap-1.5">
-              <Label htmlFor="ref-source_url">URL da fonte</Label>
-              <Input
-                id="ref-source_url"
-                type="url"
-                value={form.source_url ?? ""}
-                onChange={(e) => handleChange("source_url", e.target.value)}
-                placeholder="https://linkedin.com/posts/..."
-              />
             </div>
 
             <div className="grid gap-1.5">

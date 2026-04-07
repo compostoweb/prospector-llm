@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
+from datetime import UTC
 
 import httpx
 import structlog
@@ -39,6 +40,7 @@ _CHAT_LIST_CACHE_TTL = 120  # 2min for full conversation list
 @dataclass
 class SendResult:
     """Resultado de um envio via Unipile."""
+
     message_id: str
     success: bool
 
@@ -46,6 +48,7 @@ class SendResult:
 @dataclass
 class LinkedInProfile:
     """Dados básicos de perfil LinkedIn retornados pela Unipile."""
+
     profile_id: str
     name: str
     headline: str | None
@@ -55,6 +58,7 @@ class LinkedInProfile:
 @dataclass
 class ChatAttendee:
     """Participante de um chat Unipile."""
+
     id: str
     name: str
     profile_url: str | None = None
@@ -71,6 +75,7 @@ class ChatAttendee:
 @dataclass
 class ChatSummary:
     """Resumo de uma conversa na listagem."""
+
     chat_id: str
     attendees: list[ChatAttendee] = field(default_factory=list)
     last_message_text: str | None = None
@@ -82,6 +87,7 @@ class ChatSummary:
 @dataclass
 class ChatMessage:
     """Uma mensagem dentro de um chat."""
+
     id: str
     sender_id: str
     sender_name: str
@@ -94,6 +100,7 @@ class ChatMessage:
 @dataclass
 class ChatDetail:
     """Detalhes de uma conversa."""
+
     chat_id: str
     attendees: list[ChatAttendee] = field(default_factory=list)
     account_id: str = ""
@@ -182,10 +189,7 @@ class UnipileClient:
         if message:
             data_fields["text"] = message
 
-        files = [
-            ("attachments", (fname, fbytes, ctype))
-            for fname, fbytes, ctype in attachments
-        ]
+        files = [("attachments", (fname, fbytes, ctype)) for fname, fbytes, ctype in attachments]
 
         response = await self._client.post(
             "/chats/messages",
@@ -269,20 +273,54 @@ class UnipileClient:
         linkedin_url: str,
     ) -> LinkedInProfile | None:
         """
-        Busca dados básicos de um perfil LinkedIn por URL.
-        Retorna None se o perfil não for encontrado.
+        Busca dados básicos de um perfil LinkedIn por URL pública.
+
+        Endpoint: GET /users/{public_identifier}?account_id=...
+        O `identifier` é o slug do LinkedIn extraído da URL, ex:
+          https://www.linkedin.com/in/pedrofsoares/ → pedrofsoares
+
+        Retorna None se o perfil não for encontrado ou se o identifier
+        não puder ser extraído da URL.
         """
-        params = {"account_id": account_id, "url": linkedin_url}
-        response = await self._client.get("/linkedin/profiles", params=params)
+        import re as _re
+
+        m = _re.search(r"/in/([a-zA-Z0-9_%-]+)", linkedin_url)
+        if not m:
+            logger.warning(
+                "unipile.get_profile.bad_url",
+                url=linkedin_url,
+            )
+            return None
+        identifier = m.group(1).rstrip("/")
+
+        params = {
+            "account_id": account_id,
+            "linkedin_sections": "experience",
+        }
+        response = await self._client.get(f"/users/{identifier}", params=params)
         if response.status_code == 404:
             return None
         response.raise_for_status()
         data = response.json()
+
+        # Monta nome completo
+        first = data.get("first_name") or ""
+        last = data.get("last_name") or ""
+        full_name = f"{first} {last}".strip() or data.get("public_identifier", "")
+
+        # Empresa atual = primeiro item de experience
+        company: str | None = None
+        experiences = data.get("experience") or []
+        if experiences and isinstance(experiences, list):
+            exp = experiences[0]
+            if isinstance(exp, dict):
+                company = exp.get("company_name") or exp.get("company") or None
+
         return LinkedInProfile(
-            profile_id=data.get("public_id", ""),
-            name=data.get("name", ""),
+            profile_id=data.get("provider_id") or data.get("public_identifier", ""),
+            name=full_name,
             headline=data.get("headline"),
-            company=data.get("current_company"),
+            company=company,
         )
 
     async def get_relation_status(
@@ -561,7 +599,8 @@ class UnipileClient:
 
             # Filter out sponsored / read-only / offer chats
             filtered_items = [
-                chat for chat in raw_items
+                chat
+                for chat in raw_items
                 if chat.get("content_type", "") not in _SKIP_CONTENT_TYPES
                 and not chat.get("read_only", 0)
             ]
@@ -591,11 +630,7 @@ class UnipileClient:
 
                 # Fallback: use display_name from chat if profile resolution failed
                 if attendee and not attendee.name:
-                    fallback_name = (
-                        chat.get("display_name")
-                        or chat.get("name")
-                        or ""
-                    )
+                    fallback_name = chat.get("display_name") or chat.get("name") or ""
                     if fallback_name:
                         attendee = ChatAttendee(
                             id=attendee.id,
@@ -604,11 +639,7 @@ class UnipileClient:
                             profile_picture_url=attendee.profile_picture_url,
                         )
                 elif not attendee and att_id:
-                    fallback_name = (
-                        chat.get("display_name")
-                        or chat.get("name")
-                        or ""
-                    )
+                    fallback_name = chat.get("display_name") or chat.get("name") or ""
                     attendee = ChatAttendee(id=att_id, name=fallback_name)
 
                 attendees = [attendee] if attendee else []
@@ -860,7 +891,7 @@ class UnipileClient:
             )
             return False
 
-    async def __aenter__(self) -> "UnipileClient":
+    async def __aenter__(self) -> UnipileClient:
         return self
 
     async def __aexit__(self, *_: object) -> None:
@@ -897,9 +928,7 @@ class UnipileClient:
                 status=response.status_code,
                 body=body,
             )
-            raise RuntimeError(
-                f"Unipile GET /users/me retornou {response.status_code}: {body}"
-            )
+            raise RuntimeError(f"Unipile GET /users/me retornou {response.status_code}: {body}")
         return response.json()
 
     # ── Own Posts with Metrics (Content Hub Analytics) ─────────────────
@@ -1035,7 +1064,7 @@ class UnipileClient:
         Reage ao post mais recente do lead (≤7 dias).
         Retorna True se reagiu, False se não há post recente ou houve erro.
         """
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         posts = await self.get_lead_posts(account_id, provider_id, limit=1)
         if not posts:
@@ -1050,7 +1079,7 @@ class UnipileClient:
         if published_at:
             try:
                 pub_dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
-                cutoff = datetime.now(tz=timezone.utc) - timedelta(days=self._POST_RECENT_DAYS)
+                cutoff = datetime.now(tz=UTC) - timedelta(days=self._POST_RECENT_DAYS)
                 if pub_dt < cutoff:
                     logger.info(
                         "unipile.react.post_too_old",
@@ -1091,7 +1120,7 @@ class UnipileClient:
         Comenta no post mais recente do lead (≤7 dias).
         Retorna True se comentou, False se não há post recente ou houve erro.
         """
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         posts = await self.get_lead_posts(account_id, provider_id, limit=1)
         if not posts:
@@ -1105,7 +1134,7 @@ class UnipileClient:
         if published_at:
             try:
                 pub_dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
-                cutoff = datetime.now(tz=timezone.utc) - timedelta(days=self._POST_RECENT_DAYS)
+                cutoff = datetime.now(tz=UTC) - timedelta(days=self._POST_RECENT_DAYS)
                 if pub_dt < cutoff:
                     logger.info(
                         "unipile.comment.post_too_old",
@@ -1184,8 +1213,7 @@ class UnipileClient:
             items = data.get("items", [])
             return {
                 "items": [
-                    {"id": item.get("id", ""), "title": item.get("title", "")}
-                    for item in items
+                    {"id": item.get("id", ""), "title": item.get("title", "")} for item in items
                 ]
             }
         except httpx.HTTPError as exc:
@@ -1195,31 +1223,37 @@ class UnipileClient:
     def _parse_linkedin_items(self, raw_items: list[dict]) -> list[dict]:
         """Normaliza itens brutos do Unipile para o formato interno."""
         nd_map = {
-            "DISTANCE_1": 1, "DISTANCE_2": 2,
-            "DISTANCE_3PLUS": 3, "DISTANCE_3": 3, "OUT_OF_NETWORK": 3,
+            "DISTANCE_1": 1,
+            "DISTANCE_2": 2,
+            "DISTANCE_3PLUS": 3,
+            "DISTANCE_3": 3,
+            "OUT_OF_NETWORK": 3,
         }
         items: list[dict] = []
         for p in raw_items:
             public_identifier = p.get("public_identifier") or p.get("public_id") or ""
             nd = nd_map.get(p.get("network_distance", ""))
-            items.append({
-                "provider_id": p.get("id") or p.get("public_id") or "",
-                "name": p.get("name") or (
-                    f"{p.get('first_name', '')} {p.get('last_name', '')}".strip()
-                ),
-                "headline": p.get("headline") or p.get("title") or None,
-                "company": p.get("company") or p.get("current_company") or None,
-                "location": p.get("location") or None,
-                "profile_url": (
-                    p.get("public_profile_url") or p.get("profile_url")
-                    or (
-                        f"https://www.linkedin.com/in/{public_identifier}"
-                        if public_identifier else None
-                    )
-                ),
-                "profile_picture_url": p.get("profile_picture_url") or None,
-                "network_distance": nd,
-            })
+            items.append(
+                {
+                    "provider_id": p.get("id") or p.get("public_id") or "",
+                    "name": p.get("name")
+                    or (f"{p.get('first_name', '')} {p.get('last_name', '')}".strip()),
+                    "headline": p.get("headline") or p.get("title") or None,
+                    "company": p.get("company") or p.get("current_company") or None,
+                    "location": p.get("location") or None,
+                    "profile_url": (
+                        p.get("public_profile_url")
+                        or p.get("profile_url")
+                        or (
+                            f"https://www.linkedin.com/in/{public_identifier}"
+                            if public_identifier
+                            else None
+                        )
+                    ),
+                    "profile_picture_url": p.get("profile_picture_url") or None,
+                    "network_distance": nd,
+                }
+            )
         return items
 
     async def _fetch_linkedin_page(
@@ -1234,9 +1268,7 @@ class UnipileClient:
         if cursor:
             query_params["cursor"] = cursor
 
-        response = await self._client.post(
-            "/linkedin/search", params=query_params, json=body
-        )
+        response = await self._client.post("/linkedin/search", params=query_params, json=body)
         response.raise_for_status()
         data = response.json()
         raw_items = data.get("items", data if isinstance(data, list) else [])
@@ -1262,8 +1294,8 @@ class UnipileClient:
         Auto-pagina até atingir ``limit`` quando ``cursor`` não é fornecido.
         Se ``cursor`` é fornecido (ex.: "Carregar mais"), faz apenas 1 fetch.
         """
-        PAGE_SIZE = 25   # Unipile pode reduzir (Classic ≈ 10)
-        MAX_PAGES = 20   # segurança anti-loop infinito
+        PAGE_SIZE = 25  # Unipile pode reduzir (Classic ≈ 10)
+        MAX_PAGES = 20  # segurança anti-loop infinito
 
         body: dict = {
             "api": "classic",

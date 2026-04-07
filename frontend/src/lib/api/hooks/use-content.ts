@@ -83,6 +83,7 @@ export interface ContentReference {
   tenant_id: string
   author_name: string | null
   author_title: string | null
+  author_company: string | null
   body: string
   hook_type: HookType | null
   pillar: PostPillar | null
@@ -154,6 +155,7 @@ export interface ContentReferenceCreate {
   body: string
   author_name?: string | null
   author_title?: string | null
+  author_company?: string | null
   hook_type?: HookType | null
   pillar?: PostPillar | null
   engagement_score?: number | null
@@ -687,6 +689,7 @@ export interface AnalyzeUrlResult {
   body: string
   author_name: string | null
   author_title: string | null
+  author_company: string | null
   hook_type: HookType | null
   pillar: PostPillar | null
   engagement_score: number | null

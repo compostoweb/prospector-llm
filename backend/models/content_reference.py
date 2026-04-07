@@ -34,6 +34,7 @@ class ContentReference(Base, TenantMixin, TimestampMixin):
 
     author_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
     author_title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    author_company: Mapped[str | None] = mapped_column(String(200), nullable=True)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     hook_type: Mapped[str | None] = mapped_column(
         String(30),
