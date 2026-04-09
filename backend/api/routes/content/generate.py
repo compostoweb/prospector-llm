@@ -34,6 +34,8 @@ from models.enums import LeadStatus
 from models.lead import Lead
 from schemas.content import (
     ContentThemeResponse,
+    DetectHookRequest,
+    DetectHookResponse,
     GeneratePostImageRequest,
     GeneratePostImageResponse,
     GeneratePostRequest,
@@ -411,6 +413,66 @@ async def vary_theme(
 
     return VaryThemeResponse(variation=variation)
 
+# ── POST /content/generate/detect-hook ─────────────────────────────────────────────
+
+HOOK_DESCRIPTIONS = (
+    "- loop_open: abre uma história ou pergunta que só será respondida no final\n"
+    "- contrarian: vai contra uma crença popular do mercado\n"
+    "- identification: leía se identifica diretamente (dor, situção, perfil)\n"
+    "- shortcut: promete um caminho mais rápido ou mais fácil para algo\n"
+    "- benefit: apresenta um benefício claro e direto na primeira linha\n"
+    "- data: abre com um número, estatística ou dado concreto\n"
+)
+
+
+@router.post(
+    "/detect-hook",
+    response_model=DetectHookResponse,
+    summary="Detecta o tipo de gancho de um post com IA",
+)
+async def detect_hook(
+    body: DetectHookRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    registry: LLMRegistry = Depends(get_llm_registry),
+) -> DetectHookResponse:
+    """
+    Analisa as primeiras linhas do post e classifica o tipo de gancho
+    em um dos 6 tipos disponíveis.
+    """
+    from integrations.llm import LLMMessage
+
+    # Usa apenas as primeiras 3 linhas não vazias — o gancho é sempre no início
+    first_lines = "\n".join(
+        [l for l in body.body.strip().splitlines() if l.strip()][:3]
+    )
+
+    prompt = (
+        "Você é especialista em copywriting para LinkedIn.\n"
+        "Analise as primeiras linhas do post abaixo e classifique o tipo de gancho.\n\n"
+        f"Tipos disponíveis:\n{HOOK_DESCRIPTIONS}\n"
+        f"Primeiras linhas do post:\n{first_lines}\n\n"
+        "Responda APENAS com a chave do tipo (ex: loop_open), sem explicações."
+    )
+
+    messages = [LLMMessage(role="user", content=prompt)]
+    response = await registry.complete(
+        messages=messages,
+        provider=settings.CONTENT_GEN_PROVIDER,
+        model=settings.CONTENT_GEN_MODEL,
+        temperature=0.1,
+        max_tokens=16,
+    )
+
+    valid_hooks = {"loop_open", "contrarian", "identification", "shortcut", "benefit", "data"}
+    detected = response.text.strip().lower().split()[0].rstrip(".")
+    if detected not in valid_hooks:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Não foi possível detectar o tipo de gancho. Resposta recebida: {response.text!r}",
+        )
+
+    logger.info("detect_hook.done", hook_type=detected, tenant_id=str(tenant_id))
+    return DetectHookResponse(hook_type=detected)
 
 # ── POST /content/generate/image ─────────────────────────────────────
 

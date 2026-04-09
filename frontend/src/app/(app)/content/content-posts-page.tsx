@@ -5,8 +5,15 @@ import Link from "next/link"
 import { isSameMonth, parseISO, startOfMonth, subMonths, format } from "date-fns"
 import { ptBR } from "date-fns/locale"
 import { Plus, Filter, Sparkles, LayoutGrid, List, RefreshCw } from "lucide-react"
+import { NotionLogo } from "@/components/ui/notion-logo"
 import { toast } from "sonner"
-import { useContentPosts, useSyncVoyager, type PostStatus, type PostPillar } from "@/lib/api/hooks/use-content"
+import {
+  useContentPosts,
+  useSyncVoyager,
+  useContentSettings,
+  type PostStatus,
+  type PostPillar,
+} from "@/lib/api/hooks/use-content"
 import { PostCard } from "@/components/content/post-card"
 import { PostListView, type SortKey } from "@/components/content/post-list-view"
 import { Button } from "@/components/ui/button"
@@ -18,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { CreatePostDialog } from "@/components/content/create-post-dialog"
+import { NotionImportDialog } from "@/components/content/notion-import-dialog"
 
 const STATUS_OPTIONS: { value: PostStatus | "all"; label: string }[] = [
   { value: "all", label: "Todos os status" },
@@ -40,6 +48,7 @@ export default function ContentPostsPage() {
   const [pillarFilter, setPillarFilter] = useState<PostPillar | "all">("all")
   const [monthFilter, setMonthFilter] = useState<string>("") // "2026-04" format
   const [createOpen, setCreateOpen] = useState(false)
+  const [notionOpen, setNotionOpen] = useState(false)
   const [view, setView] = useState<"list" | "grid">("list")
   const [sortBy, setSortBy] = useState<SortKey>("recent")
 
@@ -48,6 +57,10 @@ export default function ContentPostsPage() {
     ...(pillarFilter !== "all" && { pillar: pillarFilter }),
   })
   const syncVoyager = useSyncVoyager()
+  const { data: contentSettings } = useContentSettings()
+  const notionConfigured = !!(
+    contentSettings?.notion_api_key_set && contentSettings?.notion_database_id
+  )
 
   // Filtro de mês client-side — mesma prioridade de data que o PostListView usa para exibir
   const posts = useMemo(() => {
@@ -162,7 +175,8 @@ export default function ContentPostsPage() {
             onClick={() =>
               syncVoyager.mutate(undefined, {
                 onSuccess: () => toast.success("Métricas sincronizadas"),
-                onError: (err) => toast.error(err instanceof Error ? err.message : "Erro ao sincronizar"),
+                onError: (err) =>
+                  toast.error(err instanceof Error ? err.message : "Erro ao sincronizar"),
               })
             }
           >
@@ -179,6 +193,17 @@ export default function ContentPostsPage() {
             <Plus className="h-3.5 w-3.5" />
             Novo post
           </Button>
+          {notionConfigured && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs gap-1.5"
+              onClick={() => setNotionOpen(true)}
+            >
+              <NotionLogo className="h-3.5 w-3.5" />
+              Importar do Notion
+            </Button>
+          )}
         </div>
       </div>
 
@@ -211,6 +236,7 @@ export default function ContentPostsPage() {
       )}
 
       <CreatePostDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <NotionImportDialog open={notionOpen} onOpenChange={setNotionOpen} />
     </div>
   )
 }

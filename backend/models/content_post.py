@@ -157,3 +157,11 @@ class ContentPost(Base, TenantMixin, TimestampMixin):
         nullable=True,
         comment="Mensagem de erro se status=failed",
     )
+
+    # ── Notion ────────────────────────────────────────────────────────
+    notion_page_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+        comment="Page ID do Notion de origem — evita reimportação duplicada",
+    )

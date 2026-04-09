@@ -9,6 +9,8 @@ import {
   MessageCircle,
   TrendingUp,
   ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
   Bookmark,
   Pencil,
   Check,
@@ -19,9 +21,12 @@ import {
   ChevronDown,
   ImageIcon,
   VideoIcon,
+  Filter,
+  X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { StatusBadge, PillarBadge } from "@/components/content/post-badges"
+import { NotionLogo } from "@/components/ui/notion-logo"
 import { EditPostDialog } from "@/components/content/edit-post-dialog"
 import {
   useApprovePost,
@@ -52,6 +57,7 @@ import {
 } from "@/components/ui/alert-dialog"
 
 export type SortKey = "recent" | "impressions" | "likes" | "comments" | "saves" | "engagement"
+export type SortDir = "desc" | "asc"
 
 interface PostListViewProps {
   posts: ContentPost[]
@@ -59,25 +65,26 @@ interface PostListViewProps {
   onSortChange: (key: SortKey) => void
 }
 
-function sortPosts(posts: ContentPost[], sortBy: SortKey): ContentPost[] {
+function sortPosts(posts: ContentPost[], sortBy: SortKey, sortDir: SortDir): ContentPost[] {
   const sorted = [...posts]
+  const dir = sortDir === "asc" ? 1 : -1
   switch (sortBy) {
     case "recent":
       return sorted.sort((a, b) => {
         const da = a.published_at ?? a.publish_date ?? a.created_at
         const db = b.published_at ?? b.publish_date ?? b.created_at
-        return new Date(db).getTime() - new Date(da).getTime()
+        return dir * (new Date(da).getTime() - new Date(db).getTime())
       })
     case "impressions":
-      return sorted.sort((a, b) => b.impressions - a.impressions)
+      return sorted.sort((a, b) => dir * (a.impressions - b.impressions))
     case "likes":
-      return sorted.sort((a, b) => b.likes - a.likes)
+      return sorted.sort((a, b) => dir * (a.likes - b.likes))
     case "comments":
-      return sorted.sort((a, b) => b.comments - a.comments)
+      return sorted.sort((a, b) => dir * (a.comments - b.comments))
     case "saves":
-      return sorted.sort((a, b) => b.saves - a.saves)
+      return sorted.sort((a, b) => dir * (a.saves - b.saves))
     case "engagement":
-      return sorted.sort((a, b) => (b.engagement_rate ?? 0) - (a.engagement_rate ?? 0))
+      return sorted.sort((a, b) => dir * ((a.engagement_rate ?? 0) - (b.engagement_rate ?? 0)))
     default:
       return sorted
   }
@@ -92,8 +99,24 @@ export function PostListView({ posts, sortBy, onSortChange }: PostListViewProps)
   const [editPost, setEditPost] = useState<ContentPost | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [pillarFilter, setPillarFilter] = useState<string>("all")
+  const [sortDir, setSortDir] = useState<SortDir>("desc")
 
-  const sortedPosts = sortPosts(posts, sortBy)
+  function handleSortChange(key: SortKey) {
+    if (key === sortBy) {
+      setSortDir((d) => (d === "desc" ? "asc" : "desc"))
+    } else {
+      onSortChange(key)
+      setSortDir("desc")
+    }
+  }
+
+  const sortedPosts = sortPosts(posts, sortBy, sortDir).filter(
+    (p) =>
+      (statusFilter === "all" || p.status === statusFilter) &&
+      (pillarFilter === "all" || p.pillar === pillarFilter),
+  )
   const allSelected = sortedPosts.length > 0 && sortedPosts.every((p) => selectedIds.has(p.id))
   const someSelected = !allSelected && sortedPosts.some((p) => selectedIds.has(p.id))
 
@@ -227,6 +250,7 @@ export function PostListView({ posts, sortBy, onSortChange }: PostListViewProps)
 
       <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) overflow-hidden shadow-sm">
         {/* Header */}
+        <TooltipProvider delayDuration={300}>
         <div
           className={cn(
             "grid gap-2 px-4 py-2.5 border-b border-(--border-default) bg-(--bg-overlay) text-xs font-medium text-(--text-tertiary) uppercase tracking-wide items-center",
@@ -240,26 +264,91 @@ export function PostListView({ posts, sortBy, onSortChange }: PostListViewProps)
             className="ml-0.5"
           />
           <span>Post</span>
-          <span>Status</span>
-          <span>Pilar</span>
+          {/* Filtro de Status */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className={`flex items-center gap-1 text-xs font-medium uppercase tracking-wide hover:text-(--text-primary) transition-colors ${
+                  statusFilter !== "all" ? "text-(--accent)" : "text-(--text-tertiary)"
+                }`}
+              >
+                Status
+                <Filter className="h-3 w-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-36">
+              {[
+                { value: "all", label: "Todos" },
+                { value: "draft", label: "Rascunho" },
+                { value: "approved", label: "Aprovado" },
+                { value: "scheduled", label: "Agendado" },
+                { value: "published", label: "Publicado" },
+                { value: "failed", label: "Falhou" },
+              ].map((opt) => (
+                <DropdownMenuItem
+                  key={opt.value}
+                  onSelect={() => setStatusFilter(opt.value)}
+                  className={statusFilter === opt.value ? "font-medium text-(--accent)" : ""}
+                >
+                  {opt.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {/* Filtro de Pilar */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className={`flex items-center gap-1 text-xs font-medium uppercase tracking-wide hover:text-(--text-primary) transition-colors ${
+                  pillarFilter !== "all" ? "text-(--accent)" : "text-(--text-tertiary)"
+                }`}
+              >
+                Pilar
+                <Filter className="h-3 w-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-36">
+              {[
+                { value: "all", label: "Todos" },
+                { value: "authority", label: "Autoridade" },
+                { value: "case", label: "Caso" },
+                { value: "vision", label: "Visão" },
+              ].map((opt) => (
+                <DropdownMenuItem
+                  key={opt.value}
+                  onSelect={() => setPillarFilter(opt.value)}
+                  className={pillarFilter === opt.value ? "font-medium text-(--accent)" : ""}
+                >
+                  {opt.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <SortHeader
             label="Impr."
             sortKey="impressions"
             currentSort={sortBy}
-            onSort={onSortChange}
+            sortDir={sortDir}
+            onSort={handleSortChange}
+            tooltip="Ordena por alcance total de impressões"
           />
-          <SortHeader label="Likes" sortKey="likes" currentSort={sortBy} onSort={onSortChange} />
-          <SortHeader label="Com." sortKey="comments" currentSort={sortBy} onSort={onSortChange} />
-          <SortHeader label="Salv." sortKey="saves" currentSort={sortBy} onSort={onSortChange} />
+          <SortHeader label="Likes" sortKey="likes" currentSort={sortBy} sortDir={sortDir} onSort={handleSortChange} tooltip="Ordena por número de curtidas" />
+          <SortHeader label="Com." sortKey="comments" currentSort={sortBy} sortDir={sortDir} onSort={handleSortChange} tooltip="Ordena por número de comentários" />
+          <SortHeader label="Salv." sortKey="saves" currentSort={sortBy} sortDir={sortDir} onSort={handleSortChange} tooltip="Ordena por número de salvamentos" />
           <SortHeader
             label="Eng."
             sortKey="engagement"
             currentSort={sortBy}
-            onSort={onSortChange}
+            sortDir={sortDir}
+            onSort={handleSortChange}
+            tooltip="Ordena por taxa de engajamento (likes+com.+salv.) / impressões"
           />
           <span />
           <span className="text-center">Ações</span>
         </div>
+        </TooltipProvider>
 
         {/* Rows */}
         {sortedPosts.length === 0 ? (
@@ -319,26 +408,65 @@ function SortHeader({
   label,
   sortKey,
   currentSort,
+  sortDir,
   onSort,
+  tooltip,
 }: {
   label: string
   sortKey: SortKey
   currentSort: SortKey
+  sortDir: SortDir
   onSort: (key: SortKey) => void
+  tooltip: string
 }) {
   const active = currentSort === sortKey
   return (
-    <button
-      type="button"
-      onClick={() => onSort(sortKey)}
-      className={cn(
-        "flex items-center gap-0.5 cursor-pointer transition-colors",
-        active ? "text-(--accent)" : "hover:text-(--text-secondary)",
-      )}
-    >
-      {label}
-      <ArrowUpDown className="h-3 w-3" />
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => onSort(sortKey)}
+            className={cn(
+              "flex items-center gap-0.5 cursor-pointer transition-colors",
+              active ? "text-(--accent)" : "hover:text-(--text-secondary)",
+            )}
+          >
+            {label}
+            {active ? (
+              sortDir === "desc" ? (
+                <ArrowDown className="h-3 w-3" />
+              ) : (
+                <ArrowUp className="h-3 w-3" />
+              )
+            ) : (
+              <ArrowUpDown className="h-3 w-3 opacity-50" />
+            )}
+          </button>
+          {active && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onSort("recent")
+              }}
+              className="ml-0.5 text-(--text-tertiary) hover:text-(--danger) transition-colors"
+              aria-label="Remover ordenação"
+            >
+              <X className="h-2.5 w-2.5" />
+            </button>
+          )}
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="text-xs max-w-48 text-center">
+        {tooltip}
+        {active && (
+          <span className="block text-(--text-tertiary) mt-0.5">
+            {sortDir === "desc" ? "↓ maior para menor" : "↑ menor para maior"}
+          </span>
+        )}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -428,16 +556,16 @@ function PostRow({
             onClick={onEdit}
             className="text-sm font-medium text-(--text-primary) truncate text-left cursor-pointer hover:text-(--accent) transition-colors"
           >
+            {post.notion_page_id && (
+              <NotionLogo className="h-3.5 w-3.5 shrink-0 inline-block mr-1.5 align-middle" aria-label="Importado do Notion" />
+            )}
             {post.title}
           </button>
           {post.image_url && (
-            <ImageIcon
-              className="h-3 w-3 shrink-0 text-(--text-tertiary)"
-              aria-label="Tem imagem"
-            />
+            <ImageIcon className="h-4.5 w-4.5 shrink-0 text-sky-500" aria-label="Tem imagem" />
           )}
           {post.video_url && (
-            <VideoIcon className="h-3 w-3 shrink-0 text-(--text-tertiary)" aria-label="Tem vídeo" />
+            <VideoIcon className="h-4.5 w-4.5 shrink-0 text-violet-500" aria-label="Tem vídeo" />
           )}
         </div>
         {dateStr && (

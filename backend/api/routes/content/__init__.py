@@ -15,6 +15,7 @@ from api.routes.content import (
 	landing_pages,
 	lead_magnets,
 	linkedin_auth,
+	notion_import,
 	posts,
 	references,
 	settings,
@@ -32,3 +33,4 @@ router.include_router(generate.router)
 router.include_router(lead_magnets.router)
 router.include_router(landing_pages.router)
 router.include_router(calculator.router)
+router.include_router(notion_import.router)

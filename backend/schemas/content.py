@@ -100,6 +100,7 @@ class ContentPostResponse(BaseModel):
     metrics_updated_at: datetime | None
     published_at: datetime | None
     error_message: str | None
+    notion_page_id: str | None = None
     created_at: datetime
     updated_at: datetime
     # Preenchido apenas na resposta do PUT quando post já foi publicado no LinkedIn
@@ -145,6 +146,10 @@ class ContentSettingsUpdate(BaseModel):
     posts_per_week: int | None = Field(default=None, ge=1, le=7)
     author_name: str | None = Field(default=None, max_length=100)
     author_voice: str | None = None
+    # Notion — enviar apenas ao alterar; None = nao modifica o valor existente
+    notion_api_key: str | None = Field(default=None, description="Internal Integration token do Notion (secret_xxx). Enviar None para nao alterar.")
+    notion_database_id: str | None = Field(default=None, max_length=100, description="UUID do banco de dados Notion (extraido da URL)")
+    notion_column_mappings: "NotionColumnMappings | None" = Field(default=None, description="Mapeamento de colunas Notion para campos internos")
 
 
 class ContentSettingsResponse(BaseModel):
@@ -156,8 +161,38 @@ class ContentSettingsResponse(BaseModel):
     posts_per_week: int
     author_name: str | None
     author_voice: str | None
+    # Notion — chave nunca exposta; apenas indica se esta configurada
+    notion_api_key_set: bool = Field(default=False, description="True se notion_api_key esta configurada")
+    notion_database_id: str | None
+    notion_column_mappings: "NotionColumnMappings | None" = Field(default=None, description="Mapeamento de colunas Notion configurado pelo tenant")
     created_at: datetime
     updated_at: datetime
+
+    @classmethod
+    def model_validate(cls, obj: object, **kwargs: object) -> "ContentSettingsResponse":  # type: ignore[override]
+        import json
+        from models.content_settings import ContentSettings
+        if isinstance(obj, ContentSettings):
+            mappings: NotionColumnMappings | None = None
+            if obj.notion_column_mappings:
+                try:
+                    mappings = NotionColumnMappings(**json.loads(obj.notion_column_mappings))
+                except Exception:
+                    mappings = None
+            return cls(
+                id=obj.id,
+                tenant_id=obj.tenant_id,
+                default_publish_time=str(obj.default_publish_time) if obj.default_publish_time else None,
+                posts_per_week=obj.posts_per_week,
+                author_name=obj.author_name,
+                author_voice=obj.author_voice,
+                notion_api_key_set=obj.notion_api_key is not None,
+                notion_database_id=obj.notion_database_id,
+                notion_column_mappings=mappings,
+                created_at=obj.created_at,
+                updated_at=obj.updated_at,
+            )
+        return super().model_validate(obj, **kwargs)
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -331,6 +366,14 @@ class VaryThemeResponse(BaseModel):
     variation: str
 
 
+class DetectHookRequest(BaseModel):
+    body: str = Field(..., min_length=10, max_length=5000)
+
+
+class DetectHookResponse(BaseModel):
+    hook_type: str
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Geração de imagem (Nano Banana 2)
 # ─────────────────────────────────────────────────────────────────────
@@ -351,3 +394,56 @@ class GeneratePostImageRequest(BaseModel):
 class GeneratePostImageResponse(BaseModel):
     image_url: str
     image_prompt: str
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Notion Import
+# ─────────────────────────────────────────────────────────────────────
+
+
+class NotionDatabaseColumn(BaseModel):
+    """Uma coluna disponivel no banco de dados Notion."""
+
+    name: str
+    type: str
+
+
+class NotionColumnMappings(BaseModel):
+    """Mapeamento de campos internos ContentPost para colunas Notion."""
+
+    title: str = Field(..., description="Coluna Notion que contem o titulo do post (tipo: title)")
+    body: str = Field(..., description="Coluna Notion que contem o texto do post (tipo: rich_text)")
+    pillar: str | None = Field(default=None, description="Coluna Notion para o pilar (tipo: select)")
+    status: str | None = Field(default=None, description="Coluna Notion para o status (tipo: select)")
+    publish_date: str | None = Field(default=None, description="Coluna Notion para a data de publicacao (tipo: date)")
+    week_number: str | None = Field(default=None, description="Coluna Notion para o numero da semana (tipo: number)")
+    hashtags: str | None = Field(default=None, description="Coluna Notion para hashtags (tipo: rich_text)")
+
+
+class NotionPostPreview(BaseModel):
+    """Preview de uma page Notion antes de importar."""
+
+    page_id: str
+    title: str
+    pillar: str | None
+    status_notion: str | None
+    publish_date: str | None
+    week_number: int | None
+    hashtags: str | None
+    body_preview: str = Field(description="Primeiros 120 caracteres do corpo do post")
+    body: str = Field(default="", description="Texto completo do post")
+    already_imported: bool = Field(
+        default=False,
+        description="True se este page_id ja foi importado por este tenant",
+    )
+
+
+class NotionImportRequest(BaseModel):
+    page_ids: list[str] = Field(..., min_length=1, description="IDs das pages Notion a importar")
+
+
+class NotionImportResult(BaseModel):
+    imported: int
+    skipped: int
+    failed: int
+    post_ids: list[str] = Field(default_factory=list, description="UUIDs dos ContentPost criados")

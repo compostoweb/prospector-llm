@@ -24,6 +24,7 @@ import { localDateToUTC } from "@/lib/date"
 import {
   useUpdatePost,
   useImprovePost,
+  useDetectHookType,
   useApprovePost,
   useSchedulePost,
   useCancelSchedule,
@@ -127,6 +128,7 @@ export function EditPostDialog({
 
   const updatePost = useUpdatePost()
   const improvePost = useImprovePost()
+  const detectHook = useDetectHookType()
   const approvePost = useApprovePost()
   const schedulePost = useSchedulePost()
   const cancelSchedulePost = useCancelSchedule()
@@ -251,6 +253,19 @@ export function EditPostDialog({
     setImageDeleted(false)
     setLocalVideoDeleted(false)
   }, [post, defaultImproveOpen])
+
+  // Auto-calcula semana do mês quando a data de publicação muda
+  useEffect(() => {
+    if (!publishDate) return
+    try {
+      const d = new Date(publishDate)
+      // Semana do mês: ceil(dia / 7), máximo 5
+      const weekOfMonth = Math.ceil(d.getDate() / 7)
+      setWeekNumber(String(weekOfMonth))
+    } catch {
+      // data inválida, ignora
+    }
+  }, [publishDate])
 
   // Reseta estado local de vídeo apenas quando abre dialog para um post diferente (não em cada refetch)
   const prevPostIdRef = useRef<string | null>(null)
@@ -430,7 +445,26 @@ export function EditPostDialog({
               </div>
 
               <div className="grid gap-1.5">
-                <Label>Tipo de gancho</Label>
+                <div className="flex items-center justify-between">
+                  <Label>Tipo de gancho</Label>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!body.trim()) return
+                      const res = await detectHook.mutateAsync(body)
+                      setHookType(res.hook_type as HookType)
+                    }}
+                    disabled={detectHook.isPending || !body.trim()}
+                    className="flex items-center gap-1 text-xs text-(--accent) hover:text-(--accent)/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {detectHook.isPending ? (
+                      <span className="animate-spin inline-block h-3 w-3 border-2 border-current border-t-transparent rounded-full" />
+                    ) : (
+                      <Sparkles className="h-3 w-3" />
+                    )}
+                    Detectar com IA
+                  </button>
+                </div>
                 <Select value={hookType} onValueChange={(v) => setHookType(v as HookType | "none")}>
                   <SelectTrigger>
                     <SelectValue />
@@ -459,7 +493,7 @@ export function EditPostDialog({
               </div>
 
               <div className="grid gap-1.5">
-                <Label htmlFor="edit-week">Semana</Label>
+                <Label htmlFor="edit-week">Semana do mês</Label>
                 <Input
                   id="edit-week"
                   type="number"

@@ -55,6 +55,7 @@ export interface ContentPost {
   metrics_updated_at: string | null
   published_at: string | null
   error_message: string | null
+  notion_page_id: string | null
   created_at: string
   updated_at: string
   linkedin_sync_warning?: string | null
@@ -80,6 +81,9 @@ export interface ContentSettings {
   posts_per_week: number
   author_name: string | null
   author_voice: string | null
+  notion_api_key_set: boolean
+  notion_database_id: string | null
+  notion_column_mappings: NotionColumnMappings | null
   created_at: string
   updated_at: string
 }
@@ -512,6 +516,8 @@ export function useUpdateContentSettings() {
       posts_per_week?: number | null
       author_name?: string | null
       author_voice?: string | null
+      notion_api_key?: string | null
+      notion_database_id?: string | null
     }) => {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/settings`, {
         method: "PUT",
@@ -609,6 +615,27 @@ export function useImprovePost() {
       )
       if (!res.ok) throw new Error("Erro ao melhorar post")
       return res.json() as Promise<{ text: string; character_count: number; violations: string[] }>
+    },
+  })
+}
+
+export function useDetectHookType() {
+  const { data: session } = useSession()
+  return useMutation({
+    mutationFn: async (body: string) => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/generate/detect-hook`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session?.accessToken ?? ""}`,
+          },
+          body: JSON.stringify({ body }),
+        },
+      )
+      if (!res.ok) throw new Error("Não foi possível detectar o tipo de gancho")
+      return res.json() as Promise<{ hook_type: string }>
     },
   })
 }
@@ -852,5 +879,132 @@ export function useDeletePostVideo() {
       if (!res.ok) throw new Error("Erro ao excluir vídeo")
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: contentKeys.all }),
+  })
+}
+
+// ── Notion Import ─────────────────────────────────────────────────
+export interface NotionDatabaseColumn {
+  name: string
+  type: string
+}
+
+export interface NotionColumnMappings {
+  title: string
+  body: string
+  pillar?: string | null
+  status?: string | null
+  publish_date?: string | null
+  week_number?: string | null
+  hashtags?: string | null
+}
+export interface NotionPostPreview {
+  page_id: string
+  title: string
+  pillar: string | null
+  status_notion: string | null
+  publish_date: string | null
+  week_number: number | null
+  hashtags: string | null
+  body_preview: string
+  body: string
+  already_imported: boolean
+}
+
+export interface NotionImportResult {
+  imported: number
+  skipped: number
+  failed: number
+  post_ids: string[]
+}
+
+export function useNotionPreview(enabled: boolean) {
+  const { data: session } = useSession()
+  return useQuery({
+    queryKey: ["notion", "preview"],
+    queryFn: async () => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/notion/preview`,
+        { headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` } },
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { detail?: string }).detail ?? "Erro ao buscar posts do Notion")
+      }
+      return res.json() as Promise<NotionPostPreview[]>
+    },
+    enabled: enabled && !!session?.accessToken,
+    staleTime: 0, // sempre busca ao abrir o modal
+  })
+}
+
+export function useImportFromNotion() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (pageIds: string[]) => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/notion/import`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session?.accessToken ?? ""}`,
+          },
+          body: JSON.stringify({ page_ids: pageIds }),
+        },
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { detail?: string }).detail ?? "Erro ao importar posts do Notion")
+      }
+      return res.json() as Promise<NotionImportResult>
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: contentKeys.all }),
+  })
+}
+
+export function useNotionColumns() {
+  const { data: session } = useSession()
+  return useQuery({
+    queryKey: ["notion", "columns"],
+    queryFn: async () => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/notion/columns`,
+        { headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` } },
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { detail?: string }).detail ?? "Erro ao buscar colunas do Notion")
+      }
+      return res.json() as Promise<NotionDatabaseColumn[]>
+    },
+    enabled: false, // só executa via refetch()
+    staleTime: 5 * 60 * 1000, // 5 min
+  })
+}
+
+export function useSaveNotionMappings() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: NotionColumnMappings) => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/notion/mappings`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session?.accessToken ?? ""}`,
+          },
+          body: JSON.stringify(body),
+        },
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { detail?: string }).detail ?? "Erro ao salvar mapeamento")
+      }
+      return res.json() as Promise<{ ok: boolean; fields_mapped: string[] }>
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: contentKeys.settings() }),
   })
 }

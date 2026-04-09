@@ -24,6 +24,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { StatusBadge, PillarBadge } from "@/components/content/post-badges"
+import { NotionLogo } from "@/components/ui/notion-logo"
 import {
   useApprovePost,
   useSchedulePost,
@@ -94,7 +95,12 @@ export function PostCard({ post }: PostCardProps) {
                 <span className="text-xs text-(--text-tertiary)">Sem. {post.week_number}</span>
               )}
             </div>
-            <p className="text-sm font-medium text-(--text-primary) truncate">{post.title}</p>
+            <div className="flex items-center gap-1.5 min-w-0">
+              {post.notion_page_id && (
+                <NotionLogo className="h-3.5 w-3.5 shrink-0" aria-label="Importado do Notion" />
+              )}
+              <p className="text-sm font-medium text-(--text-primary) truncate">{post.title}</p>
+            </div>
           </div>
 
           <div className="flex items-center gap-1 shrink-0">

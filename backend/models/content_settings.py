@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Integer, String, Text, Time
+from sqlalchemy import Index, Integer, String, Text, Time
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -52,4 +52,21 @@ class ContentSettings(Base, TenantMixin, TimestampMixin):
         Text,
         nullable=True,
         comment="Descricao da voz/persona do autor para o prompt LLM",
+    )
+
+    # ── Integração Notion ─────────────────────────────────────────────
+    notion_api_key: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Internal Integration token do Notion (secret_xxx)",
+    )
+    notion_database_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="ID do banco de dados Notion com os posts (UUID da URL)",
+    )
+    notion_column_mappings: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="JSON: mapeamento colunas Notion -> campos ContentPost (campo_interno: nome_coluna_notion)",
     )
