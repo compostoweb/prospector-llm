@@ -39,6 +39,15 @@ class GeneratedVariation(TypedDict):
     hook_type_used: str
     violations: list[str]
 
+
+class LeadMagnetPromptContext(TypedDict, total=False):
+    title: str
+    description: str | None
+    cta_text: str | None
+    type: str
+    distribution_type: str | None
+    trigger_word: str | None
+
 # ── Mapeamento de pilares ─────────────────────────────────────────────
 
 PILLAR_CONTEXT: dict[str, str] = {
@@ -137,6 +146,9 @@ Escreva um post sobre o seguinte tema:
 TEMA: {theme}
 PILAR: {pillar_label} — {pillar_description}
 TIPO DE GANCHO: {hook_label} — {hook_description}
+OBJETIVO: {content_goal_label}
+
+{goal_block}
 
 Lembre-se: retorne APENAS o texto do post, sem nenhuma explicação adicional.\
 """
@@ -201,6 +213,51 @@ def _render_system_prompt(
     )
 
 
+def _build_goal_block(
+    *,
+    content_goal: str,
+    lead_magnet_context: LeadMagnetPromptContext | None,
+) -> tuple[str, str]:
+    if content_goal != "lead_magnet_launch" or not lead_magnet_context:
+        return (
+            "Post editorial para reforçar autoridade e gerar conversa qualificada.",
+            (
+                "Desenvolva a ideia de forma nativa para LinkedIn. "
+                "O foco principal é entregar valor e sustentar autoridade no tema."
+            ),
+        )
+
+    distribution_type = lead_magnet_context.get("distribution_type") or "comment"
+    trigger_word = lead_magnet_context.get("trigger_word") or "mapa"
+    cta_text = lead_magnet_context.get("cta_text") or f"Comente '{trigger_word}'"
+
+    distribution_instruction = {
+        "comment": (
+            f"Feche o post convidando a pessoa a comentar '{trigger_word}' para receber o material."
+        ),
+        "dm": (
+            f"Feche o post convidando a pessoa a pedir '{trigger_word}' por direct."
+        ),
+        "link_bio": "Feche o post convidando a acessar o link da bio ou comentário fixado.",
+    }.get(distribution_type, "Feche o post com um CTA claro e natural para receber o material.")
+
+    return (
+        "Lançamento de lead magnet com CTA nativo, sem parecer anúncio.",
+        (
+            f"LEAD MAGNET: {lead_magnet_context.get('title', '')}\n"
+            f"TIPO: {lead_magnet_context.get('type', '')}\n"
+            f"DESCRIÇÃO: {lead_magnet_context.get('description') or 'Não informada.'}\n"
+            f"CTA BASE: {cta_text}\n"
+            "REGRAS ADICIONAIS:\n"
+            "- Construa tensão ou curiosidade antes do CTA.\n"
+            "- Cite o lead magnet de forma concreta, sem tom publicitário.\n"
+            "- Mostre o problema que o material ajuda a resolver.\n"
+            f"- {distribution_instruction}\n"
+            "- Evite parecer venda direta ou promessa exagerada."
+        ),
+    )
+
+
 # ── Funções públicas ─────────────────────────────────────────────────
 
 async def generate_post(
@@ -217,6 +274,8 @@ async def generate_post(
     model: str,
     temperature: float,
     max_tokens: int = 1024,
+    content_goal: str = "editorial",
+    lead_magnet_context: LeadMagnetPromptContext | None = None,
 ) -> list[GeneratedVariation]:
     """
     Gera N variações de post para LinkedIn sobre um dado tema.
@@ -229,12 +288,18 @@ async def generate_post(
     """
     resolved_hook = hook_type or "benefit"
     system_prompt = _render_system_prompt(author_name, author_voice, references)
+    content_goal_label, goal_block = _build_goal_block(
+        content_goal=content_goal,
+        lead_magnet_context=lead_magnet_context,
+    )
     user_prompt = _USER_PROMPT_TEMPLATE.format(
         theme=theme,
         pillar_label=pillar,
         pillar_description=PILLAR_CONTEXT.get(pillar, pillar),
         hook_label=resolved_hook,
         hook_description=HOOK_CONTEXT.get(resolved_hook, resolved_hook),
+        content_goal_label=content_goal_label,
+        goal_block=goal_block,
     )
 
     messages = [

@@ -11,6 +11,7 @@ Endpoints de geração de conteúdo com IA:
 from __future__ import annotations
 
 import uuid
+from typing import cast
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -24,6 +25,7 @@ from api.dependencies import (
 )
 from core.config import settings
 from integrations.llm import LLMRegistry
+from models.content_lead_magnet import ContentLeadMagnet
 from models.content_post import ContentPost
 from models.content_reference import ContentReference
 from models.content_settings import ContentSettings
@@ -45,6 +47,7 @@ from schemas.content import (
 )
 from services.content.llm_generator import (
     GeneratedVariation,
+    LeadMagnetPromptContext,
     ReferenceExample,
     generate_post,
     improve_post,
@@ -131,12 +134,43 @@ async def generate_content(
 
     provider = body.provider or settings.CONTENT_GEN_PROVIDER
     model = body.model or settings.CONTENT_GEN_MODEL
+    lead_magnet_context: LeadMagnetPromptContext | None = None
+
+    if body.content_goal == "lead_magnet_launch":
+        if body.lead_magnet_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Informe lead_magnet_id para gerar um lançamento de lead magnet.",
+            )
+
+        lead_magnet_result = await db.execute(
+            select(ContentLeadMagnet).where(
+                ContentLeadMagnet.id == body.lead_magnet_id,
+                ContentLeadMagnet.tenant_id == tenant_id,
+            )
+        )
+        lead_magnet = lead_magnet_result.scalar_one_or_none()
+        if lead_magnet is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Lead magnet não encontrado.",
+            )
+
+        lead_magnet_context = LeadMagnetPromptContext(
+            title=lead_magnet.title,
+            description=lead_magnet.description,
+            cta_text=lead_magnet.cta_text,
+            type=lead_magnet.type,
+            distribution_type=body.launch_distribution_type,
+            trigger_word=body.launch_trigger_word,
+        )
 
     logger.info(
         "content.generate.start",
         tenant_id=str(tenant_id),
         theme=body.theme,
         pillar=body.pillar,
+        content_goal=body.content_goal,
         variations=body.variations,
         provider=provider,
         model=model,
@@ -154,6 +188,8 @@ async def generate_content(
         provider=provider,
         model=model,
         temperature=body.temperature,
+        content_goal=body.content_goal,
+        lead_magnet_context=lead_magnet_context,
     )
 
     logger.info(
@@ -293,16 +329,18 @@ async def suggest_themes(
     suggestions: list[ThemeSuggestion] = []
     seen_theme_ids: set[uuid.UUID] = set()
     for industry, lead_count in top_sectors:
-        themes_result = await db.execute(
+        themes_query = (
             select(ContentTheme)
-            .where(
-                ContentTheme.tenant_id == tenant_id,
-                ContentTheme.used.is_(False),
-                ContentTheme.id.notin_(seen_theme_ids) if seen_theme_ids else True,
-            )
+            .where(ContentTheme.tenant_id == tenant_id)
+            .where(ContentTheme.used.is_(False))
             .order_by(ContentTheme.created_at.asc())
             .limit(8)
         )
+        if seen_theme_ids:
+            themes_query = themes_query.where(
+                ContentTheme.id.notin_(cast(set[object], seen_theme_ids))
+            )
+        themes_result = await db.execute(themes_query)
         themes = themes_result.scalars().all()
         for theme in themes:
             if theme.id in seen_theme_ids:

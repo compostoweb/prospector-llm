@@ -12,7 +12,10 @@ import {
   type HookType,
   type GeneratePostVariation,
 } from "@/lib/api/hooks/use-content"
+import { useContentLeadMagnets, useLinkLeadMagnetPost } from "@/lib/api/hooks/use-content-inbound"
+import type { ContentGoal, LMDistributionType } from "@/lib/content-inbound/types"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -48,13 +51,32 @@ function parsePillarParam(value: string | null): PostPillar | null {
   return null
 }
 
+function parseContentGoalParam(value: string | null): ContentGoal | null {
+  if (value === "editorial" || value === "lead_magnet_launch") {
+    return value
+  }
+  return null
+}
+
+function parseDistributionTypeParam(value: string | null): LMDistributionType | null {
+  if (value === "comment" || value === "dm" || value === "link_bio") {
+    return value
+  }
+  return null
+}
+
 export default function GerarPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
   // Form state
+  const [contentGoal, setContentGoal] = useState<ContentGoal>("editorial")
   const [theme, setTheme] = useState("")
   const [pillar, setPillar] = useState<PostPillar>("authority")
+  const [leadMagnetId, setLeadMagnetId] = useState<string | null>(null)
+  const [launchDistributionType, setLaunchDistributionType] =
+    useState<LMDistributionType>("comment")
+  const [launchTriggerWord, setLaunchTriggerWord] = useState("mapa")
   const [hookType, setHookType] = useState<HookType | "auto">("auto")
   const [variations, setVariations] = useState(3)
   const [useReferences, setUseReferences] = useState(false)
@@ -69,18 +91,39 @@ export default function GerarPage() {
 
   const generate = useGeneratePost()
   const createPost = useCreateContentPost()
+  const linkLeadMagnetPost = useLinkLeadMagnetPost()
   const markThemeUsed = useMarkThemeUsed()
   const { data: suggestions } = useThemeSuggestions()
+  const { data: leadMagnets = [] } = useContentLeadMagnets()
+
+  const selectedLeadMagnet = leadMagnets.find((item) => item.id === leadMagnetId) ?? null
+
+  const leadMagnetSelectProps = leadMagnetId ? { value: leadMagnetId } : {}
 
   useEffect(() => {
     const nextTheme = searchParams.get("theme")
     const nextThemeId = searchParams.get("themeId")
     const nextPillar = parsePillarParam(searchParams.get("pillar"))
+    const nextContentGoal = parseContentGoalParam(searchParams.get("contentGoal"))
+    const nextLeadMagnetId = searchParams.get("leadMagnetId")
+    const nextDistributionType = parseDistributionTypeParam(searchParams.get("distributionType"))
+    const nextTriggerWord = searchParams.get("triggerWord")
 
-    if (!nextTheme && !nextThemeId && !nextPillar) {
+    if (
+      !nextTheme &&
+      !nextThemeId &&
+      !nextPillar &&
+      !nextContentGoal &&
+      !nextLeadMagnetId &&
+      !nextDistributionType &&
+      !nextTriggerWord
+    ) {
       return
     }
 
+    if (nextContentGoal) {
+      setContentGoal(nextContentGoal)
+    }
     if (nextTheme) {
       setTheme(nextTheme)
       setResults([])
@@ -90,6 +133,15 @@ export default function GerarPage() {
     if (nextPillar) {
       setPillar(nextPillar)
     }
+    if (nextLeadMagnetId) {
+      setLeadMagnetId(nextLeadMagnetId)
+    }
+    if (nextDistributionType) {
+      setLaunchDistributionType(nextDistributionType)
+    }
+    if (nextTriggerWord) {
+      setLaunchTriggerWord(nextTriggerWord)
+    }
     setLinkedThemeId(nextThemeId)
     setThemeSyncWarning(null)
   }, [searchParams])
@@ -98,7 +150,12 @@ export default function GerarPage() {
     const res = await generate.mutateAsync({
       theme,
       pillar,
+      content_goal: contentGoal,
+      lead_magnet_id: contentGoal === "lead_magnet_launch" ? leadMagnetId : null,
       hook_type: hookType === "auto" ? null : hookType,
+      launch_distribution_type:
+        contentGoal === "lead_magnet_launch" ? launchDistributionType : null,
+      launch_trigger_word: contentGoal === "lead_magnet_launch" ? launchTriggerWord.trim() : null,
       variations,
       use_references: useReferences,
       temperature,
@@ -111,12 +168,34 @@ export default function GerarPage() {
     const variation = results[idx]
     if (!variation) return
     const createdPost = await createPost.mutateAsync({
-      title: `${theme.slice(0, 80)} — variação ${idx + 1}`,
+      title:
+        contentGoal === "lead_magnet_launch"
+          ? `${(selectedLeadMagnet?.title || theme).slice(0, 80)} — launch ${idx + 1}`
+          : `${theme.slice(0, 80)} — variação ${idx + 1}`,
       body: variation.text,
       pillar,
       hook_type: (variation.hook_type_used as HookType) || null,
       character_count: variation.character_count,
     })
+
+    if (contentGoal === "lead_magnet_launch" && leadMagnetId) {
+      try {
+        await linkLeadMagnetPost.mutateAsync({
+          leadMagnetId,
+          body: {
+            content_post_id: createdPost.id,
+            post_type: "launch",
+            distribution_type: launchDistributionType,
+            trigger_word: launchTriggerWord.trim() || null,
+          },
+        })
+      } catch {
+        setThemeSyncWarning(
+          "O post foi salvo, mas o vínculo com o lead magnet falhou. Você pode refazer isso na aba Inbound.",
+        )
+      }
+    }
+
     setSavedIds((prev) => new Set([...prev, idx]))
 
     if (!linkedThemeId) {
@@ -171,8 +250,87 @@ export default function GerarPage() {
           </div>
         )}
 
+        <div className="grid gap-1.5">
+          <Label>Objetivo do conteúdo</Label>
+          <Select
+            value={contentGoal}
+            onValueChange={(value) => setContentGoal(value as ContentGoal)}
+          >
+            <SelectTrigger className="text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="editorial">Editorial</SelectItem>
+              <SelectItem value="lead_magnet_launch">Launch de lead magnet</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {contentGoal === "lead_magnet_launch" && (
+          <>
+            <div className="rounded-md border border-(--accent)/20 bg-(--accent-subtle) px-3 py-2.5 text-sm text-(--accent-subtle-fg)">
+              Gere um post nativo de distribuicao para o lead magnet e salve a peca ja vinculada ao
+              fluxo inbound.
+            </div>
+
+            <div className="grid gap-1.5">
+              <Label>Lead magnet</Label>
+              <Select {...leadMagnetSelectProps} onValueChange={setLeadMagnetId}>
+                <SelectTrigger className="text-sm">
+                  <SelectValue placeholder="Selecione um lead magnet" />
+                </SelectTrigger>
+                <SelectContent>
+                  {leadMagnets.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-1.5">
+                <Label>Distribuição</Label>
+                <Select
+                  value={launchDistributionType}
+                  onValueChange={(value) => setLaunchDistributionType(value as LMDistributionType)}
+                >
+                  <SelectTrigger className="text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="comment">Comentário</SelectItem>
+                    <SelectItem value="dm">DM</SelectItem>
+                    <SelectItem value="link_bio">Link na bio</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid gap-1.5">
+                <Label htmlFor="trigger-word">Palavra gatilho</Label>
+                <Input
+                  id="trigger-word"
+                  value={launchTriggerWord}
+                  onChange={(event) => setLaunchTriggerWord(event.target.value)}
+                  placeholder="Ex: mapa"
+                />
+              </div>
+            </div>
+
+            {selectedLeadMagnet && (
+              <div className="rounded-md border border-(--border-subtle) bg-(--bg-overlay) px-3 py-2.5 text-xs text-(--text-secondary)">
+                <p className="font-medium text-(--text-primary)">{selectedLeadMagnet.title}</p>
+                <p className="mt-1">
+                  {selectedLeadMagnet.description || "Sem descrição cadastrada ainda."}
+                </p>
+              </div>
+            )}
+          </>
+        )}
+
         {/* Sugestões de temas */}
-        {suggestions && suggestions.length > 0 && (
+        {contentGoal === "editorial" && suggestions && suggestions.length > 0 && (
           <div className="flex flex-col gap-2">
             <p className="text-xs text-(--text-tertiary) font-medium uppercase tracking-wide">
               Sugestões baseadas nos seus leads
@@ -302,7 +460,11 @@ export default function GerarPage() {
 
         <Button
           onClick={handleGenerate}
-          disabled={!theme.trim() || generate.isPending}
+          disabled={
+            !theme.trim() ||
+            generate.isPending ||
+            (contentGoal === "lead_magnet_launch" && !leadMagnetId)
+          }
           className="gap-2"
         >
           {generate.isPending ? (

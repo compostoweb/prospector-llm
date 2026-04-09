@@ -12,7 +12,6 @@ import {
   type ContentTheme,
   type PostPillar,
 } from "@/lib/api/hooks/use-content"
-import { PillarBadge } from "@/components/content/post-badges"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,

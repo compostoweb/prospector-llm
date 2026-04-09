@@ -19,7 +19,7 @@ from uuid import UUID
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible
@@ -1075,11 +1075,14 @@ async def get_email_over_time(
 ) -> list[EmailOverTimeItem]:
     """Série temporal diária de e-mails enviados, abertos e respondidos."""
     since = _utc_days_ago(days)
+    sent_day_expr = func.date_trunc(literal_column("'day'"), Interaction.created_at)
+    opened_day_expr = func.date_trunc(literal_column("'day'"), Interaction.opened_at)
+    replied_day_expr = func.date_trunc(literal_column("'day'"), Interaction.created_at)
 
     # Enviados por dia
     sent_q = await db.execute(
         select(
-            func.date_trunc("day", Interaction.created_at).label("day"),
+            sent_day_expr.label("day"),
             func.count(Interaction.id).label("cnt"),
         )
         .where(
@@ -1088,7 +1091,7 @@ async def get_email_over_time(
             Interaction.direction == InteractionDirection.OUTBOUND,
             Interaction.created_at >= since,
         )
-        .group_by(func.date_trunc("day", Interaction.created_at))
+        .group_by(sent_day_expr)
     )
     sent_map: dict[str, int] = {}
     for row in sent_q.all():
@@ -1097,7 +1100,7 @@ async def get_email_over_time(
     # Abertos por dia
     opened_q = await db.execute(
         select(
-            func.date_trunc("day", Interaction.opened_at).label("day"),
+            opened_day_expr.label("day"),
             func.count(Interaction.id).label("cnt"),
         )
         .where(
@@ -1106,7 +1109,7 @@ async def get_email_over_time(
             Interaction.opened.is_(True),
             Interaction.opened_at >= since,
         )
-        .group_by(func.date_trunc("day", Interaction.opened_at))
+        .group_by(opened_day_expr)
     )
     opened_map: dict[str, int] = {}
     for row in opened_q.all():
@@ -1115,7 +1118,7 @@ async def get_email_over_time(
     # Respondidos por dia (inbound)
     replied_q = await db.execute(
         select(
-            func.date_trunc("day", Interaction.created_at).label("day"),
+            replied_day_expr.label("day"),
             func.count(Interaction.id).label("cnt"),
         )
         .where(
@@ -1124,7 +1127,7 @@ async def get_email_over_time(
             Interaction.direction == InteractionDirection.INBOUND,
             Interaction.created_at >= since,
         )
-        .group_by(func.date_trunc("day", Interaction.created_at))
+        .group_by(replied_day_expr)
     )
     replied_map: dict[str, int] = {}
     for row in replied_q.all():

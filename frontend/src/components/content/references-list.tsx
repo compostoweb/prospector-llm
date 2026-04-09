@@ -103,13 +103,13 @@ export function ReferencesList() {
     setForm((prev) => ({
       ...prev,
       body: result.body ?? prev.body,
-      author_name: result.author_name ?? prev.author_name,
-      author_title: result.author_title ?? prev.author_title,
-      author_company: result.author_company ?? prev.author_company,
-      hook_type: result.hook_type ?? prev.hook_type,
-      pillar: result.pillar ?? prev.pillar,
-      engagement_score: result.engagement_score ?? prev.engagement_score,
-      notes: result.notes ?? prev.notes,
+      author_name: result.author_name ?? prev.author_name ?? null,
+      author_title: result.author_title ?? prev.author_title ?? null,
+      author_company: result.author_company ?? prev.author_company ?? null,
+      hook_type: result.hook_type ?? prev.hook_type ?? null,
+      pillar: result.pillar ?? prev.pillar ?? null,
+      engagement_score: result.engagement_score ?? prev.engagement_score ?? null,
+      notes: result.notes ?? prev.notes ?? null,
       source_url: urlInput.trim(),
     }))
     setAiAnalyzed(true)

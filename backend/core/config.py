@@ -17,7 +17,7 @@ Uso:
 from __future__ import annotations
 
 import os
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -149,7 +149,29 @@ class Settings(BaseSettings):
 
     # ── Resend (email transacional) ───────────────────────────────────
     RESEND_API_KEY: str | None = None
-    RESEND_FROM_EMAIL: str = "Prospector <noreply@prospector.app>"
+    RESEND_FROM_EMAIL: str = "Composto Web <site@compostoweb.com.br>"
+    CONTENT_CALCULATOR_NOTIFY_EMAIL: str = Field(
+        default="adriano@compostoweb.com.br",
+        description="Email que recebe notificações de envio do formulário final da calculadora pública.",
+    )
+    CONTENT_CALCULATOR_NOTIFY_FROM_EMAIL: str = Field(
+        default="site@compostoweb.com.br",
+        description="Remetente usado nas notificações da calculadora pública.",
+    )
+    CONTENT_CALCULATOR_REPLY_TO_EMAIL: str = Field(
+        default="contato@compostoweb.com.br",
+        description="Reply-To usado nos emails enviados ao lead a partir da calculadora pública.",
+    )
+    COMPOSTO_WEB_LOGO_EMAIL_URL: str | None = Field(
+        default=None,
+        description="URL pública da logo Composto Web para usar em emails HTML. Se não definida, usa data URI (dev) ou URL da API (prod).",
+    )
+    # ── SendPulse (lead magnets / nurturing inbound) ─────────────────
+    SENDPULSE_API_KEY: str | None = None
+    SENDPULSE_CLIENT_ID: str | None = None
+    SENDPULSE_CLIENT_SECRET: str | None = None
+    SENDPULSE_WEBHOOK_SECRET: str | None = None
+    SENDPULSE_BASE_URL: str = "https://api.sendpulse.com"
 
     # ── MinIO / S3 — armazenamento de arquivos ────────────────────────
     S3_ENDPOINT_URL: str | None = None
@@ -216,7 +238,14 @@ class Settings(BaseSettings):
         default="gpt-4o-mini",
         description="Modelo LLM para geração de posts.",
     )
+    CONTENT_PUBLIC_BASE_URL: str = Field(
+        default="http://localhost:3000",
+        description="URL pública base do frontend para landing pages e calculadora do Content Hub.",
+    )
 
 
 # Singleton — importar de qualquer lugar com: from core.config import settings
-settings = Settings()
+if TYPE_CHECKING:
+    settings = Settings(DATABASE_URL="", SECRET_KEY="")
+else:
+    settings = Settings()

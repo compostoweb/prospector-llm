@@ -30,7 +30,7 @@ function KPICard({
   icon: React.ComponentType<{ size?: number; className?: string; "aria-hidden"?: "true" }>
   label: string
   value: number | string
-  sub?: string
+  sub?: string | undefined
 }) {
   return (
     <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-4">
@@ -91,13 +91,19 @@ export default function CadenciasPage() {
           icon={GitBranch}
           label="Em andamento"
           value={totalActive}
-          sub={totalLeads > 0 ? `${Math.round((totalActive / totalLeads) * 100)}% do total` : undefined}
+          sub={
+            totalLeads > 0 ? `${Math.round((totalActive / totalLeads) * 100)}% do total` : undefined
+          }
         />
         <KPICard
           icon={TrendingUp}
           label="Convertidos"
           value={totalConverted}
-          sub={totalLeads > 0 ? `${Math.round((totalConverted / totalLeads) * 100)}% do total` : undefined}
+          sub={
+            totalLeads > 0
+              ? `${Math.round((totalConverted / totalLeads) * 100)}% do total`
+              : undefined
+          }
         />
       </div>
 

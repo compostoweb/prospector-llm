@@ -26,4 +26,10 @@ from models.content_settings import ContentSettings  # noqa: F401
 from models.content_reference import ContentReference  # noqa: F401
 from models.content_publish_log import ContentPublishLog  # noqa: F401
 from models.content_linkedin_account import ContentLinkedInAccount  # noqa: F401
+from models.content_lead_magnet import ContentLeadMagnet  # noqa: F401
+from models.content_lm_post import ContentLMPost  # noqa: F401
+from models.content_lm_lead import ContentLMLead  # noqa: F401
+from models.content_landing_page import ContentLandingPage  # noqa: F401
+from models.content_calculator_result import ContentCalculatorResult  # noqa: F401
+from models.content_lm_email_event import ContentLMEmailEvent  # noqa: F401
 from models.anthropic_batch_job import AnthropicBatchJob  # noqa: F401

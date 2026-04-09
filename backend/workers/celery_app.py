@@ -40,6 +40,7 @@ celery_app = Celery(
         "workers.cadence",
         "workers.dispatch",
         "workers.content",
+        "workers.content_lm_sync",
         "workers.content_voyager",
         "workers.linkedin_poll",
         "workers.email_inbox_poll",

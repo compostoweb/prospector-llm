@@ -1,12 +1,24 @@
-﻿import { auth } from "@/lib/auth/config"
+﻿import { NextResponse, type NextRequest } from "next/server"
 
-export default auth((req) => {
-  // Usuário não autenticado → redireciona para /login
-  if (!req.auth) {
-    const loginUrl = new URL("/login", req.url)
-    return Response.redirect(loginUrl)
+const SESSION_COOKIE_NAMES = [
+  "authjs.session-token",
+  "__Secure-authjs.session-token",
+  "next-auth.session-token",
+  "__Secure-next-auth.session-token",
+]
+
+export default function middleware(req: NextRequest) {
+  const hasSessionCookie = SESSION_COOKIE_NAMES.some((cookieName) =>
+    Boolean(req.cookies.get(cookieName)?.value),
+  )
+
+  if (hasSessionCookie) {
+    return NextResponse.next()
   }
-})
+
+  const loginUrl = new URL("/login", req.url)
+  return NextResponse.redirect(loginUrl)
+}
 
 export const config = {
   matcher: [
@@ -17,6 +29,6 @@ export const config = {
      * - favicon.ico
      * - login e rotas de auth (públicas)
      */
-    "/((?!_next/static|_next/image|favicon.ico|login|auth|api/auth).*)",
+    "/((?!_next/static|_next/image|favicon.ico|login|auth|api/auth|lm).*)",
   ],
 }

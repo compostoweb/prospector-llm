@@ -61,10 +61,8 @@ const CHANNEL_LABEL: Record<string, string> = {
 }
 
 const CHANNEL_COLOR: Record<string, string> = {
-  linkedin_connect:
-    "bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300",
-  linkedin_dm:
-    "bg-sky-100 text-sky-700 dark:bg-sky-900/20 dark:text-sky-300",
+  linkedin_connect: "bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300",
+  linkedin_dm: "bg-sky-100 text-sky-700 dark:bg-sky-900/20 dark:text-sky-300",
   email: "bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300",
 }
 
@@ -79,14 +77,28 @@ const PRESETS: CadencePreset[] = [
     id: "multicanal",
     label: "Multicanal",
     badge: "Recomendado",
-    description:
-      "LinkedIn + E-mail. Alta taxa de engajamento para leads frios.",
+    description: "LinkedIn + E-mail. Alta taxa de engajamento para leads frios.",
     cadence_type: "mixed",
     mode: "automatic",
     steps: [
-      { channel: "linkedin_connect", day_offset: 0, step_type: "linkedin_connect", subject_variants: [] },
-      { channel: "linkedin_dm", day_offset: 3, step_type: "linkedin_dm_post_connect", subject_variants: [] },
-      { channel: "email", day_offset: 7, step_type: "email_first", subject_variants: ["Ideia para {{company}}"] },
+      {
+        channel: "linkedin_connect",
+        day_offset: 0,
+        step_type: "linkedin_connect",
+        subject_variants: [],
+      },
+      {
+        channel: "linkedin_dm",
+        day_offset: 3,
+        step_type: "linkedin_dm_post_connect",
+        subject_variants: [],
+      },
+      {
+        channel: "email",
+        day_offset: 7,
+        step_type: "email_first",
+        subject_variants: ["Ideia para {{company}}"],
+      },
       { channel: "email", day_offset: 14, step_type: "email_followup", subject_variants: [] },
     ],
   },
@@ -97,9 +109,19 @@ const PRESETS: CadencePreset[] = [
     cadence_type: "email_only",
     mode: "automatic",
     steps: [
-      { channel: "email", day_offset: 0, step_type: "email_first", subject_variants: ["Ideia para {{company}}"] },
+      {
+        channel: "email",
+        day_offset: 0,
+        step_type: "email_first",
+        subject_variants: ["Ideia para {{company}}"],
+      },
       { channel: "email", day_offset: 4, step_type: "email_followup", subject_variants: [] },
-      { channel: "email", day_offset: 9, step_type: "email_breakup", subject_variants: ["Encerrando o contato"] },
+      {
+        channel: "email",
+        day_offset: 9,
+        step_type: "email_breakup",
+        subject_variants: ["Encerrando o contato"],
+      },
     ],
   },
   {
@@ -109,8 +131,18 @@ const PRESETS: CadencePreset[] = [
     cadence_type: "mixed",
     mode: "semi_manual",
     steps: [
-      { channel: "linkedin_connect", day_offset: 0, step_type: "linkedin_connect", subject_variants: [] },
-      { channel: "linkedin_dm", day_offset: 5, step_type: "linkedin_dm_first", subject_variants: [] },
+      {
+        channel: "linkedin_connect",
+        day_offset: 0,
+        step_type: "linkedin_connect",
+        subject_variants: [],
+      },
+      {
+        channel: "linkedin_dm",
+        day_offset: 5,
+        step_type: "linkedin_dm_first",
+        subject_variants: [],
+      },
     ],
   },
   {
@@ -120,9 +152,24 @@ const PRESETS: CadencePreset[] = [
     cadence_type: "email_only",
     mode: "automatic",
     steps: [
-      { channel: "email", day_offset: 0, step_type: "email_first", subject_variants: ["Retomando contato, {{first_name}}"] },
-      { channel: "email", day_offset: 5, step_type: "email_followup", subject_variants: ["Ainda faz sentido?"] },
-      { channel: "email", day_offset: 11, step_type: "email_breakup", subject_variants: ["Fechando este ciclo"] },
+      {
+        channel: "email",
+        day_offset: 0,
+        step_type: "email_first",
+        subject_variants: ["Retomando contato, {{first_name}}"],
+      },
+      {
+        channel: "email",
+        day_offset: 5,
+        step_type: "email_followup",
+        subject_variants: ["Ainda faz sentido?"],
+      },
+      {
+        channel: "email",
+        day_offset: 11,
+        step_type: "email_breakup",
+        subject_variants: ["Fechando este ciclo"],
+      },
     ],
   },
 ]
@@ -147,6 +194,15 @@ const STEP_SUBTITLES = [
   "Configure o modelo de IA e o contexto comercial.",
   "Revise tudo antes de criar a cadência.",
 ]
+
+function cloneSteps(steps: LocalStep[]): LocalStep[] {
+  return steps.map((step) => ({ ...step, subject_variants: [...step.subject_variants] }))
+}
+
+function getInitialSteps(): LocalStep[] {
+  const preset = PRESETS.find((item) => item.id === "multicanal")
+  return preset ? cloneSteps(preset.steps) : []
+}
 
 // ── StepCard ──────────────────────────────────────────────────────────────
 
@@ -194,9 +250,7 @@ function StepCard({
             min={0}
             max={90}
             value={step.day_offset}
-            onChange={(e) =>
-              onChange({ ...step, day_offset: Math.max(0, Number(e.target.value)) })
-            }
+            onChange={(e) => onChange({ ...step, day_offset: Math.max(0, Number(e.target.value)) })}
             aria-label={`Dia do passo ${index + 1}`}
             className="w-12 rounded border border-(--border-default) bg-(--bg-surface) px-2 py-0.5 text-center text-xs text-(--text-primary) focus:outline-none focus:ring-1 focus:ring-(--accent)"
           />
@@ -226,8 +280,7 @@ function StepCard({
               aria-label="Assunto do e-mail"
             />
             <p className="text-[10px] text-(--text-tertiary)">
-              Variáveis:{" "}
-              <code className="rounded bg-(--bg-overlay) px-1">{"{{company}}"}</code>{" "}
+              Variáveis: <code className="rounded bg-(--bg-overlay) px-1">{"{{company}}"}</code>{" "}
               <code className="rounded bg-(--bg-overlay) px-1">{"{{first_name}}"}</code>
             </p>
           </div>
@@ -246,7 +299,6 @@ function StepEstrutura({
   setPresetId,
   steps,
   setSteps,
-  cadenceType,
   setCadenceType,
 }: {
   name: string
@@ -255,13 +307,12 @@ function StepEstrutura({
   setPresetId(v: string): void
   steps: LocalStep[]
   setSteps(s: LocalStep[]): void
-  cadenceType: "mixed" | "email_only"
   setCadenceType(v: "mixed" | "email_only"): void
 }) {
   function pickPreset(p: CadencePreset) {
     setPresetId(p.id)
     setCadenceType(p.cadence_type)
-    setSteps(p.steps.map((s) => ({ ...s, subject_variants: [...s.subject_variants] })))
+    setSteps(cloneSteps(p.steps))
   }
 
   function updateStep(i: number, updated: LocalStep) {
@@ -273,7 +324,10 @@ function StepEstrutura({
   function addStep() {
     const last = steps.at(-1)
     const nextDay = last ? last.day_offset + 5 : 0
-    setSteps([...steps, { channel: "email", day_offset: nextDay, step_type: "email_followup", subject_variants: [] }])
+    setSteps([
+      ...steps,
+      { channel: "email", day_offset: nextDay, step_type: "email_followup", subject_variants: [] },
+    ])
     if (presetId !== "custom") setPresetId("custom")
   }
 
@@ -482,7 +536,8 @@ function StepAudiencia({
             <option value="">Selecione uma conta LinkedIn</option>
             {linkedInAccounts.map((a) => (
               <option key={a.id} value={a.id}>
-                {a.display_name ?? a.id} · {a.provider_type === "unipile" ? "Unipile" : "Cookie li_at"}
+                {a.display_name ?? a.id} ·{" "}
+                {a.provider_type === "unipile" ? "Unipile" : "Cookie li_at"}
               </option>
             ))}
           </select>
@@ -646,7 +701,10 @@ function StepRevisao({
             />
           )}
           {cadenceType === "mixed" && linkedInAccount && (
-            <SummaryRow label="LinkedIn" value={`${linkedInAccount.display_name ?? linkedInAccount.id} · ${linkedInAccount.provider_type === "unipile" ? "Unipile" : "Cookie li_at"}`} />
+            <SummaryRow
+              label="LinkedIn"
+              value={`${linkedInAccount.display_name ?? linkedInAccount.id} · ${linkedInAccount.provider_type === "unipile" ? "Unipile" : "Cookie li_at"}`}
+            />
           )}
           <SummaryRow
             label="Modelo IA"
@@ -703,9 +761,7 @@ export default function NovaCadenciaPage() {
   const [name, setName] = useState("")
   const [presetId, setPresetId] = useState("multicanal")
   const [cadenceType, setCadenceType] = useState<"mixed" | "email_only">("mixed")
-  const [steps, setSteps] = useState<LocalStep[]>(() =>
-    PRESETS[0].steps.map((s) => ({ ...s, subject_variants: [...s.subject_variants] })),
-  )
+  const [steps, setSteps] = useState<LocalStep[]>(getInitialSteps)
 
   // Step 1
   const [leadListId, setLeadListId] = useState("")
@@ -777,7 +833,7 @@ export default function NovaCadenciaPage() {
       },
       lead_list_id: leadListId || null,
       email_account_id: emailAccountId || null,
-      linkedin_account_id: cadenceType === "mixed" ? (linkedInAccountId || null) : null,
+      linkedin_account_id: cadenceType === "mixed" ? linkedInAccountId || null : null,
       target_segment: targetSegment.trim() || null,
       persona_description: personaDescription.trim() || null,
       offer_description: offerDescription.trim() || null,
@@ -803,7 +859,6 @@ export default function NovaCadenciaPage() {
       setPresetId={setPresetId}
       steps={steps}
       setSteps={setSteps}
-      cadenceType={cadenceType}
       setCadenceType={setCadenceType}
     />,
     <StepAudiencia
@@ -843,17 +898,17 @@ export default function NovaCadenciaPage() {
     />,
   ]
 
+  const currentWizardStep = WIZARD_STEPS[activeStep] ?? { label: "Estrutura", icon: GitBranch }
+  const currentSubtitle =
+    STEP_SUBTITLES[activeStep] ?? "Defina o nome, o preset e os passos da cadência."
+
   return (
     <div className="mx-auto max-w-3xl space-y-8 pb-16">
       {/* Page header */}
       <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-(--accent)">
-          Cadências
-        </p>
-        <h1 className="mt-1 text-2xl font-bold text-(--text-primary)">
-          {WIZARD_STEPS[activeStep].label}
-        </h1>
-        <p className="mt-1 text-sm text-(--text-secondary)">{STEP_SUBTITLES[activeStep]}</p>
+        <p className="text-xs font-semibold uppercase tracking-widest text-(--accent)">Cadências</p>
+        <h1 className="mt-1 text-2xl font-bold text-(--text-primary)">{currentWizardStep.label}</h1>
+        <p className="mt-1 text-sm text-(--text-secondary)">{currentSubtitle}</p>
       </div>
 
       {/* Stepper */}

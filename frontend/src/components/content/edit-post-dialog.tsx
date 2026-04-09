@@ -110,6 +110,9 @@ export function EditPostDialog({
   // Vídeo
   const [videoOpen, setVideoOpen] = useState(false)
   const videoInputRef = useRef<HTMLInputElement>(null)
+  const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null)
+  const [localVideoName, setLocalVideoName] = useState<string | null>(null)
+  const [localVideoSizeMB, setLocalVideoSizeMB] = useState<string | null>(null)
 
   const updatePost = useUpdatePost()
   const improvePost = useImprovePost()
@@ -149,9 +152,32 @@ export function EditPostDialog({
 
   async function handleVideoUpload(e: React.ChangeEvent<HTMLInputElement>) {
     if (!post || !e.target.files?.[0]) return
-    await uploadVideo.mutateAsync({ postId: post.id, file: e.target.files[0] })
+    const file = e.target.files[0]
+
+    if (file.size > 150 * 1024 * 1024) {
+      alert("O arquivo excede o limite de 150 MB.")
+      if (videoInputRef.current) videoInputRef.current.value = ""
+      return
+    }
+
+    const objectUrl = URL.createObjectURL(file)
+    try {
+      await uploadVideo.mutateAsync({ postId: post.id, file })
+      setLocalVideoUrl(objectUrl)
+      setLocalVideoName(file.name)
+      setLocalVideoSizeMB((file.size / 1024 / 1024).toFixed(1))
+    } catch {
+      URL.revokeObjectURL(objectUrl)
+    }
     if (videoInputRef.current) videoInputRef.current.value = ""
   }
+
+  // Libera o blob URL do vídeo local quando trocar (evitar memory leak)
+  useEffect(() => {
+    return () => {
+      if (localVideoUrl?.startsWith("blob:")) URL.revokeObjectURL(localVideoUrl)
+    }
+  }, [localVideoUrl])
 
   // Preencher form quando o post mudar
   useEffect(() => {
@@ -172,6 +198,9 @@ export function EditPostDialog({
     setInstruction("")
     setLocalImage(null)
     setImageDeleted(false)
+    setLocalVideoUrl(null)
+    setLocalVideoName(null)
+    setLocalVideoSizeMB(null)
   }, [post, defaultImproveOpen])
 
   async function handleSubmit(e: React.FormEvent) {

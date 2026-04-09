@@ -21,6 +21,8 @@ PostPillar = Literal["authority", "case", "vision"]
 PostStatus = Literal["draft", "approved", "scheduled", "published", "failed"]
 HookType = Literal["loop_open", "contrarian", "identification", "shortcut", "benefit", "data"]
 PublishAction = Literal["schedule", "publish", "cancel", "fail"]
+ContentGoal = Literal["editorial", "lead_magnet_launch"]
+LMDistributionType = Literal["comment", "dm", "link_bio"]
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -268,7 +270,11 @@ class VoyagerSyncResponse(BaseModel):
 class GeneratePostRequest(BaseModel):
     theme: str = Field(..., min_length=3, max_length=500)
     pillar: PostPillar
+    content_goal: ContentGoal = "editorial"
+    lead_magnet_id: uuid.UUID | None = None
     hook_type: HookType | None = None
+    launch_distribution_type: LMDistributionType | None = None
+    launch_trigger_word: str | None = Field(default=None, min_length=2, max_length=50)
     publish_date: datetime | None = None
     week: int | None = Field(default=None, ge=1, le=54)
     variations: int = Field(default=3, ge=1, le=5)

@@ -1,5 +1,6 @@
 "use client"
 
+import Image from "next/image"
 import { useState } from "react"
 import { formatDateBR } from "@/lib/date"
 import {
@@ -73,9 +74,12 @@ export function PostCard({ post }: PostCardProps) {
       >
         {/* Thumbnail da imagem, se existir */}
         {post.image_url && (
-          <img
+          <Image
             src={post.image_url}
-            alt=""
+            alt={post.title || "Imagem do post"}
+            width={1200}
+            height={256}
+            unoptimized
             className="-mx-4 -mt-4 w-[calc(100%+2rem)] h-32 object-cover"
           />
         )}

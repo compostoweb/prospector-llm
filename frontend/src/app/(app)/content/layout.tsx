@@ -6,7 +6,7 @@ export default function ContentLayout({ children }: { children: React.ReactNode 
       <div>
         <h1 className="text-xl font-semibold text-(--text-primary)">Content Hub</h1>
         <p className="text-sm text-(--text-secondary) mt-1">
-          Calendário editorial, geração com IA e publicação no LinkedIn
+          Calendário editorial, lead magnets, geração com IA e publicação no LinkedIn
         </p>
       </div>
 

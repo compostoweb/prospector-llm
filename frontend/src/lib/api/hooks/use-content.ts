@@ -7,6 +7,8 @@ import { useSession } from "next-auth/react"
 
 export type PostPillar = "authority" | "case" | "vision"
 export type PostStatus = "draft" | "approved" | "scheduled" | "published" | "failed"
+export type ContentGoal = "editorial" | "lead_magnet_launch"
+export type LMDistributionType = "comment" | "dm" | "link_bio"
 export type HookType =
   | "loop_open"
   | "contrarian"
@@ -128,7 +130,11 @@ export interface GeneratePostVariation {
 export interface GeneratePostRequest {
   theme: string
   pillar: PostPillar
+  content_goal?: ContentGoal
+  lead_magnet_id?: string | null
   hook_type?: HookType | null
+  launch_distribution_type?: LMDistributionType | null
+  launch_trigger_word?: string | null
   variations?: number
   use_references?: boolean
   provider?: string | null

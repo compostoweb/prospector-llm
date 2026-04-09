@@ -15,12 +15,14 @@ from __future__ import annotations
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import structlog
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from api.routes import admin_users as admin_users_router
 from api.routes import analytics as analytics_router
@@ -32,8 +34,8 @@ from api.routes import email_accounts as email_accounts_router
 from api.routes import email_templates as email_templates_router
 from api.routes import email_tracking as email_tracking_router
 from api.routes import inbox as inbox_router
-from api.routes import lead_lists as lead_lists_router
 from api.routes import lead_analysis as lead_analysis_router
+from api.routes import lead_lists as lead_lists_router
 from api.routes import leads as leads_router
 from api.routes import linkedin_accounts as linkedin_accounts_router
 from api.routes import llm as llm_router
@@ -45,6 +47,7 @@ from api.routes import tts as tts_router
 from api.routes import warmup as warmup_router
 from api.routes import ws as ws_router
 from api.routes.content import router as content_router
+from api.webhooks import sendpulse as sendpulse_webhook
 from api.webhooks import unipile as unipile_webhook
 from core.config import settings
 from core.database import AsyncSessionLocal, init_db
@@ -260,6 +263,13 @@ app.include_router(linkedin_accounts_router.router)
 app.include_router(warmup_router.router)
 app.include_router(content_router, prefix="/api")
 app.include_router(unipile_webhook.router)
+app.include_router(sendpulse_webhook.router)
+
+# ── Static assets ─────────────────────────────────────────────────────
+
+_ASSETS_DIR = Path(__file__).resolve().parents[1] / "assets"
+if _ASSETS_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=str(_ASSETS_DIR)), name="assets")
 
 
 # ── Health check ──────────────────────────────────────────────────────

@@ -28,8 +28,21 @@ import {
   useFunnel,
   useCadencePerformance,
   useEmailStats,
+  type EmailStats,
 } from "@/lib/api/hooks/use-analytics"
 import { useManualTaskStats } from "@/lib/api/hooks/use-manual-tasks"
+
+const EMPTY_EMAIL_STATS: EmailStats = {
+  sent: 0,
+  opened: 0,
+  replied: 0,
+  unsubscribed: 0,
+  bounced: 0,
+  open_rate: 0,
+  reply_rate: 0,
+  bounce_rate: 0,
+  unsubscribe_rate: 0,
+}
 
 function trendProps(value: number | undefined): { trend?: { value: number; label: string } } {
   if (value == null || value === 0) return {}
@@ -137,7 +150,7 @@ export default function DashboardPage() {
             <Mail size={15} aria-hidden="true" />
             Desempenho de e-mail — últimos {days} dias
           </h2>
-          <EmailStatsCard data={emailStats!} isLoading={loadingEmail} />
+          <EmailStatsCard data={emailStats ?? EMPTY_EMAIL_STATS} isLoading={loadingEmail} />
         </div>
       )}
 

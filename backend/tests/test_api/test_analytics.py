@@ -11,9 +11,11 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import Any, Protocol, cast
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.routes import analytics as analytics_routes
 from models.cadence import Cadence
@@ -53,12 +55,18 @@ class FakeResult:
         return self._all_values
 
 
-class RecordingAsyncSession:
+class CompilableStatement(Protocol):
+    def compile(self, *args: Any, **kwargs: Any) -> Any: ...
+
+
+class FakeAsyncSession:
     def __init__(self, *results: FakeResult) -> None:
         self._results = list(results)
-        self.statements: list[object] = []
+        self.statements: list[CompilableStatement] = []
 
-    async def execute(self, statement):  # type: ignore[no-untyped-def]
+    async def execute(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, statement: CompilableStatement, *args: Any, **kwargs: Any
+    ) -> FakeResult:
         self.statements.append(statement)
         if not self._results:
             raise AssertionError("Unexpected execute() call without fake result")
@@ -81,16 +89,21 @@ def _make_cadence(tenant_id: uuid.UUID, cadence_id: uuid.UUID | None = None) -> 
     )
 
 
-def _statement_contains_param(statement: object, expected: object) -> bool:
+def _statement_contains_param(statement: CompilableStatement, expected: object) -> bool:
     compiled = statement.compile()
     return expected in compiled.params.values()
+
+
+def _statement_param_count(statement: CompilableStatement, expected: object) -> int:
+    compiled = statement.compile()
+    return sum(1 for value in compiled.params.values() if value == expected)
 
 
 async def test_get_cadences_overview_returns_real_metrics() -> None:
     tenant_id = uuid.uuid4()
     cadence_id = uuid.uuid4()
     empty_cadence_id = uuid.uuid4()
-    session = RecordingAsyncSession(
+    session = FakeAsyncSession(
         FakeResult(
             all_values=[
                 SimpleNamespace(id=cadence_id),
@@ -110,7 +123,7 @@ async def test_get_cadences_overview_returns_real_metrics() -> None:
     )
 
     result = await analytics_routes.get_cadences_overview(
-        db=session,
+        db=cast(AsyncSession, session),
         tenant_id=tenant_id,
     )
 
@@ -132,7 +145,7 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
 
     monkeypatch.setattr(analytics_routes, "_utc_days_ago", lambda days: marker_since)
 
-    session = RecordingAsyncSession(
+    session = FakeAsyncSession(
         FakeResult(scalar_one_or_none_value=cadence),
         FakeResult(scalar_value=5),
         FakeResult(scalar_value=4),
@@ -202,7 +215,7 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
     result = await analytics_routes.get_cadence_analytics(
         cadence_id=cadence.id,
         days=7,
-        db=session,
+        db=cast(AsyncSession, session),
         tenant_id=tenant_id,
     )
 
@@ -235,12 +248,12 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
 
 async def test_get_cadence_analytics_raises_404_when_missing() -> None:
     tenant_id = uuid.uuid4()
-    session = RecordingAsyncSession(FakeResult(scalar_one_or_none_value=None))
+    session = FakeAsyncSession(FakeResult(scalar_one_or_none_value=None))
 
     with pytest.raises(HTTPException) as excinfo:
         await analytics_routes.get_cadence_analytics(
             cadence_id=uuid.uuid4(),
-            db=session,
+            db=cast(AsyncSession, session),
             tenant_id=tenant_id,
         )
 
@@ -253,7 +266,7 @@ async def test_get_email_ab_results_maps_open_rates_and_uses_days_filter(
     marker_since = datetime(2026, 3, 25, tzinfo=UTC)
     monkeypatch.setattr(analytics_routes, "_utc_days_ago", lambda days: marker_since)
 
-    session = RecordingAsyncSession(
+    session = FakeAsyncSession(
         FakeResult(
             all_values=[
                 SimpleNamespace(subject_used="Variante A", sent=1),
@@ -271,7 +284,7 @@ async def test_get_email_ab_results_maps_open_rates_and_uses_days_filter(
         cadence_id=uuid.uuid4(),
         step_number=1,
         days=7,
-        db=session,
+        db=cast(AsyncSession, session),
         tenant_id=uuid.uuid4(),
     )
 
@@ -285,3 +298,47 @@ async def test_get_email_ab_results_maps_open_rates_and_uses_days_filter(
 
     assert _statement_contains_param(session.statements[0], marker_since)
     assert _statement_contains_param(session.statements[1], marker_since)
+
+
+async def test_get_email_over_time_maps_daily_series_and_inlines_day_bucket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker_since = datetime(2026, 3, 20, tzinfo=UTC)
+    monkeypatch.setattr(analytics_routes, "_utc_days_ago", lambda days: marker_since)
+
+    session = FakeAsyncSession(
+        FakeResult(
+            all_values=[
+                SimpleNamespace(day=datetime(2026, 3, 25, tzinfo=UTC), cnt=3),
+                SimpleNamespace(day=datetime(2026, 3, 26, tzinfo=UTC), cnt=1),
+            ]
+        ),
+        FakeResult(
+            all_values=[
+                SimpleNamespace(day=datetime(2026, 3, 25, tzinfo=UTC), cnt=2),
+            ]
+        ),
+        FakeResult(
+            all_values=[
+                SimpleNamespace(day=datetime(2026, 3, 26, tzinfo=UTC), cnt=1),
+            ]
+        ),
+    )
+
+    result = await analytics_routes.get_email_over_time(
+        days=7,
+        db=cast(AsyncSession, session),
+        tenant_id=uuid.uuid4(),
+    )
+
+    assert result == [
+        analytics_routes.EmailOverTimeItem(date="2026-03-25", sent=3, opened=2, replied=0),
+        analytics_routes.EmailOverTimeItem(date="2026-03-26", sent=1, opened=0, replied=1),
+    ]
+
+    assert _statement_contains_param(session.statements[0], marker_since)
+    assert _statement_contains_param(session.statements[1], marker_since)
+    assert _statement_contains_param(session.statements[2], marker_since)
+    assert _statement_param_count(session.statements[0], "day") == 0
+    assert _statement_param_count(session.statements[1], "day") == 0
+    assert _statement_param_count(session.statements[2], "day") == 0

@@ -65,7 +65,7 @@ function KPICard({
   icon: React.ComponentType<{ size?: number; className?: string; "aria-hidden"?: "true" }>
   label: string
   value: string | number
-  sub?: string
+  sub?: string | undefined
   variant?: "default" | "accent" | "danger"
 }) {
   const valueClass =
@@ -559,10 +559,18 @@ export default function ColdEmailPage() {
                       {c.sent > 0 ? c.sent : <span className="text-(--text-disabled)">—</span>}
                     </td>
                     <td className="px-4 py-2.5 text-right font-medium text-(--accent)">
-                      {c.sent > 0 ? `${c.open_rate}%` : <span className="text-(--text-disabled)">—</span>}
+                      {c.sent > 0 ? (
+                        `${c.open_rate}%`
+                      ) : (
+                        <span className="text-(--text-disabled)">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-right font-medium text-green-600 dark:text-green-400">
-                      {c.sent > 0 ? `${c.reply_rate}%` : <span className="text-(--text-disabled)">—</span>}
+                      {c.sent > 0 ? (
+                        `${c.reply_rate}%`
+                      ) : (
+                        <span className="text-(--text-disabled)">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-right">
                       <span

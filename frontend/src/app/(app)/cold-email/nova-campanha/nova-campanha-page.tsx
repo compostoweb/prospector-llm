@@ -140,6 +140,15 @@ const STEP_SUBTITLES = [
   "Revise tudo antes de criar a campanha.",
 ]
 
+function cloneSteps(steps: LocalStep[]): LocalStep[] {
+  return steps.map((step) => ({ ...step, subject_variants: [...step.subject_variants] }))
+}
+
+function getInitialSteps(): LocalStep[] {
+  const preset = PRESETS.find((item) => item.id === "3-toques")
+  return preset ? cloneSteps(preset.steps) : []
+}
+
 // ── EmailStepCard ──────────────────────────────────────────────────────────
 
 function EmailStepCard({
@@ -301,7 +310,7 @@ function StepSequencia({
 }) {
   function pickPreset(p: EmailPreset) {
     setPresetId(p.id)
-    setSteps(p.steps.map((s) => ({ ...s, subject_variants: [...s.subject_variants] })))
+    setSteps(cloneSteps(p.steps))
   }
 
   function updateStep(i: number, updated: LocalStep) {
@@ -759,9 +768,7 @@ export default function NovaCampanhaPage() {
   // Step 0
   const [name, setName] = useState("")
   const [presetId, setPresetId] = useState("3-toques")
-  const [steps, setSteps] = useState<LocalStep[]>(() =>
-    PRESETS[0].steps.map((s) => ({ ...s, subject_variants: [...s.subject_variants] })),
-  )
+  const [steps, setSteps] = useState<LocalStep[]>(getInitialSteps)
 
   // Step 1
   const [leadListId, setLeadListId] = useState("")
@@ -893,6 +900,9 @@ export default function NovaCampanhaPage() {
     />,
   ]
 
+  const currentWizardStep = WIZARD_STEPS[activeStep] ?? { label: "Sequência", icon: Mail }
+  const currentSubtitle = STEP_SUBTITLES[activeStep] ?? "Defina o nome e os e-mails da campanha."
+
   return (
     <div className="mx-auto max-w-3xl space-y-8 pb-16">
       {/* Page header */}
@@ -900,10 +910,8 @@ export default function NovaCampanhaPage() {
         <p className="text-xs font-semibold uppercase tracking-widest text-(--accent)">
           Cold Email
         </p>
-        <h1 className="mt-1 text-2xl font-bold text-(--text-primary)">
-          {WIZARD_STEPS[activeStep].label}
-        </h1>
-        <p className="mt-1 text-sm text-(--text-secondary)">{STEP_SUBTITLES[activeStep]}</p>
+        <h1 className="mt-1 text-2xl font-bold text-(--text-primary)">{currentWizardStep.label}</h1>
+        <p className="mt-1 text-sm text-(--text-secondary)">{currentSubtitle}</p>
       </div>
 
       {/* Stepper */}

@@ -7,7 +7,6 @@ import {
   startOfMonth,
   startOfDay,
   endOfMonth,
-  startOfWeek,
   eachWeekOfInterval,
   endOfWeek,
   addDays,
@@ -137,6 +136,21 @@ const INITIAL_STATE: WizardState = {
   expandedSlot: null,
 }
 
+function parseMonthString(monthStr: string): { year: number; monthIndex: number } | null {
+  const [yearPart, monthPart] = monthStr.split("-")
+  const year = Number(yearPart)
+  const month = Number(monthPart)
+
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    return null
+  }
+
+  return {
+    year,
+    monthIndex: month - 1,
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────
 
 function getMonthOptions(): { value: string; label: string }[] {
@@ -151,8 +165,10 @@ function getMonthOptions(): { value: string; label: string }[] {
 }
 
 function getWeeksOfMonth(monthStr: string): { weekNum: number; start: Date; end: Date }[] {
-  const [y, m] = monthStr.split("-").map(Number)
-  const ms = startOfMonth(new Date(y!, m! - 1, 1))
+  const parsedMonth = parseMonthString(monthStr)
+  if (!parsedMonth) return []
+
+  const ms = startOfMonth(new Date(parsedMonth.year, parsedMonth.monthIndex, 1))
   const me = endOfMonth(ms)
   const weeks = eachWeekOfInterval({ start: ms, end: me }, { weekStartsOn: 1 })
   return weeks.map((ws, i) => ({
@@ -165,11 +181,11 @@ function getWeeksOfMonth(monthStr: string): { weekNum: number; start: Date; end:
 function buildPlanSlots(monthStr: string, postsPerWeek: number): PlanSlot[] {
   const weeks = getWeeksOfMonth(monthStr)
   const now = new Date()
-  const [y, m] = monthStr.split("-").map(Number)
-  const monthDate = new Date(y!, m! - 1, 1)
+  const parsedMonth = parseMonthString(monthStr)
+  if (!parsedMonth) return []
+
+  const monthDate = new Date(parsedMonth.year, parsedMonth.monthIndex, 1)
   const isCurrentMonth = isSameMonth(now, monthDate)
-  // For the current month, find which week we're in and skip past weeks
-  const currentWeekStart = startOfWeek(now, { weekStartsOn: 1 })
 
   const slots: PlanSlot[] = []
   let pi = 0
@@ -178,9 +194,10 @@ function buildPlanSlots(monthStr: string, postsPerWeek: number): PlanSlot[] {
     const tomorrow = addDays(startOfDay(now), 1)
     if (isCurrentMonth && isBefore(week.end, tomorrow)) continue
     for (let p = 0; p < postsPerWeek; p++) {
+      const pillar = PILLAR_CYCLE[pi % PILLAR_CYCLE.length] ?? "authority"
       slots.push({
         weekNum: week.weekNum,
-        pillar: PILLAR_CYCLE[pi % 3]!,
+        pillar,
         themeSource: "free",
         themeId: null,
         freeTheme: "",
@@ -206,8 +223,10 @@ function buildSuggestedDates(
   postsPerWeek: number,
 ): PlanSlot[] {
   const now = new Date()
-  const [y, m] = monthStr.split("-").map(Number)
-  const ms = startOfMonth(new Date(y!, m! - 1, 1))
+  const parsedMonth = parseMonthString(monthStr)
+  if (!parsedMonth) return slots
+
+  const ms = startOfMonth(new Date(parsedMonth.year, parsedMonth.monthIndex, 1))
   const me = endOfMonth(ms)
   const weeks = eachWeekOfInterval({ start: ms, end: me }, { weekStartsOn: 1 })
   const prefs = DAY_PREFS[postsPerWeek] ?? [1]
@@ -221,8 +240,10 @@ function buildSuggestedDates(
       const dateAt9 = setHours(setMinutes(date, 0), 9)
       // Skip dates already in the past
       if (isBefore(dateAt9, now)) continue
+      const currentSlot = updated[si]
+      if (!currentSlot) continue
       updated[si] = {
-        ...updated[si]!,
+        ...currentSlot,
         publishDate: format(dateAt9, "yyyy-MM-dd'T'HH:mm"),
       }
       si++
@@ -338,7 +359,11 @@ export function AiContentWizard({ open, onOpenChange }: AiContentWizardProps) {
         done++
         if (r.status === "fulfilled") {
           const { index, variation } = r.value
-          const slot = slotsSnapshot[index]!
+          const slot = slotsSnapshot[index]
+          if (!slot) {
+            setState((prev) => ({ ...prev, genProgress: done }))
+            return
+          }
           updateSlot(index, {
             generatedText: variation.text,
             hookUsed: variation.hook_type_used,
@@ -783,11 +808,7 @@ interface ThemePlanStepProps {
 }
 
 function ThemePlanStep({ state, updateSlot, themes, allThemes }: ThemePlanStepProps) {
-  const {
-    data: suggestions,
-    isFetching: isSuggesting,
-    refetch: fetchSuggestions,
-  } = useThemeSuggestions()
+  const { isFetching: isSuggesting, refetch: fetchSuggestions } = useThemeSuggestions()
   const { mutateAsync: varyTheme } = useVaryTheme()
   const [loadingVariations, setLoadingVariations] = React.useState<Set<number>>(new Set())
 
@@ -812,7 +833,7 @@ function ThemePlanStep({ state, updateSlot, themes, allThemes }: ThemePlanStepPr
     const slot = state.planSlots[index]
     if (!slot) return
     const ci = PILLAR_CYCLE.indexOf(slot.pillar)
-    const next = PILLAR_CYCLE[(ci + 1) % 3]!
+    const next = PILLAR_CYCLE[(ci + 1) % PILLAR_CYCLE.length] ?? PILLAR_CYCLE[0] ?? "authority"
     updateSlot(index, { pillar: next })
   }
 
@@ -830,11 +851,13 @@ function ThemePlanStep({ state, updateSlot, themes, allThemes }: ThemePlanStepPr
     }
 
     for (let i = 0; i < state.planSlots.length; i++) {
-      const slot = state.planSlots[i]!
+      const slot = state.planSlots[i]
+      if (!slot) continue
       if (slot.themeId || slot.freeTheme.trim().length >= 3) continue
       const pool = available[slot.pillar]
       if (pool.length > 0) {
-        const theme = pool.shift()!
+        const theme = pool.shift()
+        if (!theme) continue
         updateSlot(i, {
           themeSource: "bank",
           themeId: theme.id,
@@ -864,14 +887,16 @@ function ThemePlanStep({ state, updateSlot, themes, allThemes }: ThemePlanStepPr
     })
 
     for (let i = 0; i < state.planSlots.length; i++) {
-      const slot = state.planSlots[i]!
+      const slot = state.planSlots[i]
+      if (!slot) continue
       if (slot.themeId || slot.freeTheme.trim().length >= 3) continue
       if (pool.length === 0) break
 
       // Prefer a suggestion matching the slot's pillar
       const matchIdx = pool.findIndex((s) => s.theme.pillar === slot.pillar)
       const idx = matchIdx >= 0 ? matchIdx : 0
-      const suggestion = pool.splice(idx, 1)[0]!
+      const suggestion = pool.splice(idx, 1)[0]
+      if (!suggestion) continue
 
       usedTitles.add(suggestion.theme.title.trim().toLowerCase())
       usedIds.add(suggestion.theme.id)

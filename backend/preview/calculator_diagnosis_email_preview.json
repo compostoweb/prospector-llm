@@ -1,0 +1,8 @@
+{
+  "recipient_email": "adriano@compostoweb.com.br",
+  "subject": "Seu diagnóstico de ROI da automação — Composto Web",
+  "reply_to": "contato@compostoweb.com.br",
+  "pdf_path": "D:\\DEV com IA\\prospector-llm\\backend\\preview\\diagnostico-roi-composto-web-bd29b267.pdf",
+  "html_path": "D:\\DEV com IA\\prospector-llm\\backend\\preview\\calculator_diagnosis_email_preview.html",
+  "logo_path": "D:\\DEV com IA\\prospector-llm\\backend\\preview\\compostoweb-logo-primary-transparent.webp"
+}
