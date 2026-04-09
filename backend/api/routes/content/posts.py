@@ -21,7 +21,17 @@ import uuid
 from datetime import UTC
 
 import structlog
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -345,15 +355,89 @@ async def delete_post_image(
     post.image_style = None
     post.image_prompt = None
     post.image_aspect_ratio = None
+    post.image_filename = None
+    post.image_size_bytes = None
     post.linkedin_image_urn = None
 
     await db.commit()
     logger.info("content.post_image_deleted", post_id=str(post_id), tenant_id=str(tenant_id))
 
 
+# ── Upload manual de imagem ──────────────────────────────────────────
+
+_MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB
+_ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+
+
+@router.post(
+    "/{post_id}/upload-image",
+    response_model=ContentPostResponse,
+    summary="Faz upload manual de imagem para o post",
+)
+async def upload_post_image(
+    post_id: uuid.UUID,
+    file: UploadFile = File(...),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> ContentPostResponse:
+    """
+    Aceita JPEG, PNG, WEBP, GIF. Tamanho máximo: 10 MB.
+    Substitui qualquer imagem existente (gerada por IA ou upload anterior).
+    """
+    from integrations.s3_client import S3Client
+
+    if file.content_type not in _ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Formato inválido. Aceitos: JPEG, PNG, WEBP, GIF.",
+        )
+
+    post = await _get_post_or_404(post_id, tenant_id, db)
+
+    image_bytes = await file.read()
+
+    if len(image_bytes) > _MAX_IMAGE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Imagem excede o limite de 10 MB.",
+        )
+
+    if post.image_s3_key:
+        try:
+            S3Client().delete_object(post.image_s3_key)
+        except Exception:
+            pass
+
+    original_name = file.filename or "image.jpg"
+    ext = original_name.rsplit(".", 1)[-1].lower() if "." in original_name else "jpg"
+    s3_key = f"images/{tenant_id}/{post_id}.{ext}"
+    s3 = S3Client()
+    image_url = s3.upload_bytes(image_bytes, s3_key, file.content_type or "image/jpeg")
+
+    post.image_url = image_url
+    post.image_s3_key = s3_key
+    post.image_filename = original_name
+    post.image_size_bytes = len(image_bytes)
+    post.image_style = None
+    post.image_prompt = None
+    post.image_aspect_ratio = None
+    post.linkedin_image_urn = None
+
+    await db.commit()
+    await db.refresh(post)
+
+    logger.info(
+        "content.post_image_uploaded",
+        post_id=str(post_id),
+        tenant_id=str(tenant_id),
+        size_bytes=len(image_bytes),
+    )
+    return ContentPostResponse.model_validate(post)
+
+
 # ── Upload de vídeo ───────────────────────────────────────────────────
 
-_MAX_VIDEO_SIZE = 500 * 1024 * 1024  # 500 MB
+_MAX_VIDEO_SIZE = 150 * 1024 * 1024  # 150 MB
 
 
 @router.post(
@@ -368,7 +452,7 @@ async def upload_post_video(
     db: AsyncSession = Depends(get_session_flexible),
 ) -> ContentPostResponse:
     """
-    Aceita apenas video/mp4. Tamanho máximo: 500 MB.
+    Aceita apenas video/mp4. Tamanho máximo: 150 MB.
     Salva no S3 e atualiza post.video_url + post.video_s3_key.
     """
     from integrations.s3_client import S3Client
@@ -386,7 +470,7 @@ async def upload_post_video(
     if len(video_bytes) > _MAX_VIDEO_SIZE:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Vídeo excede o limite de 500 MB.",
+            detail="Vídeo excede o limite de 150 MB.",
         )
 
     # Remove vídeo anterior do S3
@@ -402,6 +486,8 @@ async def upload_post_video(
 
     post.video_url = video_url
     post.video_s3_key = s3_key
+    post.video_filename = file.filename or "video.mp4"
+    post.video_size_bytes = len(video_bytes)
     post.linkedin_video_urn = None  # URN inválido após novo upload
 
     await db.commit()
@@ -439,6 +525,8 @@ async def delete_post_video(
 
     post.video_url = None
     post.video_s3_key = None
+    post.video_filename = None
+    post.video_size_bytes = None
     post.linkedin_video_urn = None
 
     await db.commit()
@@ -476,3 +564,58 @@ async def get_post_image(
         ) from exc
 
     return StreamingResponse(io.BytesIO(data), media_type=content_type)
+
+
+# ── Proxy de vídeo (S3 privado, suporte a Range requests) ──────────────────────
+
+
+@router.get(
+    "/{post_id}/video",
+    summary="Stream do vídeo do post (proxy do S3 privado)",
+    include_in_schema=True,
+)
+async def stream_post_video(
+    request: Request,
+    post_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session_no_auth),
+) -> Response:
+    from integrations.s3_client import S3Client
+
+    result = await db.execute(select(ContentPost).where(ContentPost.id == post_id))
+    post = result.scalar_one_or_none()
+    if post is None or not post.video_s3_key:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vídeo não encontrado")
+
+    s3 = S3Client()
+    range_header = request.headers.get("range")
+
+    try:
+        if range_header:
+            obj = s3.get_object_range(post.video_s3_key, range_header)
+            return Response(
+                content=obj["body"],
+                status_code=206,
+                headers={
+                    "Content-Range": obj["content_range"],
+                    "Content-Length": str(obj["content_length"]),
+                    "Accept-Ranges": "bytes",
+                    "Content-Type": "video/mp4",
+                    "Cache-Control": "private, max-age=3600",
+                },
+            )
+
+        data, content_type = s3.get_bytes(post.video_s3_key)
+        return Response(
+            content=data,
+            media_type=content_type or "video/mp4",
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(len(data)),
+                "Cache-Control": "private, max-age=3600",
+            },
+        )
+    except Exception as exc:
+        logger.error("content.post_video_proxy_error", post_id=str(post_id), error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="Erro ao buscar vídeo"
+        ) from exc

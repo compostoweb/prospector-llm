@@ -16,6 +16,7 @@ import {
   RefreshCw,
   X,
   Upload,
+  Maximize2,
 } from "lucide-react"
 import { format } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
@@ -30,6 +31,7 @@ import {
   useDeletePost,
   useGeneratePostImage,
   useDeletePostImage,
+  useUploadPostImage,
   useUploadPostVideo,
   useDeletePostVideo,
   type ContentPost,
@@ -99,13 +101,20 @@ export function EditPostDialog({
 
   // Imagem
   const [imageOpen, setImageOpen] = useState(false)
+  const [imageMode, setImageMode] = useState<"generate" | "upload">("generate")
   const [imageStyle, setImageStyle] = useState<ImageStyle>("clean")
   const [imageSubType, setImageSubType] = useState<ImageSubType>("metrics")
   const [imageAspect, setImageAspect] = useState<ImageAspectRatio>("4:5")
   const [customPrompt, setCustomPrompt] = useState("")
   const [localImage, setLocalImage] = useState<{ url: string; prompt: string } | null>(null)
+  const [localUploadedImage, setLocalUploadedImage] = useState<{
+    url: string
+    name: string
+    sizeMB: string
+  } | null>(null)
   const [imageDeleted, setImageDeleted] = useState(false)
   const [lightboxOpen, setLightboxOpen] = useState(false)
+  const imageUploadInputRef = useRef<HTMLInputElement>(null)
 
   // Vídeo
   const [videoOpen, setVideoOpen] = useState(false)
@@ -113,6 +122,8 @@ export function EditPostDialog({
   const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null)
   const [localVideoName, setLocalVideoName] = useState<string | null>(null)
   const [localVideoSizeMB, setLocalVideoSizeMB] = useState<string | null>(null)
+  const [videoLightboxOpen, setVideoLightboxOpen] = useState(false)
+  const [localVideoDeleted, setLocalVideoDeleted] = useState(false)
 
   const updatePost = useUpdatePost()
   const improvePost = useImprovePost()
@@ -123,6 +134,7 @@ export function EditPostDialog({
   const deletePostMut = useDeletePost()
   const generateImage = useGeneratePostImage()
   const deleteImage = useDeletePostImage()
+  const uploadImage = useUploadPostImage()
   const uploadVideo = useUploadPostVideo()
   const deleteVideo = useDeletePostVideo()
 
@@ -147,7 +159,38 @@ export function EditPostDialog({
       url: `/api/backend/api/content/posts/${post.id}/image?t=${Date.now()}`,
       prompt: result.image_prompt,
     })
+    setLocalUploadedImage(null)
     setCustomPrompt("")
+  }
+
+  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!post || !e.target.files?.[0]) return
+    const file = e.target.files[0]
+    const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"]
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+      alert("Formato inválido. Aceitos: JPG, PNG, WEBP, GIF.")
+      if (imageUploadInputRef.current) imageUploadInputRef.current.value = ""
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      alert("A imagem excede o limite de 10 MB.")
+      if (imageUploadInputRef.current) imageUploadInputRef.current.value = ""
+      return
+    }
+    const objectUrl = URL.createObjectURL(file)
+    try {
+      await uploadImage.mutateAsync({ postId: post.id, file })
+      setLocalUploadedImage({
+        url: objectUrl,
+        name: file.name,
+        sizeMB: (file.size / 1024 / 1024).toFixed(1),
+      })
+      setLocalImage(null)
+      setImageDeleted(false)
+    } catch {
+      URL.revokeObjectURL(objectUrl)
+    }
+    if (imageUploadInputRef.current) imageUploadInputRef.current.value = ""
   }
 
   async function handleVideoUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -179,6 +222,13 @@ export function EditPostDialog({
     }
   }, [localVideoUrl])
 
+  // Libera o blob URL da imagem local quando trocar (evitar memory leak)
+  useEffect(() => {
+    return () => {
+      if (localUploadedImage?.url?.startsWith("blob:")) URL.revokeObjectURL(localUploadedImage.url)
+    }
+  }, [localUploadedImage])
+
   // Preencher form quando o post mudar
   useEffect(() => {
     if (!post) return
@@ -197,11 +247,23 @@ export function EditPostDialog({
     setImproveOpen(defaultImproveOpen ?? false)
     setInstruction("")
     setLocalImage(null)
+    setLocalUploadedImage(null)
     setImageDeleted(false)
-    setLocalVideoUrl(null)
-    setLocalVideoName(null)
-    setLocalVideoSizeMB(null)
+    setLocalVideoDeleted(false)
   }, [post, defaultImproveOpen])
+
+  // Reseta estado local de vídeo apenas quando abre dialog para um post diferente (não em cada refetch)
+  const prevPostIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!post) return
+    if (prevPostIdRef.current !== post.id) {
+      setLocalVideoUrl(null)
+      setLocalVideoName(null)
+      setLocalVideoSizeMB(null)
+      setLocalVideoDeleted(false)
+      prevPostIdRef.current = post.id
+    }
+  }, [post])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -430,7 +492,7 @@ export function EditPostDialog({
                 <span className="flex items-center gap-2">
                   <ImageIcon className="h-4 w-4 text-(--text-secondary)" />
                   Imagem
-                  {!imageDeleted && (localImage || post?.image_url) && (
+                  {!imageDeleted && (localImage || localUploadedImage || post?.image_url) && (
                     <span className="rounded-full bg-(--accent)/15 px-1.5 py-0.5 text-xs text-(--accent)">
                       Adicionada
                     </span>
@@ -445,8 +507,8 @@ export function EditPostDialog({
 
               {imageOpen && (
                 <div className="border-t border-(--border-subtle) p-3 flex flex-col gap-3">
-                  {!imageDeleted && (localImage || post?.image_url) ? (
-                    /* Preview da imagem gerada */
+                  {!imageDeleted && (localImage || localUploadedImage || post?.image_url) ? (
+                    /* Preview da imagem (gerada por IA ou upload) */
                     <div className="flex flex-col gap-2">
                       <button
                         type="button"
@@ -457,15 +519,19 @@ export function EditPostDialog({
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={
-                            localImage
-                              ? localImage.url
-                              : `/api/backend/api/content/posts/${post?.id}/image`
+                            localImage?.url ??
+                            localUploadedImage?.url ??
+                            (post?.image_s3_key
+                              ? `/api/backend/api/content/posts/${post?.id}/image`
+                              : undefined)
                           }
                           alt="Imagem do post"
                           className="w-full max-h-64 rounded object-contain bg-(--bg-subtle) hover:opacity-90 transition-opacity"
                         />
                       </button>
-                      {(localImage?.prompt ?? post?.image_prompt) && (
+
+                      {/* Info: prompt (IA) ou nome/tamanho (upload) */}
+                      {(localImage?.prompt ?? (post?.image_prompt && !post?.image_filename)) && (
                         <p
                           className="text-xs text-(--text-tertiary) truncate"
                           title={localImage?.prompt ?? post?.image_prompt ?? ""}
@@ -473,22 +539,46 @@ export function EditPostDialog({
                           Prompt: {localImage?.prompt ?? post?.image_prompt}
                         </p>
                       )}
-                      <div className="flex gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-7 text-xs gap-1"
-                          disabled={generateImage.isPending}
-                          onClick={handleGenerateImage}
-                        >
-                          {generateImage.isPending ? (
-                            <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full" />
-                          ) : (
-                            <RefreshCw className="h-3 w-3" />
+                      {(localUploadedImage || post?.image_filename) && (
+                        <div className="flex items-center gap-1.5 text-xs text-(--text-tertiary)">
+                          <ImageIcon className="h-3 w-3 shrink-0" />
+                          <span className="truncate">
+                            {localUploadedImage?.name ?? post?.image_filename ?? "imagem"}
+                          </span>
+                          {(localUploadedImage?.sizeMB ??
+                            (post?.image_size_bytes
+                              ? (post.image_size_bytes / 1024 / 1024).toFixed(1)
+                              : null)) && (
+                            <span className="text-(--text-quaternary) shrink-0">
+                              {localUploadedImage?.sizeMB ??
+                                (post?.image_size_bytes
+                                  ? (post.image_size_bytes / 1024 / 1024).toFixed(1)
+                                  : "")}
+                              {" MB"}
+                            </span>
                           )}
-                          Regenerar
-                        </Button>
+                        </div>
+                      )}
+
+                      <div className="flex gap-2">
+                        {/* Regenerar — apenas para imagens geradas por IA */}
+                        {(localImage || (!localUploadedImage && post?.image_prompt)) && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs gap-1"
+                            disabled={generateImage.isPending}
+                            onClick={handleGenerateImage}
+                          >
+                            {generateImage.isPending ? (
+                              <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full" />
+                            ) : (
+                              <RefreshCw className="h-3 w-3" />
+                            )}
+                            Regenerar
+                          </Button>
+                        )}
                         <Button
                           type="button"
                           variant="ghost"
@@ -499,6 +589,7 @@ export function EditPostDialog({
                             if (post) {
                               deleteImage.mutate(post.id)
                               setLocalImage(null)
+                              setLocalUploadedImage(null)
                               setImageDeleted(true)
                             }
                           }}
@@ -509,114 +600,188 @@ export function EditPostDialog({
                       </div>
                     </div>
                   ) : (
-                    /* Configuração para gerar nova imagem */
+                    /* Modo de adição: tabs Gerar com IA / Upload */
                     <div className="flex flex-col gap-3">
-                      {/* Estilo */}
-                      <div className="grid gap-1.5">
-                        <Label className="text-xs">Estilo</Label>
-                        <div className="flex gap-2 flex-wrap">
-                          {(["clean", "with_text", "infographic"] as ImageStyle[]).map((s) => (
-                            <button
-                              key={s}
-                              type="button"
-                              onClick={() => setImageStyle(s)}
-                              className={`rounded px-2.5 py-1 text-xs border transition-colors ${
-                                imageStyle === s
-                                  ? "border-(--accent) bg-(--accent)/10 text-(--accent)"
-                                  : "border-(--border-subtle) text-(--text-secondary) hover:border-(--accent)/50"
-                              }`}
-                            >
-                              {s === "clean"
-                                ? "Limpo"
-                                : s === "with_text"
-                                  ? "Com texto"
-                                  : "Infográfico"}
-                            </button>
-                          ))}
-                        </div>
+                      {/* Tabs de modo */}
+                      <div className="flex gap-1 rounded-md border border-(--border-subtle) p-0.5 w-fit">
+                        <button
+                          type="button"
+                          onClick={() => setImageMode("generate")}
+                          className={`rounded px-3 py-1 text-xs transition-colors ${
+                            imageMode === "generate"
+                              ? "bg-(--accent) text-white"
+                              : "text-(--text-secondary) hover:text-(--text-primary)"
+                          }`}
+                        >
+                          <span className="flex items-center gap-1">
+                            <Sparkles className="h-3 w-3" />
+                            Gerar com IA
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setImageMode("upload")}
+                          className={`rounded px-3 py-1 text-xs transition-colors ${
+                            imageMode === "upload"
+                              ? "bg-(--accent) text-white"
+                              : "text-(--text-secondary) hover:text-(--text-primary)"
+                          }`}
+                        >
+                          <span className="flex items-center gap-1">
+                            <Upload className="h-3 w-3" />
+                            Upload
+                          </span>
+                        </button>
                       </div>
 
-                      {/* Sub-tipo (apenas para infográfico) */}
-                      {imageStyle === "infographic" && (
-                        <div className="grid gap-1.5">
-                          <Label className="text-xs">Tipo de infográfico</Label>
-                          <div className="flex gap-2 flex-wrap">
-                            {(["metrics", "steps", "comparison"] as ImageSubType[]).map((s) => (
-                              <button
-                                key={s}
-                                type="button"
-                                onClick={() => setImageSubType(s)}
-                                className={`rounded px-2.5 py-1 text-xs border transition-colors ${
-                                  imageSubType === s
-                                    ? "border-(--accent) bg-(--accent)/10 text-(--accent)"
-                                    : "border-(--border-subtle) text-(--text-secondary) hover:border-(--accent)/50"
-                                }`}
-                              >
-                                {s === "metrics"
-                                  ? "Métricas"
-                                  : s === "steps"
-                                    ? "Passos"
-                                    : "Comparativo"}
-                              </button>
-                            ))}
+                      {imageMode === "generate" ? (
+                        /* Formulário de geração por IA */
+                        <>
+                          {/* Estilo */}
+                          <div className="grid gap-1.5">
+                            <Label className="text-xs">Estilo</Label>
+                            <div className="flex gap-2 flex-wrap">
+                              {(["clean", "with_text", "infographic"] as ImageStyle[]).map((s) => (
+                                <button
+                                  key={s}
+                                  type="button"
+                                  onClick={() => setImageStyle(s)}
+                                  className={`rounded px-2.5 py-1 text-xs border transition-colors ${
+                                    imageStyle === s
+                                      ? "border-(--accent) bg-(--accent)/10 text-(--accent)"
+                                      : "border-(--border-subtle) text-(--text-secondary) hover:border-(--accent)/50"
+                                  }`}
+                                >
+                                  {s === "clean"
+                                    ? "Limpo"
+                                    : s === "with_text"
+                                      ? "Com texto"
+                                      : "Infográfico"}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Sub-tipo (apenas para infográfico) */}
+                          {imageStyle === "infographic" && (
+                            <div className="grid gap-1.5">
+                              <Label className="text-xs">Tipo de infográfico</Label>
+                              <div className="flex gap-2 flex-wrap">
+                                {(["metrics", "steps", "comparison"] as ImageSubType[]).map((s) => (
+                                  <button
+                                    key={s}
+                                    type="button"
+                                    onClick={() => setImageSubType(s)}
+                                    className={`rounded px-2.5 py-1 text-xs border transition-colors ${
+                                      imageSubType === s
+                                        ? "border-(--accent) bg-(--accent)/10 text-(--accent)"
+                                        : "border-(--border-subtle) text-(--text-secondary) hover:border-(--accent)/50"
+                                    }`}
+                                  >
+                                    {s === "metrics"
+                                      ? "Métricas"
+                                      : s === "steps"
+                                        ? "Passos"
+                                        : "Comparativo"}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Proporção */}
+                          <div className="grid gap-1.5">
+                            <Label className="text-xs">Proporção</Label>
+                            <div className="flex gap-2">
+                              {(["4:5", "1:1", "16:9"] as ImageAspectRatio[]).map((r) => (
+                                <button
+                                  key={r}
+                                  type="button"
+                                  onClick={() => setImageAspect(r)}
+                                  className={`rounded px-2.5 py-1 text-xs border transition-colors ${
+                                    imageAspect === r
+                                      ? "border-(--accent) bg-(--accent)/10 text-(--accent)"
+                                      : "border-(--border-subtle) text-(--text-secondary) hover:border-(--accent)/50"
+                                  }`}
+                                >
+                                  {r}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Prompt personalizado (opcional) */}
+                          <div className="grid gap-1.5">
+                            <Label className="text-xs text-(--text-secondary)">
+                              Instrução adicional{" "}
+                              <span className="text-(--text-tertiary)">(opcional)</span>
+                            </Label>
+                            <Input
+                              value={customPrompt}
+                              onChange={(e) => setCustomPrompt(e.target.value)}
+                              placeholder="Ex: use tons de verde e inclua gráfico de barras"
+                              className="text-xs h-8"
+                            />
+                          </div>
+
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="self-start h-8 text-xs gap-1.5"
+                            disabled={generateImage.isPending}
+                            onClick={handleGenerateImage}
+                          >
+                            {generateImage.isPending ? (
+                              <>
+                                <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full" />
+                                Gerando…
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="h-3 w-3" />
+                                Gerar imagem
+                              </>
+                            )}
+                          </Button>
+                        </>
+                      ) : (
+                        /* Upload manual */
+                        <div className="flex flex-col gap-2">
+                          <p className="text-xs text-(--text-secondary)">
+                            Selecione um arquivo JPG, PNG, WEBP ou GIF (máx. 10 MB).
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <input
+                              ref={imageUploadInputRef}
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp,image/gif"
+                              className="hidden"
+                              aria-label="Selecionar imagem para upload"
+                              onChange={handleImageUpload}
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 text-xs gap-1.5"
+                              disabled={uploadImage.isPending}
+                              onClick={() => imageUploadInputRef.current?.click()}
+                            >
+                              {uploadImage.isPending ? (
+                                <>
+                                  <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full" />
+                                  Enviando…
+                                </>
+                              ) : (
+                                <>
+                                  <Upload className="h-3 w-3" />
+                                  Selecionar arquivo
+                                </>
+                              )}
+                            </Button>
                           </div>
                         </div>
                       )}
-
-                      {/* Proporção */}
-                      <div className="grid gap-1.5">
-                        <Label className="text-xs">Proporção</Label>
-                        <div className="flex gap-2">
-                          {(["4:5", "1:1", "16:9"] as ImageAspectRatio[]).map((r) => (
-                            <button
-                              key={r}
-                              type="button"
-                              onClick={() => setImageAspect(r)}
-                              className={`rounded px-2.5 py-1 text-xs border transition-colors ${
-                                imageAspect === r
-                                  ? "border-(--accent) bg-(--accent)/10 text-(--accent)"
-                                  : "border-(--border-subtle) text-(--text-secondary) hover:border-(--accent)/50"
-                              }`}
-                            >
-                              {r}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Prompt personalizado (opcional) */}
-                      <div className="grid gap-1.5">
-                        <Label className="text-xs text-(--text-secondary)">
-                          Instrução adicional{" "}
-                          <span className="text-(--text-tertiary)">(opcional)</span>
-                        </Label>
-                        <Input
-                          value={customPrompt}
-                          onChange={(e) => setCustomPrompt(e.target.value)}
-                          placeholder="Ex: use tons de verde e inclua gráfico de barras"
-                          className="text-xs h-8"
-                        />
-                      </div>
-
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="self-start h-8 text-xs gap-1.5"
-                        disabled={generateImage.isPending}
-                        onClick={handleGenerateImage}
-                      >
-                        {generateImage.isPending ? (
-                          <>
-                            <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full" />
-                            Gerando…
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles className="h-3 w-3" />
-                            Gerar imagem
-                          </>
-                        )}
-                      </Button>
                     </div>
                   )}
                 </div>
@@ -633,7 +798,7 @@ export function EditPostDialog({
                 <span className="flex items-center gap-2">
                   <VideoIcon className="h-4 w-4 text-(--text-secondary)" />
                   Vídeo
-                  {post?.video_url && (
+                  {!localVideoDeleted && (localVideoUrl || post?.video_url) && (
                     <span className="rounded-full bg-(--accent)/15 px-1.5 py-0.5 text-xs text-(--accent)">
                       Adicionado
                     </span>
@@ -648,35 +813,78 @@ export function EditPostDialog({
 
               {videoOpen && (
                 <div className="border-t border-(--border-subtle) p-3 flex flex-col gap-3">
-                  {post?.video_url ? (
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 text-sm text-(--text-secondary) truncate">
-                        <VideoIcon className="h-4 w-4 shrink-0" />
-                        <span className="truncate">
-                          {post.video_s3_key?.split("/").pop() ?? "video.mp4"}
-                        </span>
-                        {post.linkedin_video_urn && (
-                          <span className="shrink-0 rounded-full bg-green-100 px-1.5 py-0.5 text-xs text-green-700 dark:bg-green-900 dark:text-green-300">
-                            Processado
-                          </span>
-                        )}
+                  {!localVideoDeleted && (localVideoUrl || post?.video_url) ? (
+                    <div className="flex flex-col gap-2">
+                      {/* Mini player 16:9 com botão ampliar */}
+                      <div className="relative w-full aspect-video">
+                        <video
+                          src={
+                            localVideoUrl ??
+                            (post?.video_s3_key
+                              ? `/api/backend/api/content/posts/${post.id}/video`
+                              : undefined)
+                          }
+                          controls
+                          preload="metadata"
+                          className="absolute inset-0 w-full h-full rounded-md bg-black object-contain"
+                        />
+                        <button
+                          type="button"
+                          title="Ampliar vídeo"
+                          className="absolute top-2 right-2 z-10 rounded-full bg-black/50 p-1.5 text-white hover:bg-black/75 transition-colors"
+                          onClick={() => setVideoLightboxOpen(true)}
+                        >
+                          <Maximize2 className="h-3.5 w-3.5" />
+                        </button>
                       </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 text-xs gap-1 text-(--danger) hover:text-(--danger) shrink-0"
-                        disabled={deleteVideo.isPending}
-                        onClick={() => post && deleteVideo.mutate(post.id)}
-                      >
-                        <X className="h-3 w-3" />
-                        Remover
-                      </Button>
+                      {/* Info row */}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-sm text-(--text-secondary) min-w-0">
+                          <VideoIcon className="h-4 w-4 shrink-0" />
+                          <span className="truncate">
+                            {localVideoName ?? post?.video_filename ?? "video.mp4"}
+                          </span>
+                          {(localVideoSizeMB ??
+                            (post?.video_size_bytes
+                              ? (post.video_size_bytes / 1024 / 1024).toFixed(1)
+                              : null)) && (
+                            <span className="shrink-0 text-xs text-(--text-tertiary)">
+                              {localVideoSizeMB ??
+                                (post?.video_size_bytes
+                                  ? (post.video_size_bytes / 1024 / 1024).toFixed(1)
+                                  : null)}{" "}
+                              MB
+                            </span>
+                          )}
+                          {post?.linkedin_video_urn && (
+                            <span className="shrink-0 rounded-full bg-green-100 px-1.5 py-0.5 text-xs text-green-700 dark:bg-green-900 dark:text-green-300">
+                              Processado
+                            </span>
+                          )}
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs gap-1 text-(--danger) hover:text-(--danger) shrink-0"
+                          disabled={deleteVideo.isPending}
+                          onClick={() => {
+                            if (post) deleteVideo.mutate(post.id)
+                            setLocalVideoDeleted(true)
+                            setLocalVideoUrl(null)
+                            setLocalVideoName(null)
+                            setLocalVideoSizeMB(null)
+                          }}
+                        >
+                          <X className="h-3 w-3" />
+                          Remover
+                        </Button>
+                      </div>
                     </div>
                   ) : (
                     <div className="flex flex-col gap-2">
                       <p className="text-xs text-(--text-secondary)">
-                        Selecione um arquivo MP4 (máx. 500 MB).
+                        Selecione um arquivo MP4 (máx. 150 MB).
                       </p>
                       <div className="flex items-center gap-2">
                         <input
@@ -860,10 +1068,36 @@ export function EditPostDialog({
           </DialogHeader>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={localImage ? localImage.url : `/api/backend/api/content/posts/${post?.id}/image`}
+            src={
+              localImage?.url ??
+              localUploadedImage?.url ??
+              (post?.image_s3_key ? `/api/backend/api/content/posts/${post?.id}/image` : undefined)
+            }
             alt="Imagem do post"
             className="w-full max-h-[85vh] object-contain rounded"
           />
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Lightbox de vídeo ── */}
+      <Dialog open={videoLightboxOpen} onOpenChange={setVideoLightboxOpen}>
+        <DialogContent className="max-w-5xl w-full p-2 bg-black/90 border-0 [&>button]:text-white [&>button]:opacity-100 [&>button]:bg-white/20 [&>button]:rounded-full [&>button]:p-1 [&>button]:hover:bg-white/40">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Vídeo do post</DialogTitle>
+          </DialogHeader>
+          <div className="w-full aspect-video">
+            <video
+              src={
+                localVideoUrl ??
+                (post?.video_s3_key
+                  ? `/api/backend/api/content/posts/${post?.id}/video`
+                  : undefined)
+              }
+              controls
+              autoPlay
+              className="w-full h-full rounded object-contain bg-black"
+            />
+          </div>
         </DialogContent>
       </Dialog>
     </>

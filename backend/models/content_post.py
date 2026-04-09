@@ -126,11 +126,25 @@ class ContentPost(Base, TenantMixin, TimestampMixin):
     image_aspect_ratio: Mapped[str | None] = mapped_column(
         String(10), nullable=True, comment="4:5 | 1:1 | 16:9"
     )
+    image_filename: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Nome original do arquivo enviado pelo usuário (upload manual)",
+    )
+    image_size_bytes: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="Tamanho em bytes — preenchido no upload manual"
+    )
     linkedin_image_urn: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # ── Mídia: Vídeo ──────────────────────────────────────────────────
     video_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     video_s3_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    video_filename: Mapped[str | None] = mapped_column(
+        String(500), nullable=True, comment="Nome original do arquivo enviado pelo usuário"
+    )
+    video_size_bytes: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="Tamanho do arquivo em bytes"
+    )
     linkedin_video_urn: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # ── Controle ──────────────────────────────────────────────────────

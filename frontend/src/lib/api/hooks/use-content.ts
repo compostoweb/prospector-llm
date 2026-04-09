@@ -37,10 +37,14 @@ export interface ContentPost {
   image_style: string | null
   image_prompt: string | null
   image_aspect_ratio: string | null
+  image_filename: string | null
+  image_size_bytes: number | null
   linkedin_image_urn: string | null
   // Mídia: vídeo
   video_url: string | null
   video_s3_key: string | null
+  video_filename: string | null
+  video_size_bytes: number | null
   linkedin_video_urn: string | null
   impressions: number
   likes: number
@@ -776,6 +780,31 @@ export function useDeletePostImage() {
         },
       )
       if (!res.ok) throw new Error("Erro ao excluir imagem")
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: contentKeys.all }),
+  })
+}
+
+export function useUploadPostImage() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ postId, file }: { postId: string; file: File }) => {
+      const formData = new FormData()
+      formData.append("file", file)
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/posts/${postId}/upload-image`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
+          body: formData,
+        },
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { detail?: string }).detail ?? "Erro ao fazer upload da imagem")
+      }
+      return res.json() as Promise<ContentPost>
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: contentKeys.all }),
   })

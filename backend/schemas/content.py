@@ -83,9 +83,13 @@ class ContentPostResponse(BaseModel):
     image_style: str | None
     image_prompt: str | None
     image_aspect_ratio: str | None
+    image_filename: str | None
+    image_size_bytes: int | None
     linkedin_image_urn: str | None
     video_url: str | None
     video_s3_key: str | None
+    video_filename: str | None
+    video_size_bytes: int | None
     linkedin_video_urn: str | None
     impressions: int
     likes: int

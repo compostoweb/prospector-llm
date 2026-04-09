@@ -14,10 +14,12 @@ Auth:     S3_ACCESS_KEY + S3_SECRET_KEY
 
 from __future__ import annotations
 
+import io
 import uuid
 
 import boto3
 import structlog
+from boto3.s3.transfer import TransferConfig
 from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
 
@@ -49,13 +51,20 @@ class S3Client:
     ) -> str:
         """
         Faz upload de bytes para o bucket.
+        Usa multipart transfer para arquivos grandes (> 8 MB).
         Retorna a URL pública do objeto.
         """
-        self._client.put_object(
-            Bucket=self._bucket,
-            Key=key,
-            Body=data,
-            ContentType=content_type,
+        transfer_config = TransferConfig(
+            multipart_threshold=8 * 1024 * 1024,
+            multipart_chunksize=8 * 1024 * 1024,
+            use_threads=True,
+        )
+        self._client.upload_fileobj(
+            io.BytesIO(data),
+            self._bucket,
+            key,
+            ExtraArgs={"ContentType": content_type},
+            Config=transfer_config,
         )
         url = f"{self._endpoint}/{self._bucket}/{key}"
         logger.info("s3.uploaded", key=key, content_type=content_type)
@@ -92,6 +101,22 @@ class S3Client:
         data: bytes = response["Body"].read()
         content_type: str = response.get("ContentType", "application/octet-stream")
         return data, content_type
+
+    def get_object_range(self, key: str, range_header: str) -> dict:
+        """
+        Busca um intervalo de bytes de um objeto (para streaming de vídeo com Range requests).
+        Retorna dict com 'body' (bytes), 'content_range' (str), 'content_length' (int),
+        'total_size' (int) e 'content_type' (str).
+        """
+        response = self._client.get_object(Bucket=self._bucket, Key=key, Range=range_header)
+        body: bytes = response["Body"].read()
+        return {
+            "body": body,
+            "content_range": response.get("ContentRange", ""),
+            "content_length": len(body),
+            "total_size": response.get("ContentLength", len(body)),
+            "content_type": response.get("ContentType", "video/mp4"),
+        }
 
     def get_public_url(self, key: str) -> str:
         """Retorna a URL pública para um objeto."""
