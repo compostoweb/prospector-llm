@@ -47,6 +47,7 @@ celery_app = Celery(
         "workers.warmup",
         "workers.connection_check",
         "workers.anthropic_batch",
+        "workers.content_engagement",
     ],
 )
 

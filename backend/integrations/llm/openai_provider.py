@@ -7,8 +7,6 @@ Lista modelos dinamicamente via GET /v1/models e filtra apenas os de chat.
 
 from __future__ import annotations
 
-import re
-
 import httpx
 import structlog
 from openai import AsyncOpenAI
@@ -63,6 +61,14 @@ def _is_chat_model(model_id: str) -> bool:
     return any(model_id.startswith(p) for p in _CHAT_PREFIXES)
 
 
+# Modelos que exigem max_completion_tokens em vez de max_tokens
+_MAX_COMPLETION_TOKENS_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+
+
+def _uses_max_completion_tokens(model: str) -> bool:
+    return any(model.startswith(p) for p in _MAX_COMPLETION_TOKENS_PREFIXES)
+
+
 class OpenAIProvider(LLMProvider):
 
     def __init__(self, api_key: str) -> None:
@@ -90,8 +96,14 @@ class OpenAIProvider(LLMProvider):
             "model": model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
             "temperature": temperature,
-            "max_tokens": max_tokens,
         }
+
+        # Modelos gpt-5.x e o-series exigem max_completion_tokens
+        if _uses_max_completion_tokens(model):
+            kwargs["max_completion_tokens"] = max_tokens
+        else:
+            kwargs["max_tokens"] = max_tokens
+
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 

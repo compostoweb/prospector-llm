@@ -11,6 +11,7 @@ import {
   Lightbulb,
   LayoutList,
   Inbox,
+  MessageSquare,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Route } from "next"
@@ -20,6 +21,7 @@ const TABS = [
   { href: "/content/posts", label: "Posts", Icon: LayoutList },
   { href: "/content/calendario", label: "Calendário", Icon: FileText },
   { href: "/content/inbound", label: "Inbound", Icon: Inbox },
+  { href: "/content/engajamento", label: "Engajamento", Icon: MessageSquare },
   { href: "/content/gerar", label: "Gerar com IA", Icon: Sparkles },
   { href: "/content/temas", label: "Temas", Icon: Lightbulb },
   { href: "/content/referencias", label: "Referências", Icon: BookOpen },

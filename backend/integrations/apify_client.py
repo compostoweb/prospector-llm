@@ -30,7 +30,7 @@ logger = structlog.get_logger()
 _BASE_URL = "https://api.apify.com/v2"
 _TIMEOUT = 60.0
 _POLL_INTERVAL_SECONDS = 5
-_MAX_WAIT_SECONDS = 300  # 5 minutos
+_MAX_WAIT_SECONDS = 120  # 2 minutos por run
 
 
 @dataclass
@@ -115,9 +115,12 @@ class ApifyClient:
         Dispara um Actor, aguarda sua conclusão e retorna os itens do dataset.
         Usa polling com intervalo de _POLL_INTERVAL_SECONDS.
         """
+        # Apify usa "~" como separador owner/actor na URL REST
+        actor_path = actor_id.replace("/", "~")
+
         # Dispara o run
         run_response = await self._client.post(
-            f"/acts/{actor_id}/runs",
+            f"/acts/{actor_path}/runs",
             json=input_data,
         )
         run_response.raise_for_status()
@@ -129,6 +132,7 @@ class ApifyClient:
 
         # Aguarda conclusão
         elapsed = 0
+        status = "RUNNING"
         while elapsed < _MAX_WAIT_SECONDS:
             await asyncio.sleep(_POLL_INTERVAL_SECONDS)
             elapsed += _POLL_INTERVAL_SECONDS
@@ -137,10 +141,22 @@ class ApifyClient:
             status_response.raise_for_status()
             status = status_response.json().get("data", {}).get("status", "")
 
+            logger.info(
+                "apify.actor.polling",
+                actor=actor_id,
+                run_id=run_id,
+                status=status,
+                elapsed_s=elapsed,
+            )
+
             if status == "SUCCEEDED":
                 break
             elif status in ("FAILED", "ABORTED", "TIMED-OUT"):
                 raise RuntimeError(f"Apify Actor {actor_id} falhou com status: {status}")
+        else:
+            raise RuntimeError(
+                f"Apify Actor {actor_id} excedeu timeout de {_MAX_WAIT_SECONDS}s (status={status})"
+            )
 
         # Busca os itens do dataset
         items_response = await self._client.get(
@@ -155,7 +171,7 @@ class ApifyClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def __aenter__(self) -> "ApifyClient":
+    async def __aenter__(self) -> ApifyClient:
         return self
 
     async def __aexit__(self, *_: object) -> None:

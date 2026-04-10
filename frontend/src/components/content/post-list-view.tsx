@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { formatDateBR } from "@/lib/date"
+import { toZonedTime } from "date-fns-tz"
 import {
   ExternalLink,
   Eye,
@@ -404,6 +405,28 @@ export function PostListView({ posts, sortBy, onSortChange }: PostListViewProps)
   )
 }
 
+const DAY_LABELS: Record<number, { label: string; color: string }> = {
+  1: { label: "Segunda", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300" },
+  2: { label: "Terça", color: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300" },
+  3: { label: "Quarta", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" },
+  4: { label: "Quinta", color: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" },
+  5: { label: "Sexta", color: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300" },
+  6: { label: "Sábado", color: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400" },
+  0: { label: "Domingo", color: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400" },
+}
+
+function DayOfWeekBadge({ dateStr }: { dateStr: string }) {
+  const d = toZonedTime(dateStr, "America/Sao_Paulo")
+  const dow = d.getDay()
+  const info = DAY_LABELS[dow]
+  if (!info) return null
+  return (
+    <span className={`inline-flex items-center rounded px-1 py-0.5 text-[10px] font-semibold leading-none ${info.color}`}>
+      {info.label}
+    </span>
+  )
+}
+
 function SortHeader({
   label,
   sortKey,
@@ -569,7 +592,8 @@ function PostRow({
           )}
         </div>
         {dateStr && (
-          <span className="text-xs text-(--text-tertiary)">
+          <span className="flex items-center gap-1.5 text-xs text-(--text-tertiary)">
+            <DayOfWeekBadge dateStr={dateStr} />
             {formatDateBR(dateStr, "dd MMM yyyy 'às' HH:mm")}
           </span>
         )}

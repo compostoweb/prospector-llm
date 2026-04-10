@@ -11,6 +11,7 @@ from fastapi import APIRouter
 
 from api.routes.content import (
 	calculator,
+	engagement,
 	generate,
 	landing_pages,
 	lead_magnets,
@@ -34,3 +35,4 @@ router.include_router(lead_magnets.router)
 router.include_router(landing_pages.router)
 router.include_router(calculator.router)
 router.include_router(notion_import.router)
+router.include_router(engagement.router)

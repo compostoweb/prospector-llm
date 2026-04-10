@@ -10,6 +10,8 @@ import {
   Loader2,
   Sparkles,
   CheckCircle2,
+  LayoutGrid,
+  List,
 } from "lucide-react"
 import {
   useContentReferences,
@@ -39,7 +41,14 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { PillarBadge } from "@/components/content/post-badges"
+import { cn } from "@/lib/utils"
+import { PillarBadge, HookBadge } from "@/components/content/post-badges"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 const PILLAR_OPTIONS: { value: PostPillar; label: string }[] = [
   { value: "authority", label: "Autoridade" },
@@ -55,10 +64,6 @@ const HOOK_OPTIONS: { value: HookType; label: string }[] = [
   { value: "benefit", label: "Benefício" },
   { value: "data", label: "Dado" },
 ]
-
-const HOOK_LABEL: Record<HookType, string> = Object.fromEntries(
-  HOOK_OPTIONS.map((o) => [o.value, o.label]),
-) as Record<HookType, string>
 
 function emptyForm(): ContentReferenceCreate {
   return {
@@ -86,12 +91,21 @@ export function ReferencesList() {
   const [hookFilter, setHookFilter] = useState<HookType | "all">("all")
   const [urlInput, setUrlInput] = useState("")
   const [aiAnalyzed, setAiAnalyzed] = useState(false)
+  const [viewMode, setViewMode] = useState<"table" | "grid">("table")
+  const [viewRef, setViewRef] = useState<ContentReference | null>(null)
+  const [engSort, setEngSort] = useState<"all" | "asc" | "desc">("all")
 
-  const filteredRefs = (references ?? []).filter((ref) => {
-    if (pillarFilter !== "all" && ref.pillar !== pillarFilter) return false
-    if (hookFilter !== "all" && ref.hook_type !== hookFilter) return false
-    return true
-  })
+  const filteredRefs = (references ?? [])
+    .filter((ref) => {
+      if (pillarFilter !== "all" && ref.pillar !== pillarFilter) return false
+      if (hookFilter !== "all" && ref.hook_type !== hookFilter) return false
+      return true
+    })
+    .sort((a, b) => {
+      if (engSort === "desc") return (b.engagement_score ?? 0) - (a.engagement_score ?? 0)
+      if (engSort === "asc") return (a.engagement_score ?? 0) - (b.engagement_score ?? 0)
+      return 0
+    })
 
   function handleChange(field: keyof ContentReferenceCreate, value: string | number | null) {
     setForm((prev) => ({ ...prev, [field]: value === "" ? null : value }))
@@ -135,48 +149,30 @@ export function ReferencesList() {
             Posts de inspiração que a IA pode usar como referência para geração de conteúdo.
           </p>
         </div>
-        <Button size="sm" className="gap-1.5" onClick={() => setSheetOpen(true)}>
-          <Plus className="h-3.5 w-3.5" />
-          Adicionar
-        </Button>
-      </div>
-
-      {/* Filtros */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Filter className="h-4 w-4 text-(--text-tertiary)" />
-        <Select
-          value={pillarFilter}
-          onValueChange={(v) => setPillarFilter(v as PostPillar | "all")}
-        >
-          <SelectTrigger className="h-8 w-40 text-xs">
-            <SelectValue placeholder="Todos os pilares" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all" className="text-xs">
-              Todos os pilares
-            </SelectItem>
-            {PILLAR_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value} className="text-xs">
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={hookFilter} onValueChange={(v) => setHookFilter(v as HookType | "all")}>
-          <SelectTrigger className="h-8 w-44 text-xs">
-            <SelectValue placeholder="Todos os ganchos" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all" className="text-xs">
-              Todos os ganchos
-            </SelectItem>
-            {HOOK_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value} className="text-xs">
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 rounded-md border border-(--border-default) p-0.5">
+            <button
+              type="button"
+              onClick={() => setViewMode("table")}
+              className={`p-1.5 rounded transition-colors ${viewMode === "table" ? "bg-(--accent) text-white" : "text-(--text-tertiary) hover:text-(--text-secondary)"}`}
+              title="Visualização em lista"
+            >
+              <List className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("grid")}
+              className={`p-1.5 rounded transition-colors ${viewMode === "grid" ? "bg-(--accent) text-white" : "text-(--text-tertiary) hover:text-(--text-secondary)"}`}
+              title="Visualização em cards"
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </button>
+          </div>
+          <Button size="sm" className="gap-1.5" onClick={() => setSheetOpen(true)}>
+            <Plus className="h-3.5 w-3.5" />
+            Adicionar
+          </Button>
+        </div>
       </div>
 
       {/* Lista */}
@@ -196,6 +192,109 @@ export function ReferencesList() {
         <div className="flex flex-col items-center justify-center gap-2 py-8 text-center">
           <p className="text-sm text-(--text-tertiary)">Nenhuma referência com esses filtros.</p>
         </div>
+      ) : viewMode === "table" ? (
+        <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) overflow-hidden shadow-sm">
+          {/* Header */}
+          <div
+            className={cn(
+              "grid gap-2 px-4 py-2.5 border-b border-(--border-default) bg-(--bg-overlay) text-xs font-medium text-(--text-tertiary) uppercase tracking-wide items-center",
+              REF_GRID_COLS,
+            )}
+          >
+            <span>Post</span>
+            {/* Pilar filter */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={`flex items-center gap-1 text-xs font-medium uppercase tracking-wide hover:text-(--text-primary) transition-colors ${
+                    pillarFilter !== "all" ? "text-(--accent)" : "text-(--text-tertiary)"
+                  }`}
+                >
+                  Pilar
+                  <Filter className="h-3 w-3" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-36">
+                {[{ value: "all", label: "Todos" }, ...PILLAR_OPTIONS].map((opt) => (
+                  <DropdownMenuItem
+                    key={opt.value}
+                    onSelect={() => setPillarFilter(opt.value as PostPillar | "all")}
+                    className={pillarFilter === opt.value ? "font-medium text-(--accent)" : ""}
+                  >
+                    {opt.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {/* Gancho filter */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={`flex items-center gap-1 text-xs font-medium uppercase tracking-wide hover:text-(--text-primary) transition-colors ${
+                    hookFilter !== "all" ? "text-(--accent)" : "text-(--text-tertiary)"
+                  }`}
+                >
+                  Gancho
+                  <Filter className="h-3 w-3" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-40">
+                {[{ value: "all", label: "Todos" }, ...HOOK_OPTIONS].map((opt) => (
+                  <DropdownMenuItem
+                    key={opt.value}
+                    onSelect={() => setHookFilter(opt.value as HookType | "all")}
+                    className={hookFilter === opt.value ? "font-medium text-(--accent)" : ""}
+                  >
+                    {opt.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {/* Engajamento sort */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={`flex items-center gap-1 text-xs font-medium uppercase tracking-wide hover:text-(--text-primary) transition-colors text-right ${
+                    engSort !== "all" ? "text-(--accent)" : "text-(--text-tertiary)"
+                  }`}
+                >
+                  Engajamento
+                  <Filter className="h-3 w-3" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                {[
+                  { value: "all", label: "Sem ordenação" },
+                  { value: "desc", label: "↓ Maior primeiro" },
+                  { value: "asc", label: "↑ Menor primeiro" },
+                ].map((opt) => (
+                  <DropdownMenuItem
+                    key={opt.value}
+                    onSelect={() => setEngSort(opt.value as "all" | "asc" | "desc")}
+                    className={engSort === opt.value ? "font-medium text-(--accent)" : ""}
+                  >
+                    {opt.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <span>Salvo em</span>
+            <span className="text-center">Ações</span>
+          </div>
+          {/* Rows */}
+          {filteredRefs.map((ref) => (
+            <ReferenceRow
+              key={ref.id}
+              reference={ref}
+              onDelete={() => deleteRef.mutate(ref.id)}
+              isDeleting={deleteRef.isPending && deleteRef.variables === ref.id}
+              onView={() => setViewRef(ref)}
+            />
+          ))}
+        </div>
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           {filteredRefs.map((ref) => (
@@ -204,10 +303,14 @@ export function ReferencesList() {
               reference={ref}
               onDelete={() => deleteRef.mutate(ref.id)}
               isDeleting={deleteRef.isPending && deleteRef.variables === ref.id}
+              onView={() => setViewRef(ref)}
             />
           ))}
         </div>
       )}
+
+      {/* Detail modal */}
+      <ReferenceDetailDialog reference={viewRef} onClose={() => setViewRef(null)} />
 
       {/* Dialog de criação */}
       <Dialog
@@ -434,17 +537,130 @@ export function ReferencesList() {
   )
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  })
+}
+
+function formatScore(score: number | null): string {
+  if (score === null) return "—"
+  return score.toLocaleString("pt-BR")
+}
+
+// ── Grid layout ──────────────────────────────────────────────────────
+
+const REF_GRID_COLS = "grid-cols-[1fr_80px_110px_100px_100px_70px]"
+
+// ── Row (table view) ─────────────────────────────────────────────────
+
+interface ReferenceRowProps {
+  reference: ContentReference
+  onDelete: () => void
+  isDeleting: boolean
+  onView: () => void
+}
+
+function ReferenceRow({ reference, onDelete, isDeleting, onView }: ReferenceRowProps) {
+  return (
+    <div
+      className={cn(
+        "grid gap-2 px-4 py-3 border-b border-(--border-default) last:border-b-0 hover:bg-(--bg-overlay) transition-colors items-center text-xs cursor-pointer",
+        REF_GRID_COLS,
+      )}
+      onClick={onView}
+    >
+      {/* Autor + preview */}
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <p className="text-sm font-medium text-(--text-primary) truncate">
+          {reference.author_name ?? "Sem autor"}
+        </p>
+        {reference.author_title && (
+          <p className="text-xs text-(--text-tertiary) truncate">{reference.author_title}</p>
+        )}
+        <p className="text-xs text-(--text-secondary) truncate mt-0.5">{reference.body}</p>
+      </div>
+
+      {/* Pilar */}
+      <div>
+        {reference.pillar ? (
+          <PillarBadge pillar={reference.pillar} />
+        ) : (
+          <span className="text-xs text-(--text-tertiary)">—</span>
+        )}
+      </div>
+
+      {/* Gancho */}
+      <div>
+        {reference.hook_type ? (
+          <HookBadge hook={reference.hook_type} />
+        ) : (
+          <span className="text-xs text-(--text-tertiary)">—</span>
+        )}
+      </div>
+
+      {/* Engajamento */}
+      <div className="text-right">
+        <span className="text-sm tabular-nums text-(--text-secondary)">
+          {formatScore(reference.engagement_score)}
+          {reference.engagement_score !== null && (
+            <span className="text-xs text-(--text-tertiary) ml-0.5">pts</span>
+          )}
+        </span>
+      </div>
+
+      {/* Data */}
+      <div>
+        <span className="text-xs text-(--text-tertiary) tabular-nums">
+          {formatDate(reference.created_at)}
+        </span>
+      </div>
+
+      {/* Ações */}
+      <div className="flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
+        {reference.source_url && (
+          <a
+            href={reference.source_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-1.5 rounded text-(--text-tertiary) hover:text-(--text-primary) transition-colors"
+            title="Ver fonte"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        )}
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={isDeleting}
+          className="p-1.5 rounded text-(--text-tertiary) hover:text-(--danger) transition-colors disabled:opacity-50"
+          title="Excluir"
+        >
+          {isDeleting ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Trash2 className="h-3.5 w-3.5" />
+          )}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── Card individual ───────────────────────────────────────────────────
 
 interface ReferenceCardProps {
   reference: ContentReference
   onDelete: () => void
   isDeleting: boolean
+  onView: () => void
 }
 
-function ReferenceCard({ reference, onDelete, isDeleting }: ReferenceCardProps) {
-  const [expanded, setExpanded] = useState(false)
-
+function ReferenceCard({ reference, onDelete, isDeleting, onView }: ReferenceCardProps) {
   const initials = (reference.author_name ?? "?")
     .split(" ")
     .map((w) => w[0])
@@ -453,7 +669,10 @@ function ReferenceCard({ reference, onDelete, isDeleting }: ReferenceCardProps) 
     .toUpperCase()
 
   return (
-    <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-4 flex flex-col gap-3 shadow-sm">
+    <div
+      className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-4 flex flex-col gap-3 shadow-sm cursor-pointer hover:bg-(--bg-overlay) transition-colors"
+      onClick={onView}
+    >
       {/* Autor */}
       <div className="flex items-center gap-3">
         <div className="h-8 w-8 rounded-full bg-(--accent)/15 text-(--accent) flex items-center justify-center text-xs font-bold shrink-0">
@@ -473,31 +692,20 @@ function ReferenceCard({ reference, onDelete, isDeleting }: ReferenceCardProps) 
         </div>
       </div>
 
-      {/* Barra de engajamento */}
+      {/* Engajamento */}
       {reference.engagement_score !== null && (
-        <div className="flex items-center gap-2">
-          <div className="flex-1 h-1.5 bg-(--bg-overlay) rounded-full overflow-hidden">
-            <div
-              className={`h-full bg-(--accent) rounded-full transition-all [--bar-w:${reference.engagement_score}%] w-(--bar-w)`}
-            />
-          </div>
-          <span className="text-xs text-(--text-tertiary) tabular-nums shrink-0">
-            {reference.engagement_score}/100
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-semibold tabular-nums text-(--text-primary)">
+            {formatScore(reference.engagement_score)}
           </span>
+          <span className="text-xs text-(--text-tertiary)">pts engajamento</span>
         </div>
       )}
 
-      {/* Corpo do post */}
-      <button type="button" className="text-left" onClick={() => setExpanded((v) => !v)}>
-        <p
-          className={`text-sm text-(--text-secondary) whitespace-pre-wrap leading-relaxed ${!expanded ? "line-clamp-3" : ""}`}
-        >
-          {reference.body}
-        </p>
-        <span className="text-xs text-(--accent) mt-1 inline-block">
-          {expanded ? "Recolher" : `${reference.body.length} chars · Ver tudo`}
-        </span>
-      </button>
+      {/* Corpo do post (truncated) */}
+      <p className="text-sm text-(--text-secondary) whitespace-pre-wrap leading-relaxed line-clamp-3">
+        {reference.body}
+      </p>
 
       {/* Notas */}
       {reference.notes && (
@@ -509,12 +717,11 @@ function ReferenceCard({ reference, onDelete, isDeleting }: ReferenceCardProps) 
       {/* Footer */}
       <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-(--border-default)">
         {reference.pillar && <PillarBadge pillar={reference.pillar} />}
-        {reference.hook_type && (
-          <span className="inline-flex items-center rounded-full border border-(--border-default) px-2 py-0.5 text-xs text-(--text-tertiary)">
-            {HOOK_LABEL[reference.hook_type]}
-          </span>
-        )}
-        <div className="flex items-center gap-1 ml-auto">
+        {reference.hook_type && <HookBadge hook={reference.hook_type} />}
+        <span className="text-xs text-(--text-tertiary) tabular-nums">
+          {formatDate(reference.created_at)}
+        </span>
+        <div className="flex items-center gap-1 ml-auto" onClick={(e) => e.stopPropagation()}>
           {reference.source_url && (
             <a
               href={reference.source_url}
@@ -542,5 +749,109 @@ function ReferenceCard({ reference, onDelete, isDeleting }: ReferenceCardProps) 
         </div>
       </div>
     </div>
+  )
+}
+
+// ── Detail dialog ─────────────────────────────────────────────────────
+
+function ReferenceDetailDialog({
+  reference,
+  onClose,
+}: {
+  reference: ContentReference | null
+  onClose: () => void
+}) {
+  if (!reference) return null
+
+  const initials = (reference.author_name ?? "?")
+    .split(" ")
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase()
+
+  return (
+    <Dialog
+      open={!!reference}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+    >
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="sr-only">Referência</DialogTitle>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-4">
+          {/* Author */}
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-full bg-(--accent)/15 text-(--accent) flex items-center justify-center text-sm font-bold shrink-0">
+              {initials}
+            </div>
+            <div className="min-w-0 flex-1">
+              {reference.author_name && (
+                <p className="text-sm font-semibold text-(--text-primary) truncate">
+                  {reference.author_name}
+                </p>
+              )}
+              <div className="flex items-center gap-2 text-xs text-(--text-tertiary)">
+                {reference.author_title && (
+                  <span className="truncate">{reference.author_title}</span>
+                )}
+                {reference.author_title && reference.author_company && <span>·</span>}
+                {reference.author_company && (
+                  <span className="truncate">{reference.author_company}</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Meta badges */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {reference.pillar && <PillarBadge pillar={reference.pillar} />}
+            {reference.hook_type && <HookBadge hook={reference.hook_type} />}
+            {reference.engagement_score !== null && (
+              <span className="inline-flex items-center gap-1 text-xs text-(--text-secondary)">
+                <span className="font-semibold tabular-nums">
+                  {formatScore(reference.engagement_score)}
+                </span>
+                <span className="text-(--text-tertiary)">pts</span>
+              </span>
+            )}
+            <span className="text-xs text-(--text-tertiary) tabular-nums ml-auto">
+              Salvo em {formatDate(reference.created_at)}
+            </span>
+          </div>
+
+          {/* Body */}
+          <div className="rounded-lg border border-(--border-default) bg-(--bg-subtle) p-4">
+            <p className="text-sm text-(--text-secondary) whitespace-pre-wrap leading-relaxed">
+              {reference.body}
+            </p>
+          </div>
+
+          {/* Notes */}
+          {reference.notes && (
+            <div className="rounded-lg border border-(--border-default) bg-(--bg-subtle) p-3">
+              <p className="text-xs font-medium text-(--text-tertiary) mb-1">Notas</p>
+              <p className="text-sm text-(--text-secondary)">{reference.notes}</p>
+            </div>
+          )}
+
+          {/* Source link */}
+          {reference.source_url && (
+            <a
+              href={reference.source_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs text-(--accent) hover:underline"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              Ver post original
+            </a>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

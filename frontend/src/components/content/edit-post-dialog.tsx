@@ -61,6 +61,19 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
+const DAY_NAMES: Record<number, string> = {
+  0: "Domingo", 1: "Segunda", 2: "Terça", 3: "Quarta", 4: "Quinta", 5: "Sexta", 6: "Sábado",
+}
+const DAY_COLORS: Record<number, string> = {
+  0: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
+  1: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+  2: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300",
+  3: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
+  4: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+  5: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
+  6: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
+}
+
 const PILLAR_OPTIONS: { value: PostPillar; label: string }[] = [
   { value: "authority", label: "Autoridade" },
   { value: "case", label: "Caso" },
@@ -483,7 +496,14 @@ export function EditPostDialog({
 
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">
-                <Label htmlFor="edit-publish-date">Data de publicação</Label>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="edit-publish-date">Data de publicação</Label>
+                  {publishDate && (
+                    <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-semibold leading-none ${DAY_COLORS[new Date(publishDate).getDay()]}`}>
+                      {DAY_NAMES[new Date(publishDate).getDay()]}
+                    </span>
+                  )}
+                </div>
                 <Input
                   id="edit-publish-date"
                   type="datetime-local"
