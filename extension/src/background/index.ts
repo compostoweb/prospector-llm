@@ -1,5 +1,9 @@
 import { loginWithGoogle, logout } from "./auth";
-import { fetchBootstrap, importLinkedInPost } from "./api";
+import {
+  createEngagementSession,
+  fetchBootstrap,
+  importLinkedInPost,
+} from "./api";
 import {
   clearPreview,
   getBootstrap,
@@ -16,7 +20,11 @@ import {
   type ExtensionMessageResponse,
 } from "../shared/contracts";
 import { normalizePreview } from "../shared/linkedin-normalizer";
-import type { ExtensionState } from "../shared/types";
+import type {
+  CapturePreview,
+  EngagementSessionSummary,
+  ExtensionState,
+} from "../shared/types";
 
 function getExtensionVersion(): string {
   return chrome.runtime.getManifest().version;
@@ -46,6 +54,52 @@ async function refreshBootstrap(): Promise<ExtensionState> {
   return getState();
 }
 
+async function listPostsFromActiveTab(): Promise<CapturePreview[]> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) {
+    return [];
+  }
+
+  const url = tab.url ?? "";
+  if (!url.includes("linkedin.com")) {
+    return [];
+  }
+
+  try {
+    const response = (await chrome.tabs.sendMessage(tab.id, {
+      type: MESSAGE_TYPES.GET_ACTIVE_TAB_POSTS,
+    })) as ExtensionMessageResponse<CapturePreview[]>;
+    if (!response.ok) {
+      throw new Error(response.error ?? "Falha ao listar posts da pagina.");
+    }
+    return response.data ?? [];
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes("Receiving end does not exist")
+    ) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function createManualEngagementSession(): Promise<EngagementSessionSummary> {
+  const config = await getConfig();
+  const session = await getSession();
+  if (!session) {
+    throw new Error("Sessao ausente. Faca login novamente.");
+  }
+
+  const createdSession = await createEngagementSession(
+    config,
+    session,
+    getExtensionVersion(),
+  );
+  await refreshBootstrap();
+  return createdSession;
+}
+
 async function handleMessage(
   message: ExtensionMessage,
 ): Promise<ExtensionMessageResponse<unknown>> {
@@ -61,6 +115,9 @@ async function handleMessage(
       await logout();
       await clearPreview();
       return { ok: true, data: await getState() };
+
+    case MESSAGE_TYPES.GET_ACTIVE_TAB_POSTS:
+      return { ok: true, data: await listPostsFromActiveTab() };
 
     case MESSAGE_TYPES.SAVE_CAPTURED_POST:
       await setPreview(normalizePreview(message.payload));
@@ -85,6 +142,9 @@ async function handleMessage(
 
     case MESSAGE_TYPES.GET_CONFIG:
       return { ok: true, data: await getConfig() };
+
+    case MESSAGE_TYPES.CREATE_ENGAGEMENT_SESSION:
+      return { ok: true, data: await createManualEngagementSession() };
 
     case MESSAGE_TYPES.SAVE_CONFIG:
       await setConfig(message.payload);

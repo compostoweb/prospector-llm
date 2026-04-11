@@ -3,6 +3,10 @@ import { useEffect, useState } from "react";
 import { MESSAGE_TYPES } from "../shared/contracts";
 import type { ExtensionConfig } from "../shared/types";
 
+const DEFAULT_API_BASE_URL = import.meta.env.DEV
+  ? "http://localhost:8000"
+  : "https://api.prospector.compostoweb.com.br";
+
 async function sendMessage<T>(message: object): Promise<T> {
   const response = (await chrome.runtime.sendMessage(message)) as {
     ok: boolean;
@@ -17,7 +21,7 @@ async function sendMessage<T>(message: object): Promise<T> {
 
 export function OptionsApp() {
   const [config, setConfig] = useState<ExtensionConfig>({
-    apiBaseUrl: "http://localhost:8000",
+    apiBaseUrl: DEFAULT_API_BASE_URL,
   });
   const [message, setMessage] = useState<string | null>(null);
 
@@ -38,6 +42,7 @@ export function OptionsApp() {
       <p>
         Use esta pagina para ajustar o endpoint da API consumido pela extensao.
       </p>
+      <p>Build de producao usa por padrao {DEFAULT_API_BASE_URL}.</p>
       <label className="options-field">
         <span>API base URL</span>
         <input

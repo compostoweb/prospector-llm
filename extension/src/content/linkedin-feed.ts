@@ -1,3 +1,3 @@
-import { installCaptureButtons } from "./injector";
+import { initializeLinkedInCapture } from "./injector";
 
-installCaptureButtons("feed");
+initializeLinkedInCapture("feed");

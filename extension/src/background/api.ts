@@ -1,6 +1,7 @@
 import type {
   CaptureRequestPayload,
   CaptureResponse,
+  EngagementSessionSummary,
   ExtensionBootstrap,
   ExtensionConfig,
   ExtensionSession,
@@ -117,4 +118,19 @@ export async function importLinkedInPost(
     },
   );
   return parseJsonOrThrow<CaptureResponse>(response);
+}
+
+export async function createEngagementSession(
+  config: ExtensionConfig,
+  session: ExtensionSession,
+  extensionVersion: string,
+): Promise<EngagementSessionSummary> {
+  const response = await fetch(
+    `${config.apiBaseUrl}/api/content/extension/engagement/sessions`,
+    {
+      method: "POST",
+      headers: buildHeaders(session, extensionVersion),
+    },
+  );
+  return parseJsonOrThrow<EngagementSessionSummary>(response);
 }

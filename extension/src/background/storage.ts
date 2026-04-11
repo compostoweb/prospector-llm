@@ -6,11 +6,22 @@ import type {
 } from "../shared/types";
 
 const DEFAULT_API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+  import.meta.env.VITE_API_BASE_URL ??
+  (import.meta.env.DEV
+    ? "http://localhost:8000"
+    : "https://api.prospector.compostoweb.com.br");
 const SESSION_KEY = "prospector.session";
 const PREVIEW_KEY = "prospector.preview";
 const BOOTSTRAP_KEY = "prospector.bootstrap";
 const CONFIG_KEY = "prospector.config";
+
+function normalizeApiBaseUrl(value: string | null | undefined): string {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return DEFAULT_API_BASE_URL;
+  }
+  return trimmed.replace(/\/+$/, "");
+}
 
 type SessionArea = typeof chrome.storage.session | typeof chrome.storage.local;
 
@@ -22,12 +33,14 @@ export async function getConfig(): Promise<ExtensionConfig> {
   const result = await chrome.storage.local.get(CONFIG_KEY);
   const config = result[CONFIG_KEY] as ExtensionConfig | undefined;
   return {
-    apiBaseUrl: config?.apiBaseUrl ?? DEFAULT_API_BASE_URL,
+    apiBaseUrl: normalizeApiBaseUrl(config?.apiBaseUrl),
   };
 }
 
 export async function setConfig(config: ExtensionConfig): Promise<void> {
-  await chrome.storage.local.set({ [CONFIG_KEY]: config });
+  await chrome.storage.local.set({
+    [CONFIG_KEY]: { apiBaseUrl: normalizeApiBaseUrl(config.apiBaseUrl) },
+  });
 }
 
 export async function getSession(): Promise<ExtensionSession | null> {

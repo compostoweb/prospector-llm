@@ -57,6 +57,7 @@ class BrowserExtensionLinkedInStatus(BaseModel):
 class BrowserExtensionRecentEngagementSession(BaseModel):
     id: uuid.UUID
     status: str
+    scan_source: str
     created_at: datetime
 
 

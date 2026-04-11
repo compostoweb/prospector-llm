@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
 
 import { MESSAGE_TYPES } from "../shared/contracts";
-import { buildCaptureRequest } from "../shared/linkedin-normalizer";
+import {
+  buildCaptureRequest,
+  buildPreviewKey,
+} from "../shared/linkedin-normalizer";
 import type {
   CaptureDestinationType,
   CapturePreview,
+  EngagementSessionSummary,
   ExtensionState,
 } from "../shared/types";
 
@@ -22,6 +26,8 @@ async function sendMessage<T>(message: object): Promise<T> {
 
 export function PopupApp() {
   const [state, setState] = useState<ExtensionState | null>(null);
+  const [availablePosts, setAvailablePosts] = useState<CapturePreview[]>([]);
+  const [loadingPosts, setLoadingPosts] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,9 +38,10 @@ export function PopupApp() {
 
   useEffect(() => {
     void loadState();
+    void loadAvailablePosts();
   }, []);
 
-  async function loadState() {
+  async function loadState(preferredSessionId?: string | null) {
     setLoading(true);
     setError(null);
     try {
@@ -42,9 +49,23 @@ export function PopupApp() {
         type: MESSAGE_TYPES.GET_STATE,
       });
       setState(nextState);
-      if (nextState.bootstrap?.recent_engagement_sessions[0]?.id) {
-        setSessionId(nextState.bootstrap.recent_engagement_sessions[0].id);
-      }
+      const nextSessions =
+        nextState.bootstrap?.recent_engagement_sessions ?? [];
+      setSessionId((currentSessionId) => {
+        if (
+          preferredSessionId &&
+          nextSessions.some((session) => session.id === preferredSessionId)
+        ) {
+          return preferredSessionId;
+        }
+        if (
+          currentSessionId &&
+          nextSessions.some((session) => session.id === currentSessionId)
+        ) {
+          return currentSessionId;
+        }
+        return nextSessions[0]?.id ?? null;
+      });
     } catch (nextError) {
       setError(
         nextError instanceof Error
@@ -56,6 +77,24 @@ export function PopupApp() {
     }
   }
 
+  async function loadAvailablePosts() {
+    setLoadingPosts(true);
+    try {
+      const posts = await sendMessage<CapturePreview[]>({
+        type: MESSAGE_TYPES.GET_ACTIVE_TAB_POSTS,
+      });
+      setAvailablePosts(posts);
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Falha ao ler posts da aba ativa",
+      );
+    } finally {
+      setLoadingPosts(false);
+    }
+  }
+
   async function handleLogin() {
     setBusy("login");
     setError(null);
@@ -64,9 +103,52 @@ export function PopupApp() {
         type: MESSAGE_TYPES.AUTH_LOGIN,
       });
       setState(nextState);
+      await loadAvailablePosts();
     } catch (nextError) {
       setError(
         nextError instanceof Error ? nextError.message : "Falha no login",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleSelectPreview(preview: CapturePreview) {
+    setBusy("select-preview");
+    setError(null);
+    try {
+      const nextState = await sendMessage<ExtensionState>({
+        type: MESSAGE_TYPES.SAVE_CAPTURED_POST,
+        payload: preview,
+      });
+      setState(nextState);
+      setResultMessage("Post selecionado para importacao.");
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Falha ao selecionar post",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleCreateSession() {
+    setBusy("create-session");
+    setError(null);
+    try {
+      const session = await sendMessage<EngagementSessionSummary>({
+        type: MESSAGE_TYPES.CREATE_ENGAGEMENT_SESSION,
+      });
+      setDestination("engagement");
+      await loadState(session.id);
+      setResultMessage("Nova sessao de engagement criada.");
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Falha ao criar sessao",
       );
     } finally {
       setBusy(null);
@@ -123,6 +205,18 @@ export function PopupApp() {
 
   const preview = state?.preview ?? null;
   const sessions = state?.bootstrap?.recent_engagement_sessions ?? [];
+  const selectedPreviewKey = preview ? buildPreviewKey(preview) : null;
+
+  function formatSessionLabel(session: EngagementSessionSummary): string {
+    const sourceLabel = session.scan_source === "manual" ? "Manual" : "Scanner";
+    const statusLabel =
+      session.status === "running"
+        ? "Em andamento"
+        : session.status === "completed"
+          ? "Concluida"
+          : "Parcial";
+    return `${sourceLabel} · ${statusLabel} · ${new Date(session.created_at).toLocaleString("pt-BR")}`;
+  }
 
   return (
     <div className="popup-shell">
@@ -200,31 +294,93 @@ export function PopupApp() {
               </button>
             </div>
             {destination === "engagement" ? (
-              <select
-                aria-label="Selecionar sessao de engagement"
-                value={sessionId ?? ""}
-                onChange={(event) => setSessionId(event.target.value || null)}
-                className="popup-select"
-              >
-                <option value="">Selecione uma sessao</option>
-                {sessions.map((session) => (
-                  <option key={session.id} value={session.id}>
-                    {session.status} ·{" "}
-                    {new Date(session.created_at).toLocaleString("pt-BR")}
-                  </option>
-                ))}
-              </select>
+              <div className="popup-stack">
+                <select
+                  aria-label="Selecionar sessao de engagement"
+                  value={sessionId ?? ""}
+                  onChange={(event) => setSessionId(event.target.value || null)}
+                  className="popup-select"
+                >
+                  <option value="">Selecione uma sessao</option>
+                  {sessions.map((session) => (
+                    <option key={session.id} value={session.id}>
+                      {formatSessionLabel(session)}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={handleCreateSession}
+                  disabled={busy !== null}
+                  className="popup-button popup-button--secondary"
+                >
+                  {busy === "create-session"
+                    ? "Criando sessao..."
+                    : "Nova sessao"}
+                </button>
+              </div>
             ) : null}
           </section>
 
           <section className="popup-card">
             <div className="popup-card-title popup-card-title--spaced">
-              Ultimo post capturado
+              Posts detectados na pagina
+            </div>
+            <div className="popup-card-actions">
+              <button
+                onClick={() => void loadAvailablePosts()}
+                disabled={loadingPosts || busy !== null}
+                className="popup-button popup-button--secondary"
+              >
+                {loadingPosts ? "Atualizando..." : "Atualizar lista"}
+              </button>
+            </div>
+            {availablePosts.length === 0 ? (
+              <p className="popup-empty">
+                Nenhum post foi detectado na aba ativa. Abra um feed ou post do
+                LinkedIn e clique em Atualizar lista.
+              </p>
+            ) : null}
+            {availablePosts.length > 0 ? (
+              <div className="popup-post-list">
+                {availablePosts.map((candidate, index) => {
+                  const candidateKey = buildPreviewKey(candidate);
+                  const isSelected = candidateKey === selectedPreviewKey;
+                  return (
+                    <button
+                      key={`${candidateKey}-${index}`}
+                      type="button"
+                      onClick={() => void handleSelectPreview(candidate)}
+                      disabled={busy !== null}
+                      className={`popup-post-item ${isSelected ? "is-active" : ""}`}
+                    >
+                      <div className="popup-post-item__title">
+                        {candidate.author_name ?? "Autor nao identificado"}
+                      </div>
+                      <div className="popup-post-item__meta">
+                        {candidate.author_title ?? "Sem headline visivel"}
+                      </div>
+                      <div className="popup-post-item__text">
+                        {candidate.post_text.slice(0, 140)}
+                        {candidate.post_text.length > 140 ? "..." : ""}
+                      </div>
+                      <div className="popup-post-item__footer">
+                        {isSelected ? "Selecionado" : "Selecionar este post"}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </section>
+
+          <section className="popup-card">
+            <div className="popup-card-title popup-card-title--spaced">
+              Post selecionado
             </div>
             {!preview ? (
               <p className="popup-empty">
-                Clique em Salvar no Prospector em um post do LinkedIn e volte
-                aqui.
+                Selecione um post detectado acima ou use o botao Salvar no
+                Prospector dentro do LinkedIn.
               </p>
             ) : null}
             {preview ? (

@@ -10,10 +10,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible
-from api.routes.content.engagement import _load_session_or_404, _upsert_external_post
+from api.routes.content.engagement import (
+    _load_session_or_404,
+    _upsert_external_post,
+)
 from core.config import settings
 from core.redis_client import redis_client
 from core.security import UserPayload, get_current_user_payload
+from models.content_engagement_event import ContentEngagementEvent
 from models.content_engagement_session import ContentEngagementSession
 from models.content_extension_capture import ContentExtensionCapture
 from models.content_linkedin_account import ContentLinkedInAccount
@@ -186,9 +190,13 @@ async def get_extension_bootstrap(
 
     session_result = await db.execute(
         select(ContentEngagementSession)
-        .where(ContentEngagementSession.tenant_id == tenant_id)
+        .where(
+            ContentEngagementSession.tenant_id == tenant_id,
+            ContentEngagementSession.status != "failed",
+            ContentEngagementSession.error_message.is_(None),
+        )
         .order_by(ContentEngagementSession.created_at.desc())
-        .limit(5)
+        .limit(10)
     )
     sessions = session_result.scalars().all()
 
@@ -215,10 +223,70 @@ async def get_extension_bootstrap(
             BrowserExtensionRecentEngagementSession(
                 id=session.id,
                 status=session.status,
+                scan_source=session.scan_source,
                 created_at=session.created_at,
             )
             for session in sessions
         ],
+    )
+
+
+@router.post(
+    "/engagement/sessions",
+    response_model=BrowserExtensionRecentEngagementSession,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_extension_engagement_session(
+    request: Request,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    user_payload: UserPayload = Depends(get_current_user_payload),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> BrowserExtensionRecentEngagementSession:
+    if not settings.EXTENSION_LINKEDIN_CAPTURE_ENABLED:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Captura via extensao desabilitada neste ambiente.",
+        )
+
+    extension_id, extension_version = _get_extension_headers(request)
+    now = datetime.now(UTC)
+    session = ContentEngagementSession(
+        tenant_id=tenant_id,
+        status="completed",
+        scan_source="manual",
+        completed_at=now,
+    )
+    db.add(session)
+    await db.flush()
+
+    db.add(
+        ContentEngagementEvent(
+            tenant_id=tenant_id,
+            session_id=session.id,
+            event_type="extension_manual_session_created",
+            payload={
+                "extension_id": extension_id,
+                "extension_version": extension_version,
+                "created_by_user_id": str(user_payload.user_id),
+            },
+        )
+    )
+    await db.commit()
+    await db.refresh(session)
+
+    logger.info(
+        "extension.engagement_session.created",
+        extension_id=extension_id,
+        extension_version=extension_version,
+        tenant_id=str(tenant_id),
+        user_id=str(user_payload.user_id),
+        session_id=str(session.id),
+    )
+    return BrowserExtensionRecentEngagementSession(
+        id=session.id,
+        status=session.status,
+        scan_source=session.scan_source,
+        created_at=session.created_at,
     )
 
 

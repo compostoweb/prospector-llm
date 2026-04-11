@@ -32,6 +32,16 @@ export function normalizePreview(preview: CapturePreview): CapturePreview {
   };
 }
 
+export function buildPreviewKey(preview: CapturePreview): string {
+  const normalized = normalizePreview(preview);
+  return [
+    normalized.post_url ?? "",
+    normalized.author_name ?? "",
+    normalized.post_text.slice(0, 160),
+    normalized.captured_from,
+  ].join("::");
+}
+
 export function buildCaptureRequest(
   preview: CapturePreview,
   destinationType: CaptureDestinationType,

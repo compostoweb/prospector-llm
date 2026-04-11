@@ -23,6 +23,7 @@ export interface ExtensionFeatures {
 export interface EngagementSessionSummary {
   id: string;
   status: string;
+  scan_source: string;
   created_at: string;
 }
 

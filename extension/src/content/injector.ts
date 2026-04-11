@@ -1,9 +1,11 @@
 import { MESSAGE_TYPES } from "../shared/contracts";
-import type { CapturedFrom } from "../shared/types";
+import { buildPreviewKey } from "../shared/linkedin-normalizer";
+import type { CapturePreview, CapturedFrom } from "../shared/types";
 import { extractLinkedInPost } from "./dom-parser";
 
 const BUTTON_ATTRIBUTE = "data-prospector-capture-button";
 const BUTTON_CLASSNAME = "prospector-capture-button";
+let runtimeListenerRegistered = false;
 
 function showToast(message: string): void {
   const existing = document.getElementById("prospector-extension-toast");
@@ -83,13 +85,36 @@ function findInjectionTarget(container: HTMLElement): HTMLElement {
   return container;
 }
 
+function getPostContainers(scope: ParentNode): HTMLElement[] {
+  return Array.from(
+    scope.querySelectorAll<HTMLElement>(
+      "div.feed-shared-update-v2, article, .update-components-actor",
+    ),
+  );
+}
+
+function collectLinkedInPosts(
+  scope: ParentNode,
+  capturedFrom: CapturedFrom,
+): CapturePreview[] {
+  const previews = new Map<string, CapturePreview>();
+
+  for (const container of getPostContainers(scope)) {
+    const preview = extractLinkedInPost(container, capturedFrom);
+    if (!preview) {
+      continue;
+    }
+    previews.set(buildPreviewKey(preview), preview);
+  }
+
+  return Array.from(previews.values());
+}
+
 function installButtonsInScope(
   scope: ParentNode,
   capturedFrom: CapturedFrom,
 ): void {
-  const containers = scope.querySelectorAll<HTMLElement>(
-    "div.feed-shared-update-v2, article, .update-components-actor",
-  );
+  const containers = getPostContainers(scope);
 
   containers.forEach((container) => {
     if (container.querySelector(`[${BUTTON_ATTRIBUTE}]`)) {
@@ -105,8 +130,29 @@ function installButtonsInScope(
   });
 }
 
-export function installCaptureButtons(capturedFrom: CapturedFrom): void {
+function registerRuntimeHandlers(capturedFrom: CapturedFrom): void {
+  if (runtimeListenerRegistered) {
+    return;
+  }
+
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type !== MESSAGE_TYPES.GET_ACTIVE_TAB_POSTS) {
+      return undefined;
+    }
+
+    sendResponse({
+      ok: true,
+      data: collectLinkedInPosts(document, capturedFrom),
+    });
+    return true;
+  });
+
+  runtimeListenerRegistered = true;
+}
+
+export function initializeLinkedInCapture(capturedFrom: CapturedFrom): void {
   installButtonsInScope(document, capturedFrom);
+  registerRuntimeHandlers(capturedFrom);
 
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
