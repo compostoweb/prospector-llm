@@ -13,6 +13,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -54,7 +55,26 @@ class ContentEngagementPost(Base, TenantMixin, TimestampMixin):
     author_profile_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Post content
+    source: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="apify",
+        comment="apify | linkedin_api | manual | google",
+    )
+    merged_sources: Mapped[list[str] | None] = mapped_column(
+        JSONB(astext_type=Text()),
+        nullable=True,
+        comment="Lista de fontes mescladas para este post deduplicado",
+    )
+    merge_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        comment="Quantidade de capturas fundidas neste post",
+    )
     post_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    canonical_post_url: Mapped[str | None] = mapped_column(String(500), nullable=True, index=True)
+    dedup_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     post_text: Mapped[str] = mapped_column(Text, nullable=False)
     post_published_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

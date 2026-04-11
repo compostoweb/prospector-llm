@@ -9,7 +9,7 @@ Task principal:
     — Etapa 2: garimpagem de posts de ICP via Apify
     — Etapa 3: analise LLM dos posts (hook/pilar para referencias, relevancia para ICP)
     — Etapa 4: geracao de 2 comentarios por post de ICP relevante
-    — Fila: "content"
+        — Fila: "content-engagement"
 
 IMPORTANTE: nenhum comentario e postado automaticamente.
 O usuario revisa e posta manualmente pela interface.
@@ -179,7 +179,7 @@ MIN_ENGAGEMENT_SCORE = 50
     name="workers.content_engagement.run_engagement_scan",
     max_retries=2,
     default_retry_delay=60,
-    queue="content",
+    queue="content-engagement",
 )
 def run_engagement_scan(
     self,
@@ -225,6 +225,7 @@ async def _mark_session_failed(session_id: str, error_msg: str) -> None:
     from sqlalchemy import select
 
     from core.database import WorkerSessionLocal
+    from models.content_engagement_event import ContentEngagementEvent
     from models.content_engagement_session import ContentEngagementSession
 
     try:
@@ -240,6 +241,14 @@ async def _mark_session_failed(session_id: str, error_msg: str) -> None:
                 session_db.error_message = error_msg[:500]
                 session_db.completed_at = datetime.now(UTC)
                 db.add(session_db)
+                db.add(
+                    ContentEngagementEvent(
+                        tenant_id=session_db.tenant_id,
+                        session_id=session_db.id,
+                        event_type="scan_failed",
+                        payload={"reason": "worker_fatal_error", "error": error_msg[:500]},
+                    )
+                )
             await db.commit()
     except Exception as inner_exc:
         logger.error(
@@ -261,13 +270,15 @@ async def _run_scan_async(
     icp_titles: list[str] | None,
     icp_sectors: list[str] | None,
 ) -> dict:
-    from sqlalchemy import select
+    from sqlalchemy import func, select
+    from sqlalchemy.orm import selectinload
 
     from core.config import settings
     from core.database import WorkerSessionLocal
     from core.redis_client import redis_client
     from integrations.llm.registry import LLMRegistry
     from models.content_engagement_comment import ContentEngagementComment
+    from models.content_engagement_event import ContentEngagementEvent
     from models.content_engagement_post import ContentEngagementPost
     from models.content_engagement_session import ContentEngagementSession
     from models.content_post import ContentPost
@@ -278,9 +289,47 @@ async def _run_scan_async(
         analyze_icp_post_relevance,
         analyze_reference_post,
     )
+    from services.content.engagement_post_identity import (
+        build_post_identity,
+        choose_primary_post_source,
+        merge_post_sources,
+    )
 
     session_uuid = uuid.UUID(session_id)
     tenant_uuid = uuid.UUID(tenant_id)
+
+    async with WorkerSessionLocal() as preflight_db:
+        session_stmt = select(ContentEngagementSession).where(
+            ContentEngagementSession.id == session_uuid,
+            ContentEngagementSession.tenant_id == tenant_uuid,
+        )
+        session_row = await preflight_db.execute(session_stmt)
+        session_db = session_row.scalar_one_or_none()
+
+        if session_db is None:
+            logger.warning(
+                "engagement_scan.session_missing",
+                session_id=session_id,
+                tenant_id=tenant_id,
+            )
+            return {
+                "session_id": session_id,
+                "status": "failed",
+                "error": "Sessao nao encontrada antes do processamento",
+            }
+
+        if session_db.status != "running":
+            logger.warning(
+                "engagement_scan.skipped_stale_session",
+                session_id=session_id,
+                tenant_id=tenant_id,
+                status=session_db.status,
+            )
+            return {
+                "session_id": session_id,
+                "status": session_db.status,
+                "error": session_db.error_message,
+            }
 
     linked_post_keywords: list[str] = []
 
@@ -318,6 +367,47 @@ async def _run_scan_async(
 
     registry = LLMRegistry(settings=settings, redis=redis_client)
     scanner = ApifyLinkedInScanner()
+
+    async def _update_session_fields(**updates: object) -> None:
+        async with WorkerSessionLocal() as audit_db:
+            stmt = select(ContentEngagementSession).where(
+                ContentEngagementSession.id == session_uuid
+            )
+            row = await audit_db.execute(stmt)
+            session_record = row.scalar_one_or_none()
+            if session_record:
+                for field, value in updates.items():
+                    setattr(session_record, field, value)
+                audit_db.add(session_record)
+            await audit_db.commit()
+
+    async def _record_event(event_type: str, payload: dict[str, object] | None = None) -> None:
+        async with WorkerSessionLocal() as event_db:
+            event_db.add(
+                ContentEngagementEvent(
+                    tenant_id=tenant_uuid,
+                    session_id=session_uuid,
+                    event_type=event_type,
+                    payload=payload,
+                )
+            )
+            await event_db.commit()
+
+    await _update_session_fields(
+        linked_post_context_keywords=linked_post_keywords or None,
+        effective_keywords=effective_keywords or None,
+        icp_titles_used=effective_icp_titles or None,
+        icp_sectors_used=effective_icp_sectors or None,
+    )
+    await _record_event(
+        "queue_pickup_started",
+        {
+            "linked_post_id": linked_post_id,
+            "effective_keywords": effective_keywords,
+            "icp_titles_used": effective_icp_titles,
+            "icp_sectors_used": effective_icp_sectors,
+        },
+    )
 
     # Helper: atualiza current_step no banco para o frontend exibir progresso
     async def _set_step(step: int) -> None:
@@ -365,6 +455,10 @@ async def _run_scan_async(
             session_id=session_id,
             references_found=len(reference_posts_data),
         )
+        await _record_event(
+            "reference_search_completed",
+            {"references_found": len(reference_posts_data)},
+        )
     except Exception as exc:
         logger.error(
             "engagement_scan.etapa1_failed",
@@ -385,6 +479,7 @@ async def _run_scan_async(
         icp_posts_data = await scanner.get_icp_recent_posts(
             icp_titles=effective_icp_titles,
             icp_sectors=effective_icp_sectors,
+            topic_keywords=effective_keywords,
             max_results=MAX_ICP_POSTS,
         )
         logger.info(
@@ -400,18 +495,101 @@ async def _run_scan_async(
         )
         final_status = "partial"
         error_msg = (error_msg or "") + f" | Etapa 2 falhou: {exc}"
+    else:
+        await _record_event(
+            "icp_search_completed",
+            {"icp_found": len(icp_posts_data)},
+        )
 
     # ── Etapa 3 + 4: Salvar posts, analisar com LLM, gerar comentarios ────────
     async with WorkerSessionLocal() as db:
-        # Carregar ContentSettings para author_name e author_voice
-        settings_stmt = select(ContentSettings).where(
-            ContentSettings.tenant_id == tenant_uuid
+        existing_posts_stmt = (
+            select(ContentEngagementPost)
+            .options(selectinload(ContentEngagementPost.suggested_comments))
+            .where(
+                ContentEngagementPost.session_id == session_uuid,
+                ContentEngagementPost.tenant_id == tenant_uuid,
+            )
         )
+        existing_posts = (await db.execute(existing_posts_stmt)).scalars().all()
+        posts_by_dedup_key: dict[str, ContentEngagementPost] = {}
+
+        for existing_post in existing_posts:
+            canonical_post_url, dedup_key = build_post_identity(
+                post_url=existing_post.post_url,
+                post_text=existing_post.post_text,
+                author_name=existing_post.author_name,
+            )
+            if canonical_post_url and existing_post.canonical_post_url != canonical_post_url:
+                existing_post.canonical_post_url = canonical_post_url
+            if dedup_key and existing_post.dedup_key != dedup_key:
+                existing_post.dedup_key = dedup_key
+            if not existing_post.merged_sources:
+                existing_post.merged_sources = merge_post_sources([], existing_post.source)
+            if not existing_post.merge_count:
+                existing_post.merge_count = 1
+            if dedup_key:
+                posts_by_dedup_key.setdefault(dedup_key, existing_post)
+
+        def _merge_existing_post(
+            existing_post: ContentEngagementPost,
+            *,
+            post_type: str,
+            post_data: dict,
+            canonical_post_url: str | None,
+            dedup_key: str | None,
+        ) -> bool:
+            promoted_to_icp = existing_post.post_type != "icp" and post_type == "icp"
+
+            if promoted_to_icp:
+                existing_post.post_type = "icp"
+
+            existing_post.source = choose_primary_post_source(existing_post.source, "apify")
+            existing_post.merged_sources = merge_post_sources(existing_post.merged_sources, "apify")
+            existing_post.merge_count = max(existing_post.merge_count, 1) + 1
+
+            if canonical_post_url and not existing_post.canonical_post_url:
+                existing_post.canonical_post_url = canonical_post_url
+            if dedup_key and not existing_post.dedup_key:
+                existing_post.dedup_key = dedup_key
+            if post_data.get("post_url") and not existing_post.post_url:
+                existing_post.post_url = _trunc(post_data.get("post_url"), 500)
+            if post_data.get("post_text") and len(post_data["post_text"]) > len(
+                existing_post.post_text
+            ):
+                existing_post.post_text = post_data["post_text"]
+            if post_data.get("author_name") and not existing_post.author_name:
+                existing_post.author_name = _trunc(post_data.get("author_name"), 300)
+            if post_data.get("author_title") and not existing_post.author_title:
+                existing_post.author_title = _trunc(post_data.get("author_title"), 500)
+            if post_data.get("author_company") and not existing_post.author_company:
+                existing_post.author_company = _trunc(post_data.get("author_company"), 300)
+            if post_data.get("author_linkedin_urn") and not existing_post.author_linkedin_urn:
+                existing_post.author_linkedin_urn = _trunc(
+                    post_data.get("author_linkedin_urn"), 100
+                )
+            if post_data.get("author_profile_url") and not existing_post.author_profile_url:
+                existing_post.author_profile_url = _trunc(post_data.get("author_profile_url"), 500)
+            if post_data.get("post_published_at") and not existing_post.post_published_at:
+                existing_post.post_published_at = post_data.get("post_published_at")
+
+            existing_post.likes = max(existing_post.likes, post_data.get("likes", 0))
+            existing_post.comments = max(existing_post.comments, post_data.get("comments", 0))
+            existing_post.shares = max(existing_post.shares, post_data.get("shares", 0))
+
+            incoming_score = post_data.get("engagement_score")
+            if incoming_score is not None:
+                existing_post.engagement_score = max(
+                    existing_post.engagement_score or 0, incoming_score
+                )
+
+            return promoted_to_icp
+
+        # Carregar ContentSettings para author_name e author_voice
+        settings_stmt = select(ContentSettings).where(ContentSettings.tenant_id == tenant_uuid)
         settings_row = await db.execute(settings_stmt)
         content_settings = settings_row.scalar_one_or_none()
-        author_name = (
-            content_settings.author_name if content_settings else None
-        ) or "Especialista"
+        author_name = (content_settings.author_name if content_settings else None) or "Especialista"
         author_voice = (
             content_settings.author_voice if content_settings else None
         ) or "direto, tecnico, coloquial profissional"
@@ -424,17 +602,54 @@ async def _run_scan_async(
                     post_text=post_data["post_text"],
                     registry=registry,
                 )
+                canonical_post_url, dedup_key = build_post_identity(
+                    post_url=post_data.get("post_url"),
+                    post_text=post_data.get("post_text"),
+                    author_name=post_data.get("author_name"),
+                )
+                existing_post = posts_by_dedup_key.get(dedup_key) if dedup_key else None
+
+                if existing_post:
+                    _merge_existing_post(
+                        existing_post,
+                        post_type="reference",
+                        post_data=post_data,
+                        canonical_post_url=canonical_post_url,
+                        dedup_key=dedup_key,
+                    )
+                    if existing_post.post_type == "reference":
+                        existing_post.hook_type = _trunc(analysis.get("hook_type"), 30)
+                        existing_post.pillar = _trunc(analysis.get("pillar"), 20)
+                        existing_post.why_it_performed = analysis.get("why_it_performed")
+                        existing_post.what_to_replicate = analysis.get("what_to_replicate")
+                    elif not existing_post.hook_type:
+                        existing_post.hook_type = _trunc(analysis.get("hook_type"), 30)
+                        existing_post.pillar = _trunc(analysis.get("pillar"), 20)
+                    db.add(existing_post)
+                    logger.info(
+                        "engagement_scan.post_deduplicated",
+                        session_id=session_id,
+                        dedup_key=dedup_key,
+                        post_type="reference",
+                    )
+                    continue
+
                 post_db = ContentEngagementPost(
                     id=uuid.uuid4(),
                     tenant_id=tenant_uuid,
                     session_id=session_uuid,
                     post_type="reference",
+                    source="apify",
+                    merged_sources=["apify"],
+                    merge_count=1,
                     author_name=_trunc(post_data.get("author_name"), 300),
                     author_title=_trunc(post_data.get("author_title"), 500),
                     author_company=_trunc(post_data.get("author_company"), 300),
                     author_linkedin_urn=_trunc(post_data.get("author_linkedin_urn"), 100),
                     author_profile_url=_trunc(post_data.get("author_profile_url"), 500),
                     post_url=_trunc(post_data.get("post_url"), 500),
+                    canonical_post_url=_trunc(canonical_post_url, 500),
+                    dedup_key=_trunc(dedup_key, 120),
                     post_text=post_data["post_text"],
                     post_published_at=post_data.get("post_published_at"),
                     likes=post_data.get("likes", 0),
@@ -447,7 +662,8 @@ async def _run_scan_async(
                     what_to_replicate=analysis.get("what_to_replicate"),
                 )
                 db.add(post_db)
-                ref_count += 1
+                if dedup_key:
+                    posts_by_dedup_key[dedup_key] = post_db
             except Exception as exc:
                 logger.warning(
                     "engagement_scan.reference_post_failed",
@@ -466,35 +682,68 @@ async def _run_scan_async(
                     author_company=post_data.get("author_company", ""),
                     registry=registry,
                 )
-
-                # Criar o post (mesmo se irrelevante — usuario pode ver)
-                post_id = uuid.uuid4()
-                post_db = ContentEngagementPost(
-                    id=post_id,
-                    tenant_id=tenant_uuid,
-                    session_id=session_uuid,
-                    post_type="icp",
-                    author_name=_trunc(post_data.get("author_name"), 300),
-                    author_title=_trunc(post_data.get("author_title"), 500),
-                    author_company=_trunc(post_data.get("author_company"), 300),
-                    author_linkedin_urn=_trunc(post_data.get("author_linkedin_urn"), 100),
-                    author_profile_url=_trunc(post_data.get("author_profile_url"), 500),
-                    post_url=_trunc(post_data.get("post_url"), 500),
-                    post_text=post_data["post_text"],
-                    post_published_at=post_data.get("post_published_at"),
-                    likes=post_data.get("likes", 0),
-                    comments=post_data.get("comments", 0),
-                    shares=post_data.get("shares", 0),
-                    engagement_score=post_data.get("engagement_score"),
-                    # why_it_performed reutilizado como relevance_reason para ICP
-                    why_it_performed=relevance.get("relevance_reason"),
-                    what_to_replicate=relevance.get("comment_angle"),
+                canonical_post_url, dedup_key = build_post_identity(
+                    post_url=post_data.get("post_url"),
+                    post_text=post_data.get("post_text"),
+                    author_name=post_data.get("author_name"),
                 )
-                db.add(post_db)
-                icp_count += 1
+                existing_post = posts_by_dedup_key.get(dedup_key) if dedup_key else None
+
+                if existing_post:
+                    _merge_existing_post(
+                        existing_post,
+                        post_type="icp",
+                        post_data=post_data,
+                        canonical_post_url=canonical_post_url,
+                        dedup_key=dedup_key,
+                    )
+                    existing_post.why_it_performed = relevance.get("relevance_reason")
+                    existing_post.what_to_replicate = relevance.get("comment_angle")
+                    db.add(existing_post)
+                    post_db = existing_post
+                    post_id = existing_post.id
+                    logger.info(
+                        "engagement_scan.post_deduplicated",
+                        session_id=session_id,
+                        dedup_key=dedup_key,
+                        post_type="icp",
+                    )
+                else:
+                    # Criar o post (mesmo se irrelevante — usuario pode ver)
+                    post_id = uuid.uuid4()
+                    post_db = ContentEngagementPost(
+                        id=post_id,
+                        tenant_id=tenant_uuid,
+                        session_id=session_uuid,
+                        post_type="icp",
+                        source="apify",
+                        merged_sources=["apify"],
+                        merge_count=1,
+                        author_name=_trunc(post_data.get("author_name"), 300),
+                        author_title=_trunc(post_data.get("author_title"), 500),
+                        author_company=_trunc(post_data.get("author_company"), 300),
+                        author_linkedin_urn=_trunc(post_data.get("author_linkedin_urn"), 100),
+                        author_profile_url=_trunc(post_data.get("author_profile_url"), 500),
+                        post_url=_trunc(post_data.get("post_url"), 500),
+                        canonical_post_url=_trunc(canonical_post_url, 500),
+                        dedup_key=_trunc(dedup_key, 120),
+                        post_text=post_data["post_text"],
+                        post_published_at=post_data.get("post_published_at"),
+                        likes=post_data.get("likes", 0),
+                        comments=post_data.get("comments", 0),
+                        shares=post_data.get("shares", 0),
+                        engagement_score=post_data.get("engagement_score"),
+                        # why_it_performed reutilizado como relevance_reason para ICP
+                        why_it_performed=relevance.get("relevance_reason"),
+                        what_to_replicate=relevance.get("comment_angle"),
+                    )
+                    db.add(post_db)
+                    if dedup_key:
+                        posts_by_dedup_key[dedup_key] = post_db
 
                 # Gerar comentarios apenas para posts relevantes
-                if relevance.get("is_relevant"):
+                has_existing_comments = bool(post_db.suggested_comments)
+                if relevance.get("is_relevant") and not has_existing_comments:
                     comment_1, comment_2 = await generate_comments_for_post(
                         post_text=post_data["post_text"],
                         author_name=post_data.get("author_name", ""),
@@ -516,7 +765,6 @@ async def _run_scan_async(
                             status="pending",
                         )
                         db.add(comment_db)
-                        comments_generated += 1
 
             except Exception as exc:
                 logger.warning(
@@ -527,6 +775,32 @@ async def _run_scan_async(
 
         # Atualizar sessao com totais e status final
         try:
+            await db.flush()
+
+            ref_count = (
+                await db.execute(
+                    select(func.count(ContentEngagementPost.id)).where(
+                        ContentEngagementPost.session_id == session_uuid,
+                        ContentEngagementPost.post_type == "reference",
+                    )
+                )
+            ).scalar_one()
+            icp_count = (
+                await db.execute(
+                    select(func.count(ContentEngagementPost.id)).where(
+                        ContentEngagementPost.session_id == session_uuid,
+                        ContentEngagementPost.post_type == "icp",
+                    )
+                )
+            ).scalar_one()
+            comments_generated = (
+                await db.execute(
+                    select(func.count(ContentEngagementComment.id)).where(
+                        ContentEngagementComment.session_id == session_uuid,
+                    )
+                )
+            ).scalar_one()
+
             session_stmt = select(ContentEngagementSession).where(
                 ContentEngagementSession.id == session_uuid
             )
@@ -558,6 +832,21 @@ async def _run_scan_async(
             )
 
         await db.commit()
+
+    await _record_event(
+        "comments_generated",
+        {"comments_generated": comments_generated},
+    )
+    await _record_event(
+        "scan_completed" if final_status != "failed" else "scan_failed",
+        {
+            "status": final_status,
+            "references_found": ref_count,
+            "icp_posts_found": icp_count,
+            "comments_generated": comments_generated,
+            "error": error_msg,
+        },
+    )
 
     logger.info(
         "engagement_scan.completed",

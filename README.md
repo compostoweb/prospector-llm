@@ -196,6 +196,15 @@ docker compose -f docker-compose.prod.yml exec api alembic upgrade head
 # Logs
 docker compose -f docker-compose.dev.yml logs -f api
 docker compose -f docker-compose.dev.yml logs -f worker-dispatch
+docker compose -f docker-compose.dev.yml logs -f worker-content-engagement
+
+# Dev local no Windows
+npm run backend
+npm run frontend
+npm run worker:engagement
+
+# Observacao
+# No Windows local, o worker de engagement usa pool solo para evitar falha do Celery com prefork.
 
 # Nova migration
 docker compose -f docker-compose.dev.yml exec api \

@@ -5,7 +5,8 @@ Instância e configuração central do Celery.
 
 Responsabilidades:
   - Criar o app Celery com broker e backend de settings
-  - Declarar as 4 filas de processamento: capture, enrich, cadence, dispatch
+    - Declarar as filas de processamento: capture, enrich, cadence, dispatch,
+        content e content-engagement
   - Configurar serialização JSON e fuso UTC
   - Carregar o Beat schedule de scheduler/beats.py
 
@@ -14,6 +15,8 @@ Filas:
   enrich   — enriquecimento de leads (email finder, contexto web)
   cadence  — tick da cadência, geração de mensagens
   dispatch — envio de mensagens via Unipile (LinkedIn + Email)
+    content  — publicação e sincronizações gerais do Content Hub
+    content-engagement — scanner de engajamento do Content Hub
 
 Uso:
     celery -A workers.celery_app worker -Q dispatch -c 2
@@ -61,6 +64,7 @@ task_queues = (
     Queue("cadence", default_exchange, routing_key="cadence"),
     Queue("dispatch", default_exchange, routing_key="dispatch"),
     Queue("content", default_exchange, routing_key="content"),
+    Queue("content-engagement", default_exchange, routing_key="content-engagement"),
 )
 
 # ── Configuração ──────────────────────────────────────────────────────
@@ -79,11 +83,11 @@ celery_app.conf.update(
     task_default_exchange="prospector",
     task_default_routing_key="dispatch",
     # Workers
-    worker_prefetch_multiplier=1,       # não reservar tasks extras (fairness)
-    task_acks_late=True,                # confirmar só após execução bem-sucedida
-    task_reject_on_worker_lost=True,    # recolocar na fila se worker morrer
+    worker_prefetch_multiplier=1,  # não reservar tasks extras (fairness)
+    task_acks_late=True,  # confirmar só após execução bem-sucedida
+    task_reject_on_worker_lost=True,  # recolocar na fila se worker morrer
     # Resultados
-    result_expires=3600,                # TTL de 1h para resultados
+    result_expires=3600,  # TTL de 1h para resultados
     # Beat schedule
     beat_schedule=CELERY_BEAT_SCHEDULE,
 )

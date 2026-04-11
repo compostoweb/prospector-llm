@@ -6,6 +6,7 @@
   "scripts": {
     "frontend": "npm run dev --prefix frontend",
     "backend": "cd backend && python -m uvicorn api.main:app --reload --port 8000",
+    "worker:engagement": "cd backend && python -m celery -A workers.celery_app worker -Q content-engagement -P solo -c 1 --loglevel=info",
     "dev": "concurrently --kill-others-on-fail --names \"API,WEB\" --prefix-colors \"cyan,magenta\" \"npm run backend\" \"npm run frontend\""
   },
   "devDependencies": {

@@ -24,6 +24,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
+_QUEUE_PICKUP_TIMEOUT = timedelta(seconds=45)
 _SESSION_TIMEOUT = timedelta(minutes=5)
 
 import structlog
@@ -35,22 +36,264 @@ from sqlalchemy.orm import selectinload
 from api.dependencies import get_effective_tenant_id, get_llm_registry, get_session_flexible
 from integrations.llm.registry import LLMRegistry
 from models.content_engagement_comment import ContentEngagementComment
+from models.content_engagement_discovery_query import ContentEngagementDiscoveryQuery
+from models.content_engagement_event import ContentEngagementEvent
 from models.content_engagement_post import ContentEngagementPost
 from models.content_engagement_session import ContentEngagementSession
 from models.content_reference import ContentReference
+from models.content_theme import ContentTheme
 from schemas.content_engagement import (
     AddManualPostRequest,
     EngagementCommentResponse,
     EngagementPostResponse,
     EngagementSessionDetailResponse,
     EngagementSessionResponse,
+    GoogleDiscoveryComposeRequest,
+    GoogleDiscoveryQueryResponse,
+    ImportExternalPostsRequest,
+    ImportExternalPostsResponse,
     RunScanRequest,
     RunScanResponse,
+)
+from services.content.engagement_post_identity import (
+    build_post_identity,
+    choose_primary_post_source,
+    merge_post_sources,
 )
 
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/engagement", tags=["Content Hub — Engagement"])
+
+_ENGAGEMENT_SCAN_QUEUE = "content-engagement"
+
+
+def _normalize_string_list(values: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+
+    for value in values or []:
+        item = value.strip()
+        key = item.lower()
+        if not item or key in seen:
+            continue
+        seen.add(key)
+        normalized.append(item)
+
+    return normalized
+
+
+async def _record_session_event(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    session_id: uuid.UUID,
+    event_type: str,
+    payload: dict[str, object] | None = None,
+) -> None:
+    db.add(
+        ContentEngagementEvent(
+            tenant_id=tenant_id,
+            session_id=session_id,
+            event_type=event_type,
+            payload=payload,
+        )
+    )
+
+
+async def _load_session_or_404(
+    db: AsyncSession,
+    *,
+    session_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> ContentEngagementSession:
+    stmt = select(ContentEngagementSession).where(
+        ContentEngagementSession.id == session_id,
+        ContentEngagementSession.tenant_id == tenant_id,
+    )
+    result = await db.execute(stmt)
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Sessao nao encontrada")
+    return session
+
+
+async def _load_discovery_query_or_404(
+    db: AsyncSession,
+    *,
+    query_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> ContentEngagementDiscoveryQuery:
+    stmt = select(ContentEngagementDiscoveryQuery).where(
+        ContentEngagementDiscoveryQuery.id == query_id,
+        ContentEngagementDiscoveryQuery.tenant_id == tenant_id,
+    )
+    result = await db.execute(stmt)
+    query = result.scalar_one_or_none()
+    if not query:
+        raise HTTPException(status_code=404, detail="Composicao do Google nao encontrada")
+    return query
+
+
+def _apply_post_payload(
+    post: ContentEngagementPost,
+    body: AddManualPostRequest,
+    *,
+    canonical_post_url: str | None,
+    dedup_key: str | None,
+    merge_increment: bool,
+) -> None:
+    if body.post_type == "icp" and post.post_type != "icp":
+        post.post_type = "icp"
+
+    post.source = choose_primary_post_source(post.source, body.source)
+    post.merged_sources = merge_post_sources(post.merged_sources, body.source)
+    if merge_increment:
+        post.merge_count = max(post.merge_count, 1) + 1
+    else:
+        post.merge_count = max(post.merge_count, 1)
+
+    if canonical_post_url and not post.canonical_post_url:
+        post.canonical_post_url = canonical_post_url
+    if dedup_key and not post.dedup_key:
+        post.dedup_key = dedup_key
+    if body.post_url and not post.post_url:
+        post.post_url = body.post_url
+    if body.author_name and not post.author_name:
+        post.author_name = body.author_name
+    if body.author_title and not post.author_title:
+        post.author_title = body.author_title
+    if body.author_company and not post.author_company:
+        post.author_company = body.author_company
+    if body.author_profile_url and not post.author_profile_url:
+        post.author_profile_url = body.author_profile_url
+    if body.post_text and len(body.post_text) > len(post.post_text):
+        post.post_text = body.post_text
+
+    post.likes = max(post.likes, body.likes)
+    post.comments = max(post.comments, body.comments)
+    post.shares = max(post.shares, body.shares)
+
+    computed_score = body.comments * 3 + body.likes + body.shares * 2
+    post.engagement_score = (
+        max(post.engagement_score or 0, computed_score) if computed_score else post.engagement_score
+    )
+
+
+async def _upsert_external_post(
+    db: AsyncSession,
+    *,
+    session_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    body: AddManualPostRequest,
+) -> tuple[ContentEngagementPost, bool]:
+    await db.flush()
+
+    canonical_post_url, dedup_key = build_post_identity(
+        post_url=body.post_url,
+        post_text=body.post_text,
+        author_name=body.author_name,
+    )
+
+    existing_post: ContentEngagementPost | None = None
+    if dedup_key:
+        existing_stmt = select(ContentEngagementPost).where(
+            ContentEngagementPost.session_id == session_id,
+            ContentEngagementPost.tenant_id == tenant_id,
+        )
+        existing_result = await db.execute(existing_stmt)
+
+        for candidate in existing_result.scalars().all():
+            candidate_canonical_url, candidate_dedup_key = build_post_identity(
+                post_url=candidate.post_url,
+                post_text=candidate.post_text,
+                author_name=candidate.author_name,
+            )
+            if candidate_canonical_url and not candidate.canonical_post_url:
+                candidate.canonical_post_url = candidate_canonical_url
+            if candidate_dedup_key and not candidate.dedup_key:
+                candidate.dedup_key = candidate_dedup_key
+            if not candidate.merged_sources:
+                candidate.merged_sources = merge_post_sources([], candidate.source)
+            if not candidate.merge_count:
+                candidate.merge_count = 1
+            if candidate_dedup_key == dedup_key:
+                existing_post = candidate
+                break
+
+    if existing_post:
+        _apply_post_payload(
+            existing_post,
+            body,
+            canonical_post_url=canonical_post_url,
+            dedup_key=dedup_key,
+            merge_increment=True,
+        )
+        db.add(existing_post)
+        return existing_post, False
+
+    post = ContentEngagementPost(
+        tenant_id=tenant_id,
+        session_id=session_id,
+        post_type=body.post_type,
+        source=body.source,
+        merged_sources=merge_post_sources([], body.source),
+        merge_count=1,
+        post_text=body.post_text,
+        post_url=body.post_url,
+        canonical_post_url=canonical_post_url,
+        dedup_key=dedup_key,
+        author_name=body.author_name,
+        author_title=body.author_title,
+        author_company=body.author_company,
+        author_profile_url=body.author_profile_url,
+        likes=body.likes,
+        comments=body.comments,
+        shares=body.shares,
+        engagement_score=(body.comments * 3 + body.likes + body.shares * 2) or None,
+    )
+    db.add(post)
+    return post, True
+
+
+def _build_google_operator_queries(body: GoogleDiscoveryComposeRequest) -> list[str]:
+    keywords = _normalize_string_list(body.keywords)
+    exact_phrases = [
+        phrase
+        for phrase in _normalize_string_list(body.exact_phrases)
+        if phrase.strip().lower() != "comentários"
+    ]
+    titles = _normalize_string_list(body.titles)
+    sectors = _normalize_string_list(body.sectors)
+    company = body.company.strip() if body.company else ""
+    site_scope = "site:linkedin.com/posts"
+
+    queries: list[str] = []
+    seen: set[str] = set()
+
+    def add_query(parts: list[str]) -> None:
+        text = " ".join(part for part in parts if part).strip()
+        key = text.lower()
+        if not text or key in seen or len(queries) >= body.max_queries:
+            return
+        seen.add(key)
+        queries.append(text)
+
+    for keyword in keywords:
+        add_query([site_scope, f'"{keyword}"', '"comentários"'])
+        for phrase in exact_phrases[:2] or [""]:
+            add_query([site_scope, f'"{keyword}"', f'"{phrase}"' if phrase else ""])
+        for title in titles[:2]:
+            add_query([site_scope, f'"{keyword}"', f'"{title}"', '"comentários"'])
+        for sector in sectors[:2]:
+            add_query([site_scope, f'"{keyword}"', f'"{sector}"', '"comentários"'])
+        if company:
+            add_query([site_scope, f'"{keyword}"', f'"{company}"', '"comentários"'])
+
+    if not queries:
+        add_query([site_scope, '"comentários"'])
+
+    return queries[: body.max_queries]
 
 
 # ── Sessoes ────────────────────────────────────────────────────────────────────
@@ -67,15 +310,67 @@ async def run_scan(
     db: AsyncSession = Depends(get_session_flexible),
 ) -> RunScanResponse:
     """Inicia uma nova sessao de scan de engajamento."""
+    selected_theme_ids = [str(theme_id) for theme_id in body.selected_theme_ids or []]
+    selected_theme_titles: list[str] = []
+
+    if body.selected_theme_ids:
+        theme_stmt = select(ContentTheme).where(
+            ContentTheme.tenant_id == tenant_id,
+            ContentTheme.id.in_(body.selected_theme_ids),
+        )
+        theme_rows = await db.execute(theme_stmt)
+        themes = theme_rows.scalars().all()
+        theme_title_map = {str(theme.id): theme.title for theme in themes}
+        selected_theme_titles = [
+            theme_title_map[theme_id]
+            for theme_id in selected_theme_ids
+            if theme_id in theme_title_map
+        ]
+
+    manual_keywords = _normalize_string_list(body.manual_keywords)
+    requested_keywords = _normalize_string_list(body.keywords)
+    if not requested_keywords:
+        requested_keywords = _normalize_string_list([*selected_theme_titles, *manual_keywords])
+
+    requested_icp_titles = _normalize_string_list(
+        body.icp_filters.titles if body.icp_filters else None
+    )
+    requested_icp_sectors = _normalize_string_list(
+        body.icp_filters.sectors if body.icp_filters else None
+    )
+
     session = ContentEngagementSession(
         tenant_id=tenant_id,
         linked_post_id=body.linked_post_id,
         status="running",
         scan_source="apify",
+        selected_theme_ids=selected_theme_ids or None,
+        selected_theme_titles=selected_theme_titles or None,
+        manual_keywords=manual_keywords or None,
+        effective_keywords=requested_keywords or None,
+        icp_titles_used=requested_icp_titles or None,
+        icp_sectors_used=requested_icp_sectors or None,
     )
     db.add(session)
     await db.commit()
     await db.refresh(session)
+
+    await _record_session_event(
+        db,
+        tenant_id=tenant_id,
+        session_id=session.id,
+        event_type="scan_requested",
+        payload={
+            "linked_post_id": str(body.linked_post_id) if body.linked_post_id else None,
+            "selected_theme_ids": selected_theme_ids,
+            "selected_theme_titles": selected_theme_titles,
+            "manual_keywords": manual_keywords,
+            "effective_keywords": requested_keywords,
+            "icp_titles_used": requested_icp_titles,
+            "icp_sectors_used": requested_icp_sectors,
+        },
+    )
+    await db.commit()
 
     # Disparar task Celery (import local para evitar circular)
     from workers.content_engagement import run_engagement_scan
@@ -85,11 +380,11 @@ async def run_scan(
             "session_id": str(session.id),
             "tenant_id": str(tenant_id),
             "linked_post_id": str(body.linked_post_id) if body.linked_post_id else None,
-            "keywords": body.keywords,
-            "icp_titles": body.icp_filters.titles if body.icp_filters else None,
-            "icp_sectors": body.icp_filters.sectors if body.icp_filters else None,
+            "keywords": requested_keywords or None,
+            "icp_titles": requested_icp_titles or None,
+            "icp_sectors": requested_icp_sectors or None,
         },
-        queue="content",
+        queue=_ENGAGEMENT_SCAN_QUEUE,
     )
 
     logger.info(
@@ -116,10 +411,7 @@ async def list_sessions(
         .limit(limit)
     )
     result = await db.execute(stmt)
-    return [
-        EngagementSessionResponse.model_validate(s)
-        for s in result.scalars().all()
-    ]
+    return [EngagementSessionResponse.model_validate(s) for s in result.scalars().all()]
 
 
 @router.get(
@@ -138,9 +430,10 @@ async def get_session(
             ContentEngagementSession.tenant_id == tenant_id,
         )
         .options(
+            selectinload(ContentEngagementSession.events),
             selectinload(ContentEngagementSession.posts).selectinload(
                 ContentEngagementPost.suggested_comments
-            )
+            ),
         )
     )
     result = await db.execute(stmt)
@@ -148,13 +441,38 @@ async def get_session(
     if not session:
         raise HTTPException(status_code=404, detail="Sessao nao encontrada")
 
-    # Auto-fail: se está "running" há mais de _SESSION_TIMEOUT, marcar como failed
+    # Auto-fail: evita sessao eternamente "running" quando a fila nao e consumida
+    # ou quando o scan passa do tempo maximo esperado.
     if session.status == "running" and session.created_at is not None:
-        elapsed = datetime.now(UTC) - session.created_at
-        if elapsed > _SESSION_TIMEOUT:
+        now = datetime.now(UTC)
+        elapsed = now - session.created_at
+        if session.current_step is None and elapsed > _QUEUE_PICKUP_TIMEOUT:
+            session.status = "failed"
+            session.error_message = "Fila de engajamento nao iniciou o scan. Verifique se o worker-content-engagement esta ativo."
+            session.completed_at = now
+            db.add(session)
+            await db.commit()
+            await db.refresh(session)
+            logger.warning(
+                "engagement_session.queue_pickup_timeout",
+                session_id=str(session.id),
+                elapsed_s=int(elapsed.total_seconds()),
+            )
+            await _record_session_event(
+                db,
+                tenant_id=tenant_id,
+                session_id=session.id,
+                event_type="scan_failed",
+                payload={
+                    "reason": "queue_pickup_timeout",
+                    "elapsed_s": int(elapsed.total_seconds()),
+                },
+            )
+            await db.commit()
+        elif elapsed > _SESSION_TIMEOUT:
             session.status = "failed"
             session.error_message = "Timeout: scan nao completou em 5 minutos"
-            session.completed_at = datetime.now(UTC)
+            session.completed_at = now
             db.add(session)
             await db.commit()
             await db.refresh(session)
@@ -163,8 +481,78 @@ async def get_session(
                 session_id=str(session.id),
                 elapsed_s=int(elapsed.total_seconds()),
             )
+            await _record_session_event(
+                db,
+                tenant_id=tenant_id,
+                session_id=session.id,
+                event_type="scan_failed",
+                payload={"reason": "session_timeout", "elapsed_s": int(elapsed.total_seconds())},
+            )
+            await db.commit()
 
     return EngagementSessionDetailResponse.model_validate(session)
+
+
+@router.post(
+    "/discovery/google/compose",
+    response_model=list[GoogleDiscoveryQueryResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def compose_google_discovery_queries(
+    body: GoogleDiscoveryComposeRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> list[GoogleDiscoveryQueryResponse]:
+    queries = _build_google_operator_queries(body)
+    criteria = {
+        "keywords": _normalize_string_list(body.keywords),
+        "exact_phrases": _normalize_string_list(body.exact_phrases),
+        "titles": _normalize_string_list(body.titles),
+        "sectors": _normalize_string_list(body.sectors),
+        "company": body.company.strip() if body.company else None,
+        "linked_post_id": str(body.linked_post_id) if body.linked_post_id else None,
+    }
+
+    records: list[ContentEngagementDiscoveryQuery] = []
+    for query_text in queries:
+        record = ContentEngagementDiscoveryQuery(
+            tenant_id=tenant_id,
+            provider="google_operators",
+            query_text=query_text,
+            criteria=criteria,
+        )
+        db.add(record)
+        records.append(record)
+
+    await db.commit()
+    for record in records:
+        await db.refresh(record)
+
+    return [GoogleDiscoveryQueryResponse.model_validate(record) for record in records]
+
+
+@router.get(
+    "/discovery/google/history",
+    response_model=list[GoogleDiscoveryQueryResponse],
+)
+async def list_google_discovery_history(
+    limit: int = Query(20, ge=1, le=100),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> list[GoogleDiscoveryQueryResponse]:
+    stmt = (
+        select(ContentEngagementDiscoveryQuery)
+        .where(
+            ContentEngagementDiscoveryQuery.tenant_id == tenant_id,
+            ContentEngagementDiscoveryQuery.provider == "google_operators",
+        )
+        .order_by(ContentEngagementDiscoveryQuery.created_at.desc())
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    return [
+        GoogleDiscoveryQueryResponse.model_validate(record) for record in result.scalars().all()
+    ]
 
 
 # ── Posts ──────────────────────────────────────────────────────────────────────
@@ -178,9 +566,7 @@ async def list_posts(
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> list[EngagementPostResponse]:
-    stmt = select(ContentEngagementPost).where(
-        ContentEngagementPost.tenant_id == tenant_id
-    )
+    stmt = select(ContentEngagementPost).where(ContentEngagementPost.tenant_id == tenant_id)
     if session_id:
         stmt = stmt.where(ContentEngagementPost.session_id == session_id)
     if post_type:
@@ -193,9 +579,7 @@ async def list_posts(
         ContentEngagementPost.created_at.desc(),
     )
     result = await db.execute(stmt)
-    return [
-        EngagementPostResponse.model_validate(p) for p in result.scalars().all()
-    ]
+    return [EngagementPostResponse.model_validate(p) for p in result.scalars().all()]
 
 
 @router.post(
@@ -210,37 +594,109 @@ async def add_manual_post(
     db: AsyncSession = Depends(get_session_flexible),
 ) -> EngagementPostResponse:
     """Adicao manual de post pelo usuario."""
-    # Valida que a sessao pertence ao tenant
-    sess_stmt = select(ContentEngagementSession).where(
-        ContentEngagementSession.id == session_id,
-        ContentEngagementSession.tenant_id == tenant_id,
-    )
-    sess_result = await db.execute(sess_stmt)
-    session = sess_result.scalar_one_or_none()
-    if not session:
-        raise HTTPException(status_code=404, detail="Sessao nao encontrada")
+    await _load_session_or_404(db, session_id=session_id, tenant_id=tenant_id)
 
-    post = ContentEngagementPost(
-        tenant_id=tenant_id,
+    post, created = await _upsert_external_post(
+        db,
         session_id=session_id,
-        post_type=body.post_type,
-        post_text=body.post_text,
-        post_url=body.post_url,
-        author_name=body.author_name,
-        author_title=body.author_title,
-        author_company=body.author_company,
-        author_profile_url=body.author_profile_url,
+        tenant_id=tenant_id,
+        body=body,
     )
-    db.add(post)
     await db.commit()
-    await db.refresh(post)
+    loaded_post_result = await db.execute(
+        select(ContentEngagementPost)
+        .options(selectinload(ContentEngagementPost.suggested_comments))
+        .where(
+            ContentEngagementPost.id == post.id,
+            ContentEngagementPost.tenant_id == tenant_id,
+        )
+    )
+    loaded_post = loaded_post_result.scalar_one()
     logger.info(
         "engagement.post_added_manual",
-        post_id=str(post.id),
+        post_id=str(loaded_post.id),
         session_id=str(session_id),
         tenant_id=str(tenant_id),
+        source=body.source,
+        created=created,
     )
-    return EngagementPostResponse.model_validate(post)
+    return EngagementPostResponse.model_validate(loaded_post)
+
+
+@router.post(
+    "/posts/import",
+    response_model=ImportExternalPostsResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def import_external_posts(
+    body: ImportExternalPostsRequest,
+    session_id: uuid.UUID = Query(..., description="ID da sessao onde inserir os posts"),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> ImportExternalPostsResponse:
+    await _load_session_or_404(db, session_id=session_id, tenant_id=tenant_id)
+    discovery_query: ContentEngagementDiscoveryQuery | None = None
+    if body.discovery_query_id:
+        discovery_query = await _load_discovery_query_or_404(
+            db,
+            query_id=body.discovery_query_id,
+            tenant_id=tenant_id,
+        )
+
+    created_count = 0
+    merged_count = 0
+    imported_posts: list[ContentEngagementPost] = []
+
+    for post_payload in body.posts:
+        post, created = await _upsert_external_post(
+            db,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            body=post_payload,
+        )
+        imported_posts.append(post)
+        if created:
+            created_count += 1
+        else:
+            merged_count += 1
+
+    if discovery_query:
+        discovery_query.imported_session_id = session_id
+        db.add(discovery_query)
+
+    await _record_session_event(
+        db,
+        tenant_id=tenant_id,
+        session_id=session_id,
+        event_type="external_posts_imported",
+        payload={
+            "created_count": created_count,
+            "merged_count": merged_count,
+            "sources": sorted({post.source for post in imported_posts}),
+            "discovery_query_id": str(body.discovery_query_id) if body.discovery_query_id else None,
+            "discovery_query_text": discovery_query.query_text if discovery_query else None,
+        },
+    )
+    await db.commit()
+
+    post_ids = list(dict.fromkeys(post.id for post in imported_posts))
+    loaded_posts_result = await db.execute(
+        select(ContentEngagementPost)
+        .options(selectinload(ContentEngagementPost.suggested_comments))
+        .where(
+            ContentEngagementPost.tenant_id == tenant_id,
+            ContentEngagementPost.id.in_(post_ids),
+        )
+    )
+    loaded_posts_by_id = {post.id: post for post in loaded_posts_result.scalars().all()}
+    response_posts = [loaded_posts_by_id[post.id] for post in imported_posts]
+
+    return ImportExternalPostsResponse(
+        session_id=session_id,
+        created_count=created_count,
+        merged_count=merged_count,
+        posts=[EngagementPostResponse.model_validate(post) for post in response_posts],
+    )
 
 
 @router.patch("/posts/{post_id}/save", response_model=EngagementPostResponse)
@@ -325,9 +781,7 @@ async def list_comments(
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> list[EngagementCommentResponse]:
-    stmt = select(ContentEngagementComment).where(
-        ContentEngagementComment.tenant_id == tenant_id
-    )
+    stmt = select(ContentEngagementComment).where(ContentEngagementComment.tenant_id == tenant_id)
     if session_id:
         stmt = stmt.where(ContentEngagementComment.session_id == session_id)
     if comment_status:
@@ -337,9 +791,7 @@ async def list_comments(
         ContentEngagementComment.variation,
     )
     result = await db.execute(stmt)
-    return [
-        EngagementCommentResponse.model_validate(c) for c in result.scalars().all()
-    ]
+    return [EngagementCommentResponse.model_validate(c) for c in result.scalars().all()]
 
 
 @router.patch(
@@ -403,6 +855,17 @@ async def mark_comment_posted(
         comment_id=str(comment_id),
         tenant_id=str(tenant_id),
     )
+    await _record_session_event(
+        db,
+        tenant_id=tenant_id,
+        session_id=comment.session_id,
+        event_type="comment_posted",
+        payload={
+            "comment_id": str(comment_id),
+            "posted_at": comment.posted_at.isoformat() if comment.posted_at else None,
+        },
+    )
+    await db.commit()
     return EngagementCommentResponse.model_validate(comment)
 
 
@@ -455,6 +918,14 @@ async def unmark_comment_posted(
         comment_id=str(comment_id),
         tenant_id=str(tenant_id),
     )
+    await _record_session_event(
+        db,
+        tenant_id=tenant_id,
+        session_id=comment.session_id,
+        event_type="comment_unposted",
+        payload={"comment_id": str(comment_id)},
+    )
+    await db.commit()
     return EngagementCommentResponse.model_validate(comment)
 
 
@@ -600,9 +1071,7 @@ async def _on_comment_marked_posted(
     from models.lead import Lead
 
     # Buscar comentario + post associado
-    comment_stmt = select(ContentEngagementComment).where(
-        ContentEngagementComment.id == comment_id
-    )
+    comment_stmt = select(ContentEngagementComment).where(ContentEngagementComment.id == comment_id)
     comment_result = await db.execute(comment_stmt)
     comment = comment_result.scalar_one_or_none()
     if not comment:
@@ -662,9 +1131,7 @@ async def _undo_comment_marked_posted(
     if posted_at is None:
         return
 
-    comment_stmt = select(ContentEngagementComment).where(
-        ContentEngagementComment.id == comment_id
-    )
+    comment_stmt = select(ContentEngagementComment).where(ContentEngagementComment.id == comment_id)
     comment_result = await db.execute(comment_stmt)
     comment = comment_result.scalar_one_or_none()
     if not comment:

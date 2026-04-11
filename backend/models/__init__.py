@@ -8,6 +8,8 @@ from models.cadence import Cadence  # noqa: F401
 from models.cadence_step import CadenceStep  # noqa: F401
 from models.content_calculator_result import ContentCalculatorResult  # noqa: F401
 from models.content_engagement_comment import ContentEngagementComment  # noqa: F401
+from models.content_engagement_discovery_query import ContentEngagementDiscoveryQuery  # noqa: F401
+from models.content_engagement_event import ContentEngagementEvent  # noqa: F401
 from models.content_engagement_post import ContentEngagementPost  # noqa: F401
 from models.content_engagement_session import ContentEngagementSession  # noqa: F401
 from models.content_landing_page import ContentLandingPage  # noqa: F401

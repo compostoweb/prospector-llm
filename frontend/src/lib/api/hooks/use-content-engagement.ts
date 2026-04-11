@@ -4,10 +4,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useSession } from "next-auth/react"
 import { env } from "@/env"
 import type {
+  AddManualEngagementPostRequest,
   EngagementComment,
   EngagementPost,
   EngagementSession,
   EngagementSessionDetail,
+  GoogleDiscoveryComposeRequest,
+  GoogleDiscoveryQuery,
+  ImportExternalPostsRequest,
+  ImportExternalPostsResponse,
   RunScanRequest,
   RunScanResponse,
 } from "@/lib/content-engagement/types"
@@ -43,6 +48,8 @@ export const engagementKeys = {
     [...engagementKeys.all, "posts", sessionId ?? "all", postType ?? "all"] as const,
   comments: (sessionId?: string, postId?: string) =>
     [...engagementKeys.all, "comments", sessionId ?? "all", postId ?? "all"] as const,
+  googleDiscoveryHistory: (limit?: number) =>
+    [...engagementKeys.all, "google-discovery", "history", limit ?? "all"] as const,
 }
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
@@ -117,6 +124,40 @@ export function useRunScan() {
   })
 }
 
+export function useComposeGoogleDiscoveryQueries() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (body: GoogleDiscoveryComposeRequest) => {
+      const res = await fetch(`${BASE()}/discovery/google/compose`, {
+        method: "POST",
+        headers: buildAuthHeaders(session?.accessToken, true),
+        body: JSON.stringify(body),
+      })
+      return parseApiResponse<GoogleDiscoveryQuery[]>(res)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: engagementKeys.googleDiscoveryHistory() })
+    },
+  })
+}
+
+export function useGoogleDiscoveryHistory(limit = 20) {
+  const { data: session } = useSession()
+
+  return useQuery({
+    queryKey: engagementKeys.googleDiscoveryHistory(limit),
+    queryFn: async () => {
+      const res = await fetch(`${BASE()}/discovery/google/history?limit=${limit}`, {
+        headers: buildAuthHeaders(session?.accessToken),
+      })
+      return parseApiResponse<GoogleDiscoveryQuery[]>(res)
+    },
+    enabled: !!session?.accessToken,
+  })
+}
+
 // ── Posts ─────────────────────────────────────────────────────────────────────
 
 export function useEngagementPosts(sessionId?: string, postType?: "reference" | "icp") {
@@ -142,8 +183,14 @@ export function useAddManualPost() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (body: { post_url: string; session_id?: string }) => {
-      const res = await fetch(`${BASE()}/posts`, {
+    mutationFn: async ({
+      sessionId,
+      body,
+    }: {
+      sessionId: string
+      body: AddManualEngagementPostRequest
+    }) => {
+      const res = await fetch(`${BASE()}/posts?session_id=${sessionId}`, {
         method: "POST",
         headers: buildAuthHeaders(session?.accessToken, true),
         body: JSON.stringify(body),
@@ -152,6 +199,34 @@ export function useAddManualPost() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: engagementKeys.posts() })
+    },
+  })
+}
+
+export function useImportExternalPosts() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      sessionId,
+      body,
+    }: {
+      sessionId: string
+      body: ImportExternalPostsRequest
+    }) => {
+      const res = await fetch(`${BASE()}/posts/import?session_id=${sessionId}`, {
+        method: "POST",
+        headers: buildAuthHeaders(session?.accessToken, true),
+        body: JSON.stringify(body),
+      })
+      return parseApiResponse<ImportExternalPostsResponse>(res)
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: engagementKeys.all })
+      queryClient.invalidateQueries({ queryKey: engagementKeys.session(result.session_id) })
+      queryClient.invalidateQueries({ queryKey: engagementKeys.posts(result.session_id) })
+      queryClient.invalidateQueries({ queryKey: engagementKeys.sessions() })
     },
   })
 }
@@ -189,9 +264,7 @@ export function useDeleteEngagementPost() {
       })
       if (!res.ok) {
         const payload = await res.json().catch(() => null)
-        throw new Error(
-          payload?.detail ?? "Erro ao excluir post"
-        )
+        throw new Error(payload?.detail ?? "Erro ao excluir post")
       }
     },
     onSuccess: () => {

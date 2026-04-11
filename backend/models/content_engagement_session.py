@@ -15,6 +15,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -57,6 +58,41 @@ class ContentEngagementSession(Base, TenantMixin, TimestampMixin):
         default="apify",
         comment="linkedin_api | apify | manual",
     )
+    selected_theme_ids: Mapped[list[str] | None] = mapped_column(
+        JSONB(astext_type=Text()),
+        nullable=True,
+        comment="IDs dos temas selecionados nesta execucao",
+    )
+    selected_theme_titles: Mapped[list[str] | None] = mapped_column(
+        JSONB(astext_type=Text()),
+        nullable=True,
+        comment="Titulos dos temas selecionados nesta execucao",
+    )
+    manual_keywords: Mapped[list[str] | None] = mapped_column(
+        JSONB(astext_type=Text()),
+        nullable=True,
+        comment="Keywords digitadas manualmente pelo usuario",
+    )
+    effective_keywords: Mapped[list[str] | None] = mapped_column(
+        JSONB(astext_type=Text()),
+        nullable=True,
+        comment="Keywords efetivamente usadas no scan",
+    )
+    linked_post_context_keywords: Mapped[list[str] | None] = mapped_column(
+        JSONB(astext_type=Text()),
+        nullable=True,
+        comment="Keywords derivadas do post vinculado",
+    )
+    icp_titles_used: Mapped[list[str] | None] = mapped_column(
+        JSONB(astext_type=Text()),
+        nullable=True,
+        comment="Titulos ICP usados na execucao",
+    )
+    icp_sectors_used: Mapped[list[str] | None] = mapped_column(
+        JSONB(astext_type=Text()),
+        nullable=True,
+        comment="Setores ICP usados na execucao",
+    )
     current_step: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
@@ -80,4 +116,10 @@ class ContentEngagementSession(Base, TenantMixin, TimestampMixin):
         back_populates="session",
         lazy="select",
         cascade="all, delete-orphan",
+    )
+    events: Mapped[list[ContentEngagementEvent]] = relationship(  # noqa: F821
+        "ContentEngagementEvent",
+        lazy="select",
+        cascade="all, delete-orphan",
+        order_by="ContentEngagementEvent.created_at.desc()",
     )
