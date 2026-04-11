@@ -15,6 +15,7 @@ Retorna uma string Markdown (máx ~4.000 tokens) pronta para injeção no prompt
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 
 import httpx
@@ -39,7 +40,15 @@ class ContextFetcher:
     """
 
     def __init__(self) -> None:
-        self._http = httpx.AsyncClient(timeout=_TIMEOUT)
+        self._http: httpx.AsyncClient | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    async def _get_http(self) -> httpx.AsyncClient:
+        loop = asyncio.get_running_loop()
+        if self._http is None or self._loop is not loop:
+            self._http = httpx.AsyncClient(timeout=_TIMEOUT)
+            self._loop = loop
+        return self._http
 
     async def fetch_from_website(self, website_url: str) -> str:
         """
@@ -92,7 +101,8 @@ class ContextFetcher:
     async def _fetch_jina(self, url: str) -> str:
         """Converte o website em Markdown via Jina Reader (r.jina.ai)."""
         try:
-            resp = await self._http.get(
+            client = await self._get_http()
+            resp = await client.get(
                 f"{_JINA_BASE}/{url}",
                 headers={
                     "Authorization": f"Bearer {settings.JINA_API_KEY or ''}",
@@ -110,7 +120,8 @@ class ContextFetcher:
     async def _fetch_firecrawl(self, url: str) -> str:
         """Scrape via Firecrawl /scrape — retorna Markdown."""
         try:
-            resp = await self._http.post(
+            client = await self._get_http()
+            resp = await client.post(
                 f"{_FIRECRAWL_BASE}/scrape",
                 headers={"Authorization": f"Bearer {settings.FIRECRAWL_API_KEY or ''}"},
                 json={"url": url, "formats": ["markdown"]},
@@ -127,7 +138,8 @@ class ContextFetcher:
     async def _fetch_tavily(self, query: str) -> str:
         """Busca informações via Tavily /search — agrega snippets dos resultados."""
         try:
-            resp = await self._http.post(
+            client = await self._get_http()
+            resp = await client.post(
                 f"{_TAVILY_BASE}/search",
                 json={
                     "api_key": settings.TAVILY_API_KEY or "",
@@ -153,10 +165,15 @@ class ContextFetcher:
             return ""
 
     async def aclose(self) -> None:
-        await self._http.aclose()
+        client = self._http
+        self._http = None
+        self._loop = None
+        if client is not None:
+            await client.aclose()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
+
 
 def _cache_key(url: str) -> str:
     digest = hashlib.sha256(url.encode()).hexdigest()[:16]

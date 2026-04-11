@@ -19,8 +19,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC
+from typing import Any
 
 import httpx
 import structlog
@@ -35,6 +37,41 @@ _PROFILE_CACHE_TTL = 86400  # 24h
 _PROFILE_CACHE_TTL_EMPTY = 3600  # 1h for unresolved names
 _PREVIEW_CACHE_TTL = 300  # 5min for message previews
 _CHAT_LIST_CACHE_TTL = 120  # 2min for full conversation list
+
+
+class _LoopBoundAsyncClient:
+    """Recria o AsyncClient por event loop para uso seguro em Celery."""
+
+    def __init__(self, factory: Callable[[], httpx.AsyncClient]) -> None:
+        self._factory = factory
+        self._client: httpx.AsyncClient | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        loop = asyncio.get_running_loop()
+        if self._client is None or self._loop is not loop:
+            self._client = self._factory()
+            self._loop = loop
+        return self._client
+
+    async def get(self, *args: Any, **kwargs: Any) -> httpx.Response:
+        return await self._get_client().get(*args, **kwargs)
+
+    async def post(self, *args: Any, **kwargs: Any) -> httpx.Response:
+        return await self._get_client().post(*args, **kwargs)
+
+    async def put(self, *args: Any, **kwargs: Any) -> httpx.Response:
+        return await self._get_client().put(*args, **kwargs)
+
+    async def delete(self, *args: Any, **kwargs: Any) -> httpx.Response:
+        return await self._get_client().delete(*args, **kwargs)
+
+    async def aclose(self) -> None:
+        client = self._client
+        self._client = None
+        self._loop = None
+        if client is not None:
+            await client.aclose()
 
 
 @dataclass
@@ -113,14 +150,16 @@ class UnipileClient:
     """
 
     def __init__(self) -> None:
-        self._client = httpx.AsyncClient(
-            base_url=_BASE_URL,
-            headers={
-                "X-API-KEY": settings.UNIPILE_API_KEY or "",
-                "accept": "application/json",
-                "content-type": "application/json",
-            },
-            timeout=_TIMEOUT,
+        self._client = _LoopBoundAsyncClient(
+            lambda: httpx.AsyncClient(
+                base_url=_BASE_URL,
+                headers={
+                    "X-API-KEY": settings.UNIPILE_API_KEY or "",
+                    "accept": "application/json",
+                    "content-type": "application/json",
+                },
+                timeout=_TIMEOUT,
+            )
         )
 
     # ── LinkedIn ──────────────────────────────────────────────────────
@@ -195,7 +234,7 @@ class UnipileClient:
             "/chats/messages",
             data=data_fields,
             files=files,
-            headers={"content-type": None},  # let httpx set multipart
+            headers={"content-type": None},  # type: ignore[arg-type]  # let httpx set multipart
         )
         response.raise_for_status()
         resp_data = response.json()
@@ -539,7 +578,7 @@ class UnipileClient:
         if cached:
             try:
                 cached_data = json.loads(cached)
-                items = [
+                cached_items = [
                     ChatSummary(
                         chat_id=c["chat_id"],
                         attendees=[
@@ -559,9 +598,9 @@ class UnipileClient:
                     for c in cached_data.get("items", [])
                 ]
                 if unread_only:
-                    items = [i for i in items if i.unread_count > 0]
+                    cached_items = [i for i in cached_items if i.unread_count > 0]
                 return {
-                    "items": items[:limit],
+                    "items": cached_items[:limit],
                     "cursor": cached_data.get("cursor"),
                 }
             except (json.JSONDecodeError, TypeError, KeyError):
@@ -834,9 +873,9 @@ class UnipileClient:
             ok = response.status_code == 200
             if ok:
                 # Invalidate all inbox list caches to force fresh fetch
-                keys = await redis_client._redis.keys(f"inbox:list:{account_id}:*")
+                keys = await redis_client.keys(f"inbox:list:{account_id}:*")
                 if keys:
-                    await redis_client._redis.delete(*keys)
+                    await redis_client.delete_many(*keys)
                 logger.info("unipile.account.sync_started", account_id=account_id)
             else:
                 logger.warning(
