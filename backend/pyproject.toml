@@ -17,6 +17,7 @@ dependencies = [
     # Validação e configuração
     "pydantic>=2.9.0",
     "pydantic-settings>=2.6.0",
+    "email-validator>=2.2.0",
 
     # Banco de dados
     "sqlalchemy[asyncio]>=2.0.36",
