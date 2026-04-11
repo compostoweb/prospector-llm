@@ -248,5 +248,6 @@ docker compose -f docker-compose.dev.yml exec api pytest tests/ -v
 | [`docs/LLM.md`](docs/LLM.md) | Guia completo multi-provider OpenAI + Gemini |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Arquitetura técnica, fluxos, modelos de dados |
 | [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md) | Dev local vs produção, setup, deploy |
+| [`docs/EXTENSAO_LINKEDIN_V1.md`](docs/EXTENSAO_LINKEDIN_V1.md) | Escopo, arquitetura e contratos da extensao LinkedIn V1 |
 | [`docs/SKILLS.md`](docs/SKILLS.md) | Skills necessárias + ordem de desenvolvimento |
 | [`.github/copilot-instructions.md`](.github/copilot-instructions.md) | Instruções para o GitHub Copilot |
