@@ -5,7 +5,6 @@
 out/
 node_modules/
 tsconfig.tsbuildinfo
-src/lib/api/schema.d.ts
 .turbo/
 coverage/
 playwright-report/
