@@ -268,7 +268,8 @@ export function useDeleteEngagementPost() {
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: engagementKeys.posts() })
+      queryClient.invalidateQueries({ queryKey: engagementKeys.all })
+      queryClient.invalidateQueries({ queryKey: contentKeys.references() })
     },
   })
 }

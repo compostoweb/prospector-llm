@@ -25,6 +25,7 @@ import {
   Copy,
   Upload,
   Layers3,
+  Trash2,
 } from "lucide-react"
 import { useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
@@ -46,6 +47,7 @@ import { LinkedPostSelector } from "./linked-post-selector"
 import {
   engagementKeys,
   useComposeGoogleDiscoveryQueries,
+  useDeleteEngagementPost,
   useImportExternalPosts,
   useEngagementPosts,
   useEngagementSession,
@@ -1693,7 +1695,19 @@ function CompactMetric({ icon: Icon, value }: { icon: typeof ThumbsUp; value: nu
   )
 }
 
-function ReferenceListRow({ post, onOpen }: { post: EngagementPost; onOpen: () => void }) {
+function ReferenceListRow({
+  post,
+  onOpen,
+  canDelete,
+  isDeleting,
+  onDelete,
+}: {
+  post: EngagementPost
+  onOpen: () => void
+  canDelete: boolean
+  isDeleting: boolean
+  onDelete: (post: EngagementPost) => void
+}) {
   return (
     <div
       onClick={onOpen}
@@ -1732,6 +1746,21 @@ function ReferenceListRow({ post, onOpen }: { post: EngagementPost; onOpen: () =
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
+        {canDelete && (
+          <button
+            type="button"
+            title="Remover post da sessão manual"
+            aria-label="Remover post da sessão manual"
+            onClick={(event) => {
+              event.stopPropagation()
+              onDelete(post)
+            }}
+            disabled={isDeleting}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-(--border-default) text-(--danger) transition-colors hover:bg-(--danger-subtle) disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
         {post.post_url && (
           <a
             href={post.post_url}
@@ -1762,7 +1791,19 @@ function ReferenceListRow({ post, onOpen }: { post: EngagementPost; onOpen: () =
   )
 }
 
-function IcpListRow({ post, onOpen }: { post: EngagementPost; onOpen: () => void }) {
+function IcpListRow({
+  post,
+  onOpen,
+  canDelete,
+  isDeleting,
+  onDelete,
+}: {
+  post: EngagementPost
+  onOpen: () => void
+  canDelete: boolean
+  isDeleting: boolean
+  onDelete: (post: EngagementPost) => void
+}) {
   const comments = post.suggested_comments ?? []
   const wasCommented = comments.some((comment) => comment.status === "posted")
 
@@ -1809,6 +1850,21 @@ function IcpListRow({ post, onOpen }: { post: EngagementPost; onOpen: () => void
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
+        {canDelete && (
+          <button
+            type="button"
+            title="Remover post da sessão manual"
+            aria-label="Remover post da sessão manual"
+            onClick={(event) => {
+              event.stopPropagation()
+              onDelete(post)
+            }}
+            disabled={isDeleting}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-(--border-default) text-(--danger) transition-colors hover:bg-(--danger-subtle) disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
         {post.post_url && (
           <a
             href={post.post_url}
@@ -1970,7 +2026,19 @@ function PostedCommentsModal({
   )
 }
 
-function PostDetailDrawer({ post, onClose }: { post: EngagementPost | null; onClose: () => void }) {
+function PostDetailDrawer({
+  post,
+  onClose,
+  canDelete,
+  isDeleting,
+  onDelete,
+}: {
+  post: EngagementPost | null
+  onClose: () => void
+  canDelete: boolean
+  isDeleting: boolean
+  onDelete: (post: EngagementPost) => void
+}) {
   const mergedSourcesLabel = formatMergedSourcesLabel(post?.merged_sources)
 
   return (
@@ -1987,6 +2055,19 @@ function PostDetailDrawer({ post, onClose }: { post: EngagementPost | null; onCl
               <div className="mt-3 rounded-xl border border-(--border-default) bg-(--bg-sunken) px-4 py-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <PostOriginBadges post={post} />
+                  {canDelete ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 text-(--danger) hover:bg-(--danger-subtle) hover:text-(--danger)"
+                      onClick={() => onDelete(post)}
+                      disabled={isDeleting}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Remover da sessão
+                    </Button>
+                  ) : null}
                   {post.canonical_post_url ? (
                     <a
                       href={post.canonical_post_url}
@@ -2026,12 +2107,17 @@ function PostDetailDrawer({ post, onClose }: { post: EngagementPost | null; onCl
 function SessionResults({
   session,
   onOpenPost,
+  onDeletePost,
+  deletingPostId,
 }: {
   session: EngagementSessionDetail
   onOpenPost: (postId: string) => void
+  onDeletePost: (post: EngagementPost) => void
+  deletingPostId: string | null
 }) {
   const referencePosts = session.posts.filter((p) => p.post_type === "reference")
   const icpPosts = session.posts.filter((p) => p.post_type === "icp")
+  const canDeletePosts = session.scan_source === "manual"
   const [activeTab, setActiveTab] = useState<"icp" | "references">(
     icpPosts.length > 0 ? "icp" : "references",
   )
@@ -2100,7 +2186,14 @@ function SessionResults({
           ) : (
             <div className="overflow-hidden rounded-xl border border-(--border-default) bg-(--bg-surface) divide-y divide-(--border-default)">
               {icpPosts.map((post) => (
-                <IcpListRow key={post.id} post={post} onOpen={() => onOpenPost(post.id)} />
+                <IcpListRow
+                  key={post.id}
+                  post={post}
+                  onOpen={() => onOpenPost(post.id)}
+                  canDelete={canDeletePosts}
+                  isDeleting={deletingPostId === post.id}
+                  onDelete={onDeletePost}
+                />
               ))}
             </div>
           ))}
@@ -2115,7 +2208,14 @@ function SessionResults({
           ) : (
             <div className="overflow-hidden rounded-xl border border-(--border-default) bg-(--bg-surface) divide-y divide-(--border-default)">
               {referencePosts.map((post) => (
-                <ReferenceListRow key={post.id} post={post} onOpen={() => onOpenPost(post.id)} />
+                <ReferenceListRow
+                  key={post.id}
+                  post={post}
+                  onOpen={() => onOpenPost(post.id)}
+                  canDelete={canDeletePosts}
+                  isDeleting={deletingPostId === post.id}
+                  onDelete={onDeletePost}
+                />
               ))}
             </div>
           ))}
@@ -2155,6 +2255,7 @@ export default function EngagementHubPage() {
   const { data: allIcpPosts = [] } = useEngagementPosts(undefined, "icp")
   const { data: themes } = useContentThemes()
   const runScan = useRunScan()
+  const deleteEngagementPost = useDeleteEngagementPost()
 
   // Mantem um unico observer de sessao para evitar polling/states antigos competindo entre si.
   const effectiveSessionId = activeSessionId ?? sessions?.[0]?.id ?? null
@@ -2163,6 +2264,9 @@ export default function EngagementHubPage() {
     () => displaySession?.posts.find((post) => post.id === selectedPostId) ?? null,
     [displaySession?.posts, selectedPostId],
   )
+  const deletingPostId = deleteEngagementPost.isPending
+    ? (deleteEngagementPost.variables ?? null)
+    : null
   const postedCommentEntries = useMemo(
     () =>
       allIcpPosts
@@ -2311,6 +2415,29 @@ export default function EngagementHubPage() {
   function handleOpenPostInSession(post: EngagementPost) {
     setActiveSessionId(post.session_id)
     setSelectedPostId(post.id)
+  }
+
+  async function handleDeletePost(post: EngagementPost) {
+    if (displaySession?.scan_source !== "manual") {
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Remover este post da sessão manual?\n\n${post.author_name ?? "Autor desconhecido"}`,
+    )
+    if (!confirmed) {
+      return
+    }
+
+    try {
+      await deleteEngagementPost.mutateAsync(post.id)
+      if (selectedPostId === post.id) {
+        setSelectedPostId(null)
+      }
+      toast.success("Post removido da sessão manual")
+    } catch {
+      toast.error("Não foi possível remover o post da sessão")
+    }
   }
 
   function handleExternalImportCompleted(result: ImportExternalPostsResponse) {
@@ -2480,7 +2607,12 @@ export default function EngagementHubPage() {
           ))}
         </div>
       ) : displaySession ? (
-        <SessionResults session={displaySession} onOpenPost={setSelectedPostId} />
+        <SessionResults
+          session={displaySession}
+          onOpenPost={setSelectedPostId}
+          onDeletePost={handleDeletePost}
+          deletingPostId={deletingPostId}
+        />
       ) : (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-(--border-default) py-20 text-center">
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-(--bg-overlay)">
@@ -2504,7 +2636,13 @@ export default function EngagementHubPage() {
         </div>
       )}
 
-      <PostDetailDrawer post={selectedPost} onClose={() => setSelectedPostId(null)} />
+      <PostDetailDrawer
+        post={selectedPost}
+        onClose={() => setSelectedPostId(null)}
+        canDelete={displaySession?.scan_source === "manual"}
+        isDeleting={deletingPostId === selectedPost?.id}
+        onDelete={handleDeletePost}
+      />
       <PostedCommentsModal
         open={postedCommentsOpen}
         onOpenChange={setPostedCommentsOpen}

@@ -107,6 +107,59 @@ function buildEmptyActiveTabScanResult(
   };
 }
 
+function scorePreview(preview: CapturePreview): number {
+  const normalized = normalizePreview(preview);
+  let score = 0;
+
+  if (normalized.post_url) score += 8;
+  if (normalized.author_name) score += 5;
+  if (normalized.author_title) score += 3;
+  if (normalized.likes + normalized.comments + normalized.shares > 0) score += 2;
+  if (normalized.post_text.length >= 80) score += 4;
+  else if (normalized.post_text.length >= 30) score += 2;
+
+  if (/\b(gostou|liked|comentou|commented|repostou|reposted|compartilhou|shared)\b/i.test(normalized.author_name ?? "")) {
+    score -= 12;
+  }
+
+  if (/\b(gostou|liked|comentou|commented|repostou|reposted|compartilhou|shared)\b/i.test(normalized.post_text.slice(0, 80))) {
+    score -= 6;
+  }
+
+  return score;
+}
+
+function buildLoosePreviewKey(preview: CapturePreview): string {
+  const normalized = normalizePreview(preview);
+  const bodyPrefix = normalized.post_text.toLowerCase().replace(/\s+/g, " ").slice(0, 120);
+  return [normalized.author_name?.toLowerCase() ?? "", bodyPrefix, normalized.captured_from].join("::");
+}
+
+function mergePreviewLists(...groups: CapturePreview[][]): CapturePreview[] {
+  const byExactKey = new Map<string, CapturePreview>();
+  const byLooseKey = new Map<string, string>();
+
+  for (const group of groups) {
+    for (const preview of group) {
+      const normalized = normalizePreview(preview);
+      const exactKey = buildPreviewKey(normalized);
+      const looseKey = buildLoosePreviewKey(normalized);
+      const existingExactKey = byLooseKey.get(looseKey) ?? exactKey;
+      const current = byExactKey.get(existingExactKey);
+
+      if (!current || scorePreview(normalized) > scorePreview(current)) {
+        if (existingExactKey !== exactKey) {
+          byExactKey.delete(existingExactKey);
+        }
+        byExactKey.set(exactKey, normalized);
+        byLooseKey.set(looseKey, exactKey);
+      }
+    }
+  }
+
+  return Array.from(byExactKey.values());
+}
+
 async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
@@ -172,8 +225,13 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
 
         const actionTextPattern =
           /\b(gostar|like|comentar|comment|compartilhar|share|repost|enviar|send)\b/i;
+        const socialContextPattern =
+          /\b(gostou|liked|comentou|commented|repostou|reposted|compartilhou|shared|seguem a empresa|follows the company|conexoes seguem|connections follow)\b/i;
         const timestampPattern =
           /^(\d+\s*(min|minutos?|h|hora|horas|d|dia|dias|sem|semanas?|m|mes|meses|mo)\b|edited|editado|promoted|patrocinado)$/i;
+        const reactionPattern = /reaction|reactions|reac|curtida|curtidas|like|likes/i;
+        const commentPattern = /comment|comments|comentario|comentarios|comentário|comentários/i;
+        const sharePattern = /repost|reposts|share|shares|compartilhamento|compartilhamentos|compartilhar/i;
         const postUrlSelectors = [
           ".update-components-actor__meta-link",
           ".feed-shared-actor__container-link",
@@ -186,7 +244,7 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
         ];
         const postUrnAttributeSelectors =
           "[data-urn], [data-id], [data-activity-urn], [data-entity-urn], [data-update-urn], [data-content-urn]";
-        const postUrnPattern = /urn:li:(activity|share):\d+/i;
+        const postUrnPattern = /urn:li:(activity|share|ugcPost|update):\d+/i;
         const authorNameSelectors = [
           ".update-components-actor__title span[aria-hidden='true']",
           ".feed-shared-actor__name",
@@ -219,6 +277,33 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
           ".social-details-social-counts",
           ".social-details-social-activity",
           ".feed-shared-social-action-bar",
+        ];
+        const reactionCountSelectors = [
+          ".social-details-social-counts__reactions-count",
+          ".social-details-social-counts__social-proof-text",
+          "[aria-label*='reaction']",
+          "[aria-label*='reactions']",
+          "[aria-label*='curtida']",
+          "[aria-label*='curtidas']",
+        ];
+        const commentCountSelectors = [
+          "button[aria-label*='comment']",
+          "button[aria-label*='coment']",
+          "a[aria-label*='comment']",
+          "a[aria-label*='coment']",
+          "span[aria-label*='comment']",
+          "span[aria-label*='coment']",
+        ];
+        const shareCountSelectors = [
+          "button[aria-label*='repost']",
+          "button[aria-label*='share']",
+          "button[aria-label*='compart']",
+          "a[aria-label*='repost']",
+          "a[aria-label*='share']",
+          "a[aria-label*='compart']",
+          "span[aria-label*='repost']",
+          "span[aria-label*='share']",
+          "span[aria-label*='compart']",
         ];
         const staticContainerSelectors = [
           "div.feed-shared-update-v2",
@@ -280,6 +365,16 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
           return root;
         }
 
+        function collectSearchRoots(root: ParentNode): ParentNode[] {
+          const searchRoots: ParentNode[] = [root];
+          let current = root instanceof HTMLElement ? root.parentElement : null;
+          for (let depth = 0; current && depth < 10; depth += 1) {
+            searchRoots.push(current);
+            current = current.parentElement;
+          }
+          return searchRoots;
+        }
+
         function collectVisibleTextCandidates(root: ParentNode, minLength = 12): string[] {
           const values: string[] = [];
           const seen = new Set<string>();
@@ -320,9 +415,7 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
           return null;
         }
 
-        function normalizeLinkedInPostUrl(
-          rawUrl: string | null | undefined,
-        ): string | null {
+        function normalizeLinkedInPostUrl(rawUrl: string | null | undefined): string | null {
           const cleaned = normalizeWhitespace(rawUrl);
           if (!cleaned) {
             return null;
@@ -330,9 +423,26 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
 
           try {
             const parsed = new URL(cleaned, window.location.origin);
-            const updateEntityUrn = normalizeWhitespace(
-              parsed.searchParams.get("updateEntityUrn"),
-            );
+            for (const key of [
+              "url",
+              "destRedirectUrl",
+              "destUrl",
+              "redirect",
+              "redirectUrl",
+              "destination",
+              "href",
+            ]) {
+              const nestedValue = normalizeWhitespace(parsed.searchParams.get(key));
+              if (!nestedValue) {
+                continue;
+              }
+              const nestedResolved = normalizeLinkedInPostUrl(nestedValue);
+              if (nestedResolved) {
+                return nestedResolved;
+              }
+            }
+
+            const updateEntityUrn = normalizeWhitespace(parsed.searchParams.get("updateEntityUrn"));
             if (updateEntityUrn && postUrnPattern.test(updateEntityUrn)) {
               return `${parsed.origin}/feed/update/${updateEntityUrn.replace(/\/+$/, "")}/`;
             }
@@ -363,27 +473,29 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
         function extractPostUrn(root: ParentNode): string | null {
           const candidates: string[] = [];
 
-          if (root instanceof HTMLElement) {
+          let currentElement = root instanceof HTMLElement ? root : null;
+          for (let depth = 0; currentElement && depth < 8; depth += 1) {
             candidates.push(
               ...[
-                root.dataset.urn,
-                root.dataset.id,
-                root.dataset.activityUrn,
-                root.dataset.entityUrn,
-                root.dataset.updateUrn,
-                root.dataset.contentUrn,
-                root.getAttribute("data-urn"),
-                root.getAttribute("data-id"),
-                root.getAttribute("data-activity-urn"),
-                root.getAttribute("data-entity-urn"),
-                root.getAttribute("data-update-urn"),
-                root.getAttribute("data-content-urn"),
+                currentElement.dataset.urn,
+                currentElement.dataset.id,
+                currentElement.dataset.activityUrn,
+                currentElement.dataset.entityUrn,
+                currentElement.dataset.updateUrn,
+                currentElement.dataset.contentUrn,
+                currentElement.getAttribute("data-urn"),
+                currentElement.getAttribute("data-id"),
+                currentElement.getAttribute("data-activity-urn"),
+                currentElement.getAttribute("data-entity-urn"),
+                currentElement.getAttribute("data-update-urn"),
+                currentElement.getAttribute("data-content-urn"),
               ].filter((value): value is string => !!value),
             );
+            currentElement = currentElement.parentElement;
           }
 
           for (const element of root.querySelectorAll<HTMLElement>(postUrnAttributeSelectors)) {
-            const attributeCandidates = [
+            for (const candidate of [
               element.dataset.urn,
               element.dataset.id,
               element.dataset.activityUrn,
@@ -396,12 +508,10 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
               element.getAttribute("data-entity-urn"),
               element.getAttribute("data-update-urn"),
               element.getAttribute("data-content-urn"),
-            ];
-            for (const candidate of attributeCandidates) {
-              if (!candidate) {
-                continue;
+            ]) {
+              if (candidate) {
+                candidates.push(candidate);
               }
-              candidates.push(candidate);
             }
           }
 
@@ -416,28 +526,41 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
         }
 
         function firstPostUrl(root: ParentNode): string | null {
-          for (const selector of postUrlSelectors) {
-            const anchor = root.querySelector<HTMLAnchorElement>(selector);
-            const href = normalizeLinkedInPostUrl(anchor?.href);
-            if (href) {
-              return href;
+          for (const searchRoot of collectSearchRoots(root)) {
+            for (const selector of postUrlSelectors) {
+              const anchor = searchRoot.querySelector<HTMLAnchorElement>(selector);
+              const href = normalizeLinkedInPostUrl(anchor?.href);
+              if (href) {
+                return href;
+              }
             }
           }
-          const anchors = root.querySelectorAll<HTMLAnchorElement>("a[href]");
-          for (const anchor of anchors) {
-            const href = normalizeLinkedInPostUrl(anchor.href);
-            if (!href) {
-              continue;
-            }
-            if (
-              href.includes("/posts/") ||
-              href.includes("/feed/update/") ||
-              href.includes("/activity-")
-            ) {
-              return href;
+
+          for (const searchRoot of collectSearchRoots(root)) {
+            const anchors = searchRoot.querySelectorAll<HTMLAnchorElement>("a[href]");
+            for (const anchor of anchors) {
+              const href = normalizeLinkedInPostUrl(anchor.href);
+              if (!href) {
+                continue;
+              }
+              if (
+                href.includes("/posts/") ||
+                href.includes("/feed/update/") ||
+                href.includes("/activity-")
+              ) {
+                return href;
+              }
             }
           }
-          return buildLinkedInFeedUrlFromUrn(extractPostUrn(root));
+
+          for (const searchRoot of collectSearchRoots(root)) {
+            const postUrl = buildLinkedInFeedUrlFromUrn(extractPostUrn(searchRoot));
+            if (postUrl) {
+              return postUrl;
+            }
+          }
+
+          return null;
         }
 
         function parseMetricValue(rawText: string | null): number {
@@ -466,17 +589,105 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
           return root;
         }
 
-        function findMetric(root: ParentNode, pattern: RegExp): number {
+        function readElementText(element: HTMLElement | null): string | null {
+          if (!element) {
+            return null;
+          }
+          const ariaLabel = normalizeWhitespace(element.getAttribute("aria-label"));
+          const text = normalizeWhitespace(element.innerText || element.textContent);
+          return normalizeWhitespace([ariaLabel, text].filter(Boolean).join(" "));
+        }
+
+        function parseNamedMetricValue(rawText: string | null, pattern: RegExp): number {
+          if (!rawText) {
+            return 0;
+          }
+          const source = pattern.source;
+          const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+          const regex = new RegExp(`(\\d+(?:[\\.,]\\d+)?)(\\s*[km])?\\s*(?:${source})`, flags);
+          let lastMatch = null;
+          for (const match of rawText.toLowerCase().matchAll(regex)) {
+            lastMatch = match;
+          }
+          if (!lastMatch) {
+            return 0;
+          }
+          return parseMetricValue(`${lastMatch[1]}${lastMatch[2] ?? ""}`);
+        }
+
+        function findMetricBySelectors(
+          root: ParentNode,
+          selectors: string[],
+          pattern?: RegExp,
+        ): number {
+          for (const selector of selectors) {
+            for (const element of root.querySelectorAll<HTMLElement>(selector)) {
+              const text = readElementText(element);
+              if (!text) {
+                continue;
+              }
+              if (pattern) {
+                const namedMetric = parseNamedMetricValue(text, pattern);
+                if (namedMetric > 0) {
+                  return namedMetric;
+                }
+                continue;
+              }
+              const parsed = parseMetricValue(text);
+              if (parsed > 0) {
+                return parsed;
+              }
+            }
+          }
+          return 0;
+        }
+
+        function findNamedMetric(
+          root: ParentNode,
+          selectors: string[],
+          pattern: RegExp,
+        ): number {
+          const directMetric = findMetricBySelectors(root, selectors, pattern);
+          if (directMetric > 0) {
+            return directMetric;
+          }
+
           const scope = getMetricScope(root);
-          const elements = scope.querySelectorAll<HTMLElement>(
-            "button, span, li, div",
-          );
-          for (const element of elements) {
-            const text = normalizeWhitespace(element.innerText);
-            if (!text || !pattern.test(text.toLowerCase())) {
+          for (const element of scope.querySelectorAll<HTMLElement>("button, a, span, div, li")) {
+            const text = readElementText(element);
+            if (!text) {
               continue;
             }
-            return parseMetricValue(text);
+            const namedMetric = parseNamedMetricValue(text, pattern);
+            if (namedMetric > 0) {
+              return namedMetric;
+            }
+          }
+          return 0;
+        }
+
+        function findReactionMetric(root: ParentNode): number {
+          const directMetric = findMetricBySelectors(root, reactionCountSelectors);
+          if (directMetric > 0) {
+            return directMetric;
+          }
+
+          const scope = getMetricScope(root);
+          for (const element of scope.querySelectorAll<HTMLElement>("button, a, span, div, li")) {
+            const text = readElementText(element);
+            if (!text) {
+              continue;
+            }
+            if (commentPattern.test(text) || sharePattern.test(text) || socialContextPattern.test(text)) {
+              continue;
+            }
+            const namedMetric = parseNamedMetricValue(text, reactionPattern);
+            if (namedMetric > 0) {
+              return namedMetric;
+            }
+            if (/^\d+(?:[\.,]\d+)?\s*[km]?$/i.test(text)) {
+              return parseMetricValue(text);
+            }
           }
           return 0;
         }
@@ -582,9 +793,9 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
           }
           const hasPostUrl = !!firstPostUrl(container);
           const hasMetrics =
-            findMetric(container, /like|curt/) > 0 ||
-            findMetric(container, /comment|coment/) > 0 ||
-            findMetric(container, /repost|share|compart/) > 0;
+            findReactionMetric(container) > 0 ||
+            findNamedMetric(container, commentCountSelectors, commentPattern) > 0 ||
+            findNamedMetric(container, shareCountSelectors, sharePattern) > 0;
           const hasHeader = !!firstText(getHeaderScope(container), authorNameSelectors);
           return hasPostUrl || hasMetrics || hasHeader;
         }
@@ -671,9 +882,9 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
             firstText(container, postTextSelectors) ??
             fallbackPostText(container, authorName, authorTitle);
           const postUrl = firstPostUrl(container);
-          const likes = findMetric(container, /like|curt/);
-          const comments = findMetric(container, /comment|coment/);
-          const shares = findMetric(container, /repost|share|compart/);
+          const likes = findReactionMetric(container);
+          const comments = findNamedMetric(container, commentCountSelectors, commentPattern);
+          const shares = findNamedMetric(container, shareCountSelectors, sharePattern);
           const hasMetrics = likes > 0 || comments > 0 || shares > 0;
           const resolvedPostText = postText;
 
@@ -750,7 +961,7 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
           type: MESSAGE_TYPES.GET_ACTIVE_TAB_POSTS,
         })) as ExtensionMessageResponse<CapturePreview[]>;
         if (response.ok && (response.data?.length ?? 0) > 0) {
-          const posts = response.data ?? [];
+          const posts = mergePreviewLists(scanResult.posts, response.data ?? []);
           return {
             posts,
             diagnostic: {
