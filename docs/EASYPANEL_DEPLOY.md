@@ -183,8 +183,14 @@ Mesmo build do worker.
 Start command:
 
 ```bash
-celery -A workers.celery_app beat --loglevel=warning
+celery -A workers.celery_app beat --loglevel=warning --schedule /tmp/celerybeat-schedule
 ```
+
+Motivo:
+
+- o Celery Beat usa um arquivo local de estado
+- no container, a pasta /app pode nao ser gravavel para apagar/recriar esse arquivo
+- usando /tmp/celerybeat-schedule, o beat consegue recriar o estado sem falhar por permissao
 
 ## 6. Serviço Flower
 

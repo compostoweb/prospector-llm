@@ -20,7 +20,7 @@ Filas:
 
 Uso:
     celery -A workers.celery_app worker -Q dispatch -c 2
-    celery -A workers.celery_app beat --loglevel=info
+    celery -A workers.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule
 """
 
 from __future__ import annotations

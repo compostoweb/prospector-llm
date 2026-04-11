@@ -111,7 +111,7 @@ services:
       - .:/app
     depends_on:
       - redis
-    command: celery -A workers.celery_app beat --loglevel=info
+    command: celery -A workers.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule
     restart: unless-stopped
 
   flower:
