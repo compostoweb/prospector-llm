@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Awaitable
 from datetime import date
+from typing import Any, cast
 
 import redis.asyncio as aioredis
 import structlog
@@ -109,10 +111,34 @@ class RedisClient:
         """
         key = f"ratelimit:{tenant_id}:{channel}:{date.today()}"
         redis = self._get_redis()
-        current = await redis.incr(key)
-        if current == 1:
-            # Primeira vez hoje — define TTL para expirar à meia-noite aproximada
-            await redis.expire(key, 86400)
+        current = await cast(
+            Awaitable[Any],
+            redis.eval(
+                """
+            local key = KEYS[1]
+            local limit = tonumber(ARGV[1])
+            local ttl = tonumber(ARGV[2])
+
+            local current = redis.call('GET', key)
+            if not current then
+                redis.call('SET', key, 1, 'EX', ttl)
+                return 1
+            end
+
+            current = tonumber(current)
+            if current >= limit then
+                return current
+            end
+
+            return redis.call('INCR', key)
+            """,
+                1,
+                key,
+                str(limit),
+                "86400",
+            ),
+        )
+        current = int(current)
         allowed = current <= limit
         if not allowed:
             logger.warning(
@@ -123,6 +149,37 @@ class RedisClient:
                 limit=limit,
             )
         return allowed
+
+    async def release_rate_limit(self, channel: str, tenant_id: uuid.UUID) -> int:
+        """
+        Libera uma reserva de rate limit quando um envio enfileirado termina sem sucesso.
+        Nunca deixa o contador ficar negativo.
+        """
+        key = f"ratelimit:{tenant_id}:{channel}:{date.today()}"
+        redis = self._get_redis()
+        current = await cast(
+            Awaitable[Any],
+            redis.eval(
+                """
+            local key = KEYS[1]
+            local current = redis.call('GET', key)
+            if not current then
+                return 0
+            end
+
+            current = tonumber(current)
+            if current <= 1 then
+                redis.call('DEL', key)
+                return 0
+            end
+
+            return redis.call('DECR', key)
+            """,
+                1,
+                key,
+            ),
+        )
+        return int(current)
 
     # ── Cache genérico ────────────────────────────────────────────────
 

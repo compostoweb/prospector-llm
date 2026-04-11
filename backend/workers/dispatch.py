@@ -107,6 +107,9 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
             )
             return {"step_id": step_id, "status": step.status.value}
 
+        async def _release_rate_limit_slot() -> None:
+            await redis_client.release_rate_limit(step.channel.value, tid)
+
         # ── Carrega Lead e Cadence ────────────────────────────────────
         lead_result = await db.execute(select(Lead).where(Lead.id == step.lead_id))
         lead = lead_result.scalar_one_or_none()
@@ -117,6 +120,7 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
         if not lead or not cadence:
             step.status = StepStatus.FAILED
             await db.commit()
+            await _release_rate_limit_slot()
             logger.error("dispatch.missing_lead_or_cadence", step_id=step_id)
             return {"step_id": step_id, "status": "failed"}
 
@@ -282,6 +286,7 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                         if _li_account is None:
                             step.status = StepStatus.SKIPPED
                             await db.commit()
+                            await _release_rate_limit_slot()
                             return {
                                 "step_id": step_id,
                                 "status": "skipped",
@@ -319,12 +324,14 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                 if not email_to:
                     step.status = StepStatus.SKIPPED
                     await db.commit()
+                    await _release_rate_limit_slot()
                     return {"step_id": step_id, "status": "skipped", "reason": "no_email"}
 
                 # Verifica bounce
                 if lead.email_bounced_at is not None:
                     step.status = StepStatus.SKIPPED
                     await db.commit()
+                    await _release_rate_limit_slot()
                     return {"step_id": step_id, "status": "skipped", "reason": "email_bounced"}
 
                 # Verifica descadastro
@@ -337,6 +344,7 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                 if unsub_q.scalar_one_or_none() is not None:
                     step.status = StepStatus.SKIPPED
                     await db.commit()
+                    await _release_rate_limit_slot()
                     return {"step_id": step_id, "status": "skipped", "reason": "unsubscribed"}
 
                 subject_variants = template_step.get("subject_variants") if template_step else None
@@ -441,6 +449,7 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                         )
                         step.status = StepStatus.SKIPPED
                         await db.commit()
+                        await _release_rate_limit_slot()
                         return {
                             "step_id": step_id,
                             "status": "skipped",
@@ -492,6 +501,7 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                 if not lead.linkedin_profile_id:
                     step.status = StepStatus.SKIPPED
                     await db.commit()
+                    await _release_rate_limit_slot()
                     return {
                         "step_id": step_id,
                         "status": "skipped",
@@ -506,6 +516,7 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                 if not reacted:
                     step.status = StepStatus.SKIPPED
                     await db.commit()
+                    await _release_rate_limit_slot()
                     logger.info(
                         "dispatch.post_reaction.skipped",
                         step_id=step_id,
@@ -523,6 +534,7 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                 if not lead.linkedin_profile_id:
                     step.status = StepStatus.SKIPPED
                     await db.commit()
+                    await _release_rate_limit_slot()
                     return {
                         "step_id": step_id,
                         "status": "skipped",
@@ -538,6 +550,7 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                 if not commented:
                     step.status = StepStatus.SKIPPED
                     await db.commit()
+                    await _release_rate_limit_slot()
                     logger.info(
                         "dispatch.post_comment.skipped",
                         step_id=step_id,
@@ -552,6 +565,7 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                 if not lead.linkedin_profile_id:
                     step.status = StepStatus.SKIPPED
                     await db.commit()
+                    await _release_rate_limit_slot()
                     return {
                         "step_id": step_id,
                         "status": "skipped",
@@ -586,6 +600,7 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
             else:
                 step.status = StepStatus.SKIPPED
                 await db.commit()
+                await _release_rate_limit_slot()
                 return {"step_id": step_id, "status": "skipped", "reason": "unknown_channel"}
 
             # ── Salva Interaction outbound ────────────────────────────
@@ -630,10 +645,11 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                 error=str(exc),
             )
             try:
-                raise task.retry(exc=exc)
+                raise task.retry(exc=RuntimeError(f"{type(exc).__name__}: {exc}"))
             except task.MaxRetriesExceededError:
                 step.status = StepStatus.FAILED
                 await db.commit()
+                await _release_rate_limit_slot()
                 return {"step_id": step_id, "status": "failed", "error": str(exc)}
 
     return {"step_id": step_id, "status": "error", "error": "no_session"}
