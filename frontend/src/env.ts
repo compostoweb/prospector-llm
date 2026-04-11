@@ -2,6 +2,8 @@
 import { z } from "zod"
 
 export const env = createEnv({
+  skipValidation: process.env["SKIP_ENV_VALIDATION"] === "1",
+
   client: {
     NEXT_PUBLIC_API_URL: z.string().url(),
     NEXT_PUBLIC_WS_URL: z.string().min(1),

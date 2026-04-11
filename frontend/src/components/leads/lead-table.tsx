@@ -213,7 +213,10 @@ export function LeadTable({
                       <Archive size={14} aria-hidden="true" />
                     </Button>
                   )}
-                  <LeadDeleteDialog lead={lead} onDeleted={onLeadDeleted} />
+                  <LeadDeleteDialog
+                    lead={lead}
+                    {...(onLeadDeleted ? { onDeleted: onLeadDeleted } : {})}
+                  />
                 </div>
               </td>
             </tr>
