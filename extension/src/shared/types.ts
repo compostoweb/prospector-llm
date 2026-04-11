@@ -56,6 +56,35 @@ export interface CapturePreview {
   captured_at: string;
 }
 
+export interface ActiveTabPostCandidateDiagnostic {
+  tag_name: string;
+  text_excerpt: string | null;
+  has_post_url: boolean;
+  has_author_name: boolean;
+  has_author_title: boolean;
+  has_metrics: boolean;
+  discard_reason: string | null;
+}
+
+export interface ActiveTabPostScanDiagnostic {
+  page_url: string | null;
+  is_linkedin: boolean;
+  captured_from: CapturedFrom;
+  static_container_count: number;
+  action_anchor_count: number;
+  action_bar_count: number;
+  candidate_container_count: number;
+  accepted_post_count: number;
+  discard_reason_counts: Record<string, number>;
+  sample_candidates: ActiveTabPostCandidateDiagnostic[];
+  error_message: string | null;
+}
+
+export interface ActiveTabPostScanResult {
+  posts: CapturePreview[];
+  diagnostic: ActiveTabPostScanDiagnostic;
+}
+
 export interface CaptureRequestPayload {
   destination: {
     type: CaptureDestinationType;

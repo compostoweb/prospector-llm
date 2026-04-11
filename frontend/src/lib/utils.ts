@@ -51,6 +51,20 @@ export function channelLabel(channel: string): string {
   return map[channel] ?? channel
 }
 
+/** Origem do lead → label legível em português */
+export function leadSourceLabel(source: string): string {
+  const map: Record<string, string> = {
+    manual: "Manual",
+    apify_maps: "Apify Maps",
+    apify_linkedin: "Apify LinkedIn",
+    linkedin_search: "Busca LinkedIn",
+    import: "Importação",
+    api: "Ferramenta interna/API",
+  }
+
+  return map[source] ?? source
+}
+
 type IntentVariant = "success" | "warning" | "danger" | "neutral" | "info"
 
 /** Intent da resposta → label + variante de cor */

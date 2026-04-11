@@ -14,13 +14,17 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, Float, String, Text
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base, TenantMixin, TimestampMixin
 from models.enums import LeadSource, LeadStatus
+
+if TYPE_CHECKING:
+    from models.lead_list import LeadList
 
 
 class Lead(Base, TenantMixin, TimestampMixin):
@@ -150,4 +154,11 @@ class Lead(Base, TenantMixin, TimestampMixin):
         nullable=True,
         default=None,
         comment="Timestamp da última análise LLM via Batch API",
+    )
+
+    lists: Mapped[list[LeadList]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+        "LeadList",
+        secondary="lead_list_members",
+        back_populates="leads",
+        lazy="selectin",
     )

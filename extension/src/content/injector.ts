@@ -1,7 +1,7 @@
 import { MESSAGE_TYPES } from "../shared/contracts";
 import { buildPreviewKey } from "../shared/linkedin-normalizer";
 import type { CapturePreview, CapturedFrom } from "../shared/types";
-import { extractLinkedInPost } from "./dom-parser";
+import { collectLikelyPostContainers, extractLinkedInPost } from "./dom-parser";
 
 const BUTTON_ATTRIBUTE = "data-prospector-capture-button";
 const BUTTON_CLASSNAME = "prospector-capture-button";
@@ -92,28 +92,13 @@ function findInjectionTarget(container: HTMLElement): HTMLElement {
   return container;
 }
 
-function getPostContainers(scope: ParentNode): HTMLElement[] {
-  return Array.from(
-    scope.querySelectorAll<HTMLElement>(
-      [
-        "div.feed-shared-update-v2",
-        "div.occludable-update",
-        "div[data-id^='urn:li:activity:']",
-        "div[data-urn^='urn:li:activity:']",
-        "article",
-        ".update-components-actor",
-      ].join(", "),
-    ),
-  );
-}
-
 function collectLinkedInPosts(
   scope: ParentNode,
   capturedFrom: CapturedFrom,
 ): CapturePreview[] {
   const previews = new Map<string, CapturePreview>();
 
-  for (const container of getPostContainers(scope)) {
+  for (const container of collectLikelyPostContainers(scope)) {
     const preview = extractLinkedInPost(container, capturedFrom);
     if (!preview) {
       continue;
@@ -128,7 +113,7 @@ function installButtonsInScope(
   scope: ParentNode,
   capturedFrom: CapturedFrom,
 ): void {
-  const containers = getPostContainers(scope);
+  const containers = collectLikelyPostContainers(scope);
 
   containers.forEach((container) => {
     if (container.querySelector(`[${BUTTON_ATTRIBUTE}]`)) {

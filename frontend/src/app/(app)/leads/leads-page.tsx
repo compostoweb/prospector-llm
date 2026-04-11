@@ -7,7 +7,9 @@ import { useUIStore } from "@/store/ui-store"
 import { LeadTable } from "@/components/leads/lead-table"
 import { LeadCreateDialog } from "@/components/leads/lead-create-dialog"
 import { LeadImportDialog } from "@/components/leads/lead-import-dialog"
-import { Search, X, Linkedin } from "lucide-react"
+import { LeadMergeDialog } from "@/components/leads/lead-merge-dialog"
+import { Search, X, Linkedin, GitMerge } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 const STATUS_OPTIONS = [
@@ -23,6 +25,8 @@ export default function LeadsPage() {
   const { activeFilters, setFilter, clearFilters } = useUIStore()
   const [search, setSearch] = useState("")
   const [page, setPage] = useState(1)
+  const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([])
+  const [showMergeDialog, setShowMergeDialog] = useState(false)
 
   const { data, isLoading } = useLeads({
     page,
@@ -32,10 +36,23 @@ export default function LeadsPage() {
   })
 
   const hasFilters = !!activeFilters.status?.[0] || !!search
+  const selectedLeads = (data?.items ?? []).filter((lead) => selectedLeadIds.includes(lead.id))
 
   function handleSearch(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setPage(1)
+  }
+
+  function toggleLead(leadId: string, checked: boolean) {
+    setSelectedLeadIds((current) => {
+      if (checked) return [...new Set([...current, leadId])]
+      return current.filter((id) => id !== leadId)
+    })
+  }
+
+  function toggleAll(checked: boolean) {
+    if (!data) return
+    setSelectedLeadIds(checked ? data.items.map((lead) => lead.id) : [])
   }
 
   return (
@@ -49,6 +66,12 @@ export default function LeadsPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          {selectedLeadIds.length >= 2 && (
+            <Button variant="outline" onClick={() => setShowMergeDialog(true)}>
+              <GitMerge size={14} aria-hidden="true" />
+              Mesclar {selectedLeadIds.length}
+            </Button>
+          )}
           <LeadImportDialog />
           <Link
             href="/leads/busca-linkedin"
@@ -64,7 +87,7 @@ export default function LeadsPage() {
       {/* Filtros */}
       <div className="flex flex-wrap items-center gap-3">
         {/* Busca */}
-        <form onSubmit={handleSearch} className="relative flex-1 min-w-[200px] max-w-sm">
+        <form onSubmit={handleSearch} className="relative flex-1 min-w-50 max-w-sm">
           <Search
             size={14}
             className="absolute left-3 top-1/2 -translate-y-1/2 text-(--text-tertiary)"
@@ -122,7 +145,21 @@ export default function LeadsPage() {
       </div>
 
       {/* Tabela */}
-      <LeadTable leads={data?.items ?? []} isLoading={isLoading} />
+      <LeadTable
+        leads={data?.items ?? []}
+        isLoading={isLoading}
+        selectedLeadIds={selectedLeadIds}
+        onToggleLead={toggleLead}
+        onToggleAll={toggleAll}
+        onLeadDeleted={() => setSelectedLeadIds([])}
+      />
+
+      <LeadMergeDialog
+        open={showMergeDialog}
+        onOpenChange={setShowMergeDialog}
+        leads={selectedLeads}
+        onMerged={() => setSelectedLeadIds([])}
+      />
 
       {/* Paginação */}
       {data && data.pages > 1 && (

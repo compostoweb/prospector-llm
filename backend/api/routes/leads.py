@@ -16,12 +16,14 @@ Endpoints:
 from __future__ import annotations
 
 import uuid
-from typing import Annotated, Any
+from importlib import import_module
+from typing import Annotated, Any, cast
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible
 from models.cadence import Cadence
@@ -33,15 +35,31 @@ from schemas.interaction import InteractionListResponse, InteractionResponse
 from schemas.lead import (
     LeadCreateRequest,
     LeadEnrollRequest,
+    LeadGenerationImportRequest,
+    LeadGenerationImportResponse,
+    LeadGenerationPreviewRequest,
+    LeadGenerationPreviewResponse,
     LeadImportRequest,
     LeadImportResponse,
     LeadListResponse,
+    LeadMergeRequest,
+    LeadMergeResponse,
     LeadResponse,
     LeadStepResponse,
     LeadUpdateRequest,
 )
 from services.cadence_manager import CadenceManager
-from workers.enrich import enrich_lead
+from services.lead_generation import preview_generated_leads
+from services.lead_management import (
+    apply_candidate_to_lead,
+    delete_lead_permanently,
+    ensure_list_membership,
+    find_existing_lead,
+    get_lead_with_lists,
+    get_or_create_list,
+    merge_leads,
+    serialize_lead,
+)
 
 logger = structlog.get_logger()
 
@@ -51,6 +69,7 @@ _cadence_manager = CadenceManager()
 
 
 # ── Listagem paginada ─────────────────────────────────────────────────
+
 
 @router.get("", response_model=LeadListResponse)
 async def list_leads(
@@ -63,7 +82,7 @@ async def list_leads(
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> LeadListResponse:
-    query = select(Lead).where(Lead.tenant_id == tenant_id)
+    query = select(Lead).where(Lead.tenant_id == tenant_id).options(selectinload(Lead.lists))  # type: ignore[arg-type]
 
     if status_filter is not None:
         query = query.where(Lead.status == status_filter)
@@ -85,11 +104,13 @@ async def list_leads(
     total = (await db.execute(count_q)).scalar_one()
 
     offset = (page - 1) * page_size
-    result = await db.execute(query.order_by(Lead.created_at.desc()).offset(offset).limit(page_size))
+    result = await db.execute(
+        query.order_by(Lead.created_at.desc()).offset(offset).limit(page_size)
+    )
     leads = result.scalars().all()
 
     return LeadListResponse(
-        items=[LeadResponse.model_validate(lead) for lead in leads],
+        items=[serialize_lead(lead) for lead in leads],
         total=total,
         page=page,
         page_size=page_size,
@@ -97,6 +118,7 @@ async def list_leads(
 
 
 # ── Criação ───────────────────────────────────────────────────────────
+
 
 @router.post("", response_model=LeadResponse, status_code=status.HTTP_201_CREATED)
 async def create_lead(
@@ -147,13 +169,18 @@ async def create_lead(
     logger.info("lead.created", lead_id=str(lead.id), tenant_id=str(tenant_id))
 
     if enrich:
-        enrich_lead.delay(str(lead.id), str(tenant_id))
+        enrichment_task = import_module("workers.enrich").enrich_lead
+        enrichment_task.delay(str(lead.id), str(tenant_id))
         logger.info("lead.enrich_queued", lead_id=str(lead.id))
 
-    return LeadResponse.model_validate(lead)
+    lead_with_lists = await get_lead_with_lists(lead.id, tenant_id, db)
+    if lead_with_lists is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead não encontrado.")
+    return serialize_lead(lead_with_lists)
 
 
 # ── Detalhes ──────────────────────────────────────────────────────────
+
 
 @router.get("/{lead_id}", response_model=LeadResponse)
 async def get_lead(
@@ -162,10 +189,11 @@ async def get_lead(
     db: AsyncSession = Depends(get_session_flexible),
 ) -> LeadResponse:
     lead = await _get_lead_or_404(lead_id, tenant_id, db)
-    return LeadResponse.model_validate(lead)
+    return serialize_lead(lead)
 
 
 # ── Atualização parcial ───────────────────────────────────────────────
+
 
 @router.patch("/{lead_id}", response_model=LeadResponse)
 async def update_lead(
@@ -181,13 +209,14 @@ async def update_lead(
         setattr(lead, field, value)
 
     await db.commit()
-    await db.refresh(lead)
+    lead = await _get_lead_or_404(lead_id, tenant_id, db)
 
     logger.info("lead.updated", lead_id=str(lead_id), fields=list(updates.keys()))
-    return LeadResponse.model_validate(lead)
+    return serialize_lead(lead)
 
 
 # ── Arquivamento ──────────────────────────────────────────────────────
+
 
 @router.delete("/{lead_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def archive_lead(
@@ -201,7 +230,55 @@ async def archive_lead(
     logger.info("lead.archived", lead_id=str(lead_id))
 
 
+@router.delete("/{lead_id}/permanent", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+async def hard_delete_lead(
+    lead_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> None:
+    lead = await _get_lead_or_404(lead_id, tenant_id, db)
+    await delete_lead_permanently(db, lead=lead)
+    logger.info("lead.deleted_permanently", lead_id=str(lead_id), tenant_id=str(tenant_id))
+
+
+@router.post("/merge", response_model=LeadMergeResponse)
+async def merge_selected_leads(
+    body: LeadMergeRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> LeadMergeResponse:
+    if body.primary_lead_id in body.secondary_lead_ids:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="O lead principal não pode aparecer na lista de leads mesclados.",
+        )
+
+    primary = await get_lead_with_lists(body.primary_lead_id, tenant_id, db)
+    if primary is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Lead principal não encontrado."
+        )
+
+    merged_lead = await merge_leads(
+        db,
+        tenant_id=tenant_id,
+        primary_lead_id=body.primary_lead_id,
+        secondary_lead_ids=body.secondary_lead_ids,
+    )
+    logger.info(
+        "lead.merged",
+        lead_id=str(body.primary_lead_id),
+        merged_count=len(body.secondary_lead_ids),
+        tenant_id=str(tenant_id),
+    )
+    return LeadMergeResponse(
+        lead=serialize_lead(merged_lead),
+        merged_lead_ids=body.secondary_lead_ids,
+    )
+
+
 # ── Enrollment em cadência ────────────────────────────────────────────
+
 
 @router.post("/{lead_id}/enroll", response_model=dict[str, Any], status_code=status.HTTP_200_OK)
 async def enroll_lead(
@@ -252,6 +329,7 @@ async def enroll_lead(
 
 # ── Histórico de interações ───────────────────────────────────────────
 
+
 @router.get("/{lead_id}/interactions", response_model=InteractionListResponse)
 async def list_lead_interactions(
     lead_id: uuid.UUID,
@@ -283,6 +361,7 @@ async def list_lead_interactions(
 
 
 # ── Steps de cadência (timeline) ──────────────────────────────────────
+
 
 @router.get("/{lead_id}/steps", response_model=list[LeadStepResponse])
 async def list_lead_steps(
@@ -341,30 +420,35 @@ async def list_lead_steps(
         reply_content: str | None = None
         intent: str | None = None
         if ib_i < len(ib_list):
-            reply_content = ib_list[ib_i].content_text
-            intent = ib_list[ib_i].intent.value if ib_list[ib_i].intent else None
+            current_interaction = ib_list[ib_i]
+            reply_content = current_interaction.content_text
+            interaction_intent = current_interaction.intent
+            intent = interaction_intent.value if interaction_intent is not None else None
             inbound_idx[ch] = ib_i + 1
 
-        result.append(LeadStepResponse(
-            id=step.id,
-            lead_id=step.lead_id,
-            cadence_id=step.cadence_id,
-            step_number=step.step_number,
-            channel=ch,
-            status=step.status.value,
-            use_voice=step.use_voice,
-            day_offset=step.day_offset,
-            scheduled_at=step.scheduled_at,
-            sent_at=step.sent_at,
-            message_content=message_content,
-            reply_content=reply_content,
-            intent=intent,
-        ))
+        result.append(
+            LeadStepResponse(
+                id=step.id,
+                lead_id=step.lead_id,
+                cadence_id=step.cadence_id,
+                step_number=step.step_number,
+                channel=ch,
+                status=step.status.value,
+                use_voice=step.use_voice,
+                day_offset=step.day_offset,
+                scheduled_at=step.scheduled_at,
+                sent_at=step.sent_at,
+                message_content=message_content,
+                reply_content=reply_content,
+                intent=intent,
+            )
+        )
 
     return result
 
 
 # ── Importação em lote ────────────────────────────────────────────────
+
 
 @router.post("/import", response_model=LeadImportResponse)
 async def import_leads(
@@ -391,7 +475,9 @@ async def import_leads(
     seen_urls: set[str] = set()
 
     for i, item in enumerate(body.items):
-        if item.linkedin_url and (item.linkedin_url in existing_urls or item.linkedin_url in seen_urls):
+        if item.linkedin_url and (
+            item.linkedin_url in existing_urls or item.linkedin_url in seen_urls
+        ):
             duplicates += 1
             continue
         try:
@@ -436,6 +522,95 @@ async def import_leads(
     return LeadImportResponse(imported=imported, duplicates=duplicates, errors=errors)
 
 
+@router.post("/generate-preview", response_model=LeadGenerationPreviewResponse)
+async def generate_leads_preview(
+    body: LeadGenerationPreviewRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> LeadGenerationPreviewResponse:
+    del tenant_id, db
+    try:
+        items = await preview_generated_leads(body)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return LeadGenerationPreviewResponse(source=body.source, items=items, total=len(items))
+
+
+@router.post(
+    "/generate-import",
+    response_model=LeadGenerationImportResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_leads_import(
+    body: LeadGenerationImportRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> LeadGenerationImportResponse:
+    target_list = await get_or_create_list(
+        db,
+        tenant_id=tenant_id,
+        list_id=body.list_id,
+        create_list_name=body.create_list_name,
+    )
+    if body.list_id and target_list is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lista não encontrada.")
+
+    created = 0
+    updated = 0
+    duplicates = 0
+    lead_ids: list[uuid.UUID] = []
+
+    for item in body.items:
+        existing = await find_existing_lead(db, tenant_id, item)
+        if existing is not None:
+            duplicates += 1
+            if body.merge_duplicates:
+                apply_candidate_to_lead(
+                    existing, item, source=body.source, overwrite_missing_only=True
+                )
+                updated += 1
+                if existing.id not in lead_ids:
+                    lead_ids.append(existing.id)
+            if target_list is not None:
+                await ensure_list_membership(db, lead_id=existing.id, list_id=target_list.id)
+            continue
+
+        lead = Lead(
+            tenant_id=tenant_id,
+            name=item.name,
+            source=item.source,
+            status=LeadStatus.RAW,
+        )
+        apply_candidate_to_lead(lead, item, source=body.source, overwrite_missing_only=False)
+        db.add(lead)
+        await db.flush()
+        if target_list is not None:
+            await ensure_list_membership(db, lead_id=lead.id, list_id=target_list.id)
+        lead_ids.append(lead.id)
+        created += 1
+
+    await db.commit()
+    logger.info(
+        "lead_generation.imported",
+        source=body.source,
+        tenant_id=str(tenant_id),
+        created=created,
+        updated=updated,
+        duplicates=duplicates,
+        list_id=str(target_list.id) if target_list else None,
+    )
+    return LeadGenerationImportResponse(
+        created=created,
+        updated=updated,
+        duplicates=duplicates,
+        list_id=target_list.id if target_list else None,
+        lead_ids=lead_ids,
+    )
+
+
 # ── LinkedIn Search ───────────────────────────────────────────────────
 
 from pydantic import BaseModel as _BaseModel  # noqa: E402
@@ -444,17 +619,17 @@ from pydantic import BaseModel as _BaseModel  # noqa: E402
 class LinkedInSearchRequest(_BaseModel):
     keywords: str
     # filtros multi-valor (mapeiam para o schema Unipile Classic - People)
-    titles: list[str] | None = None          # advanced_keywords.title (OR-joined)
-    companies: list[str] | None = None       # advanced_keywords.company (OR-joined)
-    location_ids: list[str] | None = None    # IDs numéricos do lookup /linkedin-search-params
-    industry_ids: list[str] | None = None    # IDs numéricos do lookup /linkedin-search-params
+    titles: list[str] | None = None  # advanced_keywords.title (OR-joined)
+    companies: list[str] | None = None  # advanced_keywords.company (OR-joined)
+    location_ids: list[str] | None = None  # IDs numéricos do lookup /linkedin-search-params
+    industry_ids: list[str] | None = None  # IDs numéricos do lookup /linkedin-search-params
     network_distance: list[int] | None = None  # [1=1º, 2=2º, 3=3º+]
     limit: int = 25
     cursor: str | None = None
 
 
 class LinkedInImportRequest(_BaseModel):
-    profiles: list[dict]
+    profiles: list[dict[str, object]]
     list_id: uuid.UUID | None = None
 
 
@@ -463,7 +638,7 @@ async def search_linkedin(
     body: LinkedInSearchRequest,
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
-) -> dict:
+) -> dict[str, object]:
     """
     Busca perfis LinkedIn via Unipile.
     Não importa — apenas retorna os resultados para preview.
@@ -488,16 +663,19 @@ async def search_linkedin(
             detail="Conta LinkedIn não configurada para este tenant.",
         )
 
-    result = await search_linkedin_profiles(
-        account_id=linkedin_account_id,
-        keywords=body.keywords,
-        titles=body.titles,
-        companies=body.companies,
-        location_ids=body.location_ids,
-        industry_ids=body.industry_ids,
-        network_distance=body.network_distance,
-        limit=body.limit,
-        cursor=body.cursor,
+    result = cast(
+        dict[str, object],
+        await search_linkedin_profiles(
+            account_id=linkedin_account_id,
+            keywords=body.keywords,
+            titles=body.titles,
+            companies=body.companies,
+            location_ids=body.location_ids,
+            industry_ids=body.industry_ids,
+            network_distance=body.network_distance,
+            limit=body.limit,
+            cursor=body.cursor,
+        ),
     )
     return result
 
@@ -508,7 +686,7 @@ async def linkedin_search_params(
     query: Annotated[str, Query(description="Texto para busca")] = "",
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
-) -> dict:
+) -> dict[str, object]:
     """
     Faz lookup de IDs de localização ou setor no LinkedIn via Unipile.
     Necessário para usar os filtros native do LinkedIn Search.
@@ -531,10 +709,14 @@ async def linkedin_search_params(
             detail="Conta LinkedIn não configurada para este tenant.",
         )
     from integrations.unipile_client import unipile_client
-    return await unipile_client.search_linkedin_params(
-        account_id=linkedin_account_id,
-        param_type=type,
-        query=query,
+
+    return cast(
+        dict[str, object],
+        await cast(Any, unipile_client).search_linkedin_params(
+            account_id=linkedin_account_id,
+            param_type=type,
+            query=query,
+        ),
     )
 
 
@@ -543,32 +725,33 @@ async def import_linkedin(
     body: LinkedInImportRequest,
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
-) -> dict:
+) -> dict[str, object]:
     """
     Importa perfis selecionados do LinkedIn como leads (source=linkedin_search).
     Deduplica por linkedin_profile_id dentro do tenant.
     """
     from services.linkedin_search_service import import_linkedin_profiles
 
-    return await import_linkedin_profiles(
-        profiles=body.profiles,
-        tenant_id=tenant_id,
-        list_id=body.list_id,
-        db=db,
+    return cast(
+        dict[str, object],
+        await import_linkedin_profiles(
+            profiles=body.profiles,
+            tenant_id=tenant_id,
+            list_id=body.list_id,
+            db=db,
+        ),
     )
 
 
 # ── Helper ────────────────────────────────────────────────────────────
+
 
 async def _get_lead_or_404(
     lead_id: uuid.UUID,
     tenant_id: uuid.UUID,
     db: AsyncSession,
 ) -> Lead:
-    result = await db.execute(
-        select(Lead).where(Lead.id == lead_id, Lead.tenant_id == tenant_id)
-    )
-    lead = result.scalar_one_or_none()
+    lead = await get_lead_with_lists(lead_id, tenant_id, db)
     if lead is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -1,7 +1,9 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { useLeadLists, useCreateLeadList, useDeleteLeadList } from "@/lib/api/hooks/use-lead-lists"
+import { LeadListsTable } from "@/components/listas/lead-lists-table"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,17 +16,19 @@ import {
   DialogFooter,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Loader2, Plus, Trash2, List, Users, AlertTriangle } from "lucide-react"
+import { Loader2, Plus, Trash2, List, Users, AlertTriangle, LayoutGrid, Table2 } from "lucide-react"
 import { formatRelativeTime } from "@/lib/utils"
 import { useRouter } from "next/navigation"
+import { cn } from "@/lib/utils"
 
 export default function LeadListsPage() {
   const { data: lists, isLoading, isError } = useLeadLists()
   const { mutate: createList, isPending: creating } = useCreateLeadList()
-  const { mutate: deleteList } = useDeleteLeadList()
+  const deleteListMutation = useDeleteLeadList()
   const router = useRouter()
 
   const [open, setOpen] = useState(false)
+  const [view, setView] = useState<"table" | "grid">("table")
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
 
@@ -54,49 +58,80 @@ export default function LeadListsPage() {
           </p>
         </div>
 
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm">
-              <Plus size={14} aria-hidden="true" />
-              Nova Lista
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Criar lista</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleCreate} className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="list-name">Nome *</Label>
-                <Input
-                  id="list-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Ex: SaaS Brasil"
-                  required
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="list-desc">Descrição</Label>
-                <Input
-                  id="list-desc"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Descrição opcional"
-                />
-              </div>
-              <DialogFooter>
-                <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
-                  Cancelar
-                </Button>
-                <Button type="submit" size="sm" disabled={creating || !name.trim()}>
-                  {creating && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
-                  Criar
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center rounded-md border border-(--border-default) overflow-hidden h-8">
+            <button
+              type="button"
+              aria-label="Visão em tabela"
+              onClick={() => setView("table")}
+              className={cn(
+                "px-2.5 h-full flex items-center transition-colors",
+                view === "table"
+                  ? "bg-(--accent) text-white"
+                  : "text-(--text-secondary) hover:bg-(--bg-overlay)",
+              )}
+            >
+              <Table2 className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              aria-label="Visão em cards"
+              onClick={() => setView("grid")}
+              className={cn(
+                "px-2.5 h-full flex items-center transition-colors",
+                view === "grid"
+                  ? "bg-(--accent) text-white"
+                  : "text-(--text-secondary) hover:bg-(--bg-overlay)",
+              )}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm">
+                <Plus size={14} aria-hidden="true" />
+                Nova Lista
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Criar lista</DialogTitle>
+              </DialogHeader>
+              <form onSubmit={handleCreate} className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="list-name">Nome *</Label>
+                  <Input
+                    id="list-name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Ex: SaaS Brasil"
+                    required
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="list-desc">Descrição</Label>
+                  <Input
+                    id="list-desc"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Descrição opcional"
+                  />
+                </div>
+                <DialogFooter>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
+                    Cancelar
+                  </Button>
+                  <Button type="submit" size="sm" disabled={creating || !name.trim()}>
+                    {creating && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
+                    Criar
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       {/* Loading */}
@@ -132,47 +167,56 @@ export default function LeadListsPage() {
         </div>
       )}
 
-      {/* Grid */}
+      {/* Conteúdo */}
       {lists && lists.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {lists.map((list) => (
-            <Card
-              key={list.id}
-              className="cursor-pointer transition-colors hover:border-(--accent)"
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              onClick={() => router.push(`/listas/${list.id}` as any)}
-            >
-              <CardHeader className="flex-row items-start justify-between">
-                <CardTitle className="text-sm">{list.name}</CardTitle>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    deleteList(list.id)
-                  }}
-                  className="shrink-0 rounded-md p-1 text-(--text-tertiary) transition-colors hover:bg-(--bg-overlay) hover:text-(--danger)"
-                  aria-label="Excluir lista"
-                >
-                  <Trash2 size={13} aria-hidden="true" />
-                </button>
-              </CardHeader>
-              <CardContent>
-                {list.description && (
-                  <p className="mb-3 text-xs text-(--text-secondary)">{list.description}</p>
-                )}
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-1 text-xs text-(--text-tertiary)">
-                    <Users size={12} aria-hidden="true" />
-                    {list.lead_count} lead{list.lead_count !== 1 ? "s" : ""}
-                  </span>
-                  <span className="text-[11px] text-(--text-tertiary)">
-                    {formatRelativeTime(list.created_at)}
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        view === "table" ? (
+          <LeadListsTable
+            lists={lists}
+            isDeleting={deleteListMutation.isPending}
+            onDelete={(id) => deleteListMutation.mutate(id)}
+            onOpen={(id) => router.push(`/listas/${id}`)}
+          />
+        ) : (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {lists.map((list) => (
+              <Card key={list.id} className="transition-colors hover:border-(--accent)">
+                <CardHeader className="flex-row items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <CardTitle className="truncate text-sm">{list.name}</CardTitle>
+                    <p className="mt-1 text-xs text-(--text-tertiary)">
+                      Atualizada {formatRelativeTime(list.updated_at)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => deleteListMutation.mutate(list.id)}
+                    className="shrink-0 rounded-md p-1 text-(--text-tertiary) transition-colors hover:bg-(--bg-overlay) hover:text-(--danger)"
+                    aria-label="Excluir lista"
+                  >
+                    <Trash2 size={13} aria-hidden="true" />
+                  </button>
+                </CardHeader>
+                <CardContent>
+                  {list.description && (
+                    <p className="mb-3 text-xs text-(--text-secondary)">{list.description}</p>
+                  )}
+                  <div className="mb-4 flex items-center justify-between">
+                    <span className="flex items-center gap-1 text-xs text-(--text-tertiary)">
+                      <Users size={12} aria-hidden="true" />
+                      {list.lead_count} lead{list.lead_count !== 1 ? "s" : ""}
+                    </span>
+                    <span className="text-[11px] text-(--text-tertiary)">
+                      {formatRelativeTime(list.created_at)}
+                    </span>
+                  </div>
+                  <Button asChild variant="outline" className="w-full">
+                    <Link href={`/listas/${list.id}`}>Abrir lista</Link>
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )
       )}
     </div>
   )

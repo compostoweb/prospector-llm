@@ -1,11 +1,13 @@
 ﻿"use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useSession } from "next-auth/react"
 import { useCadenceOverview } from "@/lib/api/hooks/use-cadence-analytics"
 import { useCadences, useToggleCadence } from "@/lib/api/hooks/use-cadences"
 import { EmptyState } from "@/components/shared/empty-state"
+import { CadenceListView } from "@/components/cadencias/cadence-list-view"
+import { Button } from "@/components/ui/button"
 import {
   Plus,
   GitBranch,
@@ -16,6 +18,8 @@ import {
   Mail,
   Layers,
   TrendingUp,
+  LayoutGrid,
+  List,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -46,17 +50,21 @@ function KPICard({
 
 export default function CadenciasPage() {
   const [filter, setFilter] = useState<CadenceFilter>("all")
+  const [view, setView] = useState<"list" | "grid">("list")
   const { status } = useSession()
-  const cadenceType = filter === "all" ? undefined : (filter as "mixed" | "email_only")
-  const { data: cadences, isLoading, error: cadencesError } = useCadences(cadenceType)
+  const { data: allCadences, isLoading, error: cadencesError } = useCadences()
   const { data: overview, isLoading: loadingOverview } = useCadenceOverview()
   const toggleCadence = useToggleCadence()
   const isPageLoading = status === "loading" || isLoading || loadingOverview
 
   const overviewMap = new Map((overview ?? []).map((item) => [item.cadence_id, item]))
+  const cadences = useMemo(() => {
+    if (!allCadences) return []
+    if (filter === "all") return allCadences
+    return allCadences.filter((cadence) => cadence.cadence_type === filter)
+  }, [allCadences, filter])
 
   // KPI aggregation (always over all cadences for context)
-  const { data: allCadences } = useCadences()
   const totalCadences = allCadences?.length ?? 0
   const totalLeads = (overview ?? []).reduce((sum, o) => sum + o.total_leads, 0)
   const totalActive = (overview ?? []).reduce((sum, o) => sum + o.leads_active, 0)
@@ -72,15 +80,16 @@ export default function CadenciasPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold text-(--text-primary)">Cadências</h1>
-          <p className="text-sm text-(--text-secondary)">Sequências de mensagens automatizadas</p>
+          <p className="text-sm text-(--text-secondary)">
+            {cadences.length} cadência{cadences.length !== 1 ? "s" : ""} na visualização atual
+          </p>
         </div>
-        <Link
-          href="/cadencias/nova"
-          className="flex items-center gap-1.5 rounded-md bg-(--accent) px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90"
-        >
-          <Plus size={14} aria-hidden="true" />
-          Nova cadência
-        </Link>
+        <Button asChild>
+          <Link href="/cadencias/nova">
+            <Plus size={14} aria-hidden="true" />
+            Nova cadência
+          </Link>
+        </Button>
       </div>
 
       {/* KPIs */}
@@ -107,38 +116,73 @@ export default function CadenciasPage() {
         />
       </div>
 
-      {/* Filtro por tipo */}
-      <div className="flex gap-1 rounded-md border border-(--border-default) bg-(--bg-overlay) p-1 w-fit">
-        {(
-          [
-            { key: "all", label: "Todas" },
-            { key: "mixed", label: "Mistas" },
-            { key: "email_only", label: "Só E-mail" },
-          ] as const
-        ).map(({ key, label }) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setFilter(key)}
-            className={cn(
-              "rounded px-3 py-1 text-xs font-medium transition-colors",
-              filter === key
-                ? "bg-(--bg-surface) text-(--text-primary) shadow-sm"
-                : "text-(--text-secondary) hover:text-(--text-primary)",
-            )}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Lista */}
-      {isPageLoading ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-40 animate-pulse rounded-lg bg-(--bg-overlay)" />
+      {/* Filtros + view */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex gap-1 rounded-md border border-(--border-default) bg-(--bg-overlay) p-1">
+          {(
+            [
+              { key: "all", label: "Todas" },
+              { key: "mixed", label: "Mistas" },
+              { key: "email_only", label: "Só E-mail" },
+            ] as const
+          ).map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setFilter(key)}
+              className={cn(
+                "rounded px-3 py-1 text-xs font-medium transition-colors",
+                filter === key
+                  ? "bg-(--bg-surface) text-(--text-primary) shadow-sm"
+                  : "text-(--text-secondary) hover:text-(--text-primary)",
+              )}
+            >
+              {label}
+            </button>
           ))}
         </div>
+
+        <div className="flex items-center rounded-md border border-(--border-default) overflow-hidden h-8">
+          <button
+            type="button"
+            aria-label="Visão em lista"
+            onClick={() => setView("list")}
+            className={cn(
+              "px-2.5 h-full flex items-center transition-colors",
+              view === "list"
+                ? "bg-(--accent) text-white"
+                : "text-(--text-secondary) hover:bg-(--bg-overlay)",
+            )}
+          >
+            <List className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            aria-label="Visão em cards"
+            onClick={() => setView("grid")}
+            className={cn(
+              "px-2.5 h-full flex items-center transition-colors",
+              view === "grid"
+                ? "bg-(--accent) text-white"
+                : "text-(--text-secondary) hover:bg-(--bg-overlay)",
+            )}
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Conteúdo */}
+      {isPageLoading ? (
+        view === "list" ? (
+          <div className="h-80 animate-pulse rounded-lg border border-(--border-default) bg-(--bg-overlay)" />
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-40 animate-pulse rounded-lg bg-(--bg-overlay)" />
+            ))}
+          </div>
+        )
       ) : cadencesError ? (
         <EmptyState
           icon={GitBranch}
@@ -153,90 +197,94 @@ export default function CadenciasPage() {
             </Link>
           }
         />
-      ) : cadences && cadences.length > 0 ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {cadences.map((cadence) => {
-            const metrics = overviewMap.get(cadence.id)
+      ) : cadences.length > 0 ? (
+        view === "list" ? (
+          <CadenceListView
+            items={cadences.map((cadence) => ({ cadence, metrics: overviewMap.get(cadence.id) }))}
+            onToggle={handleToggle}
+            isToggling={toggleCadence.isPending}
+          />
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {cadences.map((cadence) => {
+              const metrics = overviewMap.get(cadence.id)
 
-            return (
-              <div
-                key={cadence.id}
-                className="relative flex flex-col rounded-lg border border-(--border-default) bg-(--bg-surface) p-5 shadow-(--shadow-sm) transition-shadow hover:shadow-(--shadow-md)"
-              >
-                {/* Header do card */}
-                <div className="flex items-start justify-between gap-2">
-                  <Link href={`/cadencias/${cadence.id}`} className="min-w-0">
-                    <p className="truncate font-semibold text-(--text-primary) hover:underline">
-                      {cadence.name}
-                    </p>
-                    {cadence.description && (
-                      <p className="mt-0.5 line-clamp-2 text-xs text-(--text-secondary)">
-                        {cadence.description}
+              return (
+                <div
+                  key={cadence.id}
+                  className="relative flex flex-col rounded-lg border border-(--border-default) bg-(--bg-surface) p-5 shadow-(--shadow-sm) transition-shadow hover:shadow-(--shadow-md)"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <Link href={`/cadencias/${cadence.id}`} className="min-w-0">
+                      <p className="truncate font-semibold text-(--text-primary) hover:underline">
+                        {cadence.name}
                       </p>
-                    )}
-                    <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                      {cadence.cadence_type === "email_only" ? (
-                        <span className="inline-flex items-center gap-1 rounded bg-(--accent)/10 px-1.5 py-0.5 text-[10px] font-medium text-(--accent)">
-                          <Mail size={9} aria-hidden="true" />
-                          Só E-mail
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-700 dark:bg-violet-900/20 dark:text-violet-300">
-                          <Layers size={9} aria-hidden="true" />
-                          Multicanal
-                        </span>
+                      {cadence.description && (
+                        <p className="mt-0.5 line-clamp-2 text-xs text-(--text-secondary)">
+                          {cadence.description}
+                        </p>
                       )}
-                      <span className="rounded bg-(--bg-overlay) px-1.5 py-0.5 text-[10px] text-(--text-tertiary)">
-                        {cadence.mode === "automatic" ? "Auto" : "Semi-manual"}
-                      </span>
-                    </div>
-                  </Link>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                        {cadence.cadence_type === "email_only" ? (
+                          <span className="inline-flex items-center gap-1 rounded bg-(--info-subtle) px-1.5 py-0.5 text-[10px] font-medium text-(--info-subtle-fg)">
+                            <Mail size={9} aria-hidden="true" />
+                            Só E-mail
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded bg-(--accent-subtle) px-1.5 py-0.5 text-[10px] font-medium text-(--accent-subtle-fg)">
+                            <Layers size={9} aria-hidden="true" />
+                            Multicanal
+                          </span>
+                        )}
+                        <span className="rounded bg-(--bg-overlay) px-1.5 py-0.5 text-[10px] text-(--text-tertiary)">
+                          {cadence.mode === "automatic" ? "Auto" : "Semi-manual"}
+                        </span>
+                      </div>
+                    </Link>
 
-                  {/* Toggle ativo/inativo */}
-                  <button
-                    type="button"
-                    onClick={() => handleToggle(cadence.id, cadence.is_active)}
-                    aria-label={cadence.is_active ? "Desativar cadência" : "Ativar cadência"}
-                    disabled={toggleCadence.isPending}
-                    className={cn(
-                      "shrink-0 transition-colors disabled:opacity-50",
-                      cadence.is_active ? "text-(--success)" : "text-(--text-disabled)",
-                    )}
-                  >
-                    <Power size={16} aria-hidden="true" />
-                  </button>
-                </div>
+                    <button
+                      type="button"
+                      onClick={() => handleToggle(cadence.id, cadence.is_active)}
+                      aria-label={cadence.is_active ? "Desativar cadência" : "Ativar cadência"}
+                      disabled={toggleCadence.isPending}
+                      className={cn(
+                        "shrink-0 transition-colors disabled:opacity-50",
+                        cadence.is_active ? "text-(--success)" : "text-(--text-disabled)",
+                      )}
+                    >
+                      <Power size={16} aria-hidden="true" />
+                    </button>
+                  </div>
 
-                {/* Stats */}
-                <div className="mt-4 grid grid-cols-3 divide-x divide-(--border-subtle)">
-                  <Stat icon={Users} label="Total" value={metrics?.total_leads ?? 0} />
-                  <Stat icon={GitBranch} label="Em andamento" value={metrics?.leads_active ?? 0} />
-                  <Stat
-                    icon={CheckCircle}
-                    label="Convertidos"
-                    value={metrics?.leads_converted ?? 0}
-                  />
-                </div>
+                  <div className="mt-4 grid grid-cols-3 divide-x divide-(--border-subtle)">
+                    <Stat icon={Users} label="Total" value={metrics?.total_leads ?? 0} />
+                    <Stat icon={GitBranch} label="Em andamento" value={metrics?.leads_active ?? 0} />
+                    <Stat
+                      icon={CheckCircle}
+                      label="Convertidos"
+                      value={metrics?.leads_converted ?? 0}
+                    />
+                  </div>
 
-                {/* LLM info + Sandbox link */}
-                <div className="mt-4 flex items-center justify-between">
-                  <p className="text-xs text-(--text-tertiary)">
-                    {cadence.llm_provider === "openai" ? "OpenAI" : "Gemini"} · {cadence.llm_model}{" "}
-                    · {cadence.steps_template?.length ?? 0} passo
-                    {(cadence.steps_template?.length ?? 0) !== 1 ? "s" : ""}
-                  </p>
-                  <Link
-                    href={`/cadencias/${cadence.id}/sandbox`}
-                    className="flex items-center gap-1 text-xs text-(--text-tertiary) transition-colors hover:text-(--accent)"
-                  >
-                    <FlaskConical size={12} aria-hidden="true" />
-                    Sandbox
-                  </Link>
+                  <div className="mt-4 flex items-center justify-between">
+                    <p className="text-xs text-(--text-tertiary)">
+                      {cadence.llm_provider === "openai" ? "OpenAI" : "Gemini"} · {cadence.llm_model}{" "}
+                      · {cadence.steps_template?.length ?? 0} passo
+                      {(cadence.steps_template?.length ?? 0) !== 1 ? "s" : ""}
+                    </p>
+                    <Link
+                      href={`/cadencias/${cadence.id}/sandbox`}
+                      className="flex items-center gap-1 text-xs text-(--text-tertiary) transition-colors hover:text-(--accent)"
+                    >
+                      <FlaskConical size={12} aria-hidden="true" />
+                      Sandbox
+                    </Link>
+                  </div>
                 </div>
-              </div>
-            )
-          })}
-        </div>
+              )
+            })}
+          </div>
+        )
       ) : (
         <EmptyState
           icon={GitBranch}

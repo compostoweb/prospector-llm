@@ -12,20 +12,34 @@ Responsabilidades:
 from __future__ import annotations
 
 import uuid
+from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, String, Table, Column
+from sqlalchemy import Column, ForeignKey, String, Table
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base, TenantMixin, TimestampMixin
+
+if TYPE_CHECKING:
+    from models.lead import Lead
 
 
 # Tabela associativa M:N entre lead_lists e leads
 lead_list_members = Table(
     "lead_list_members",
     Base.metadata,
-    Column("lead_list_id", PGUUID(as_uuid=True), ForeignKey("lead_lists.id", ondelete="CASCADE"), primary_key=True),
-    Column("lead_id", PGUUID(as_uuid=True), ForeignKey("leads.id", ondelete="CASCADE"), primary_key=True),
+    Column(
+        "lead_list_id",
+        PGUUID(as_uuid=True),
+        ForeignKey("lead_lists.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "lead_id",
+        PGUUID(as_uuid=True),
+        ForeignKey("leads.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
 )
 
 
@@ -45,8 +59,9 @@ class LeadList(Base, TenantMixin, TimestampMixin):
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Relationship M:N
-    leads: Mapped[list["Lead"]] = relationship(
+    leads: Mapped[list[Lead]] = relationship(
         "Lead",
         secondary=lead_list_members,
+        back_populates="lists",
         lazy="selectin",
     )

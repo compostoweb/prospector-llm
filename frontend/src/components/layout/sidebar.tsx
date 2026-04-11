@@ -16,6 +16,7 @@ import {
   Bell,
   LogOut,
   Search,
+  Sparkles,
   Mail,
   FileText,
 } from "lucide-react"
@@ -38,14 +39,15 @@ import {
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/leads", label: "Leads", icon: Users },
   { href: "/leads/busca-linkedin", label: "Busca LinkedIn", icon: Search },
+  { href: "/gerar-leads", label: "Gerar Leads", icon: Sparkles },
   { href: "/listas", label: "Listas", icon: List },
+  { href: "/leads", label: "Leads", icon: Users },
+  { href: "/inbox", label: "Inbox", icon: MessageSquare },
   { href: "/cadencias", label: "Cadências", icon: GitBranch },
   { href: "/cold-email", label: "Cold Email", icon: Mail },
-  { href: "/content", label: "Conteúdo", icon: FileText },
   { href: "/tarefas", label: "Tarefas", icon: ClipboardList },
-  { href: "/inbox", label: "Inbox", icon: MessageSquare },
+  { href: "/content", label: "Conteúdo", icon: FileText },
 ] as const
 
 const settingsItems = [{ href: "/configuracoes", label: "Configurações", icon: Settings }] as const

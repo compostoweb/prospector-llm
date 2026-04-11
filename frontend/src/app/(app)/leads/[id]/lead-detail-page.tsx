@@ -15,10 +15,14 @@ import {
   Loader2,
   GitBranch,
   Archive,
+  Workflow,
+  List,
 } from "lucide-react"
 import Link from "next/link"
 import { useLead, useLeadSteps, useArchiveLead, useEnrollLead } from "@/lib/api/hooks/use-leads"
 import { useCadences } from "@/lib/api/hooks/use-cadences"
+import { LeadDeleteDialog } from "@/components/leads/lead-delete-dialog"
+import { LeadEditDialog } from "@/components/leads/lead-edit-dialog"
 import { LeadTimeline } from "@/components/leads/lead-timeline"
 import { LeadScore } from "@/components/leads/lead-score"
 import { Button } from "@/components/ui/button"
@@ -115,6 +119,7 @@ export default function LeadDetailPage() {
           </div>
         </div>
         <div className="flex shrink-0 gap-2">
+          <LeadEditDialog lead={lead} />
           {lead.status !== "archived" && lead.status !== "in_cadence" && (
             <Button variant="outline" size="sm" onClick={() => setShowEnroll(!showEnroll)}>
               <GitBranch size={14} aria-hidden="true" />
@@ -176,6 +181,10 @@ export default function LeadDetailPage() {
                 <InfoRow icon={Briefcase} label="Tamanho" value={lead.company_size} />
               )}
               {lead.segment && <InfoRow icon={Tag} label="Segmento" value={lead.segment} />}
+              <InfoRow icon={Workflow} label="Origem" value={lead.origin_label} />
+              {lead.origin_detail && (
+                <InfoRow icon={Workflow} label="Detalhe da origem" value={lead.origin_detail} />
+              )}
               {(lead.location ?? lead.city) && (
                 <InfoRow
                   icon={MapPin}
@@ -220,6 +229,49 @@ export default function LeadDetailPage() {
               </CardContent>
             </Card>
           )}
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Listas vinculadas</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {lead.lead_lists.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {lead.lead_lists.map((list) => (
+                    <Link
+                      key={list.id}
+                      href={`/listas/${list.id}`}
+                      className="inline-flex items-center gap-1 rounded-(--radius-full) border border-(--border-default) px-3 py-1 text-xs text-(--text-secondary) transition-colors hover:bg-(--bg-overlay) hover:text-(--text-primary)"
+                    >
+                      <List size={12} aria-hidden="true" />
+                      {list.name}
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-(--text-tertiary)">
+                  Este lead ainda não está em nenhuma lista.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Ações avançadas</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <LeadDeleteDialog
+                lead={lead}
+                onDeleted={() => router.push("/leads")}
+                trigger={
+                  <Button variant="destructive" size="sm">
+                    Excluir definitivamente
+                  </Button>
+                }
+              />
+            </CardContent>
+          </Card>
         </div>
 
         {/* Right: timeline */}

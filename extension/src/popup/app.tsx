@@ -6,6 +6,8 @@ import {
   buildPreviewKey,
 } from "../shared/linkedin-normalizer";
 import type {
+  ActiveTabPostScanDiagnostic,
+  ActiveTabPostScanResult,
   CaptureDestinationType,
   CapturePreview,
   EngagementSessionSummary,
@@ -27,6 +29,8 @@ async function sendMessage<T>(message: object): Promise<T> {
 export function PopupApp() {
   const [state, setState] = useState<ExtensionState | null>(null);
   const [availablePosts, setAvailablePosts] = useState<CapturePreview[]>([]);
+  const [scanDiagnostic, setScanDiagnostic] =
+    useState<ActiveTabPostScanDiagnostic | null>(null);
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -80,11 +84,13 @@ export function PopupApp() {
   async function loadAvailablePosts() {
     setLoadingPosts(true);
     try {
-      const posts = await sendMessage<CapturePreview[]>({
-        type: MESSAGE_TYPES.GET_ACTIVE_TAB_POSTS,
+      const scan = await sendMessage<ActiveTabPostScanResult>({
+        type: MESSAGE_TYPES.GET_ACTIVE_TAB_SCAN,
       });
-      setAvailablePosts(posts);
+      setAvailablePosts(scan.posts);
+      setScanDiagnostic(scan.diagnostic);
     } catch (nextError) {
+      setScanDiagnostic(null);
       setError(
         nextError instanceof Error
           ? nextError.message
@@ -206,6 +212,9 @@ export function PopupApp() {
   const preview = state?.preview ?? null;
   const sessions = state?.bootstrap?.recent_engagement_sessions ?? [];
   const selectedPreviewKey = preview ? buildPreviewKey(preview) : null;
+  const discardReasonEntries = Object.entries(
+    scanDiagnostic?.discard_reason_counts ?? {},
+  ).sort((left, right) => right[1] - left[1]);
 
   function formatSessionLabel(session: EngagementSessionSummary): string {
     const sourceLabel = session.scan_source === "manual" ? "Manual" : "Scanner";
@@ -334,11 +343,83 @@ export function PopupApp() {
                 {loadingPosts ? "Atualizando..." : "Atualizar lista"}
               </button>
             </div>
+            {scanDiagnostic ? (
+              <div className="popup-diagnostic-summary">
+                <div className="popup-diagnostic-summary__row">
+                  <span>Cards:</span>
+                  <strong>{scanDiagnostic.static_container_count}</strong>
+                </div>
+                <div className="popup-diagnostic-summary__row">
+                  <span>Barras de acao:</span>
+                  <strong>{scanDiagnostic.action_bar_count}</strong>
+                </div>
+                <div className="popup-diagnostic-summary__row">
+                  <span>Candidatos:</span>
+                  <strong>{scanDiagnostic.candidate_container_count}</strong>
+                </div>
+                <div className="popup-diagnostic-summary__row">
+                  <span>Posts aceitos:</span>
+                  <strong>{scanDiagnostic.accepted_post_count}</strong>
+                </div>
+              </div>
+            ) : null}
+            {scanDiagnostic?.error_message ? (
+              <p className="popup-feedback popup-feedback--warning">
+                {scanDiagnostic.error_message}
+              </p>
+            ) : null}
             {availablePosts.length === 0 ? (
               <p className="popup-empty">
                 Nenhum post foi detectado na aba ativa. Abra um feed ou post do
                 LinkedIn e clique em Atualizar lista.
               </p>
+            ) : null}
+            {scanDiagnostic ? (
+              <details className="popup-diagnostic-panel">
+                <summary>Diagnostico da deteccao</summary>
+                <div className="popup-diagnostic-panel__content">
+                  <div className="popup-meta">
+                    Fonte: {scanDiagnostic.captured_from} · URL: {scanDiagnostic.page_url ?? "indisponivel"}
+                  </div>
+                  {discardReasonEntries.length > 0 ? (
+                    <div className="popup-diagnostic-block">
+                      <div className="popup-diagnostic-title">Motivos de descarte</div>
+                      {discardReasonEntries.map(([reason, count]) => (
+                        <div key={reason} className="popup-diagnostic-item">
+                          <span>{reason}</span>
+                          <strong>{count}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {scanDiagnostic.sample_candidates.length > 0 ? (
+                    <div className="popup-diagnostic-block">
+                      <div className="popup-diagnostic-title">Amostra de candidatos</div>
+                      {scanDiagnostic.sample_candidates.map((candidate, index) => (
+                        <div key={`${candidate.tag_name}-${index}`} className="popup-diagnostic-candidate">
+                          <div className="popup-diagnostic-candidate__head">
+                            <strong>{candidate.discard_reason ? "Descartado" : "Aceito"}</strong>
+                            <span>{candidate.tag_name}</span>
+                          </div>
+                          <div className="popup-diagnostic-candidate__flags">
+                            URL {candidate.has_post_url ? "sim" : "nao"} · Autor {candidate.has_author_name ? "sim" : "nao"} · Titulo {candidate.has_author_title ? "sim" : "nao"} · Metricas {candidate.has_metrics ? "sim" : "nao"}
+                          </div>
+                          {candidate.discard_reason ? (
+                            <div className="popup-diagnostic-candidate__reason">
+                              motivo: {candidate.discard_reason}
+                            </div>
+                          ) : null}
+                          {candidate.text_excerpt ? (
+                            <div className="popup-diagnostic-candidate__text">
+                              {candidate.text_excerpt}
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </details>
             ) : null}
             {availablePosts.length > 0 ? (
               <div className="popup-post-list">

@@ -8,15 +8,17 @@ Ponto de entrada: search_and_import()
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from integrations.unipile_client import unipile_client
 from models.enums import LeadSource, LeadStatus
 from models.lead import Lead
+from models.lead_list import lead_list_members
 
 if TYPE_CHECKING:
     pass
@@ -35,32 +37,36 @@ async def search_linkedin_profiles(
     network_distance: list[int] | None = None,
     limit: int = 25,
     cursor: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """
     Busca perfis LinkedIn via Unipile.
     Retorna {"items": [...], "cursor": str | None}.
     Não persiste — apenas consulta.
     """
-    return await unipile_client.search_linkedin_profiles(
-        account_id=account_id,
-        keywords=keywords,
-        titles=titles,
-        companies=companies,
-        location_ids=location_ids,
-        industry_ids=industry_ids,
-        network_distance=network_distance,
-        limit=limit,
-        cursor=cursor,
+    client = cast(Any, unipile_client)
+    return cast(
+        dict[str, Any],
+        await client.search_linkedin_profiles(
+            account_id=account_id,
+            keywords=keywords,
+            titles=titles,
+            companies=companies,
+            location_ids=location_ids,
+            industry_ids=industry_ids,
+            network_distance=network_distance,
+            limit=limit,
+            cursor=cursor,
+        ),
     )
 
 
 async def import_linkedin_profiles(
     *,
-    profiles: list[dict],
+    profiles: list[dict[str, object]],
     tenant_id: uuid.UUID,
     list_id: uuid.UUID | None = None,
     db: AsyncSession,
-) -> dict:
+) -> dict[str, Any]:
     """
     Importa uma lista de perfis LinkedIn como leads.
 
@@ -75,7 +81,7 @@ async def import_linkedin_profiles(
     lead_ids: list[str] = []
 
     for profile in profiles:
-        provider_id: str = profile.get("provider_id") or ""
+        provider_id = cast(str, profile.get("provider_id") or "")
         if not provider_id:
             skipped += 1
             continue
@@ -91,27 +97,29 @@ async def import_linkedin_profiles(
             skipped += 1
             continue
 
-        profile_url: str | None = profile.get("profile_url")
+        profile_url = cast(str | None, profile.get("profile_url"))
 
         lead = Lead(
             id=uuid.uuid4(),
             tenant_id=tenant_id,
-            name=profile.get("name") or provider_id,
-            job_title=profile.get("headline"),
-            company=profile.get("company"),
-            location=profile.get("location"),
+            name=cast(str, profile.get("name") or provider_id),
+            job_title=cast(str | None, profile.get("headline")),
+            company=cast(str | None, profile.get("company")),
+            location=cast(str | None, profile.get("location")),
             linkedin_url=profile_url,
             linkedin_profile_id=provider_id,
             source=LeadSource.LINKEDIN_SEARCH,
             status=LeadStatus.RAW,
         )
 
-        if list_id:
-            # Associa à lista se o modelo suportar (campo list_id)
-            if hasattr(lead, "list_id"):
-                lead.list_id = list_id  # type: ignore[attr-defined]
-
         db.add(lead)
+        await db.flush()
+        if list_id:
+            await db.execute(
+                pg_insert(lead_list_members)
+                .values(lead_list_id=list_id, lead_id=lead.id)
+                .on_conflict_do_nothing()
+            )
         lead_ids.append(str(lead.id))
         created += 1
 

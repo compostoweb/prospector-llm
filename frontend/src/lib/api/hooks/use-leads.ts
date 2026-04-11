@@ -34,8 +34,20 @@ export interface Lead {
   phone: string | null
   enriched_at: string | null
   notes: string | null
+  lead_lists: Array<{
+    id: string
+    name: string
+  }>
+  origin_key: string
+  origin_label: string
+  origin_detail: string | null
   created_at: string
   updated_at: string
+}
+
+export interface LeadMergeResponse {
+  lead: Lead
+  merged_lead_ids: string[]
 }
 
 export interface LeadStep {
@@ -98,6 +110,69 @@ export interface ImportLeadsResponse {
   imported: number
   duplicates: number
   errors: string[]
+}
+
+export interface GeneratedLeadPreviewItem {
+  preview_id: string
+  name: string
+  first_name: string | null
+  last_name: string | null
+  job_title: string | null
+  company: string | null
+  company_domain: string | null
+  website: string | null
+  industry: string | null
+  company_size: string | null
+  linkedin_url: string | null
+  linkedin_profile_id: string | null
+  city: string | null
+  location: string | null
+  segment: string | null
+  phone: string | null
+  email_corporate: string | null
+  email_personal: string | null
+  notes: string | null
+  source: string
+  origin_key: string
+  origin_label: string
+}
+
+export interface GenerateLeadsPreviewRequest {
+  source: "google_maps" | "b2b_database" | "linkedin_enrichment"
+  limit?: number
+  search_terms?: string[]
+  location_query?: string | null
+  categories?: string[]
+  job_titles?: string[]
+  locations?: string[]
+  cities?: string[]
+  industries?: string[]
+  company_keywords?: string[]
+  company_sizes?: string[]
+  email_status?: string[]
+  linkedin_urls?: string[]
+}
+
+export interface GenerateLeadsPreviewResponse {
+  source: string
+  items: GeneratedLeadPreviewItem[]
+  total: number
+}
+
+export interface GenerateLeadsImportRequest {
+  source: "google_maps" | "b2b_database" | "linkedin_enrichment"
+  items: GeneratedLeadPreviewItem[]
+  list_id?: string | null
+  create_list_name?: string | null
+  merge_duplicates?: boolean
+}
+
+export interface GenerateLeadsImportResponse {
+  created: number
+  updated: number
+  duplicates: number
+  list_id: string | null
+  lead_ids: string[]
 }
 
 export interface LeadListParams {
@@ -210,6 +285,48 @@ export function useArchiveLead() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["leads"] })
+    },
+  })
+}
+
+export function usePermanentDeleteLead() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const client = createBrowserClient(session?.accessToken)
+      const { error } = await client.DELETE(`/leads/${id}/permanent` as never)
+      if (error) throw new Error("Falha ao excluir lead definitivamente")
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["leads"] })
+    },
+  })
+}
+
+export function useMergeLeads() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      primary_lead_id,
+      secondary_lead_ids,
+    }: {
+      primary_lead_id: string
+      secondary_lead_ids: string[]
+    }): Promise<LeadMergeResponse> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.POST("/leads/merge" as never, {
+        body: { primary_lead_id, secondary_lead_ids } as never,
+      })
+      if (error) throw new Error("Falha ao mesclar leads")
+      return data as LeadMergeResponse
+    },
+    onSuccess: (result) => {
+      void queryClient.invalidateQueries({ queryKey: ["leads"] })
+      void queryClient.invalidateQueries({ queryKey: ["leads", result.lead.id] })
     },
   })
 }
@@ -356,6 +473,46 @@ export function useImportLinkedInProfiles() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["leads"] })
+    },
+  })
+}
+
+export function useGenerateLeadsPreview() {
+  const { data: session, status } = useSession()
+
+  return useMutation({
+    mutationFn: async (
+      body: GenerateLeadsPreviewRequest,
+    ): Promise<GenerateLeadsPreviewResponse> => {
+      if (status !== "authenticated" || !session?.accessToken) {
+        throw new Error("Sessão não disponível. Recarregue a página.")
+      }
+      const client = createBrowserClient(session.accessToken)
+      const { data, error } = await client.POST("/leads/generate-preview" as never, {
+        body: body as never,
+      })
+      if (error) throw new Error("Falha ao gerar preview de leads")
+      return data as GenerateLeadsPreviewResponse
+    },
+  })
+}
+
+export function useGenerateLeadsImport() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (body: GenerateLeadsImportRequest): Promise<GenerateLeadsImportResponse> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.POST("/leads/generate-import" as never, {
+        body: body as never,
+      })
+      if (error) throw new Error("Falha ao importar leads gerados")
+      return data as GenerateLeadsImportResponse
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["leads"] })
+      void queryClient.invalidateQueries({ queryKey: ["lead-lists"] })
     },
   })
 }

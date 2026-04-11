@@ -1,4 +1,5 @@
 import type {
+  ActiveTabPostScanResult,
   CaptureRequestPayload,
   CapturePreview,
   ExtensionConfig,
@@ -10,6 +11,7 @@ export const MESSAGE_TYPES = {
   AUTH_LOGIN: "AUTH_LOGIN",
   AUTH_LOGOUT: "AUTH_LOGOUT",
   GET_ACTIVE_TAB_POSTS: "GET_ACTIVE_TAB_POSTS",
+  GET_ACTIVE_TAB_SCAN: "GET_ACTIVE_TAB_SCAN",
   SAVE_CAPTURED_POST: "SAVE_CAPTURED_POST",
   IMPORT_CAPTURE: "IMPORT_CAPTURE",
   CREATE_ENGAGEMENT_SESSION: "CREATE_ENGAGEMENT_SESSION",
@@ -23,6 +25,7 @@ export type ExtensionMessage =
   | { type: typeof MESSAGE_TYPES.AUTH_LOGIN }
   | { type: typeof MESSAGE_TYPES.AUTH_LOGOUT }
   | { type: typeof MESSAGE_TYPES.GET_ACTIVE_TAB_POSTS }
+  | { type: typeof MESSAGE_TYPES.GET_ACTIVE_TAB_SCAN }
   | { type: typeof MESSAGE_TYPES.CREATE_ENGAGEMENT_SESSION }
   | { type: typeof MESSAGE_TYPES.REFRESH_BOOTSTRAP }
   | { type: typeof MESSAGE_TYPES.SAVE_CAPTURED_POST; payload: CapturePreview }
@@ -48,3 +51,5 @@ export type ExtensionMessageResponse<T> =
   | ExtensionErrorResponse;
 
 export type ExtensionStateResponse = ExtensionMessageResponse<ExtensionState>;
+export type ActiveTabPostScanResponse =
+  ExtensionMessageResponse<ActiveTabPostScanResult>;

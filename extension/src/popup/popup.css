@@ -94,6 +94,10 @@ body {
   color: #166534;
 }
 
+.popup-feedback--warning {
+  color: #92400e;
+}
+
 .popup-button,
 .popup-segment,
 .popup-select {
@@ -147,6 +151,88 @@ body {
   gap: 8px;
   max-height: 220px;
   overflow-y: auto;
+}
+
+.popup-diagnostic-summary {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+}
+
+.popup-diagnostic-summary__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: #334155;
+}
+
+.popup-diagnostic-panel {
+  margin-bottom: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.popup-diagnostic-panel summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f766e;
+}
+
+.popup-diagnostic-panel__content {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.popup-diagnostic-block {
+  display: grid;
+  gap: 6px;
+}
+
+.popup-diagnostic-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #172554;
+}
+
+.popup-diagnostic-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: #334155;
+}
+
+.popup-diagnostic-candidate {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.popup-diagnostic-candidate__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: #172554;
+}
+
+.popup-diagnostic-candidate__flags,
+.popup-diagnostic-candidate__reason,
+.popup-diagnostic-candidate__text {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #475569;
 }
 
 .popup-post-item {

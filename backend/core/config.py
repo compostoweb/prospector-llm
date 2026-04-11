@@ -143,6 +143,9 @@ class Settings(BaseSettings):
 
     # ── Apify ─────────────────────────────────────────────────────────
     APIFY_API_TOKEN: str | None = None
+    APIFY_GOOGLE_MAPS_ACTOR_ID: str = "compass/google-maps-extractor"
+    APIFY_B2B_LEADS_ACTOR_ID: str = "code_crafter/leads-finder"
+    APIFY_LINKEDIN_ENRICH_ACTOR_ID: str = "anchor/linkedin-profile-enrichment"
 
     # ── Email finders ─────────────────────────────────────────────────
     PROSPEO_API_KEY: str | None = None
