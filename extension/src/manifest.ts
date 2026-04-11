@@ -28,16 +28,8 @@ export default defineManifest({
   options_page: "src/options/index.html",
   content_scripts: [
     {
-      matches: ["https://www.linkedin.com/feed/*"],
+      matches: ["https://www.linkedin.com/*", "https://linkedin.com/*"],
       js: ["src/content/linkedin-feed.ts"],
-      run_at: "document_idle",
-    },
-    {
-      matches: [
-        "https://www.linkedin.com/posts/*",
-        "https://www.linkedin.com/feed/update/*",
-      ],
-      js: ["src/content/linkedin-post-detail.ts"],
       run_at: "document_idle",
     },
   ],

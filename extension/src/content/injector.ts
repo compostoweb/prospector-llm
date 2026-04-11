@@ -77,10 +77,17 @@ function createCaptureButton(
 
 function findInjectionTarget(container: HTMLElement): HTMLElement {
   const actionBar = container.querySelector<HTMLElement>(
-    ".social-actions-button",
+    ".feed-shared-social-action-bar, .social-actions-button, .update-v2-social-activity",
   );
-  if (actionBar?.parentElement instanceof HTMLElement) {
-    return actionBar.parentElement;
+  if (actionBar instanceof HTMLElement) {
+    return actionBar;
+  }
+
+  const socialDetails = container.querySelector<HTMLElement>(
+    ".social-details-social-counts, .social-details-social-activity",
+  );
+  if (socialDetails?.parentElement instanceof HTMLElement) {
+    return socialDetails.parentElement;
   }
   return container;
 }
@@ -88,7 +95,14 @@ function findInjectionTarget(container: HTMLElement): HTMLElement {
 function getPostContainers(scope: ParentNode): HTMLElement[] {
   return Array.from(
     scope.querySelectorAll<HTMLElement>(
-      "div.feed-shared-update-v2, article, .update-components-actor",
+      [
+        "div.feed-shared-update-v2",
+        "div.occludable-update",
+        "div[data-id^='urn:li:activity:']",
+        "div[data-urn^='urn:li:activity:']",
+        "article",
+        ".update-components-actor",
+      ].join(", "),
     ),
   );
 }

@@ -1,3 +1,9 @@
 import { initializeLinkedInCapture } from "./injector";
 
-initializeLinkedInCapture("feed");
+const capturedFrom =
+  window.location.pathname.includes("/posts/") ||
+  window.location.pathname.includes("/feed/update/")
+    ? "post_detail"
+    : "feed";
+
+initializeLinkedInCapture(capturedFrom);

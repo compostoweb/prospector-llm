@@ -1,23 +1,46 @@
 import type { CapturePreview, CapturedFrom } from "../shared/types";
 
-const POST_URL_SELECTORS = ['a[href*="/posts/"]', 'a[href*="/feed/update/"]'];
+const POST_URL_SELECTORS = [
+  'a[href*="/posts/"]',
+  'a[href*="/feed/update/"]',
+  'a[href*="/activity-"]',
+];
 
 const AUTHOR_NAME_SELECTORS = [
   ".update-components-actor__title span[aria-hidden='true']",
   ".feed-shared-actor__name",
   ".update-components-actor__name",
+  ".update-components-actor__title",
+  ".feed-shared-actor__title",
+  ".feed-shared-actor__meta a",
 ];
 
 const AUTHOR_TITLE_SELECTORS = [
   ".update-components-actor__description",
   ".feed-shared-actor__description",
   ".update-components-actor__subtitle span[aria-hidden='true']",
+  ".update-components-actor__sub-description",
+  ".feed-shared-actor__sub-description",
 ];
 
 const POST_TEXT_SELECTORS = [
   ".update-components-text span[dir='ltr']",
+  ".update-components-text",
   ".feed-shared-update-v2__description-wrapper span[dir='ltr']",
+  ".feed-shared-update-v2__description-wrapper",
+  ".feed-shared-update-v2__description",
   ".feed-shared-text span[dir='ltr']",
+  ".feed-shared-text",
+  ".break-words",
+  ".attributed-text-segment-list__content",
+  ".update-components-update-v2__commentary",
+  ".update-components-update-v2__commentary .break-words",
+];
+
+const METRIC_SCOPE_SELECTORS = [
+  ".social-details-social-counts",
+  ".social-details-social-activity",
+  ".feed-shared-social-action-bar",
 ];
 
 function firstText(root: ParentNode, selectors: string[]): string | null {
@@ -42,6 +65,16 @@ function firstPostUrl(root: ParentNode): string | null {
   return null;
 }
 
+function getMetricScope(root: ParentNode): ParentNode {
+  for (const selector of METRIC_SCOPE_SELECTORS) {
+    const scope = root.querySelector<HTMLElement>(selector);
+    if (scope) {
+      return scope;
+    }
+  }
+  return root;
+}
+
 function parseMetricValue(rawText: string | null): number {
   if (!rawText) return 0;
   const normalized = rawText
@@ -61,7 +94,8 @@ function parseMetricValue(rawText: string | null): number {
 }
 
 function findMetric(root: ParentNode, pattern: RegExp): number {
-  const elements = root.querySelectorAll<HTMLElement>("button, span");
+  const scope = getMetricScope(root);
+  const elements = scope.querySelectorAll<HTMLElement>("button, span, li, div");
   for (const element of elements) {
     const text = element.innerText?.trim();
     if (!text || !pattern.test(text.toLowerCase())) continue;
