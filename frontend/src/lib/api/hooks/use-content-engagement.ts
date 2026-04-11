@@ -273,6 +273,27 @@ export function useDeleteEngagementPost() {
   })
 }
 
+export function useGenerateCommentsForPost() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (postId: string) => {
+      const res = await fetch(`${BASE()}/posts/${postId}/generate-comments`, {
+        method: "POST",
+        headers: buildAuthHeaders(session?.accessToken),
+      })
+      return parseApiResponse<EngagementPost>(res)
+    },
+    onSuccess: (post) => {
+      queryClient.invalidateQueries({ queryKey: engagementKeys.all })
+      queryClient.invalidateQueries({ queryKey: engagementKeys.session(post.session_id) })
+      queryClient.invalidateQueries({ queryKey: engagementKeys.posts(post.session_id, "icp") })
+      queryClient.invalidateQueries({ queryKey: engagementKeys.comments(post.session_id, post.id) })
+    },
+  })
+}
+
 // ── Comments ──────────────────────────────────────────────────────────────────
 
 export function useEngagementComments(sessionId?: string, postId?: string) {

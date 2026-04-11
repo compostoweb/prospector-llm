@@ -119,6 +119,26 @@ export interface CaptureResponse {
   engagement_post_id?: string | null;
 }
 
+export interface ImportedPostStatusCandidate {
+  candidate_key: string;
+  post_url: string | null;
+  canonical_post_url?: string | null;
+  post_text: string;
+  author_name: string | null;
+}
+
+export interface ImportedPostStatusMatch {
+  candidate_key: string;
+  imported: boolean;
+  destination_type?: CaptureDestinationType | null;
+  linked_object_type?: string | null;
+  linked_object_id?: string | null;
+}
+
+export interface ImportedPostStatusResponse {
+  matches: ImportedPostStatusMatch[];
+}
+
 export interface ExtensionConfig {
   apiBaseUrl: string;
 }

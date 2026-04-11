@@ -100,6 +100,30 @@ class BrowserExtensionCaptureRequest(BaseModel):
     client_context: BrowserExtensionClientContext
 
 
+class BrowserExtensionImportStatusCandidate(BaseModel):
+    candidate_key: str = Field(..., min_length=1, max_length=400)
+    post_url: str | None = Field(default=None, max_length=500)
+    canonical_post_url: str | None = Field(default=None, max_length=500)
+    post_text: str = Field(..., min_length=1)
+    author_name: str | None = Field(default=None, max_length=300)
+
+
+class BrowserExtensionImportStatusRequest(BaseModel):
+    candidates: list[BrowserExtensionImportStatusCandidate] = Field(..., min_length=1, max_length=50)
+
+
+class BrowserExtensionImportStatusMatch(BaseModel):
+    candidate_key: str
+    imported: bool
+    destination_type: ExtensionDestinationType | None = None
+    linked_object_type: str | None = None
+    linked_object_id: uuid.UUID | None = None
+
+
+class BrowserExtensionImportStatusResponse(BaseModel):
+    matches: list[BrowserExtensionImportStatusMatch]
+
+
 class BrowserExtensionCaptureResponse(BaseModel):
     destination: ExtensionDestinationType
     result: ExtensionCaptureResult

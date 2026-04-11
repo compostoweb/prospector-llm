@@ -11,7 +11,7 @@ export default defineManifest({
   name: "Prospector LinkedIn Capture",
   version: "0.1.0",
   description: "Captura e importa posts do LinkedIn para o Prospector.",
-  permissions: ["storage", "identity", "activeTab", "scripting"],
+  permissions: ["storage", "identity", "activeTab", "scripting", "sidePanel"],
   host_permissions: [
     "https://www.linkedin.com/*",
     "https://*.linkedin.com/*",
@@ -23,7 +23,9 @@ export default defineManifest({
   },
   action: {
     default_title: "Prospector",
-    default_popup: "src/popup/index.html",
+  },
+  side_panel: {
+    default_path: "src/sidepanel/index.html",
   },
   options_page: "src/options/index.html",
   content_scripts: [

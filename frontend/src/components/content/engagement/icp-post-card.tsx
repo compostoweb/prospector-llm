@@ -1,8 +1,22 @@
 "use client"
 
 import { useState } from "react"
-import { ExternalLink, ChevronDown, ChevronUp, User, Lightbulb, ThumbsUp, MessageCircle, Repeat2 } from "lucide-react"
+import {
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  User,
+  Lightbulb,
+  ThumbsUp,
+  MessageCircle,
+  Repeat2,
+  Sparkles,
+  Loader2,
+} from "lucide-react"
+import { toast } from "sonner"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { useGenerateCommentsForPost } from "@/lib/api/hooks/use-content-engagement"
 import { CommentCard } from "./comment-card"
 import type { EngagementPost } from "@/lib/content-engagement/types"
 
@@ -13,9 +27,19 @@ interface IcpPostCardProps {
 
 export function IcpPostCard({ post, className }: IcpPostCardProps) {
   const [expanded, setExpanded] = useState(false)
+  const generateComments = useGenerateCommentsForPost()
   const comments = post.suggested_comments ?? []
   const hasComments = comments.length > 0
   const wasCommented = comments.some((c) => c.status === "posted")
+
+  async function handleGenerateComments() {
+    try {
+      await generateComments.mutateAsync(post.id)
+      toast.success(hasComments ? "Comentários atualizados com IA" : "Comentários gerados com IA")
+    } catch {
+      toast.error("Não foi possível gerar comentários para este post")
+    }
+  }
 
   return (
     <div
@@ -136,9 +160,26 @@ export function IcpPostCard({ post, className }: IcpPostCardProps) {
       {/* Comentários sugeridos */}
       {hasComments && (
         <div className="border-t border-(--border-default) bg-(--bg-sunken) px-5 py-4 space-y-3">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-(--text-tertiary)">
-            Comentários sugeridos
-          </p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-(--text-tertiary)">
+              Comentários sugeridos
+            </p>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleGenerateComments}
+              disabled={generateComments.isPending}
+              className="h-7 gap-1.5 text-xs text-(--text-secondary)"
+            >
+              {generateComments.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5" />
+              )}
+              Regenerar com IA
+            </Button>
+          </div>
           {comments.map((c) => (
             <CommentCard key={c.id} comment={c} />
           ))}
@@ -146,10 +187,27 @@ export function IcpPostCard({ post, className }: IcpPostCardProps) {
       )}
 
       {!hasComments && (
-        <div className="border-t border-(--border-default) px-5 py-3">
-          <p className="text-xs text-(--text-tertiary) italic">
-            Nenhum comentário gerado para este post.
-          </p>
+        <div className="border-t border-(--border-default) px-5 py-4">
+          <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-(--text-tertiary) italic">
+              Nenhum comentário gerado para este post.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleGenerateComments}
+              disabled={generateComments.isPending}
+              className="h-8 gap-1.5"
+            >
+              {generateComments.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5" />
+              )}
+              Gerar comentário com IA
+            </Button>
+          </div>
         </div>
       )}
     </div>

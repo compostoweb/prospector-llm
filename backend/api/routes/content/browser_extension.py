@@ -6,7 +6,7 @@ from typing import Literal, cast
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible
@@ -28,6 +28,9 @@ from schemas.browser_extension import (
     BrowserExtensionCaptureRequest,
     BrowserExtensionCaptureResponse,
     BrowserExtensionFeatureFlags,
+    BrowserExtensionImportStatusMatch,
+    BrowserExtensionImportStatusRequest,
+    BrowserExtensionImportStatusResponse,
     BrowserExtensionLinkedInStatus,
     BrowserExtensionRecentEngagementSession,
     BrowserExtensionUserSummary,
@@ -291,6 +294,105 @@ async def create_extension_engagement_session(
 
 
 @router.post(
+    "/capture/statuses",
+    response_model=BrowserExtensionImportStatusResponse,
+)
+async def get_extension_capture_statuses(
+    body: BrowserExtensionImportStatusRequest,
+    request: Request,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    user_payload: UserPayload = Depends(get_current_user_payload),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> BrowserExtensionImportStatusResponse:
+    extension_id, extension_version = _get_extension_headers(request)
+
+    candidate_identity_map: dict[str, tuple[str | None, str | None]] = {}
+    canonical_urls: set[str] = set()
+    dedup_keys: set[str] = set()
+
+    for candidate in body.candidates:
+        canonical_post_url, dedup_key = build_post_identity(
+            post_url=candidate.canonical_post_url or candidate.post_url,
+            post_text=candidate.post_text,
+            author_name=candidate.author_name,
+        )
+        candidate_identity_map[candidate.candidate_key] = (canonical_post_url, dedup_key)
+        if canonical_post_url:
+            canonical_urls.add(canonical_post_url)
+        if dedup_key:
+            dedup_keys.add(dedup_key)
+
+    capture_by_canonical_url: dict[str, ContentExtensionCapture] = {}
+    capture_by_dedup_key: dict[str, ContentExtensionCapture] = {}
+    if canonical_urls or dedup_keys:
+        capture_stmt = select(ContentExtensionCapture).where(
+            ContentExtensionCapture.tenant_id == tenant_id,
+            ContentExtensionCapture.source_platform == "linkedin",
+        )
+        if canonical_urls and dedup_keys:
+            capture_stmt = capture_stmt.where(
+                or_(
+                    ContentExtensionCapture.canonical_post_url.in_(canonical_urls),
+                    ContentExtensionCapture.dedup_key.in_(dedup_keys),
+                )
+            )
+        elif canonical_urls:
+            capture_stmt = capture_stmt.where(
+                ContentExtensionCapture.canonical_post_url.in_(canonical_urls)
+            )
+        else:
+            capture_stmt = capture_stmt.where(ContentExtensionCapture.dedup_key.in_(dedup_keys))
+
+        capture_result = await db.execute(
+            capture_stmt.order_by(ContentExtensionCapture.created_at.desc())
+        )
+        for capture in capture_result.scalars().all():
+            if (
+                capture.canonical_post_url
+                and capture.canonical_post_url not in capture_by_canonical_url
+            ):
+                capture_by_canonical_url[capture.canonical_post_url] = capture
+            if capture.dedup_key and capture.dedup_key not in capture_by_dedup_key:
+                capture_by_dedup_key[capture.dedup_key] = capture
+
+    matches: list[BrowserExtensionImportStatusMatch] = []
+    for candidate in body.candidates:
+        canonical_post_url, dedup_key = candidate_identity_map[candidate.candidate_key]
+        matched_capture: ContentExtensionCapture | None = None
+        if canonical_post_url:
+            matched_capture = capture_by_canonical_url.get(canonical_post_url)
+        if matched_capture is None and dedup_key:
+            matched_capture = capture_by_dedup_key.get(dedup_key)
+
+        matches.append(
+            BrowserExtensionImportStatusMatch(
+                candidate_key=candidate.candidate_key,
+                imported=matched_capture is not None,
+                destination_type=(
+                    "reference"
+                    if matched_capture and matched_capture.destination_type == "reference"
+                    else "engagement"
+                    if matched_capture and matched_capture.destination_type == "engagement"
+                    else None
+                ),
+                linked_object_type=matched_capture.linked_object_type if matched_capture else None,
+                linked_object_id=matched_capture.linked_object_id if matched_capture else None,
+            )
+        )
+
+    logger.info(
+        "extension.capture_statuses.resolved",
+        extension_id=extension_id,
+        extension_version=extension_version,
+        tenant_id=str(tenant_id),
+        user_id=str(user_payload.user_id),
+        candidates_count=len(body.candidates),
+        imported_count=sum(1 for match in matches if match.imported),
+    )
+    return BrowserExtensionImportStatusResponse(matches=matches)
+
+
+@router.post(
     "/capture/linkedin-post",
     response_model=BrowserExtensionCaptureResponse,
     status_code=status.HTTP_201_CREATED,
@@ -375,6 +477,7 @@ async def capture_linkedin_post(
             session_id=body.destination.session_id,
             tenant_id=tenant_id,
         )
+        engagement_post_type = "icp" if body.post.post_type != "icp" else body.post.post_type
         manual_post_payload = AddManualPostRequest(
             source="manual",
             post_url=body.post.post_url,
@@ -383,7 +486,7 @@ async def capture_linkedin_post(
             author_title=body.post.author_title,
             author_company=body.post.author_company,
             author_profile_url=body.post.author_profile_url,
-            post_type=body.post.post_type,
+            post_type=engagement_post_type,
             likes=body.post.likes,
             comments=body.post.comments,
             shares=body.post.shares,
@@ -396,7 +499,7 @@ async def capture_linkedin_post(
         )
         linked_object_type = "engagement_post"
         linked_object_id = engagement_post.id
-        result = cast(Literal["created", "merged"], "created" if created else "merged")
+        result = "created" if created else "merged"
         response = BrowserExtensionCaptureResponse(
             destination="engagement",
             result=result,

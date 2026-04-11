@@ -23,13 +23,14 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 _QUEUE_PICKUP_TIMEOUT = timedelta(seconds=45)
 _SESSION_TIMEOUT = timedelta(minutes=5)
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -254,6 +255,97 @@ async def _upsert_external_post(
     )
     db.add(post)
     return post, True
+
+
+async def _refresh_session_comment_count(
+    db: AsyncSession,
+    *,
+    session_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> None:
+    session_stmt = select(ContentEngagementSession).where(
+        ContentEngagementSession.id == session_id,
+        ContentEngagementSession.tenant_id == tenant_id,
+    )
+    session_result = await db.execute(session_stmt)
+    session = session_result.scalar_one_or_none()
+    if not session:
+        return
+
+    count_result = await db.execute(
+        select(func.count(ContentEngagementComment.id)).where(
+            ContentEngagementComment.session_id == session_id,
+            ContentEngagementComment.tenant_id == tenant_id,
+        )
+    )
+    session.comments_generated = count_result.scalar_one() or 0  # type: ignore[assignment]
+    db.add(session)
+
+
+async def _generate_comments_for_engagement_post(
+    *,
+    post: ContentEngagementPost,
+    tenant_id: uuid.UUID,
+    db: AsyncSession,
+    registry: LLMRegistry,
+) -> ContentEngagementPost:
+    if post.post_type != "icp":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Comentarios por IA so podem ser gerados para posts ICP.",
+        )
+
+    _, author_voice = await _get_author_settings(tenant_id, db)
+
+    from services.content.comment_generator import generate_comments_for_post
+
+    comment_1, comment_2 = await generate_comments_for_post(
+        post_text=post.post_text,
+        author_name=post.author_name or "",
+        author_title=post.author_title or "",
+        author_company=post.author_company or "",
+        comment_angle=post.what_to_replicate or "",
+        author_voice=author_voice,
+        registry=registry,
+    )
+
+    existing_comments = cast(
+        list[ContentEngagementComment],
+        list(post.suggested_comments or []),
+    )
+    existing_by_variation = {comment.variation: comment for comment in existing_comments}
+    for variation, text in enumerate((comment_1, comment_2), start=1):
+        comment = existing_by_variation.get(variation)
+        if comment is None:
+            comment = ContentEngagementComment(
+                id=uuid.uuid4(),
+                tenant_id=tenant_id,
+                engagement_post_id=post.id,
+                session_id=post.session_id,
+                comment_text=text,
+                variation=variation,
+                status="pending",
+            )
+        else:
+            comment.comment_text = text  # type: ignore[assignment]
+            comment.status = "pending"  # type: ignore[assignment]
+            comment.posted_at = None  # type: ignore[assignment]
+        db.add(comment)
+
+    await _record_session_event(
+        db,
+        tenant_id=tenant_id,
+        session_id=post.session_id,
+        event_type="manual_comments_generated",
+        payload={"post_id": str(post.id)},
+    )
+    await _refresh_session_comment_count(
+        db,
+        session_id=post.session_id,
+        tenant_id=tenant_id,
+    )
+    await db.commit()
+    return await _get_post_or_404(post.id, tenant_id, db)
 
 
 def _build_google_operator_queries(body: GoogleDiscoveryComposeRequest) -> list[str]:
@@ -969,20 +1061,17 @@ async def regenerate_comment(
         raise HTTPException(status_code=404, detail="Post nao encontrado")
 
     # Buscar author_name e author_voice das configuracoes do tenant
-    author_name, author_voice = await _get_author_settings(tenant_id, db)
+    _, author_voice = await _get_author_settings(tenant_id, db)
 
     # Gerar novo comentario via LLM
     from services.content.comment_generator import generate_comments_for_post
 
-    comment_angle = ""  # sem angle especifico no regenerate
+    comment_angle = post.what_to_replicate or ""
     c1, c2 = await generate_comments_for_post(
-        post={
-            "post_text": post.post_text,
-            "author_name": post.author_name or "",
-            "author_title": post.author_title or "",
-            "author_company": post.author_company or "",
-        },
-        author_name=author_name,
+        post_text=post.post_text,
+        author_name=post.author_name or "",
+        author_title=post.author_title or "",
+        author_company=post.author_company or "",
         author_voice=author_voice,
         comment_angle=comment_angle,
         registry=registry,
@@ -1001,6 +1090,32 @@ async def regenerate_comment(
         tenant_id=str(tenant_id),
     )
     return EngagementCommentResponse.model_validate(comment)
+
+
+@router.post(
+    "/posts/{post_id}/generate-comments",
+    response_model=EngagementPostResponse,
+)
+async def generate_comments_for_post_manually(
+    post_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+    registry: LLMRegistry = Depends(get_llm_registry),
+) -> EngagementPostResponse:
+    post = await _get_post_or_404(post_id, tenant_id, db)
+    updated_post = await _generate_comments_for_engagement_post(
+        post=post,
+        tenant_id=tenant_id,
+        db=db,
+        registry=registry,
+    )
+
+    logger.info(
+        "engagement.post_comments_generated",
+        post_id=str(post_id),
+        tenant_id=str(tenant_id),
+    )
+    return EngagementPostResponse.model_validate(updated_post)
 
 
 # ── Helpers privados ───────────────────────────────────────────────────────────

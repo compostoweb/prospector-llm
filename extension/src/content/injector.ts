@@ -36,18 +36,24 @@ function createCaptureButton(
 ): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
-  button.textContent = "Salvar no Prospector";
+  button.textContent = "Selecionar post";
   button.className = BUTTON_CLASSNAME;
   button.setAttribute(BUTTON_ATTRIBUTE, "1");
-  button.style.marginTop = "10px";
-  button.style.padding = "8px 12px";
+  button.style.display = "inline-flex";
+  button.style.alignItems = "center";
+  button.style.justifyContent = "center";
+  button.style.height = "30px";
+  button.style.padding = "0 12px";
   button.style.borderRadius = "999px";
-  button.style.border = "1px solid #0a66c2";
-  button.style.background = "#ffffff";
-  button.style.color = "#0a66c2";
+  button.style.border = "1px solid rgba(15, 118, 110, 0.35)";
+  button.style.background = "rgba(236, 253, 245, 0.96)";
+  button.style.color = "#0f766e";
   button.style.cursor = "pointer";
-  button.style.fontSize = "13px";
+  button.style.fontSize = "12px";
   button.style.fontWeight = "600";
+  button.style.whiteSpace = "nowrap";
+  button.style.marginRight = "8px";
+  button.style.boxShadow = "0 6px 18px rgba(15, 118, 110, 0.12)";
 
   button.addEventListener("click", async (event) => {
     event.preventDefault();
@@ -76,6 +82,28 @@ function createCaptureButton(
 }
 
 function findInjectionTarget(container: HTMLElement): HTMLElement {
+  const topRightControls = container.querySelector<HTMLElement>(
+    [
+      ".feed-shared-control-menu__trigger",
+      ".feed-shared-control-menu",
+      ".update-components-header__control-menu",
+      ".update-components-header__right-rail",
+      ".update-components-header__text-view + div",
+      "button[aria-label*='Mais']",
+      "button[aria-label*='More']",
+      "button[aria-label*='menu']",
+      "button[aria-label*='Fechar']",
+      "button[aria-label*='Close']",
+    ].join(", "),
+  );
+  if (topRightControls?.parentElement instanceof HTMLElement) {
+    const host = topRightControls.parentElement;
+    host.style.display = "flex";
+    host.style.alignItems = "center";
+    host.style.gap = "8px";
+    return host;
+  }
+
   const actionBar = container.querySelector<HTMLElement>(
     ".feed-shared-social-action-bar, .social-actions-button, .update-v2-social-activity",
   );
@@ -125,7 +153,12 @@ function installButtonsInScope(
     }
 
     const target = findInjectionTarget(container);
-    target.appendChild(createCaptureButton(container, capturedFrom));
+    const button = createCaptureButton(container, capturedFrom);
+    if (target.firstChild) {
+      target.insertBefore(button, target.firstChild);
+      return;
+    }
+    target.appendChild(button);
   });
 }
 

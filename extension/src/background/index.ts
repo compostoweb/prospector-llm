@@ -3,6 +3,7 @@ import {
   createEngagementSession,
   fetchBootstrap,
   importLinkedInPost,
+  resolveImportedPosts,
 } from "./api";
 import {
   clearPreview,
@@ -19,17 +20,39 @@ import {
   type ExtensionMessage,
   type ExtensionMessageResponse,
 } from "../shared/contracts";
-import { normalizePreview } from "../shared/linkedin-normalizer";
+import {
+  buildPreviewKey,
+  normalizePreview,
+} from "../shared/linkedin-normalizer";
 import type {
   ActiveTabPostScanResult,
   CapturePreview,
   EngagementSessionSummary,
   ExtensionState,
+  ImportedPostStatusCandidate,
 } from "../shared/types";
 
 function getExtensionVersion(): string {
   return chrome.runtime.getManifest().version;
 }
+
+async function ensureSidePanelBehavior(): Promise<void> {
+  if (!("sidePanel" in chrome) || !chrome.sidePanel) {
+    return;
+  }
+
+  await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+}
+
+void ensureSidePanelBehavior();
+
+chrome.runtime.onInstalled.addListener(() => {
+  void ensureSidePanelBehavior();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  void ensureSidePanelBehavior();
+});
 
 async function getState(): Promise<ExtensionState> {
   return {
@@ -152,10 +175,18 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
         const timestampPattern =
           /^(\d+\s*(min|minutos?|h|hora|horas|d|dia|dias|sem|semanas?|m|mes|meses|mo)\b|edited|editado|promoted|patrocinado)$/i;
         const postUrlSelectors = [
+          ".update-components-actor__meta-link",
+          ".feed-shared-actor__container-link",
+          ".feed-shared-actor__meta-link",
+          ".update-components-actor__sub-description-link",
+          ".feed-shared-actor__sub-description-link",
           'a[href*="/posts/"]',
           'a[href*="/feed/update/"]',
           'a[href*="/activity-"]',
         ];
+        const postUrnAttributeSelectors =
+          "[data-urn], [data-id], [data-activity-urn], [data-entity-urn], [data-update-urn], [data-content-urn]";
+        const postUrnPattern = /urn:li:(activity|share):\d+/i;
         const authorNameSelectors = [
           ".update-components-actor__title span[aria-hidden='true']",
           ".feed-shared-actor__name",
@@ -289,17 +320,112 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
           return null;
         }
 
+        function normalizeLinkedInPostUrl(
+          rawUrl: string | null | undefined,
+        ): string | null {
+          const cleaned = normalizeWhitespace(rawUrl);
+          if (!cleaned) {
+            return null;
+          }
+
+          try {
+            const parsed = new URL(cleaned, window.location.origin);
+            const updateEntityUrn = normalizeWhitespace(
+              parsed.searchParams.get("updateEntityUrn"),
+            );
+            if (updateEntityUrn && postUrnPattern.test(updateEntityUrn)) {
+              return `${parsed.origin}/feed/update/${updateEntityUrn.replace(/\/+$/, "")}/`;
+            }
+
+            const pathname = parsed.pathname.replace(/\/+$/, "");
+            if (
+              pathname.includes("/posts/") ||
+              pathname.includes("/feed/update/") ||
+              pathname.includes("/activity-")
+            ) {
+              return `${parsed.origin}${pathname}/`;
+            }
+          } catch {
+            return cleaned;
+          }
+
+          return null;
+        }
+
+        function buildLinkedInFeedUrlFromUrn(postUrn: string | null): string | null {
+          const normalizedUrn = normalizeWhitespace(postUrn);
+          if (!normalizedUrn || !postUrnPattern.test(normalizedUrn)) {
+            return null;
+          }
+          return `https://www.linkedin.com/feed/update/${normalizedUrn}/`;
+        }
+
+        function extractPostUrn(root: ParentNode): string | null {
+          const candidates: string[] = [];
+
+          if (root instanceof HTMLElement) {
+            candidates.push(
+              ...[
+                root.dataset.urn,
+                root.dataset.id,
+                root.dataset.activityUrn,
+                root.dataset.entityUrn,
+                root.dataset.updateUrn,
+                root.dataset.contentUrn,
+                root.getAttribute("data-urn"),
+                root.getAttribute("data-id"),
+                root.getAttribute("data-activity-urn"),
+                root.getAttribute("data-entity-urn"),
+                root.getAttribute("data-update-urn"),
+                root.getAttribute("data-content-urn"),
+              ].filter((value): value is string => !!value),
+            );
+          }
+
+          for (const element of root.querySelectorAll<HTMLElement>(postUrnAttributeSelectors)) {
+            const attributeCandidates = [
+              element.dataset.urn,
+              element.dataset.id,
+              element.dataset.activityUrn,
+              element.dataset.entityUrn,
+              element.dataset.updateUrn,
+              element.dataset.contentUrn,
+              element.getAttribute("data-urn"),
+              element.getAttribute("data-id"),
+              element.getAttribute("data-activity-urn"),
+              element.getAttribute("data-entity-urn"),
+              element.getAttribute("data-update-urn"),
+              element.getAttribute("data-content-urn"),
+            ];
+            for (const candidate of attributeCandidates) {
+              if (!candidate) {
+                continue;
+              }
+              candidates.push(candidate);
+            }
+          }
+
+          for (const candidate of candidates) {
+            const match = candidate.match(postUrnPattern);
+            if (match) {
+              return match[0];
+            }
+          }
+
+          return null;
+        }
+
         function firstPostUrl(root: ParentNode): string | null {
           for (const selector of postUrlSelectors) {
             const anchor = root.querySelector<HTMLAnchorElement>(selector);
-            const href = normalizeWhitespace(anchor?.href);
+            const href = normalizeLinkedInPostUrl(anchor?.href);
             if (href) {
               return href;
             }
           }
           const anchors = root.querySelectorAll<HTMLAnchorElement>("a[href]");
           for (const anchor of anchors) {
-            const href = normalizeWhitespace(anchor.href);
+            const href = normalizeLinkedInPostUrl(anchor.href);
             if (!href) {
               continue;
             }
@@ -311,7 +437,7 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
               return href;
             }
           }
-          return null;
+          return buildLinkedInFeedUrlFromUrn(extractPostUrn(root));
         }
 
         function parseMetricValue(rawText: string | null): number {
@@ -619,6 +745,23 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
 
     const scanResult = results[0]?.result as ActiveTabPostScanResult | undefined;
     if (scanResult) {
+      try {
+        const response = (await chrome.tabs.sendMessage(tab.id, {
+          type: MESSAGE_TYPES.GET_ACTIVE_TAB_POSTS,
+        })) as ExtensionMessageResponse<CapturePreview[]>;
+        if (response.ok && (response.data?.length ?? 0) > 0) {
+          const posts = response.data ?? [];
+          return {
+            posts,
+            diagnostic: {
+              ...scanResult.diagnostic,
+              accepted_post_count: posts.length,
+            },
+          };
+        }
+      } catch {
+        // Mantem fallback do scan direto da aba.
+      }
       return scanResult;
     }
 
@@ -667,13 +810,80 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
   }
 }
 
+async function filterImportedPosts(
+  scan: ActiveTabPostScanResult,
+): Promise<ActiveTabPostScanResult> {
+  if (scan.posts.length === 0) {
+    return scan;
+  }
+
+  const config = await getConfig();
+  const session = await getSession();
+  if (!session) {
+    return scan;
+  }
+
+  const candidates: ImportedPostStatusCandidate[] = scan.posts.map((preview) => {
+    const normalized = normalizePreview(preview);
+    return {
+      candidate_key: buildPreviewKey(normalized),
+      post_url: normalized.post_url,
+      canonical_post_url: normalized.post_url,
+      post_text: normalized.post_text,
+      author_name: normalized.author_name,
+    };
+  });
+
+  try {
+    const statusResponse = await resolveImportedPosts(
+      config,
+      session,
+      getExtensionVersion(),
+      candidates,
+    );
+    const importedKeys = new Set(
+      statusResponse.matches
+        .filter((match) => match.imported)
+        .map((match) => match.candidate_key),
+    );
+    if (importedKeys.size === 0) {
+      return scan;
+    }
+
+    const filteredPosts = scan.posts.filter(
+      (preview) => !importedKeys.has(buildPreviewKey(normalizePreview(preview))),
+    );
+    const alreadyImportedCount = scan.posts.length - filteredPosts.length;
+
+    return {
+      posts: filteredPosts,
+      diagnostic: {
+        ...scan.diagnostic,
+        accepted_post_count: filteredPosts.length,
+        discard_reason_counts: {
+          ...scan.diagnostic.discard_reason_counts,
+          already_imported:
+            (scan.diagnostic.discard_reason_counts.already_imported ?? 0) +
+            alreadyImportedCount,
+        },
+        error_message:
+          filteredPosts.length === 0
+            ? "Todos os posts detectados nesta pagina ja foram importados."
+            : scan.diagnostic.error_message,
+      },
+    };
+  } catch {
+    return scan;
+  }
+}
+
 async function listPostsFromActiveTab(): Promise<CapturePreview[]> {
-  const scan = await scanActiveTab();
+  const scan = await filterImportedPosts(await scanActiveTab());
   return scan.posts;
 }
 
 async function getActiveTabScan(): Promise<ActiveTabPostScanResult> {
-  return scanActiveTab();
+  return filterImportedPosts(await scanActiveTab());
 }
 
 async function createManualEngagementSession(): Promise<EngagementSessionSummary> {

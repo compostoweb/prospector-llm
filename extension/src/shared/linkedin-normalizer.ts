@@ -64,8 +64,7 @@ export function buildCaptureRequest(
       likes: normalized.likes,
       comments: normalized.comments,
       shares: normalized.shares,
-      post_type:
-        destinationType === "reference" ? "reference" : normalized.post_type,
+      post_type: destinationType === "engagement" ? "icp" : "reference",
     },
     client_context: {
       captured_from: normalized.captured_from,

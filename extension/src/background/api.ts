@@ -5,6 +5,8 @@ import type {
   ExtensionBootstrap,
   ExtensionConfig,
   ExtensionSession,
+  ImportedPostStatusCandidate,
+  ImportedPostStatusResponse,
 } from "../shared/types";
 
 function buildHeaders(
@@ -133,4 +135,21 @@ export async function createEngagementSession(
     },
   );
   return parseJsonOrThrow<EngagementSessionSummary>(response);
+}
+
+export async function resolveImportedPosts(
+  config: ExtensionConfig,
+  session: ExtensionSession,
+  extensionVersion: string,
+  candidates: ImportedPostStatusCandidate[],
+): Promise<ImportedPostStatusResponse> {
+  const response = await fetch(
+    `${config.apiBaseUrl}/api/content/extension/capture/statuses`,
+    {
+      method: "POST",
+      headers: buildHeaders(session, extensionVersion),
+      body: JSON.stringify({ candidates }),
+    },
+  );
+  return parseJsonOrThrow<ImportedPostStatusResponse>(response);
 }
