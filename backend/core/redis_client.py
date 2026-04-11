@@ -56,6 +56,12 @@ class RedisClient:
     async def delete(self, key: str) -> None:
         await self._redis.delete(key)
 
+    async def increment_with_ttl(self, key: str, ttl: int) -> int:
+        current = await self._redis.incr(key)
+        if current == 1:
+            await self._redis.expire(key, ttl)
+        return int(current)
+
     async def ping(self) -> bool:
         try:
             return await self._redis.ping()
@@ -104,11 +110,13 @@ class RedisClient:
     async def set_bytes(self, key: str, value: bytes, ttl: int) -> None:
         """Salva bytes no Redis como base64 com TTL em segundos."""
         import base64
+
         await self._redis.set(key, base64.b64encode(value).decode("ascii"), ex=ttl)
 
     async def get_bytes(self, key: str) -> bytes | None:
         """Recupera bytes armazenados via set_bytes. Retorna None se não encontrado."""
         import base64
+
         raw: str | None = await self._redis.get(key)
         if raw is None:
             return None

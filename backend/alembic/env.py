@@ -15,20 +15,22 @@ from __future__ import annotations
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from alembic import context
+
 # ── Importar settings ────────────────────────────────────────────────
 from core.config import settings
+from models.audio_file import AudioFile  # noqa: F401
 
 # ── Importar TODOS os models para o autogenerate funcionar ──────────
 # Cada import adiciona os models ao metadata da Base
 from models.base import Base  # noqa: F401
-from models.audio_file import AudioFile  # noqa: F401
 from models.cadence import Cadence  # noqa: F401
 from models.cadence_step import CadenceStep  # noqa: F401
+from models.content_extension_capture import ContentExtensionCapture  # noqa: F401
 from models.interaction import Interaction  # noqa: F401
 from models.lead import Lead  # noqa: F401
 from models.lead_list import LeadList  # noqa: F401

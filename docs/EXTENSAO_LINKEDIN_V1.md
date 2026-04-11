@@ -183,14 +183,14 @@ Responsabilidades:
 #### Autenticacao e contexto
 
 - `GET /auth/me`
-- `GET /content/linkedin/status`
-- `GET /content/engagement/sessions`
-- `GET /content/engagement/sessions/{session_id}`
+- `GET /api/content/linkedin/status`
+- `GET /api/content/engagement/sessions`
+- `GET /api/content/engagement/sessions/{session_id}`
 
 #### Importacao ja existente
 
-- `POST /content/references`
-- `POST /content/engagement/posts/import?session_id={session_id}`
+- `POST /api/content/references`
+- `POST /api/content/engagement/posts/import?session_id={session_id}`
 
 Esses endpoints sao suficientes para um prototipo, mas para a V1 fechada da extensao o ideal e criar uma facade propria para reduzir acoplamento com regras internas do Content Hub.
 
@@ -274,7 +274,7 @@ Response:
 
 #### 4. Bootstrap da extensao
 
-`GET /content/extension/bootstrap`
+`GET /api/content/extension/bootstrap`
 
 Response:
 
@@ -310,7 +310,7 @@ Objetivo:
 
 #### 5. Captura/importacao unificada de post do LinkedIn
 
-`POST /content/extension/capture/linkedin-post`
+`POST /api/content/extension/capture/linkedin-post`
 
 Request:
 

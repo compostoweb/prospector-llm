@@ -12,6 +12,7 @@ from models.content_engagement_discovery_query import ContentEngagementDiscovery
 from models.content_engagement_event import ContentEngagementEvent  # noqa: F401
 from models.content_engagement_post import ContentEngagementPost  # noqa: F401
 from models.content_engagement_session import ContentEngagementSession  # noqa: F401
+from models.content_extension_capture import ContentExtensionCapture  # noqa: F401
 from models.content_landing_page import ContentLandingPage  # noqa: F401
 from models.content_lead_magnet import ContentLeadMagnet  # noqa: F401
 from models.content_linkedin_account import ContentLinkedInAccount  # noqa: F401

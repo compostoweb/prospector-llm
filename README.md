@@ -202,6 +202,8 @@ docker compose -f docker-compose.dev.yml logs -f worker-content-engagement
 npm run backend
 npm run frontend
 npm run worker:engagement
+npm run extension
+npm run extension:build
 
 # Observacao
 # No Windows local, o worker de engagement usa pool solo para evitar falha do Celery com prefork.
@@ -249,5 +251,6 @@ docker compose -f docker-compose.dev.yml exec api pytest tests/ -v
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Arquitetura técnica, fluxos, modelos de dados |
 | [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md) | Dev local vs produção, setup, deploy |
 | [`docs/EXTENSAO_LINKEDIN_V1.md`](docs/EXTENSAO_LINKEDIN_V1.md) | Escopo, arquitetura e contratos da extensao LinkedIn V1 |
+| [`docs/GOOGLE_OAUTH_SETUP.md`](docs/GOOGLE_OAUTH_SETUP.md) | Checklist exato de Google Console e variáveis de ambiente para web + extensão |
 | [`docs/SKILLS.md`](docs/SKILLS.md) | Skills necessárias + ordem de desenvolvimento |
 | [`.github/copilot-instructions.md`](.github/copilot-instructions.md) | Instruções para o GitHub Copilot |

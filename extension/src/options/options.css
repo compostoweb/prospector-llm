@@ -1,0 +1,38 @@
+body {
+  margin: 0;
+  background: #f8fafc;
+}
+
+.options-shell {
+  padding: 24px;
+  max-width: 720px;
+  margin: 0 auto;
+  font-family: "Segoe UI", sans-serif;
+}
+
+.options-field {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.options-input {
+  padding: 10px 12px;
+  font-size: 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+}
+
+.options-button {
+  margin-top: 16px;
+  padding: 10px 14px;
+  font-weight: 700;
+  border-radius: 10px;
+  border: 1px solid #0f766e;
+  background: #0f766e;
+  color: #f8fafc;
+}
+
+.options-success {
+  color: #166534;
+}

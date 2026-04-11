@@ -22,8 +22,11 @@ Segurança do fluxo Google OAuth:
 
 from __future__ import annotations
 
+import json
 import secrets
+import uuid
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
 import httpx
@@ -47,7 +50,15 @@ from core.security import (
 )
 from models.tenant import Tenant
 from models.user import User
-from schemas.user import GoogleLoginUrlResponse, UserResponse, UserTokenResponse
+from schemas.browser_extension import (
+    BrowserExtensionExchangeRequest,
+    BrowserExtensionExchangeResponse,
+    BrowserExtensionStartSessionRequest,
+    BrowserExtensionStartSessionResponse,
+    BrowserExtensionUserSummary,
+)
+from schemas.user import UserResponse
+from services.browser_extension import build_extension_callback_url, ensure_extension_id_allowed
 
 logger = structlog.get_logger()
 
@@ -57,6 +68,9 @@ _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # TTL do state CSRF para o fluxo Google OAuth (segundos)
 _OAUTH_STATE_TTL = 300
+_EXTENSION_OAUTH_STATE_PREFIX = "google_oauth_extension_state:"
+_EXTENSION_GRANT_PREFIX = "extension_auth_grant:"
+_EXTENSION_GRANT_TTL = 120
 
 
 class TokenResponse(BaseModel):
@@ -65,6 +79,7 @@ class TokenResponse(BaseModel):
 
 
 # ── Sessão sem RLS (usada internamente em auth) ───────────────────────
+
 
 async def _get_raw_session() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
@@ -75,9 +90,136 @@ async def _get_raw_session() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
+def _build_google_authorization_url(*, redirect_uri: str, state: str) -> str:
+    params = {
+        "client_id": settings.GOOGLE_CLIENT_ID,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "state": state,
+        "access_type": "online",
+        "prompt": "select_account",
+    }
+    return "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
+
+
+async def _exchange_google_code_for_access_token(*, code: str, redirect_uri: str) -> str:
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        token_resp = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "code": code,
+                "client_id": settings.GOOGLE_CLIENT_ID,
+                "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code",
+            },
+        )
+
+    if token_resp.status_code != 200:
+        logger.error("auth.google_callback.token_exchange_failed", status=token_resp.status_code)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao trocar o código com o Google. Tente novamente.",
+        )
+
+    access_token_google: str = token_resp.json().get("access_token", "")
+    if not access_token_google:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Google não retornou access_token.",
+        )
+
+    return access_token_google
+
+
+async def _fetch_google_userinfo(access_token_google: str) -> dict[str, object]:
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        userinfo_resp = await client.get(
+            "https://www.googleapis.com/oauth2/v2/userinfo",
+            headers={"Authorization": f"Bearer {access_token_google}"},
+        )
+
+    if userinfo_resp.status_code != 200:
+        logger.error("auth.google_callback.userinfo_failed", status=userinfo_resp.status_code)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao obter perfil do Google.",
+        )
+
+    return dict(userinfo_resp.json())
+
+
+async def _resolve_active_user_from_google_profile(
+    *,
+    db: AsyncSession,
+    userinfo: dict[str, object],
+) -> User:
+    email = str(userinfo.get("email", "")).lower().strip()
+    email_verified = bool(userinfo.get("verified_email", False))
+    google_sub = str(userinfo.get("id", ""))
+    name_value = userinfo.get("name")
+    name = str(name_value) if isinstance(name_value, str) else None
+
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google não retornou o email do usuário.",
+        )
+
+    if not email_verified:
+        logger.warning("auth.google_callback.unverified_email", email=email)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email não verificado pelo Google. Verifique sua conta e tente novamente.",
+        )
+
+    result = await db.execute(select(User).where(func.lower(User.email) == email))
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        logger.warning("auth.google_callback.email_not_registered", email=email)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado. Seu email não está cadastrado no sistema.",
+        )
+
+    if not user.is_active:
+        logger.warning("auth.google_callback.user_inactive", email=email)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sua conta está inativa. Entre em contato com o administrador.",
+        )
+
+    changed = False
+    if user.google_sub is None and google_sub:
+        user.google_sub = google_sub
+        changed = True
+    if user.name is None and name:
+        user.name = name
+        changed = True
+    if changed:
+        await db.commit()
+        await db.refresh(user)
+
+    return user
+
+
+def _build_extension_redirect(
+    *, extension_id: str, grant_code: str | None = None, error: str | None = None
+) -> str:
+    params: dict[str, str] = {}
+    if grant_code:
+        params["grant_code"] = grant_code
+    if error:
+        params["error"] = error
+    return build_extension_callback_url(extension_id, params)
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # 1. Fluxo Tenant (API Key)
 # ═══════════════════════════════════════════════════════════════════════
+
 
 @router.post("/token", response_model=TokenResponse)
 async def login(
@@ -116,6 +258,7 @@ async def login(
 # 2. Fluxo Usuário (Google OAuth 2.0)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 @router.get("/google/login")
 async def google_login() -> RedirectResponse:
     """
@@ -133,16 +276,10 @@ async def google_login() -> RedirectResponse:
     state = secrets.token_urlsafe(32)
     await redis_client.set(f"google_oauth_state:{state}", "1", ex=_OAUTH_STATE_TTL)
 
-    params = {
-        "client_id": settings.GOOGLE_CLIENT_ID,
-        "redirect_uri": settings.GOOGLE_REDIRECT_URI,
-        "response_type": "code",
-        "scope": "openid email profile",
-        "state": state,
-        "access_type": "online",
-        "prompt": "select_account",
-    }
-    url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
+    url = _build_google_authorization_url(
+        redirect_uri=settings.GOOGLE_REDIRECT_URI,
+        state=state,
+    )
     logger.info("auth.google_login.initiated")
     return RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
 
@@ -186,98 +323,12 @@ async def google_callback(
         )
     await redis_client.delete(state_key)
 
-    # ── 2. Trocar code por access_token ──────────────────────────────
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        token_resp = await client.post(
-            "https://oauth2.googleapis.com/token",
-            data={
-                "code": code,
-                "client_id": settings.GOOGLE_CLIENT_ID,
-                "client_secret": settings.GOOGLE_CLIENT_SECRET,
-                "redirect_uri": settings.GOOGLE_REDIRECT_URI,
-                "grant_type": "authorization_code",
-            },
-        )
-
-    if token_resp.status_code != 200:
-        logger.error("auth.google_callback.token_exchange_failed", status=token_resp.status_code)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Falha ao trocar o código com o Google. Tente novamente.",
-        )
-
-    access_token_google: str = token_resp.json().get("access_token", "")
-    if not access_token_google:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Google não retornou access_token.",
-        )
-
-    # ── 3. Buscar perfil do usuário no Google ─────────────────────────
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        userinfo_resp = await client.get(
-            "https://www.googleapis.com/oauth2/v2/userinfo",
-            headers={"Authorization": f"Bearer {access_token_google}"},
-        )
-
-    if userinfo_resp.status_code != 200:
-        logger.error("auth.google_callback.userinfo_failed", status=userinfo_resp.status_code)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Falha ao obter perfil do Google.",
-        )
-
-    userinfo = userinfo_resp.json()
-    email: str = userinfo.get("email", "").lower().strip()
-    email_verified: bool = userinfo.get("verified_email", False)
-    google_sub: str = str(userinfo.get("id", ""))
-    name: str | None = userinfo.get("name")
-
-    # ── 4. Validações de segurança ────────────────────────────────────
-    if not email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Google não retornou o email do usuário.",
-        )
-
-    if not email_verified:
-        logger.warning("auth.google_callback.unverified_email", email=email)
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Email não verificado pelo Google. Verifique sua conta e tente novamente.",
-        )
-
-    # ── 5. Verificar se o email está na allowlist ─────────────────────
-    result = await db.execute(
-        select(User).where(func.lower(User.email) == email)
+    access_token_google = await _exchange_google_code_for_access_token(
+        code=code,
+        redirect_uri=settings.GOOGLE_REDIRECT_URI,
     )
-    user = result.scalar_one_or_none()
-
-    if user is None:
-        logger.warning("auth.google_callback.email_not_registered", email=email)
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Acesso negado. Seu email não está cadastrado no sistema.",
-        )
-
-    if not user.is_active:
-        logger.warning("auth.google_callback.user_inactive", email=email)
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Sua conta está inativa. Entre em contato com o administrador.",
-        )
-
-    # ── 6. Atualizar google_sub e name no primeiro login ──────────────
-    changed = False
-    if user.google_sub is None and google_sub:
-        user.google_sub = google_sub
-        changed = True
-    if user.name is None and name:
-        user.name = name
-        changed = True
-    if changed:
-        await db.commit()
-        await db.refresh(user)
+    userinfo = await _fetch_google_userinfo(access_token_google)
+    user = await _resolve_active_user_from_google_profile(db=db, userinfo=userinfo)
 
     jwt_token = create_user_token(
         user_id=user.id,
@@ -298,9 +349,192 @@ async def google_callback(
     )
 
 
+@router.post(
+    "/extension/session/start",
+    response_model=BrowserExtensionStartSessionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def start_extension_session(
+    body: BrowserExtensionStartSessionRequest,
+) -> BrowserExtensionStartSessionResponse:
+    if not settings.EXTENSION_LINKEDIN_CAPTURE_ENABLED:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Captura via extensao desabilitada neste ambiente.",
+        )
+
+    if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google OAuth nao configurado neste ambiente.",
+        )
+
+    extension_id = ensure_extension_id_allowed(body.extension_id)
+    auth_session_id = uuid.uuid4()
+    state = secrets.token_urlsafe(32)
+    state_key = f"{_EXTENSION_OAUTH_STATE_PREFIX}{state}"
+    payload = {
+        "auth_session_id": str(auth_session_id),
+        "extension_id": extension_id,
+        "extension_version": body.extension_version,
+        "browser": body.browser,
+    }
+    await redis_client.set(state_key, json.dumps(payload), ex=_OAUTH_STATE_TTL)
+
+    authorization_url = _build_google_authorization_url(
+        redirect_uri=settings.GOOGLE_EXTENSION_REDIRECT_URI,
+        state=state,
+    )
+    logger.info(
+        "extension.auth.started",
+        auth_session_id=str(auth_session_id),
+        extension_id=extension_id,
+        browser=body.browser,
+        extension_version=body.extension_version,
+    )
+    return BrowserExtensionStartSessionResponse(
+        auth_session_id=auth_session_id,
+        authorization_url=authorization_url,
+        expires_in=_OAUTH_STATE_TTL,
+    )
+
+
+@router.get("/extension/google/callback")
+async def extension_google_callback(
+    state: str,
+    code: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
+    db: AsyncSession = Depends(_get_raw_session),
+) -> RedirectResponse:
+    state_key = f"{_EXTENSION_OAUTH_STATE_PREFIX}{state}"
+    raw_state = await redis_client.get(state_key)
+    if not raw_state:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sessao OAuth da extensao invalida ou expirada.",
+        )
+    await redis_client.delete(state_key)
+
+    state_payload = json.loads(raw_state)
+    extension_id = ensure_extension_id_allowed(str(state_payload["extension_id"]))
+
+    if error:
+        logger.warning(
+            "extension.auth.google_error",
+            extension_id=extension_id,
+            error=error,
+            error_description=error_description,
+        )
+        return RedirectResponse(
+            url=_build_extension_redirect(
+                extension_id=extension_id,
+                error=(error_description or error),
+            ),
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    if not code:
+        return RedirectResponse(
+            url=_build_extension_redirect(
+                extension_id=extension_id,
+                error="Authorization code ausente.",
+            ),
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    try:
+        access_token_google = await _exchange_google_code_for_access_token(
+            code=code,
+            redirect_uri=settings.GOOGLE_EXTENSION_REDIRECT_URI,
+        )
+        userinfo = await _fetch_google_userinfo(access_token_google)
+        user = await _resolve_active_user_from_google_profile(db=db, userinfo=userinfo)
+    except HTTPException as exc:
+        logger.warning(
+            "extension.auth.callback_failed",
+            extension_id=extension_id,
+            error_detail=str(exc.detail),
+        )
+        return RedirectResponse(
+            url=_build_extension_redirect(
+                extension_id=extension_id,
+                error=str(exc.detail),
+            ),
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    grant_code = secrets.token_urlsafe(32)
+    grant_key = f"{_EXTENSION_GRANT_PREFIX}{grant_code}"
+    grant_payload = {
+        "extension_id": extension_id,
+        "user_id": str(user.id),
+        "email": user.email,
+        "name": user.name,
+        "is_superuser": user.is_superuser,
+    }
+    await redis_client.set(grant_key, json.dumps(grant_payload), ex=_EXTENSION_GRANT_TTL)
+    logger.info(
+        "extension.auth.grant_created",
+        extension_id=extension_id,
+        user_id=str(user.id),
+    )
+    return RedirectResponse(
+        url=_build_extension_redirect(extension_id=extension_id, grant_code=grant_code),
+        status_code=status.HTTP_302_FOUND,
+    )
+
+
+@router.post("/extension/session/exchange", response_model=BrowserExtensionExchangeResponse)
+async def exchange_extension_session(
+    body: BrowserExtensionExchangeRequest,
+) -> BrowserExtensionExchangeResponse:
+    extension_id = ensure_extension_id_allowed(body.extension_id)
+    grant_key = f"{_EXTENSION_GRANT_PREFIX}{body.grant_code}"
+    raw_grant = await redis_client.get(grant_key)
+    if not raw_grant:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Grant da extensao invalido ou expirado.",
+        )
+
+    grant_payload = json.loads(raw_grant)
+    if grant_payload.get("extension_id") != extension_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Grant nao pertence a esta extensao.",
+        )
+
+    await redis_client.delete(grant_key)
+    user_id = uuid.UUID(str(grant_payload["user_id"]))
+    jwt_token = create_user_token(
+        user_id=user_id,
+        email=str(grant_payload["email"]),
+        is_superuser=bool(grant_payload.get("is_superuser", False)),
+        name=str(grant_payload["name"]) if grant_payload.get("name") else None,
+    )
+    expires_at = datetime.now(UTC) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    logger.info(
+        "extension.auth.exchanged",
+        extension_id=extension_id,
+        user_id=str(user_id),
+    )
+    return BrowserExtensionExchangeResponse(
+        access_token=jwt_token,
+        expires_at=expires_at,
+        user=BrowserExtensionUserSummary(
+            id=user_id,
+            email=str(grant_payload["email"]),
+            name=str(grant_payload["name"]) if grant_payload.get("name") else None,
+            is_superuser=bool(grant_payload.get("is_superuser", False)),
+        ),
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # 3. Dados do usuário autenticado
 # ═══════════════════════════════════════════════════════════════════════
+
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(
@@ -327,7 +561,7 @@ async def get_me(
 # Utilitário (usada na criação de tenant)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def hash_api_key(plaintext: str) -> str:
     """Gera hash bcrypt para armazenamento seguro da api_key."""
     return _pwd_context.hash(plaintext)
-

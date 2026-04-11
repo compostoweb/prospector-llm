@@ -53,6 +53,10 @@ class Settings(BaseSettings):
         default="http://localhost:8000/auth/google/callback",
         description="URI de redirecionamento registrada no Google Cloud Console",
     )
+    GOOGLE_EXTENSION_REDIRECT_URI: str = Field(
+        default="http://localhost:8000/auth/extension/google/callback",
+        description="URI de redirecionamento do Google OAuth usada pela extensao do navegador.",
+    )
     SUPERUSER_EMAIL: str = Field(
         default="adriano@compostoweb.com.br",
         description="Email do admin master — criado automaticamente no startup se não existir",
@@ -85,6 +89,18 @@ class Settings(BaseSettings):
     # ── Segurança ─────────────────────────────────────────────────────
     SECRET_KEY: str = Field(..., description="Chave secreta para assinar JWTs")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 dias
+    EXTENSION_LINKEDIN_CAPTURE_ENABLED: bool = Field(
+        default=False,
+        description="Kill switch para captura/importacao via extensao do LinkedIn.",
+    )
+    EXTENSION_CAPTURE_DAILY_LIMIT: int = Field(
+        default=250,
+        description="Limite diario de capturas/importacoes por usuario na extensao.",
+    )
+    EXTENSION_ALLOWED_IDS: str | None = Field(
+        default=None,
+        description="Lista separada por virgula com extension IDs autorizados por ambiente.",
+    )
 
     # ── CORS ──────────────────────────────────────────────────────────
     ALLOWED_ORIGINS: list[str] = Field(default=["*"])
