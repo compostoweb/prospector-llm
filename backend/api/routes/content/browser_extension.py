@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Literal, cast
+from typing import Annotated, Literal, cast
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -11,8 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible
 from api.routes.content.engagement import (
-    _load_session_or_404,
-    _upsert_external_post,
+    load_session_or_404,
+    upsert_external_post,
 )
 from core.config import settings
 from core.redis_client import redis_client
@@ -46,6 +46,10 @@ router = APIRouter(prefix="/extension", tags=["Content Hub — Browser Extension
 _EXTENSION_PLATFORM = "chrome_extension"
 _EXTENSION_CAPTURE_RATE_TTL = 86400
 
+TenantIdDep = Annotated[uuid.UUID, Depends(get_effective_tenant_id)]
+UserPayloadDep = Annotated[UserPayload, Depends(get_current_user_payload)]
+SessionDep = Annotated[AsyncSession, Depends(get_session_flexible)]
+
 
 def _extension_feature_flags() -> BrowserExtensionFeatureFlags:
     enabled = settings.EXTENSION_LINKEDIN_CAPTURE_ENABLED
@@ -74,7 +78,19 @@ async def _load_reference_match(
     *,
     tenant_id: uuid.UUID,
     dedup_key: str | None,
+    source_url: str | None = None,
 ) -> ContentReference | None:
+    if source_url:
+        direct_match = await db.execute(
+            select(ContentReference).where(
+                ContentReference.tenant_id == tenant_id,
+                ContentReference.source_url == source_url,
+            )
+        )
+        reference = direct_match.scalar_one_or_none()
+        if reference is not None:
+            return reference
+
     if not dedup_key:
         return None
 
@@ -167,9 +183,9 @@ async def _check_extension_capture_rate_limit(*, tenant_id: uuid.UUID, user_id: 
 @router.get("/bootstrap", response_model=BrowserExtensionBootstrapResponse)
 async def get_extension_bootstrap(
     request: Request,
-    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
-    user_payload: UserPayload = Depends(get_current_user_payload),
-    db: AsyncSession = Depends(get_session_flexible),
+    tenant_id: TenantIdDep,
+    user_payload: UserPayloadDep,
+    db: SessionDep,
 ) -> BrowserExtensionBootstrapResponse:
     extension_id, extension_version = _get_extension_headers(request)
 
@@ -241,9 +257,9 @@ async def get_extension_bootstrap(
 )
 async def create_extension_engagement_session(
     request: Request,
-    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
-    user_payload: UserPayload = Depends(get_current_user_payload),
-    db: AsyncSession = Depends(get_session_flexible),
+    tenant_id: TenantIdDep,
+    user_payload: UserPayloadDep,
+    db: SessionDep,
 ) -> BrowserExtensionRecentEngagementSession:
     if not settings.EXTENSION_LINKEDIN_CAPTURE_ENABLED:
         raise HTTPException(
@@ -300,9 +316,9 @@ async def create_extension_engagement_session(
 async def get_extension_capture_statuses(
     body: BrowserExtensionImportStatusRequest,
     request: Request,
-    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
-    user_payload: UserPayload = Depends(get_current_user_payload),
-    db: AsyncSession = Depends(get_session_flexible),
+    tenant_id: TenantIdDep,
+    user_payload: UserPayloadDep,
+    db: SessionDep,
 ) -> BrowserExtensionImportStatusResponse:
     extension_id, extension_version = _get_extension_headers(request)
 
@@ -400,9 +416,9 @@ async def get_extension_capture_statuses(
 async def capture_linkedin_post(
     body: BrowserExtensionCaptureRequest,
     request: Request,
-    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
-    user_payload: UserPayload = Depends(get_current_user_payload),
-    db: AsyncSession = Depends(get_session_flexible),
+    tenant_id: TenantIdDep,
+    user_payload: UserPayloadDep,
+    db: SessionDep,
 ) -> BrowserExtensionCaptureResponse:
     if not settings.EXTENSION_LINKEDIN_CAPTURE_ENABLED:
         raise HTTPException(
@@ -432,6 +448,7 @@ async def capture_linkedin_post(
             db,
             tenant_id=tenant_id,
             dedup_key=dedup_key,
+            source_url=canonical_post_url or body.post.post_url,
         )
 
         if matched_reference is None:
@@ -472,7 +489,7 @@ async def capture_linkedin_post(
                 detail="session_id e obrigatorio quando o destino for engagement.",
             )
 
-        await _load_session_or_404(
+        await load_session_or_404(
             db,
             session_id=body.destination.session_id,
             tenant_id=tenant_id,
@@ -491,7 +508,7 @@ async def capture_linkedin_post(
             comments=body.post.comments,
             shares=body.post.shares,
         )
-        engagement_post, created = await _upsert_external_post(
+        engagement_post, created = await upsert_external_post(
             db,
             session_id=body.destination.session_id,
             tenant_id=tenant_id,

@@ -605,6 +605,7 @@ async def _run_scan_async(
                     post_text=post_data["post_text"],
                     registry=registry,
                     llm_config=llm_config,
+                    tenant_id=str(tenant_uuid),
                 )
                 canonical_post_url, dedup_key = build_post_identity(
                     post_url=post_data.get("post_url"),
@@ -686,6 +687,7 @@ async def _run_scan_async(
                     author_company=post_data.get("author_company", ""),
                     registry=registry,
                     llm_config=llm_config,
+                    tenant_id=str(tenant_uuid),
                 )
                 canonical_post_url, dedup_key = build_post_identity(
                     post_url=post_data.get("post_url"),
@@ -758,6 +760,8 @@ async def _run_scan_async(
                         author_voice=author_voice,
                         registry=registry,
                         llm_config=llm_config,
+                        tenant_id=str(tenant_uuid),
+                        post_id=str(post_id),
                     )
 
                     for variation, text in enumerate([comment_1, comment_2], start=1):

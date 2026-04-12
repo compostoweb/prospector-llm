@@ -203,6 +203,7 @@ async def generate_content(
         variations=body.variations,
         references=references,
         registry=registry,
+        tenant_id=str(tenant_id),
         provider=provider,
         model=model,
         temperature=body.temperature,
@@ -302,6 +303,7 @@ async def improve_content(
         author_name=author_name,
         author_voice=author_voice,
         registry=registry,
+        tenant_id=str(tenant_id),
         provider=provider,
         model=model,
         temperature=temperature,
@@ -420,7 +422,7 @@ async def vary_theme(
         "Máximo 120 caracteres."
     )
 
-    from integrations.llm import LLMMessage  # local import para evitar circular
+    from integrations.llm import LLMMessage, LLMUsageContext  # local import para evitar circular
 
     messages = [LLMMessage(role="user", content=prompt)]
     provider, model, _, _ = await _resolve_content_llm_config(db, tenant_id)
@@ -430,7 +432,14 @@ async def vary_theme(
         provider=provider,
         model=model,
         temperature=0.9,
-        max_tokens=128,
+        max_tokens=48,
+        usage_context=LLMUsageContext(
+            tenant_id=str(tenant_id),
+            module="content_hub",
+            task_type="vary_theme",
+            feature=body.pillar,
+            metadata={"theme_title": body.theme_title[:160]},
+        ),
     )
 
     variation = response.text.strip().strip('"').strip("'").strip()
@@ -466,7 +475,7 @@ async def detect_hook(
     Analisa as primeiras linhas do post e classifica o tipo de gancho
     em um dos 6 tipos disponíveis.
     """
-    from integrations.llm import LLMMessage
+    from integrations.llm import LLMMessage, LLMUsageContext
 
     # Usa apenas as primeiras 3 linhas não vazias — o gancho é sempre no início
     first_lines = "\n".join([l for l in body.body.strip().splitlines() if l.strip()][:3])
@@ -486,7 +495,13 @@ async def detect_hook(
         provider=provider,
         model=model,
         temperature=0.1,
-        max_tokens=16,
+        max_tokens=8,
+        usage_context=LLMUsageContext(
+            tenant_id=str(tenant_id),
+            module="content_hub",
+            task_type="detect_hook",
+            feature="hook_classification",
+        ),
     )
 
     valid_hooks = {"loop_open", "contrarian", "identification", "shortcut", "benefit", "data"}

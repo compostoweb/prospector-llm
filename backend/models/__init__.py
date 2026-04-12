@@ -34,6 +34,8 @@ from models.lead import Lead  # noqa: F401
 from models.lead_list import LeadList  # noqa: F401
 from models.lead_tag import LeadTag  # noqa: F401
 from models.linkedin_account import LinkedInAccount  # noqa: F401
+from models.llm_usage_event import LLMUsageEvent  # noqa: F401
+from models.llm_usage_hourly import LLMUsageHourlyAggregate  # noqa: F401
 from models.manual_task import ManualTask  # noqa: F401
 from models.sandbox import SandboxRun, SandboxStep  # noqa: F401
 from models.tenant import Tenant, TenantIntegration  # noqa: F401

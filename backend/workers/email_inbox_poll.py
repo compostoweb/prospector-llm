@@ -635,7 +635,13 @@ async def _process_email_reply(
             provider=llm_config.provider,
             model=llm_config.model,
         )
-        classification = await parser.classify(reply_text=body, lead_name=lead.name)
+        classification = await parser.classify(
+            reply_text=body,
+            lead_name=lead.name,
+            tenant_id=str(lead.tenant_id),
+            lead_id=str(lead.id),
+            channel=Channel.EMAIL.value,
+        )
 
         intent_str: str = (classification.get("intent") or "NEUTRAL").upper()
         try:

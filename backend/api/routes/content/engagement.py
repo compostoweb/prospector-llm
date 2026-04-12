@@ -119,6 +119,19 @@ async def _load_session_or_404(
     return session
 
 
+async def load_session_or_404(
+    db: AsyncSession,
+    *,
+    session_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> ContentEngagementSession:
+    return await _load_session_or_404(
+        db,
+        session_id=session_id,
+        tenant_id=tenant_id,
+    )
+
+
 async def _load_discovery_query_or_404(
     db: AsyncSession,
     *,
@@ -257,6 +270,21 @@ async def _upsert_external_post(
     return post, True
 
 
+async def upsert_external_post(
+    db: AsyncSession,
+    *,
+    session_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    body: AddManualPostRequest,
+) -> tuple[ContentEngagementPost, bool]:
+    return await _upsert_external_post(
+        db,
+        session_id=session_id,
+        tenant_id=tenant_id,
+        body=body,
+    )
+
+
 async def _refresh_session_comment_count(
     db: AsyncSession,
     *,
@@ -311,6 +339,8 @@ async def _generate_comments_for_engagement_post(
         author_voice=author_voice,
         registry=registry,
         llm_config=llm_config,
+        tenant_id=str(tenant_id),
+        post_id=str(post.id),
     )
 
     existing_comments = cast(
@@ -1082,6 +1112,8 @@ async def regenerate_comment(
         comment_angle=comment_angle,
         registry=registry,
         llm_config=llm_config,
+        tenant_id=str(tenant_id),
+        post_id=str(post.id),
     )
 
     # Atualiza somente a variacao correspondente

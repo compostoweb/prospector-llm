@@ -30,6 +30,20 @@ class LLMResponse:
 
 
 @dataclass
+class LLMUsageContext:
+    """Contexto opcional para observabilidade e analytics de consumo."""
+    tenant_id: str
+    module: str
+    task_type: str
+    feature: str | None = None
+    entity_type: str | None = None
+    entity_id: str | None = None
+    secondary_entity_type: str | None = None
+    secondary_entity_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class ModelInfo:
     """Informações de um modelo disponível."""
     id: str

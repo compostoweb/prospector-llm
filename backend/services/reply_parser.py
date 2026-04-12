@@ -11,7 +11,7 @@ import json
 
 import structlog
 
-from integrations.llm import LLMMessage, LLMRegistry, LLMResponse
+from integrations.llm import LLMMessage, LLMRegistry, LLMResponse, LLMUsageContext
 
 logger = structlog.get_logger()
 
@@ -47,7 +47,15 @@ class ReplyParser:
         self._provider = provider
         self._model = model
 
-    async def classify(self, reply_text: str, lead_name: str) -> dict:
+    async def classify(
+        self,
+        reply_text: str,
+        lead_name: str,
+        *,
+        tenant_id: str,
+        lead_id: str | None = None,
+        channel: str | None = None,
+    ) -> dict:
         """
         Retorna dict com: intent, confidence, summary, out_of_office_return_date.
         """
@@ -66,6 +74,14 @@ class ReplyParser:
             temperature=0.1,  # baixa temperatura para classificação determinística
             max_tokens=256,
             json_mode=True,
+            usage_context=LLMUsageContext(
+                tenant_id=tenant_id,
+                module="inbox",
+                task_type="reply_classification",
+                feature=channel,
+                entity_type="lead",
+                entity_id=lead_id,
+            ),
         )
 
         try:

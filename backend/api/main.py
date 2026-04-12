@@ -39,6 +39,7 @@ from api.routes import lead_lists as lead_lists_router
 from api.routes import leads as leads_router
 from api.routes import linkedin_accounts as linkedin_accounts_router
 from api.routes import llm as llm_router
+from api.routes import llm_usage_analytics as llm_usage_analytics_router
 from api.routes import manual_tasks as manual_tasks_router
 from api.routes import pipedrive as pipedrive_router
 from api.routes import sandbox as sandbox_router
@@ -241,6 +242,7 @@ async def log_requests(
 
 app.include_router(auth_router.router)
 app.include_router(analytics_router.router)
+app.include_router(llm_usage_analytics_router.router)
 app.include_router(audio_router.router)
 app.include_router(audio_files_router.router)
 app.include_router(llm_router.router)

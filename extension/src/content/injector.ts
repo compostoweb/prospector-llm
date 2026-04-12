@@ -71,7 +71,7 @@ function createCaptureButton(
     });
 
     if (response?.ok) {
-      showToast("Post capturado. Abra a extensao para importar.");
+      showToast("Post adicionado a selecao. Abra a extensao para importar.");
       return;
     }
 

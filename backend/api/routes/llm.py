@@ -11,17 +11,20 @@ GET  /llm/providers       — lista providers disponíveis (configurados)
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from api.dependencies import get_llm_registry
+from api.dependencies import get_effective_tenant_id, get_llm_registry
 from core.security import UserPayload, get_current_user_payload
-from integrations.llm import LLMMessage, LLMRegistry, ModelInfo
+from integrations.llm import LLMMessage, LLMRegistry, LLMUsageContext, ModelInfo
 
 router = APIRouter(prefix="/llm", tags=["LLM"])
 
 
 # ── Schemas de resposta ──────────────────────────────────────────────
+
 
 class ModelResponse(BaseModel):
     id: str
@@ -33,7 +36,7 @@ class ModelResponse(BaseModel):
     output_cost_per_mtok: float
 
     @classmethod
-    def from_model_info(cls, m: ModelInfo) -> "ModelResponse":
+    def from_model_info(cls, m: ModelInfo) -> ModelResponse:
         return cls(
             id=m.id,
             name=m.name,
@@ -69,6 +72,7 @@ class TestResponse(BaseModel):
 
 
 # ── Rotas ────────────────────────────────────────────────────────────
+
 
 @router.get("/providers", summary="Lista provedores configurados")
 async def get_providers(
@@ -125,6 +129,7 @@ async def get_models_by_provider(
 )
 async def test_model(
     body: TestRequest,
+    tenant_id: UUID = Depends(get_effective_tenant_id),
     _user: UserPayload = Depends(get_current_user_payload),
     registry: LLMRegistry = Depends(get_llm_registry),
 ) -> TestResponse:
@@ -142,6 +147,13 @@ async def test_model(
             model=body.model,
             temperature=body.temperature,
             max_tokens=body.max_tokens,
+            usage_context=LLMUsageContext(
+                tenant_id=str(tenant_id),
+                module="llm_settings",
+                task_type="test_model",
+                feature=body.provider,
+                metadata={"model": body.model},
+            ),
         )
         latency = (time.monotonic() - t0) * 1000
         return TestResponse(

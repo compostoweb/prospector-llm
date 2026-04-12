@@ -47,6 +47,7 @@ export function buildCaptureRequest(
   destinationType: CaptureDestinationType,
   sessionId: string | null,
   extensionVersion: string,
+  postUrlOverride?: string | null,
 ): CaptureRequestPayload {
   const normalized = normalizePreview(preview);
   return {
@@ -55,7 +56,8 @@ export function buildCaptureRequest(
       session_id: destinationType === "engagement" ? sessionId : null,
     },
     post: {
-      post_url: normalized.post_url,
+      post_url:
+        normalizeWhitespace(postUrlOverride) ?? normalized.post_url,
       post_text: normalized.post_text,
       author_name: normalized.author_name,
       author_title: normalized.author_title,

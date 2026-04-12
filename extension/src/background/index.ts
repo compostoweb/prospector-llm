@@ -7,13 +7,16 @@ import {
 } from "./api";
 import {
   clearPreview,
+  clearSelectedPreviews,
   getBootstrap,
   getConfig,
   getPreview,
+  getSelectedPreviews,
   getSession,
   setBootstrap,
   setConfig,
   setPreview,
+  setSelectedPreviews,
 } from "./storage";
 import {
   MESSAGE_TYPES,
@@ -59,8 +62,40 @@ async function getState(): Promise<ExtensionState> {
     session: await getSession(),
     bootstrap: await getBootstrap(),
     preview: await getPreview(),
+    selected_previews: await getSelectedPreviews(),
     config: await getConfig(),
   };
+}
+
+async function saveSelectedPreview(preview: CapturePreview): Promise<void> {
+  const normalizedPreview = normalizePreview(preview);
+  const nextPreviewKey = buildPreviewKey(normalizedPreview);
+  const currentSelectedPreviews = await getSelectedPreviews();
+  const dedupedPreviews = currentSelectedPreviews.filter(
+    (candidate) => buildPreviewKey(candidate) !== nextPreviewKey,
+  );
+
+  await setSelectedPreviews([normalizedPreview, ...dedupedPreviews]);
+  await setPreview(normalizedPreview);
+}
+
+async function removeSelectedPreview(candidateKey: string): Promise<void> {
+  const currentSelectedPreviews = await getSelectedPreviews();
+  const nextSelectedPreviews = currentSelectedPreviews.filter(
+    (candidate) => buildPreviewKey(candidate) !== candidateKey,
+  );
+
+  await setSelectedPreviews(nextSelectedPreviews);
+
+  const currentPreview = await getPreview();
+  if (currentPreview && buildPreviewKey(currentPreview) === candidateKey) {
+    const nextPreview = nextSelectedPreviews[0] ?? null;
+    if (nextPreview) {
+      await setPreview(nextPreview);
+    } else {
+      await clearPreview();
+    }
+  }
 }
 
 async function refreshBootstrap(): Promise<ExtensionState> {
@@ -248,16 +283,20 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
         const timestampPattern =
           /^(\d+\s*(min|minutos?|h|hora|horas|d|dia|dias|sem|semanas?|m|mes|meses|mo)\b|edited|editado|promoted|patrocinado)$/i;
         const followCtaPattern =
-          /\b(seguir|follow|conectar|connect|acessar meu site|acesse meu site|visit website)\b/i;
+          /\b(seguir|follow|conectar|connect|acessar meu site|acesse meu site|visit website|agende uma reunião|agendar uma reunião|agende|schedule a meeting|book a meeting)\b/i;
         const postTextCollapsePattern = /(?:\.\.\.|…)\s*(mais|more)\b/gi;
         const relativeTimeTokenPattern =
           /\b(\d+\s*(?:min|minutos?|h|hora|horas|d|dia|dias|sem|semanas?|m|mes|meses|mo))\b/i;
+        const controlMenuAuthorPattern =
+          /(?:publica(?:ç|c)[aã]o|publication|post)\s+(?:de|of|by)\s+(.+)$/i;
         const reactionPattern =
           /reaction|reactions|reac|curtida|curtidas|like|likes/i;
         const commentPattern =
           /comment|comments|comentario|comentarios|comentário|comentários/i;
         const sharePattern =
           /repost|reposts|share|shares|compartilhamento|compartilhamentos|compartilhar/i;
+        const authorTitleNoisePattern =
+          /\b(?:usu[aá]rio verificado|verified user|premium|perfil|profile|seguidores?|followers?|visibilidade|global|promovida|promoted)\b/gi;
         const postUrlSelectors = [
           ".update-components-actor__meta-link",
           ".feed-shared-actor__container-link",
@@ -273,6 +312,18 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
           'a[href*="/activity/"]',
         ];
         const postUrnPattern = /urn:li:(activity|share|ugcPost|update):\d+/i;
+        const encodedPostUrnPattern =
+          /urn(?:%3A|:)li(?:%3A|:)(activity|share|ugcPost|update)(?:%3A|:)(\d+)/i;
+        const reactionSocialProofOthersPattern =
+          /(?:\be\s+mais\s+(\d+(?:[\.,]\d+)?)\s+pessoas\b|\band\s+(\d+(?:[\.,]\d+)?)\s+others\b)/i;
+        const reactionSocialProofTotalPattern =
+          /\b(\d+(?:[\.,]\d+)?)\s+(?:pessoas|people)\b/i;
+        const metadataShareIdPattern =
+          /(?:shareId|activityId|updateId)=(\d{15,25})/i;
+        const metadataUgcPostIdPattern = /(?:postId|ugcPostId)=(\d{15,25})/i;
+        const metadataKeyedUrnIdPattern =
+          /(activity|share|ugcPost|update)(?:Urn|Id)?[:=](\d{15,25})/i;
+        const rawLinkedInIdPattern = /(?:^|\D)(\d{19,20})(?:\D|$)/;
         const authorNameSelectors = [
           ".update-components-actor__meta-link span[aria-hidden='true']",
           ".update-components-actor__meta-link",
@@ -293,6 +344,7 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
           ".feed-shared-actor__sub-description",
         ];
         const postTextSelectors = [
+          "span[data-testid='expandable-text-box']",
           ".update-components-update-v2__commentary span[dir='ltr']",
           ".update-components-update-v2__commentary",
           ".update-components-text-view span[dir='ltr']",
@@ -428,7 +480,7 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
         function collectSearchRoots(root: ParentNode): ParentNode[] {
           const searchRoots: ParentNode[] = [root];
           let current = root instanceof HTMLElement ? root.parentElement : null;
-          for (let depth = 0; current && depth < 10; depth += 1) {
+          for (let depth = 0; current && depth < 20; depth += 1) {
             searchRoots.push(current);
             current = current.parentElement;
           }
@@ -438,6 +490,7 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
         function collectVisibleTextCandidates(
           root: ParentNode,
           minLength = 12,
+          maxLength = 700,
         ): string[] {
           const values: string[] = [];
           const seen = new Set<string>();
@@ -449,7 +502,7 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
               continue;
             }
             const text = normalizeWhitespace(element.innerText);
-            if (!text || text.length < minLength || text.length > 700) {
+            if (!text || text.length < minLength || text.length > maxLength) {
               continue;
             }
             if (isActionOrNoiseText(text) || seen.has(text)) {
@@ -503,7 +556,16 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
           value: string | null,
           authorName: string | null,
         ): string | null {
-          const cleaned = normalizeWhitespace(value);
+          let cleaned = normalizeWhitespace(value);
+          if (authorName && cleaned) {
+            const authorPrefixPattern = new RegExp(
+              `^${escapeRegExp(authorName)}\\s*[·•-]?\\s*`,
+              "i",
+            );
+            cleaned = normalizeWhitespace(
+              cleaned.replace(authorPrefixPattern, " "),
+            );
+          }
           if (
             !cleaned ||
             cleaned === authorName ||
@@ -511,7 +573,22 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
           ) {
             return null;
           }
-          return normalizeWhitespace(cleaned.replace(followCtaPattern, " "));
+          cleaned = normalizeWhitespace(
+            cleaned
+              .replace(followCtaPattern, " ")
+              .replace(relativeTimeTokenPattern, " ")
+              .replace(authorTitleNoisePattern, " ")
+              .replace(/\b\d+(?:º|°|st|nd|rd|th)\+?\b/gi, " ")
+              .replace(/[·•]/g, " "),
+          );
+          if (
+            !cleaned ||
+            cleaned === authorName ||
+            timestampPattern.test(cleaned)
+          ) {
+            return null;
+          }
+          return cleaned;
         }
 
         function sanitizePostText(
@@ -536,6 +613,11 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
               "i",
             );
             cleaned = cleaned.replace(authorPrefixPattern, "");
+            const authorDegreePattern = new RegExp(
+              `^${escapeRegExp(authorName)}\\s*[·•]\\s*(?:\\d+[º°]\\+?\\s*)?`,
+              "i",
+            );
+            cleaned = cleaned.replace(authorDegreePattern, "");
           }
           if (authorTitle && cleaned.startsWith(authorTitle)) {
             cleaned = cleaned.slice(authorTitle.length);
@@ -581,6 +663,36 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
               .replace(/[·•]/g, " "),
           );
           return { authorName: maybeName, authorTitle: remainder };
+        }
+
+        function extractAuthorNameFromControlLabel(
+          root: ParentNode,
+        ): string | null {
+          const labeledElements =
+            root instanceof HTMLElement
+              ? [
+                  root,
+                  ...Array.from(
+                    root.querySelectorAll<HTMLElement>("[aria-label]"),
+                  ),
+                ]
+              : Array.from(root.querySelectorAll<HTMLElement>("[aria-label]"));
+
+          for (const element of labeledElements) {
+            const ariaLabel = normalizeWhitespace(
+              element.getAttribute("aria-label"),
+            );
+            if (!ariaLabel) {
+              continue;
+            }
+            const match = ariaLabel.match(controlMenuAuthorPattern);
+            const candidate = sanitizeAuthorName(match?.[1] ?? null);
+            if (candidate && candidate.length <= 120) {
+              return candidate;
+            }
+          }
+
+          return null;
         }
 
         function collectSelectorTexts(
@@ -632,8 +744,15 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
         }
 
         function resolveAuthorName(root: ParentNode): string | null {
+          const authorFromControlLabel =
+            extractAuthorNameFromControlLabel(root);
+          if (authorFromControlLabel) {
+            return authorFromControlLabel;
+          }
+
+          const headerScope = getHeaderScope(root);
           for (const candidate of collectSelectorTexts(
-            root,
+            headerScope,
             authorNameSelectors,
           )) {
             const fromMeta = extractAuthorFromMetaLine(candidate);
@@ -641,22 +760,23 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
             const sanitized = sanitizeAuthorName(candidate);
             if (sanitized && looksLikeAuthorName(sanitized)) return sanitized;
           }
-          return fallbackAuthorName(root);
+          return fallbackAuthorName(headerScope);
         }
 
         function resolveAuthorTitle(
           root: ParentNode,
           authorName: string | null,
         ): string | null {
+          const headerScope = getHeaderScope(root);
           for (const candidate of collectSelectorTexts(
-            root,
+            headerScope,
             authorTitleSelectors,
           )) {
             const sanitized = sanitizeAuthorTitle(candidate, authorName);
             if (sanitized) return sanitized;
           }
           for (const candidate of collectSelectorTexts(
-            root,
+            headerScope,
             authorNameSelectors,
           )) {
             const fromMeta = extractAuthorFromMetaLine(candidate);
@@ -668,7 +788,30 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
               return fromMeta.authorTitle;
             }
           }
-          return fallbackAuthorTitle(root, authorName);
+          return fallbackAuthorTitle(headerScope, authorName);
+        }
+
+        function isLikelyAuthorText(
+          value: string,
+          authorName: string | null,
+          authorTitle: string | null,
+        ): boolean {
+          if (!value) return false;
+          if (value === authorName || value === authorTitle) return true;
+          if (authorTitle && value.length < authorTitle.length + 30) {
+            if (value.startsWith(authorTitle.slice(0, 40))) return true;
+            if (authorTitle.startsWith(value.slice(0, 40))) return true;
+          }
+          if (authorName && value.startsWith(authorName)) {
+            const afterName = value.slice(authorName.length).trim();
+            if (
+              afterName.startsWith("•") ||
+              afterName.startsWith("·") ||
+              afterName.length < 30
+            )
+              return true;
+          }
+          return false;
         }
 
         function extractPostText(
@@ -676,6 +819,23 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
           authorName: string | null,
           authorTitle: string | null,
         ): string | null {
+          const expandableTextCandidates = collectStructuredTexts(root, [
+            "span[data-testid='expandable-text-box']",
+          ])
+            .map((c) => sanitizePostText(c, authorName, authorTitle))
+            .filter(
+              (c): c is string =>
+                !!c &&
+                c.length >= 20 &&
+                !isActionOrNoiseText(c) &&
+                !isSocialProofOrMetricsText(c) &&
+                !followCtaPattern.test(c) &&
+                !isLikelyAuthorText(c, authorName, authorTitle),
+            );
+          if (expandableTextCandidates.length > 0) {
+            return chooseLongestText(expandableTextCandidates);
+          }
+
           const structuredCandidates = collectStructuredTexts(
             root,
             postTextSelectors,
@@ -688,8 +848,7 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
                 !isActionOrNoiseText(c) &&
                 !isSocialProofOrMetricsText(c) &&
                 !followCtaPattern.test(c) &&
-                c !== authorName &&
-                c !== authorTitle,
+                !isLikelyAuthorText(c, authorName, authorTitle),
             );
           if (structuredCandidates.length > 0) {
             return chooseLongestText(structuredCandidates);
@@ -709,12 +868,43 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
                 text.length >= 20 &&
                 !isActionOrNoiseText(text) &&
                 !isSocialProofOrMetricsText(text) &&
-                text !== authorName &&
-                text !== authorTitle
+                !isLikelyAuthorText(text, authorName, authorTitle)
               ) {
                 return text;
               }
             }
+          }
+
+          // Strategy 3: Generic span[dir='ltr'] outside header scope
+          const headerScope = getHeaderScope(root);
+          const dirLtrCandidates: string[] = [];
+          for (const span of root.querySelectorAll<HTMLElement>(
+            "span[dir='ltr']",
+          )) {
+            if (
+              headerScope instanceof HTMLElement &&
+              headerScope.contains(span)
+            ) {
+              continue;
+            }
+            const text = sanitizePostText(
+              normalizeWhitespace(span.textContent ?? span.innerText),
+              authorName,
+              authorTitle,
+            );
+            if (
+              text &&
+              text.length >= 30 &&
+              !isActionOrNoiseText(text) &&
+              !isSocialProofOrMetricsText(text) &&
+              !followCtaPattern.test(text) &&
+              !isLikelyAuthorText(text, authorName, authorTitle)
+            ) {
+              dirLtrCandidates.push(text);
+            }
+          }
+          if (dirLtrCandidates.length > 0) {
+            return chooseLongestText(dirLtrCandidates);
           }
 
           return fallbackPostText(root, authorName, authorTitle);
@@ -726,6 +916,10 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
           const cleaned = normalizeWhitespace(rawUrl);
           if (!cleaned) {
             return null;
+          }
+
+          if (postUrnPattern.test(cleaned)) {
+            return buildLinkedInFeedUrlFromUrn(cleaned);
           }
 
           try {
@@ -759,12 +953,22 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
             }
 
             const pathname = parsed.pathname.replace(/\/+$/, "");
+            const isCanonicalPostsPath = /\/posts\/[^/]+$/i.test(pathname);
             if (
-              pathname.includes("/posts/") ||
+              isCanonicalPostsPath ||
               pathname.includes("/feed/update/") ||
-              pathname.includes("/activity-")
+              pathname.includes("/activity-") ||
+              pathname.includes("/activity/")
             ) {
               return `${parsed.origin}${pathname}/`;
+            }
+
+            const fullUrlStr = parsed.toString();
+            const encodedUrnMatch = fullUrlStr.match(
+              /urn(?:%3A|:)li(?:%3A|:)(?:activity|ugcPost|share|update)(?:%3A|:)(\d+)/i,
+            );
+            if (encodedUrnMatch) {
+              return `https://www.linkedin.com/feed/update/urn:li:activity:${encodedUrnMatch[1]}/`;
             }
           } catch {
             return cleaned;
@@ -783,23 +987,58 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
           return `https://www.linkedin.com/feed/update/${normalizedUrn}/`;
         }
 
+        function extractPostUrnFromMetadataValue(
+          value: string | null | undefined,
+        ): string | null {
+          const normalized = normalizeWhitespace(value);
+          if (!normalized) {
+            return null;
+          }
+
+          const directUrnMatch = normalized.match(postUrnPattern);
+          if (directUrnMatch) {
+            return directUrnMatch[0];
+          }
+
+          const encodedUrnMatch = normalized.match(encodedPostUrnPattern);
+          if (encodedUrnMatch) {
+            return `urn:li:${encodedUrnMatch[1]}:${encodedUrnMatch[2]}`;
+          }
+
+          const shareMatch = normalized.match(metadataShareIdPattern);
+          if (shareMatch) {
+            return `urn:li:share:${shareMatch[1]}`;
+          }
+
+          const ugcPostMatch = normalized.match(metadataUgcPostIdPattern);
+          if (ugcPostMatch) {
+            return `urn:li:ugcPost:${ugcPostMatch[1]}`;
+          }
+
+          const keyedIdMatch = normalized.match(metadataKeyedUrnIdPattern);
+          if (keyedIdMatch) {
+            return `urn:li:${keyedIdMatch[1]}:${keyedIdMatch[2]}`;
+          }
+
+          return null;
+        }
+
         function extractPostUrn(root: ParentNode): string | null {
           // Walk up ancestors and check ALL attributes for activity URN pattern
           let currentElement = root instanceof HTMLElement ? root : null;
-          for (let depth = 0; currentElement && depth < 15; depth += 1) {
+          for (let depth = 0; currentElement && depth < 30; depth += 1) {
             for (const attr of Array.from(currentElement.attributes)) {
-              const match = attr.value.match(postUrnPattern);
-              if (match) return match[0];
+              const urn = extractPostUrnFromMetadataValue(attr.value);
+              if (urn) return urn;
             }
             currentElement = currentElement.parentElement;
           }
 
-          // Search descendants — any element with data-* attribute containing URN
+          // Search descendants — any element with any attribute containing URN
           for (const element of root.querySelectorAll<HTMLElement>("*")) {
             for (const attr of Array.from(element.attributes)) {
-              if (!attr.name.startsWith("data-")) continue;
-              const match = attr.value.match(postUrnPattern);
-              if (match) return match[0];
+              const urn = extractPostUrnFromMetadataValue(attr.value);
+              if (urn) return urn;
             }
           }
 
@@ -821,16 +1060,14 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
             }
           }
 
-          // Strategy 3: Link wrapping a <time> element (timestamp links to post)
-          for (const searchRoot of collectSearchRoots(root)) {
-            const timeElements =
-              searchRoot.querySelectorAll<HTMLElement>("time");
-            for (const timeEl of timeElements) {
-              const parentLink = timeEl.closest<HTMLAnchorElement>("a[href]");
-              if (parentLink) {
-                const href = normalizeLinkedInPostUrl(parentLink.href);
-                if (href) return href;
-              }
+          // Strategy 3: Link wrapping <time> or link with timestamp text
+          for (const link of root.querySelectorAll<HTMLAnchorElement>(
+            "a[href]",
+          )) {
+            const linkText = (normalizeWhitespace(link.innerText) ?? "").trim();
+            if (link.querySelector("time") || timestampPattern.test(linkText)) {
+              const href = normalizeLinkedInPostUrl(link.href);
+              if (href) return href;
             }
           }
 
@@ -855,6 +1092,29 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
                 return `https://www.linkedin.com/feed/update/urn:li:activity:${activityMatch[1]}/`;
               }
             }
+          }
+
+          // Strategy 6: Scan all attributes for raw LinkedIn ids as a last fallback.
+          for (const element of root.querySelectorAll<HTMLElement>("*")) {
+            for (const attr of Array.from(element.attributes)) {
+              const idMatch = attr.value.match(rawLinkedInIdPattern);
+              if (idMatch) {
+                return `https://www.linkedin.com/feed/update/urn:li:activity:${idMatch[1]}/`;
+              }
+            }
+          }
+
+          // Also check ancestors for raw LinkedIn ids.
+          let urlAncestor =
+            root instanceof HTMLElement ? root.parentElement : null;
+          for (let depth = 0; urlAncestor && depth < 30; depth += 1) {
+            for (const attr of Array.from(urlAncestor.attributes)) {
+              const idMatch = attr.value.match(rawLinkedInIdPattern);
+              if (idMatch) {
+                return `https://www.linkedin.com/feed/update/urn:li:activity:${idMatch[1]}/`;
+              }
+            }
+            urlAncestor = urlAncestor.parentElement;
           }
 
           return null;
@@ -1009,6 +1269,25 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
             if (namedMetric > 0) {
               return namedMetric;
             }
+
+            const othersMatch = text.match(reactionSocialProofOthersPattern);
+            if (othersMatch) {
+              const othersCount = parseMetricValue(
+                othersMatch[1] ?? othersMatch[2],
+              );
+              if (othersCount > 0) {
+                return othersCount + 1;
+              }
+            }
+
+            const peopleMatch = text.match(reactionSocialProofTotalPattern);
+            if (peopleMatch) {
+              const peopleCount = parseMetricValue(peopleMatch[1]);
+              if (peopleCount > 0) {
+                return peopleCount;
+              }
+            }
+
             if (/^\d+(?:[\.,]\d+)?\s*[km]?$/i.test(text)) {
               return parseMetricValue(text);
             }
@@ -1075,17 +1354,17 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
           authorName: string | null,
           authorTitle: string | null,
         ): string | null {
-          const candidates = collectVisibleTextCandidates(root, 20);
+          const candidates = collectVisibleTextCandidates(root, 20, 5000);
           const filtered = candidates
             .map((candidate) =>
               sanitizePostText(candidate, authorName, authorTitle),
             )
             .filter((candidate): candidate is string => {
               if (!candidate) return false;
-              if (candidate === authorName || candidate === authorTitle) {
+              if (isLikelyAuthorText(candidate, authorName, authorTitle)) {
                 return false;
               }
-              if (candidate.length < 20 || candidate.length > 1500) {
+              if (candidate.length < 20 || candidate.length > 5000) {
                 return false;
               }
               if (
@@ -1241,9 +1520,8 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
         }
 
         for (const container of containers) {
-          const headerScope = getHeaderScope(container);
-          const authorName = resolveAuthorName(headerScope);
-          const authorTitle = resolveAuthorTitle(headerScope, authorName);
+          const authorName = resolveAuthorName(container);
+          const authorTitle = resolveAuthorTitle(container, authorName);
           const postText = extractPostText(container, authorName, authorTitle);
           const postUrl = firstPostUrl(container);
           const likes = findReactionMetric(container);
@@ -1514,6 +1792,7 @@ async function handleMessage(
     case MESSAGE_TYPES.AUTH_LOGOUT:
       await logout();
       await clearPreview();
+      await clearSelectedPreviews();
       return { ok: true, data: await getState() };
 
     case MESSAGE_TYPES.GET_ACTIVE_TAB_POSTS:
@@ -1523,7 +1802,16 @@ async function handleMessage(
       return { ok: true, data: await getActiveTabScan() };
 
     case MESSAGE_TYPES.SAVE_CAPTURED_POST:
-      await setPreview(normalizePreview(message.payload));
+      await saveSelectedPreview(message.payload);
+      return { ok: true, data: await getState() };
+
+    case MESSAGE_TYPES.REMOVE_CAPTURED_POST:
+      await removeSelectedPreview(message.payload.candidateKey);
+      return { ok: true, data: await getState() };
+
+    case MESSAGE_TYPES.CLEAR_CAPTURED_POSTS:
+      await clearSelectedPreviews();
+      await clearPreview();
       return { ok: true, data: await getState() };
 
     case MESSAGE_TYPES.IMPORT_CAPTURE: {
@@ -1538,7 +1826,6 @@ async function handleMessage(
         getExtensionVersion(),
         message.payload,
       );
-      await clearPreview();
       await refreshBootstrap();
       return { ok: true, data: captureResponse };
     }

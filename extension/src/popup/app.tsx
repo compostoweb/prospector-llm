@@ -1,21 +1,33 @@
 import { useEffect, useState } from "react";
 
+import { EXTENSION_STORAGE_KEYS } from "../background/storage";
 import { MESSAGE_TYPES } from "../shared/contracts";
 import {
   buildCaptureRequest,
   buildPreviewKey,
+  normalizeWhitespace,
 } from "../shared/linkedin-normalizer";
 import type {
   ActiveTabPostScanDiagnostic,
   ActiveTabPostScanResult,
   CaptureDestinationType,
   CapturePreview,
+  CaptureResponse,
   EngagementSessionSummary,
   ExtensionState,
 } from "../shared/types";
 
 type ExtensionSurfaceMode = "popup" | "sidepanel";
-type PopupTabKey = "capture" | "destination" | "diagnostic";
+type PopupStepKey = "selection" | "destination" | "review";
+type LoadStateOptions = {
+  preferredSessionId?: string | null;
+  showLoading?: boolean;
+};
+type ImportFailure = {
+  candidateKey: string;
+  label: string;
+  message: string;
+};
 
 async function sendMessage<T>(message: object): Promise<T> {
   const response = (await chrome.runtime.sendMessage(message)) as {
@@ -27,6 +39,10 @@ async function sendMessage<T>(message: object): Promise<T> {
     throw new Error(response.error ?? "Erro desconhecido");
   }
   return response.data as T;
+}
+
+function truncateText(value: string, limit: number): string {
+  return value.length > limit ? `${value.slice(0, limit)}...` : value;
 }
 
 export function PopupApp({
@@ -42,42 +58,111 @@ export function PopupApp({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<PopupTabKey>("capture");
+  const [activeStep, setActiveStep] = useState<PopupStepKey>("selection");
   const [destination, setDestination] =
     useState<CaptureDestinationType>("reference");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
+  const [manualUrls, setManualUrls] = useState<Record<string, string>>({});
+  const [importProgress, setImportProgress] = useState<string | null>(null);
+  const [importFailures, setImportFailures] = useState<ImportFailure[]>([]);
+
+  const selectedPreviews = state?.selected_previews ?? [];
+  const selectedPreviewKeys = new Set(
+    selectedPreviews.map((preview) => buildPreviewKey(preview)),
+  );
+  const sessions = state?.bootstrap?.recent_engagement_sessions ?? [];
+  const discardReasonEntries = Object.entries(
+    scanDiagnostic?.discard_reason_counts ?? {},
+  ).sort((left, right) => right[1] - left[1]);
+  const availableTextLimit = surfaceMode === "sidepanel" ? 190 : 140;
+  const selectedTextLimit = surfaceMode === "sidepanel" ? 420 : 320;
 
   useEffect(() => {
     void loadState();
     void loadAvailablePosts();
+
+    const handleStorageChange: Parameters<
+      typeof chrome.storage.onChanged.addListener
+    >[0] = (changes, areaName) => {
+      if (areaName !== "local" && areaName !== "session") {
+        return;
+      }
+
+      const changedKeys = Object.keys(changes);
+      const stateStorageKeys = new Set<string>(
+        Object.values(EXTENSION_STORAGE_KEYS),
+      );
+      if (!changedKeys.some((key) => stateStorageKeys.has(key))) {
+        return;
+      }
+
+      if (changes[EXTENSION_STORAGE_KEYS.preview]?.newValue) {
+        setResultMessage("Seleção atualizada no LinkedIn.");
+        void loadAvailablePosts();
+      }
+
+      void loadState({ showLoading: false });
+    };
+
+    chrome.storage.onChanged.addListener(handleStorageChange);
+
+    return () => {
+      chrome.storage.onChanged.removeListener(handleStorageChange);
+    };
   }, []);
 
-  async function loadState(preferredSessionId?: string | null) {
-    setLoading(true);
+  useEffect(() => {
+    setManualUrls((current) => {
+      const next: Record<string, string> = {};
+      for (const preview of selectedPreviews) {
+        const candidateKey = buildPreviewKey(preview);
+        next[candidateKey] = current[candidateKey] ?? preview.post_url ?? "";
+      }
+      return next;
+    });
+  }, [selectedPreviews]);
+
+  useEffect(() => {
+    if (selectedPreviews.length === 0 && activeStep !== "selection") {
+      setActiveStep("selection");
+    }
+  }, [activeStep, selectedPreviews.length]);
+
+  function applyState(
+    nextState: ExtensionState,
+    preferredSessionId?: string | null,
+  ) {
+    setState(nextState);
+    const nextSessions = nextState.bootstrap?.recent_engagement_sessions ?? [];
+    setSessionId((currentSessionId) => {
+      if (
+        preferredSessionId &&
+        nextSessions.some((session) => session.id === preferredSessionId)
+      ) {
+        return preferredSessionId;
+      }
+      if (
+        currentSessionId &&
+        nextSessions.some((session) => session.id === currentSessionId)
+      ) {
+        return currentSessionId;
+      }
+      return nextSessions[0]?.id ?? null;
+    });
+  }
+
+  async function loadState(options: LoadStateOptions = {}) {
+    const { preferredSessionId = null, showLoading = true } = options;
+    if (showLoading) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const nextState = await sendMessage<ExtensionState>({
         type: MESSAGE_TYPES.GET_STATE,
       });
-      setState(nextState);
-      const nextSessions =
-        nextState.bootstrap?.recent_engagement_sessions ?? [];
-      setSessionId((currentSessionId) => {
-        if (
-          preferredSessionId &&
-          nextSessions.some((session) => session.id === preferredSessionId)
-        ) {
-          return preferredSessionId;
-        }
-        if (
-          currentSessionId &&
-          nextSessions.some((session) => session.id === currentSessionId)
-        ) {
-          return currentSessionId;
-        }
-        return nextSessions[0]?.id ?? null;
-      });
+      applyState(nextState, preferredSessionId);
     } catch (nextError) {
       setError(
         nextError instanceof Error
@@ -85,7 +170,9 @@ export function PopupApp({
           : "Falha ao carregar estado",
       );
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   }
 
@@ -116,7 +203,7 @@ export function PopupApp({
       const nextState = await sendMessage<ExtensionState>({
         type: MESSAGE_TYPES.AUTH_LOGIN,
       });
-      setState(nextState);
+      applyState(nextState);
       await loadAvailablePosts();
     } catch (nextError) {
       setError(
@@ -127,21 +214,77 @@ export function PopupApp({
     }
   }
 
-  async function handleSelectPreview(preview: CapturePreview) {
-    setBusy("select-preview");
+  async function handleTogglePreview(preview: CapturePreview) {
+    const candidateKey = buildPreviewKey(preview);
+    const isSelected = selectedPreviewKeys.has(candidateKey);
+    setBusy("toggle-preview");
     setError(null);
     try {
-      const nextState = await sendMessage<ExtensionState>({
-        type: MESSAGE_TYPES.SAVE_CAPTURED_POST,
-        payload: preview,
-      });
-      setState(nextState);
-      setResultMessage("Post selecionado para importacao.");
+      const nextState = await sendMessage<ExtensionState>(
+        isSelected
+          ? {
+              type: MESSAGE_TYPES.REMOVE_CAPTURED_POST,
+              payload: { candidateKey },
+            }
+          : {
+              type: MESSAGE_TYPES.SAVE_CAPTURED_POST,
+              payload: preview,
+            },
+      );
+      applyState(nextState);
+      setResultMessage(
+        isSelected
+          ? "Post removido da seleção."
+          : "Post adicionado à seleção.",
+      );
     } catch (nextError) {
       setError(
         nextError instanceof Error
           ? nextError.message
-          : "Falha ao selecionar post",
+          : "Falha ao atualizar seleção",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleRemoveSelected(candidateKey: string) {
+    setBusy("remove-preview");
+    setError(null);
+    try {
+      const nextState = await sendMessage<ExtensionState>({
+        type: MESSAGE_TYPES.REMOVE_CAPTURED_POST,
+        payload: { candidateKey },
+      });
+      applyState(nextState);
+      setResultMessage("Post removido da seleção.");
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Falha ao remover post",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleClearSelected() {
+    setBusy("clear-selection");
+    setError(null);
+    try {
+      const nextState = await sendMessage<ExtensionState>({
+        type: MESSAGE_TYPES.CLEAR_CAPTURED_POSTS,
+      });
+      applyState(nextState);
+      setImportFailures([]);
+      setResultMessage("Seleção limpa.");
+      setActiveStep("selection");
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Falha ao limpar seleção",
       );
     } finally {
       setBusy(null);
@@ -156,13 +299,13 @@ export function PopupApp({
         type: MESSAGE_TYPES.CREATE_ENGAGEMENT_SESSION,
       });
       setDestination("engagement");
-      await loadState(session.id);
-      setResultMessage("Nova sessao de engagement criada.");
+      await loadState({ preferredSessionId: session.id });
+      setResultMessage("Nova sessão de engagement criada.");
     } catch (nextError) {
       setError(
         nextError instanceof Error
           ? nextError.message
-          : "Falha ao criar sessao",
+          : "Falha ao criar sessão",
       );
     } finally {
       setBusy(null);
@@ -175,7 +318,8 @@ export function PopupApp({
       const nextState = await sendMessage<ExtensionState>({
         type: MESSAGE_TYPES.AUTH_LOGOUT,
       });
-      setState(nextState);
+      applyState(nextState);
+      setImportFailures([]);
       setResultMessage(null);
     } catch (nextError) {
       setError(
@@ -186,47 +330,117 @@ export function PopupApp({
     }
   }
 
-  async function handleImport(preview: CapturePreview) {
-    setBusy("import");
+  function handleUrlChange(candidateKey: string, value: string) {
+    setManualUrls((current) => ({
+      ...current,
+      [candidateKey]: value,
+    }));
+  }
+
+  function getEditablePostUrl(preview: CapturePreview): string {
+    return manualUrls[buildPreviewKey(preview)] ?? preview.post_url ?? "";
+  }
+
+  async function handleImportSelected() {
+    if (selectedPreviews.length === 0) {
+      setError("Selecione ao menos um post antes de importar.");
+      setActiveStep("selection");
+      return;
+    }
+
+    if (destination === "engagement" && !sessionId) {
+      setError("Selecione ou crie uma sessão de engagement antes de importar.");
+      setActiveStep("destination");
+      return;
+    }
+
+    const missingManualUrls = selectedPreviews.filter((preview) => {
+      const candidateKey = buildPreviewKey(preview);
+      return !preview.post_url && !normalizeWhitespace(manualUrls[candidateKey]);
+    });
+
+    if (missingManualUrls.length > 0) {
+      setError(
+        `Preencha o link manual em ${missingManualUrls.length} ${missingManualUrls.length === 1 ? "post" : "posts"} antes de importar.`,
+      );
+      setActiveStep("review");
+      return;
+    }
+
+    setBusy("batch-import");
     setError(null);
     setResultMessage(null);
+    setImportFailures([]);
+
+    const manifestVersion = chrome.runtime.getManifest().version;
+    const failures: ImportFailure[] = [];
+    let successCount = 0;
 
     try {
-      const payload = buildCaptureRequest(
-        preview,
-        destination,
-        destination === "engagement" ? sessionId : null,
-        chrome.runtime.getManifest().version,
-      );
-      const result = await sendMessage<{ destination: string; result: string }>(
-        {
-          type: MESSAGE_TYPES.IMPORT_CAPTURE,
-          payload,
-        },
-      );
-      await loadState();
-      setAvailablePosts((prev) =>
-        prev.filter((p) => buildPreviewKey(p) !== buildPreviewKey(preview)),
-      );
-      void loadAvailablePosts();
-      setResultMessage(
-        `Importacao concluida: ${result.destination} (${result.result}).`,
-      );
-    } catch (nextError) {
-      setError(
-        nextError instanceof Error ? nextError.message : "Falha ao importar",
-      );
+      for (const [index, preview] of selectedPreviews.entries()) {
+        const candidateKey = buildPreviewKey(preview);
+        setImportProgress(
+          `Importando ${index + 1} de ${selectedPreviews.length}`,
+        );
+
+        try {
+          const payload = buildCaptureRequest(
+            preview,
+            destination,
+            destination === "engagement" ? sessionId : null,
+            manifestVersion,
+            getEditablePostUrl(preview),
+          );
+          await sendMessage<CaptureResponse>({
+            type: MESSAGE_TYPES.IMPORT_CAPTURE,
+            payload,
+          });
+          const nextState = await sendMessage<ExtensionState>({
+            type: MESSAGE_TYPES.REMOVE_CAPTURED_POST,
+            payload: { candidateKey },
+          });
+          applyState(nextState);
+          setAvailablePosts((current) =>
+            current.filter((candidate) => buildPreviewKey(candidate) !== candidateKey),
+          );
+          successCount += 1;
+        } catch (nextError) {
+          failures.push({
+            candidateKey,
+            label: preview.author_name ?? "Autor não identificado",
+            message:
+              nextError instanceof Error
+                ? nextError.message
+                : "Falha ao importar post",
+          });
+        }
+      }
+
+      if (successCount > 0) {
+        void loadAvailablePosts();
+      }
+
+      if (failures.length === 0) {
+        setResultMessage(
+          `${successCount} ${successCount === 1 ? "post importado" : "posts importados"} com sucesso.`,
+        );
+        setActiveStep("selection");
+      } else {
+        setImportFailures(failures);
+        setError(
+          `${failures.length} ${failures.length === 1 ? "post falhou" : "posts falharam"} durante a importação.`,
+        );
+        if (successCount > 0) {
+          setResultMessage(
+            `${successCount} ${successCount === 1 ? "post importado" : "posts importados"} antes das falhas.`,
+          );
+        }
+      }
     } finally {
+      setImportProgress(null);
       setBusy(null);
     }
   }
-
-  const preview = state?.preview ?? null;
-  const sessions = state?.bootstrap?.recent_engagement_sessions ?? [];
-  const selectedPreviewKey = preview ? buildPreviewKey(preview) : null;
-  const discardReasonEntries = Object.entries(
-    scanDiagnostic?.discard_reason_counts ?? {},
-  ).sort((left, right) => right[1] - left[1]);
 
   function formatSessionLabel(session: EngagementSessionSummary): string {
     const sourceLabel = session.scan_source === "manual" ? "Manual" : "Scanner";
@@ -234,12 +448,16 @@ export function PopupApp({
       session.status === "running"
         ? "Em andamento"
         : session.status === "completed"
-          ? "Concluida"
+          ? "Concluída"
           : "Parcial";
     return `${sourceLabel} · ${statusLabel} · ${new Date(session.created_at).toLocaleString("pt-BR")}`;
   }
 
-  const tabCountLabel = `${availablePosts.length} ${availablePosts.length === 1 ? "post" : "posts"}`;
+  const scanCountLabel = `${availablePosts.length} ${availablePosts.length === 1 ? "post detectado" : "posts detectados"}`;
+  const selectionCountLabel = `${selectedPreviews.length} ${selectedPreviews.length === 1 ? "post selecionado" : "posts selecionados"}`;
+  const missingRequiredUrlCount = selectedPreviews.filter((preview) => {
+    return !preview.post_url && !normalizeWhitespace(getEditablePostUrl(preview));
+  }).length;
 
   return (
     <div
@@ -250,7 +468,7 @@ export function PopupApp({
           <div className="popup-kicker">LinkedIn Capture V1</div>
           <h1 className="popup-title">Prospector</h1>
           <div className="popup-subtitle">
-            Capture, organize e importe posts do LinkedIn com menos atrito.
+            Selecione vários posts, defina o destino e revise os links antes de importar.
           </div>
         </div>
         {state?.session ? (
@@ -273,12 +491,14 @@ export function PopupApp({
           {resultMessage}
         </p>
       ) : null}
+      {importProgress ? (
+        <p className="popup-feedback popup-feedback--warning">{importProgress}</p>
+      ) : null}
 
       {!state?.session && !loading ? (
         <div className="popup-stack">
           <p>
-            Faça login com Google para liberar a captura e importação no
-            Prospector.
+            Faça login com Google para liberar a captura e importação no Prospector.
           </p>
           <button
             onClick={handleLogin}
@@ -306,38 +526,52 @@ export function PopupApp({
             </div>
           </section>
 
-          <section className="popup-tabs">
+          <section className="popup-steps">
             <button
               type="button"
-              onClick={() => setActiveTab("capture")}
-              className={`popup-tab ${activeTab === "capture" ? "is-active" : ""}`}
+              onClick={() => setActiveStep("selection")}
+              className={`popup-step ${activeStep === "selection" ? "is-active" : ""}`}
             >
-              Captura
-              <span className="popup-tab-badge">{tabCountLabel}</span>
+              <span className="popup-step__index">1</span>
+              <span>Selecionar posts</span>
+              <span className="popup-step__meta">{selectionCountLabel}</span>
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab("destination")}
-              className={`popup-tab ${activeTab === "destination" ? "is-active" : ""}`}
+              onClick={() => setActiveStep("destination")}
+              disabled={selectedPreviews.length === 0}
+              className={`popup-step ${activeStep === "destination" ? "is-active" : ""}`}
             >
-              Destino
+              <span className="popup-step__index">2</span>
+              <span>Escolher destino</span>
+              <span className="popup-step__meta">
+                {destination === "reference" ? "Referência" : "Engagement"}
+              </span>
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab("diagnostic")}
-              className={`popup-tab ${activeTab === "diagnostic" ? "is-active" : ""}`}
+              onClick={() => setActiveStep("review")}
+              disabled={selectedPreviews.length === 0}
+              className={`popup-step ${activeStep === "review" ? "is-active" : ""}`}
             >
-              Diagnóstico
+              <span className="popup-step__index">3</span>
+              <span>Revisar e importar</span>
+              <span className="popup-step__meta">
+                {missingRequiredUrlCount > 0
+                  ? `${missingRequiredUrlCount} links pendentes`
+                  : "Pronto para importar"}
+              </span>
             </button>
           </section>
 
-          {activeTab === "capture" ? (
+          {activeStep === "selection" ? (
             <>
               <section className="popup-card">
                 <div className="popup-card-title popup-card-title--spaced">
-                  Posts detectados na página
+                  1. Posts detectados na página
                 </div>
                 <div className="popup-card-actions">
+                  <div className="popup-inline-badge">{scanCountLabel}</div>
                   <button
                     onClick={() => void loadAvailablePosts()}
                     disabled={loadingPosts || busy !== null}
@@ -360,38 +594,42 @@ export function PopupApp({
                 ) : null}
                 {availablePosts.length === 0 ? (
                   <p className="popup-empty">
-                    Nenhum post foi detectado na aba ativa. Abra um feed ou post do
-                    LinkedIn e clique em Atualizar lista.
+                    Nenhum post foi detectado na aba ativa. Abra um feed ou post do LinkedIn e clique em Atualizar lista.
                   </p>
                 ) : null}
                 {availablePosts.length > 0 ? (
-                  <div className={`popup-post-list ${surfaceMode === "sidepanel" ? "is-sidepanel" : ""}`}>
+                  <div
+                    className={`popup-post-list ${surfaceMode === "sidepanel" ? "is-sidepanel" : ""}`}
+                  >
                     {availablePosts.map((candidate, index) => {
                       const candidateKey = buildPreviewKey(candidate);
-                      const isSelected = candidateKey === selectedPreviewKey;
+                      const isSelected = selectedPreviewKeys.has(candidateKey);
                       return (
                         <button
                           key={`${candidateKey}-${index}`}
                           type="button"
-                          onClick={() => void handleSelectPreview(candidate)}
+                          onClick={() => void handleTogglePreview(candidate)}
                           disabled={busy !== null}
                           className={`popup-post-item ${isSelected ? "is-active" : ""}`}
                         >
                           <div className="popup-post-item__eyebrow">
-                            {candidate.captured_from === "post_detail" ? "Post detalhado" : "Publicação no feed"}
+                            {candidate.captured_from === "post_detail"
+                              ? "Post detalhado"
+                              : "Publicação no feed"}
                           </div>
                           <div className="popup-post-item__title">
-                            {candidate.author_name ?? "Autor nao identificado"}
+                            {candidate.author_name ?? "Autor não identificado"}
                           </div>
                           <div className="popup-post-item__meta">
-                            {candidate.author_title ?? "Sem headline visivel"}
+                            {candidate.author_title ?? "Sem headline visível"}
                           </div>
                           <div className="popup-post-item__text">
-                            {candidate.post_text.slice(0, surfaceMode === "sidepanel" ? 190 : 140)}
-                            {candidate.post_text.length > (surfaceMode === "sidepanel" ? 190 : 140) ? "..." : ""}
+                            {truncateText(candidate.post_text, availableTextLimit)}
                           </div>
                           <div className="popup-post-item__footer">
-                            {isSelected ? "Selecionado" : "Selecionar este post"}
+                            {isSelected
+                              ? "Remover da seleção"
+                              : "Adicionar à seleção"}
                           </div>
                         </button>
                       );
@@ -402,50 +640,101 @@ export function PopupApp({
 
               <section className="popup-card">
                 <div className="popup-card-title popup-card-title--spaced">
-                  Post selecionado
+                  Posts selecionados
                 </div>
-                {!preview ? (
+                {selectedPreviews.length === 0 ? (
                   <p className="popup-empty">
-                    Selecione um post detectado acima ou use o botão Selecionar post
-                    dentro do LinkedIn.
+                    Selecione posts na lista acima ou clique em Selecionar post dentro do LinkedIn.
                   </p>
-                ) : null}
-                {preview ? (
-                  <div className="popup-stack">
-                    <div className="popup-card-title">
-                      {preview.author_name ?? "Autor nao identificado"}
-                    </div>
-                    <div className="popup-muted">
-                      {preview.author_title ?? "Sem headline visivel"}
-                    </div>
-                    <div className="popup-preview-text">
-                      {preview.post_text.slice(0, surfaceMode === "sidepanel" ? 420 : 320)}
-                      {preview.post_text.length > (surfaceMode === "sidepanel" ? 420 : 320) ? "..." : ""}
-                    </div>
-                    <div className="popup-meta">
-                      {preview.likes} curtidas · {preview.comments} comentarios · {" "}
-                      {preview.shares} compartilhamentos
-                    </div>
-                    <button
-                      onClick={() => handleImport(preview)}
-                      disabled={
-                        busy !== null ||
-                        (destination === "engagement" && !sessionId)
-                      }
-                      className="popup-button popup-button--primary"
-                    >
-                      {busy === "import" ? "Importando..." : "Importar agora"}
-                    </button>
+                ) : (
+                  <div className="popup-selected-list">
+                    {selectedPreviews.map((preview) => {
+                      const candidateKey = buildPreviewKey(preview);
+                      return (
+                        <div key={candidateKey} className="popup-selected-card">
+                          <div className="popup-selected-card__header">
+                            <div>
+                              <div className="popup-selected-card__title">
+                                {preview.author_name ?? "Autor não identificado"}
+                              </div>
+                              <div className="popup-muted">
+                                {preview.author_title ?? "Sem headline visível"}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => void handleRemoveSelected(candidateKey)}
+                              disabled={busy !== null}
+                              className="popup-button popup-button--secondary"
+                            >
+                              Remover
+                            </button>
+                          </div>
+                          <div className="popup-selected-card__body">
+                            {truncateText(preview.post_text, 180)}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                ) : null}
+                )}
+                <div className="popup-actions">
+                  <button
+                    type="button"
+                    onClick={() => void handleClearSelected()}
+                    disabled={busy !== null || selectedPreviews.length === 0}
+                    className="popup-button popup-button--secondary"
+                  >
+                    Limpar seleção
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveStep("destination")}
+                    disabled={busy !== null || selectedPreviews.length === 0}
+                    className="popup-button popup-button--primary"
+                  >
+                    Continuar para destino
+                  </button>
+                </div>
               </section>
+
+              {scanDiagnostic ? (
+                <section className="popup-card">
+                  <div className="popup-card-title popup-card-title--spaced">
+                    Diagnóstico da detecção
+                  </div>
+                  <div className="popup-diagnostic-panel is-open">
+                    <div className="popup-diagnostic-panel__content">
+                      <div className="popup-meta">
+                        Fonte: {scanDiagnostic.captured_from} · URL: {scanDiagnostic.page_url ?? "indisponível"}
+                      </div>
+                      {discardReasonEntries.length > 0 ? (
+                        <div className="popup-diagnostic-block">
+                          <div className="popup-diagnostic-title">
+                            Motivos de descarte
+                          </div>
+                          {discardReasonEntries.map(([reason, count]) => (
+                            <div key={reason} className="popup-diagnostic-item">
+                              <span>{reason}</span>
+                              <strong>{count}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </section>
+              ) : null}
             </>
           ) : null}
 
-          {activeTab === "destination" ? (
+          {activeStep === "destination" ? (
             <section className="popup-card">
               <div className="popup-card-title popup-card-title--spaced">
-                Destino de importação
+                2. Destino do lote
+              </div>
+              <div className="popup-meta popup-meta--spaced">
+                {selectionCountLabel}. Posts importados pela extensão entram como curadoria manual e não disparam análise por IA nesta etapa.
               </div>
               <div className="popup-segmented">
                 <button
@@ -461,18 +750,15 @@ export function PopupApp({
                   Engagement
                 </button>
               </div>
-              <div className="popup-meta popup-meta--spaced">
-                Referência salva o post como inspiração. Engagement anexa o post a uma sessão ativa.
-              </div>
               {destination === "engagement" ? (
                 <div className="popup-stack popup-stack--section">
                   <select
-                    aria-label="Selecionar sessao de engagement"
+                    aria-label="Selecionar sessão de engagement"
                     value={sessionId ?? ""}
                     onChange={(event) => setSessionId(event.target.value || null)}
                     className="popup-select"
                   >
-                    <option value="">Selecione uma sessao</option>
+                    <option value="">Selecione uma sessão</option>
                     {sessions.map((session) => (
                       <option key={session.id} value={session.id}>
                         {formatSessionLabel(session)}
@@ -484,93 +770,154 @@ export function PopupApp({
                     disabled={busy !== null}
                     className="popup-button popup-button--secondary"
                   >
-                    {busy === "create-session" ? "Criando sessao..." : "Nova sessao"}
+                    {busy === "create-session" ? "Criando sessão..." : "Nova sessão"}
                   </button>
                 </div>
               ) : (
                 <div className="popup-empty-card">
-                  O próximo clique em Importar agora vai salvar este post como referência no Prospector.
+                  O lote será salvo como referência curada para consulta dentro do Prospector.
                 </div>
               )}
+              <div className="popup-actions">
+                <button
+                  type="button"
+                  onClick={() => setActiveStep("selection")}
+                  disabled={busy !== null}
+                  className="popup-button popup-button--secondary"
+                >
+                  Voltar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (destination === "engagement" && !sessionId) {
+                      setError("Selecione ou crie uma sessão de engagement antes de continuar.");
+                      return;
+                    }
+                    setActiveStep("review");
+                  }}
+                  disabled={busy !== null || selectedPreviews.length === 0}
+                  className="popup-button popup-button--primary"
+                >
+                  Continuar para revisão
+                </button>
+              </div>
             </section>
           ) : null}
 
-          {activeTab === "diagnostic" ? (
+          {activeStep === "review" ? (
             <section className="popup-card">
-            <div className="popup-card-title popup-card-title--spaced">
-              Diagnóstico da detecção
-            </div>
-            {scanDiagnostic ? (
-              <div className="popup-diagnostic-summary">
-                <div className="popup-diagnostic-summary__row">
-                  <span>Cards:</span>
-                  <strong>{scanDiagnostic.static_container_count}</strong>
-                </div>
-                <div className="popup-diagnostic-summary__row">
-                  <span>Barras de acao:</span>
-                  <strong>{scanDiagnostic.action_bar_count}</strong>
-                </div>
-                <div className="popup-diagnostic-summary__row">
-                  <span>Candidatos:</span>
-                  <strong>{scanDiagnostic.candidate_container_count}</strong>
-                </div>
-                <div className="popup-diagnostic-summary__row">
-                  <span>Posts aceitos:</span>
-                  <strong>{scanDiagnostic.accepted_post_count}</strong>
-                </div>
+              <div className="popup-card-title popup-card-title--spaced">
+                3. Revisar links e importar
               </div>
-            ) : null}
-            {scanDiagnostic?.error_message ? (
-              <p className="popup-feedback popup-feedback--warning">
-                {scanDiagnostic.error_message}
-              </p>
-            ) : null}
-            {scanDiagnostic ? (
-              <div className="popup-diagnostic-panel is-open">
-                <div className="popup-diagnostic-panel__content">
-                  <div className="popup-meta">
-                    Fonte: {scanDiagnostic.captured_from} · URL: {scanDiagnostic.page_url ?? "indisponivel"}
-                  </div>
-                  {discardReasonEntries.length > 0 ? (
-                    <div className="popup-diagnostic-block">
-                      <div className="popup-diagnostic-title">Motivos de descarte</div>
-                      {discardReasonEntries.map(([reason, count]) => (
-                        <div key={reason} className="popup-diagnostic-item">
-                          <span>{reason}</span>
-                          <strong>{count}</strong>
+              <div className="popup-meta popup-meta--spaced">
+                Revise o link de cada post. Quando a URL automática não vier, o preenchimento manual é obrigatório.
+              </div>
+              {selectedPreviews.length === 0 ? (
+                <div className="popup-empty-card">
+                  Nenhum post selecionado. Volte para a etapa anterior e monte o lote.
+                </div>
+              ) : (
+                <div className="popup-selected-list">
+                  {selectedPreviews.map((preview) => {
+                    const candidateKey = buildPreviewKey(preview);
+                    const editablePostUrl = getEditablePostUrl(preview);
+                    const requiresManualUrl =
+                      !preview.post_url && !normalizeWhitespace(editablePostUrl);
+                    return (
+                      <div key={candidateKey} className="popup-selected-card">
+                        <div className="popup-selected-card__header">
+                          <div>
+                            <div className="popup-selected-card__title">
+                              {preview.author_name ?? "Autor não identificado"}
+                            </div>
+                            <div className="popup-muted">
+                              {preview.author_title ?? "Sem headline visível"}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleRemoveSelected(candidateKey)}
+                            disabled={busy !== null}
+                            className="popup-button popup-button--secondary"
+                          >
+                            Remover
+                          </button>
                         </div>
-                      ))}
-                    </div>
-                  ) : null}
-                  {scanDiagnostic.sample_candidates.length > 0 ? (
-                    <div className="popup-diagnostic-block">
-                      <div className="popup-diagnostic-title">Amostra de candidatos</div>
-                      {scanDiagnostic.sample_candidates.map((candidate, index) => (
-                        <div key={`${candidate.tag_name}-${index}`} className="popup-diagnostic-candidate">
-                          <div className="popup-diagnostic-candidate__head">
-                            <strong>{candidate.discard_reason ? "Descartado" : "Aceito"}</strong>
-                            <span>{candidate.tag_name}</span>
+                        <div className="popup-selected-card__body">
+                          {truncateText(preview.post_text, selectedTextLimit)}
+                        </div>
+                        <div className="popup-selected-card__footer">
+                          {preview.likes} curtidas · {preview.comments} comentários · {preview.shares} compartilhamentos
+                        </div>
+                        <div className="popup-field">
+                          <label className="popup-field__label" htmlFor={`post-url-${candidateKey}`}>
+                            Link do post
+                          </label>
+                          <input
+                            id={`post-url-${candidateKey}`}
+                            type="url"
+                            value={editablePostUrl}
+                            onChange={(event) =>
+                              handleUrlChange(candidateKey, event.target.value)
+                            }
+                            placeholder="https://www.linkedin.com/feed/update/..."
+                            className="popup-input"
+                          />
+                          <div className="popup-field__hint">
+                            {preview.post_url
+                              ? "URL detectada automaticamente. Você pode editar se necessário."
+                              : "Preencha manualmente para concluir a importação deste post."}
                           </div>
-                          <div className="popup-diagnostic-candidate__flags">
-                            URL {candidate.has_post_url ? "sim" : "nao"} · Autor {candidate.has_author_name ? "sim" : "nao"} · Titulo {candidate.has_author_title ? "sim" : "nao"} · Metricas {candidate.has_metrics ? "sim" : "nao"}
-                          </div>
-                          {candidate.discard_reason ? (
-                            <div className="popup-diagnostic-candidate__reason">
-                              motivo: {candidate.discard_reason}
+                          {requiresManualUrl ? (
+                            <div className="popup-feedback popup-feedback--warning">
+                              Link obrigatório para este post.
                             </div>
                           ) : null}
-                          {candidate.text_excerpt ? (
-                            <div className="popup-diagnostic-candidate__text">
-                              {candidate.text_excerpt}
-                            </div>
-                          ) : null}
                         </div>
-                      ))}
-                    </div>
-                  ) : null}
+                      </div>
+                    );
+                  })}
                 </div>
+              )}
+              {importFailures.length > 0 ? (
+                <div className="popup-failure-list">
+                  {importFailures.map((failure) => (
+                    <div key={failure.candidateKey} className="popup-failure-item">
+                      <strong>{failure.label}</strong>
+                      <span>{failure.message}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <div className="popup-actions">
+                <button
+                  type="button"
+                  onClick={() => setActiveStep("destination")}
+                  disabled={busy !== null}
+                  className="popup-button popup-button--secondary"
+                >
+                  Voltar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleClearSelected()}
+                  disabled={busy !== null || selectedPreviews.length === 0}
+                  className="popup-button popup-button--secondary"
+                >
+                  Limpar seleção
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleImportSelected()}
+                  disabled={busy !== null || selectedPreviews.length === 0}
+                  className="popup-button popup-button--primary"
+                >
+                  {busy === "batch-import"
+                    ? "Importando lote..."
+                    : `Importar ${selectedPreviews.length} ${selectedPreviews.length === 1 ? "post" : "posts"}`}
+                </button>
               </div>
-            ) : null}
             </section>
           ) : null}
         </div>

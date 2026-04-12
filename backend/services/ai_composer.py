@@ -15,7 +15,7 @@ from typing import Any
 
 import structlog
 
-from integrations.llm import LLMMessage, LLMRegistry, LLMResponse
+from integrations.llm import LLMMessage, LLMRegistry, LLMResponse, LLMUsageContext
 from models.cadence import Cadence
 from models.lead import Lead
 from services.outreach_playbook import PlaybookEntry, get_lead_playbook
@@ -414,6 +414,17 @@ class AIComposer:
             model=cadence.llm_model,
             temperature=cadence.llm_temperature,
             max_tokens=cadence.llm_max_tokens,
+            usage_context=LLMUsageContext(
+                tenant_id=str(lead.tenant_id),
+                module="cadence",
+                task_type="compose_message",
+                feature=channel,
+                entity_type="lead",
+                entity_id=str(lead.id),
+                secondary_entity_type="cadence",
+                secondary_entity_id=str(cadence.id),
+                metadata={"step_number": step_number},
+            ),
         )
         response.raw["composition_context"] = serialize_composition_context(composition_context)
 
@@ -470,6 +481,17 @@ class AIComposer:
             model=cadence.llm_model,
             temperature=cadence.llm_temperature,
             max_tokens=cadence.llm_max_tokens,
+            usage_context=LLMUsageContext(
+                tenant_id=str(lead.tenant_id),
+                module="cadence",
+                task_type="compose_email",
+                feature="email",
+                entity_type="lead",
+                entity_id=str(lead.id),
+                secondary_entity_type="cadence",
+                secondary_entity_id=str(cadence.id),
+                metadata={"step_number": step_number},
+            ),
         )
         response.raw["composition_context"] = serialize_composition_context(composition_context)
 

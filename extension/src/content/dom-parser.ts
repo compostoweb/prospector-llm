@@ -7,17 +7,21 @@ const SOCIAL_CONTEXT_PATTERN =
 const SOCIAL_PROOF_PATTERN =
   /\b(e mais \d+|\d+\s*(reações|reactions|curtidas|likes|comentários|comments|compartilhamentos|shares|reposts)|pessoas\s+reagiram|people\s+reacted)\b/i;
 const FOLLOW_CTA_PATTERN =
-  /\b(seguir|follow|conectar|connect|acessar meu site|acesse meu site|visit website)\b/i;
+  /\b(seguir|follow|conectar|connect|acessar meu site|acesse meu site|visit website|agende uma reunião|agendar uma reunião|agende|schedule a meeting|book a meeting)\b/i;
 const TIMESTAMP_PATTERN =
   /^(\d+\s*(min|minutos?|h|hora|horas|d|dia|dias|sem|semanas?|m|mes|meses|mo)\b|edited|editado|promoted|patrocinado)$/i;
 const RELATIVE_TIME_TOKEN_PATTERN =
   /\b(\d+\s*(?:min|minutos?|h|hora|horas|d|dia|dias|sem|semanas?|m|mes|meses|mo))\b/i;
+const CONTROL_MENU_AUTHOR_PATTERN =
+  /(?:publica(?:ç|c)[aã]o|publication|post)\s+(?:de|of|by)\s+(.+)$/i;
 const POST_TEXT_COLLAPSE_PATTERN = /(?:\.\.\.|…)\s*(mais|more)\b/gi;
 const REACTION_PATTERN = /reaction|reactions|reac|curtida|curtidas|like|likes/i;
 const COMMENT_PATTERN =
   /comment|comments|comentario|comentarios|comentário|comentários/i;
 const SHARE_PATTERN =
   /repost|reposts|share|shares|compartilhamento|compartilhamentos|compartilhar/i;
+const AUTHOR_TITLE_NOISE_PATTERN =
+  /\b(?:usu[aá]rio verificado|verified user|premium|perfil|profile|seguidores?|followers?|visibilidade|global|promovida|promoted)\b/gi;
 
 const POST_URL_SELECTORS = [
   ".update-components-actor__meta-link",
@@ -35,6 +39,12 @@ const POST_URL_SELECTORS = [
 ];
 
 const POST_URN_PATTERN = /urn:li:(activity|share|ugcPost|update):\d+/i;
+const ENCODED_POST_URN_PATTERN =
+  /urn(?:%3A|:)li(?:%3A|:)(activity|share|ugcPost|update)(?:%3A|:)(\d+)/i;
+const REACTION_SOCIAL_PROOF_OTHERS_PATTERN =
+  /(?:\be\s+mais\s+(\d+(?:[\.,]\d+)?)\s+pessoas\b|\band\s+(\d+(?:[\.,]\d+)?)\s+others\b)/i;
+const REACTION_SOCIAL_PROOF_TOTAL_PATTERN =
+  /\b(\d+(?:[\.,]\d+)?)\s+(?:pessoas|people)\b/i;
 
 const AUTHOR_NAME_SELECTORS = [
   ".update-components-actor__meta-link span[aria-hidden='true']",
@@ -58,6 +68,7 @@ const AUTHOR_TITLE_SELECTORS = [
 ];
 
 const POST_TEXT_SELECTORS = [
+  "span[data-testid='expandable-text-box']",
   ".update-components-update-v2__commentary span[dir='ltr']",
   ".update-components-update-v2__commentary",
   ".update-components-text-view span[dir='ltr']",
@@ -130,6 +141,13 @@ const HEADER_SCOPE_SELECTORS = [
   ".feed-shared-actor__container",
 ];
 
+const METADATA_SHARE_ID_PATTERN =
+  /(?:shareId|activityId|updateId)=(\d{15,25})/i;
+const METADATA_UGC_POST_ID_PATTERN = /(?:postId|ugcPostId)=(\d{15,25})/i;
+const METADATA_KEYED_URN_ID_PATTERN =
+  /(activity|share|ugcPost|update)(?:Urn|Id)?[:=](\d{15,25})/i;
+const RAW_LINKEDIN_ID_PATTERN = /(?:^|\D)(\d{19,20})(?:\D|$)/;
+
 function normalizeWhitespace(value: string | null | undefined): string | null {
   if (!value) return null;
   const normalized = value.replace(/\s+/g, " ").trim();
@@ -185,7 +203,14 @@ function sanitizeAuthorTitle(
   value: string | null,
   authorName: string | null,
 ): string | null {
-  const cleaned = normalizeWhitespace(value);
+  let cleaned = normalizeWhitespace(value);
+  if (authorName && cleaned) {
+    const authorPrefixPattern = new RegExp(
+      `^${escapeRegExp(authorName)}\s*[·•-]?\s*`,
+      "i",
+    );
+    cleaned = normalizeWhitespace(cleaned.replace(authorPrefixPattern, " "));
+  }
   if (
     !cleaned ||
     cleaned === authorName ||
@@ -193,7 +218,18 @@ function sanitizeAuthorTitle(
   ) {
     return null;
   }
-  return normalizeWhitespace(cleaned.replace(FOLLOW_CTA_PATTERN, " "));
+  cleaned = normalizeWhitespace(
+    cleaned
+      .replace(FOLLOW_CTA_PATTERN, " ")
+      .replace(RELATIVE_TIME_TOKEN_PATTERN, " ")
+      .replace(AUTHOR_TITLE_NOISE_PATTERN, " ")
+      .replace(/\b\d+(?:º|°|st|nd|rd|th)\+?\b/gi, " ")
+      .replace(/[·•]/g, " "),
+  );
+  if (!cleaned || cleaned === authorName || TIMESTAMP_PATTERN.test(cleaned)) {
+    return null;
+  }
+  return cleaned;
 }
 
 function sanitizePostText(
@@ -215,11 +251,18 @@ function sanitizePostText(
     cleaned = cleaned.replace(combinedPrefixPattern, "");
   }
   if (authorName) {
+    // Strip "AuthorName • Xº ... Seguir/Follow" prefix
     const authorPrefixPattern = new RegExp(
       `^${escapeRegExp(authorName)}\\s*[·•].{0,220}?\\b(?:seguir|follow)\\b\\s*`,
       "i",
     );
     cleaned = cleaned.replace(authorPrefixPattern, "");
+    // Strip "AuthorName • Xº " prefix (connection degree)
+    const authorDegreePattern = new RegExp(
+      `^${escapeRegExp(authorName)}\\s*[·•]\\s*(?:\\d+[º°]\\+?\\s*)?`,
+      "i",
+    );
+    cleaned = cleaned.replace(authorDegreePattern, "");
   }
   if (authorTitle && cleaned.startsWith(authorTitle)) {
     cleaned = cleaned.slice(authorTitle.length);
@@ -272,7 +315,7 @@ function getHeaderScope(root: ParentNode): ParentNode {
 function collectSearchRoots(root: ParentNode): ParentNode[] {
   const searchRoots: ParentNode[] = [root];
   let current = root instanceof HTMLElement ? root.parentElement : null;
-  for (let depth = 0; current && depth < 10; depth += 1) {
+  for (let depth = 0; current && depth < 20; depth += 1) {
     searchRoots.push(current);
     current = current.parentElement;
   }
@@ -282,6 +325,7 @@ function collectSearchRoots(root: ParentNode): ParentNode[] {
 function collectVisibleTextCandidates(
   root: ParentNode,
   minLength = 12,
+  maxLength = 700,
 ): string[] {
   const values: string[] = [];
   const seen = new Set<string>();
@@ -292,7 +336,7 @@ function collectVisibleTextCandidates(
       continue;
     }
     const text = normalizeWhitespace(element.innerText);
-    if (!text || text.length < minLength || text.length > 700) {
+    if (!text || text.length < minLength || text.length > maxLength) {
       continue;
     }
     if (isActionOrNoiseText(text) || SOCIAL_CONTEXT_PATTERN.test(text)) {
@@ -410,6 +454,30 @@ function firstText(root: ParentNode, selectors: string[]): string | null {
   return null;
 }
 
+function extractAuthorNameFromControlLabel(root: ParentNode): string | null {
+  const labeledElements =
+    root instanceof HTMLElement
+      ? [
+          root,
+          ...Array.from(root.querySelectorAll<HTMLElement>("[aria-label]")),
+        ]
+      : Array.from(root.querySelectorAll<HTMLElement>("[aria-label]"));
+
+  for (const element of labeledElements) {
+    const ariaLabel = normalizeWhitespace(element.getAttribute("aria-label"));
+    if (!ariaLabel) {
+      continue;
+    }
+    const match = ariaLabel.match(CONTROL_MENU_AUTHOR_PATTERN);
+    const candidate = sanitizeAuthorName(match?.[1] ?? null);
+    if (candidate && candidate.length <= 120) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 function extractAuthorFromMetaLine(value: string | null): {
   authorName: string | null;
   authorTitle: string | null;
@@ -447,7 +515,16 @@ function extractAuthorFromMetaLine(value: string | null): {
 }
 
 function resolveAuthorName(root: ParentNode): string | null {
-  for (const candidate of collectSelectorTexts(root, AUTHOR_NAME_SELECTORS)) {
+  const authorFromControlLabel = extractAuthorNameFromControlLabel(root);
+  if (authorFromControlLabel) {
+    return authorFromControlLabel;
+  }
+
+  const headerScope = getHeaderScope(root);
+  for (const candidate of collectSelectorTexts(
+    headerScope,
+    AUTHOR_NAME_SELECTORS,
+  )) {
     const authorFromMetaLine = extractAuthorFromMetaLine(candidate);
     if (authorFromMetaLine.authorName) {
       return authorFromMetaLine.authorName;
@@ -459,21 +536,29 @@ function resolveAuthorName(root: ParentNode): string | null {
     }
   }
 
-  return fallbackAuthorName(root);
+  return fallbackAuthorName(headerScope);
 }
 
 function resolveAuthorTitle(
   root: ParentNode,
   authorName: string | null,
 ): string | null {
-  for (const candidate of collectSelectorTexts(root, AUTHOR_TITLE_SELECTORS)) {
+  const headerScope = getHeaderScope(root);
+
+  for (const candidate of collectSelectorTexts(
+    headerScope,
+    AUTHOR_TITLE_SELECTORS,
+  )) {
     const sanitized = sanitizeAuthorTitle(candidate, authorName);
     if (sanitized) {
       return sanitized;
     }
   }
 
-  for (const candidate of collectSelectorTexts(root, AUTHOR_NAME_SELECTORS)) {
+  for (const candidate of collectSelectorTexts(
+    headerScope,
+    AUTHOR_NAME_SELECTORS,
+  )) {
     const authorFromMetaLine = extractAuthorFromMetaLine(candidate);
     if (
       authorFromMetaLine.authorName &&
@@ -484,7 +569,7 @@ function resolveAuthorTitle(
     }
   }
 
-  return fallbackAuthorTitle(root, authorName);
+  return fallbackAuthorTitle(headerScope, authorName);
 }
 
 function normalizeLinkedInPostUrl(
@@ -493,6 +578,10 @@ function normalizeLinkedInPostUrl(
   const cleaned = normalizeWhitespace(rawUrl);
   if (!cleaned) {
     return null;
+  }
+
+  if (POST_URN_PATTERN.test(cleaned)) {
+    return buildLinkedInFeedUrlFromUrn(cleaned);
   }
 
   try {
@@ -526,15 +615,62 @@ function normalizeLinkedInPostUrl(
     }
 
     const pathname = url.pathname.replace(/\/+$/, "");
+    const isCanonicalPostsPath = /\/posts\/[^/]+$/i.test(pathname);
     if (
-      pathname.includes("/posts/") ||
+      isCanonicalPostsPath ||
       pathname.includes("/feed/update/") ||
-      pathname.includes("/activity-")
+      pathname.includes("/activity-") ||
+      pathname.includes("/activity/")
     ) {
       return `${url.origin}${pathname}/`;
     }
+
+    // Check full URL for encoded URN (e.g. in query params)
+    const fullUrlStr = url.toString();
+    const encodedUrnMatch = fullUrlStr.match(
+      /urn(?:%3A|:)li(?:%3A|:)(?:activity|ugcPost|share|update)(?:%3A|:)(\d+)/i,
+    );
+    if (encodedUrnMatch) {
+      return `https://www.linkedin.com/feed/update/urn:li:activity:${encodedUrnMatch[1]}/`;
+    }
   } catch {
     return cleaned;
+  }
+
+  return null;
+}
+
+function extractPostUrnFromMetadataValue(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeWhitespace(value);
+  if (!normalized) {
+    return null;
+  }
+
+  const directUrnMatch = normalized.match(POST_URN_PATTERN);
+  if (directUrnMatch) {
+    return directUrnMatch[0];
+  }
+
+  const encodedUrnMatch = normalized.match(ENCODED_POST_URN_PATTERN);
+  if (encodedUrnMatch) {
+    return `urn:li:${encodedUrnMatch[1]}:${encodedUrnMatch[2]}`;
+  }
+
+  const shareMatch = normalized.match(METADATA_SHARE_ID_PATTERN);
+  if (shareMatch) {
+    return `urn:li:share:${shareMatch[1]}`;
+  }
+
+  const ugcPostMatch = normalized.match(METADATA_UGC_POST_ID_PATTERN);
+  if (ugcPostMatch) {
+    return `urn:li:ugcPost:${ugcPostMatch[1]}`;
+  }
+
+  const keyedIdMatch = normalized.match(METADATA_KEYED_URN_ID_PATTERN);
+  if (keyedIdMatch) {
+    return `urn:li:${keyedIdMatch[1]}:${keyedIdMatch[2]}`;
   }
 
   return null;
@@ -551,25 +687,22 @@ function buildLinkedInFeedUrlFromUrn(postUrn: string | null): string | null {
 function extractPostUrn(root: ParentNode): string | null {
   // Walk up ancestors and check ALL attributes for activity URN pattern
   let currentElement = root instanceof HTMLElement ? root : null;
-  for (let depth = 0; currentElement && depth < 15; depth += 1) {
+  for (let depth = 0; currentElement && depth < 30; depth += 1) {
     for (const attr of Array.from(currentElement.attributes)) {
-      const match = attr.value.match(POST_URN_PATTERN);
-      if (match) {
-        return match[0];
+      const urn = extractPostUrnFromMetadataValue(attr.value);
+      if (urn) {
+        return urn;
       }
     }
     currentElement = currentElement.parentElement;
   }
 
-  // Search descendants — any element with any data attribute containing URN
+  // Search descendants — any element with any attribute containing URN
   for (const element of root.querySelectorAll<HTMLElement>("*")) {
     for (const attr of Array.from(element.attributes)) {
-      if (!attr.name.startsWith("data-")) {
-        continue;
-      }
-      const match = attr.value.match(POST_URN_PATTERN);
-      if (match) {
-        return match[0];
+      const urn = extractPostUrnFromMetadataValue(attr.value);
+      if (urn) {
+        return urn;
       }
     }
   }
@@ -595,16 +728,13 @@ function firstPostUrl(root: ParentNode): string | null {
     }
   }
 
-  // Strategy 3: Link wrapping a <time> element (timestamp links to post)
-  for (const searchRoot of collectSearchRoots(root)) {
-    const timeElements = searchRoot.querySelectorAll<HTMLElement>("time");
-    for (const timeEl of timeElements) {
-      const parentLink = timeEl.closest<HTMLAnchorElement>("a[href]");
-      if (parentLink) {
-        const href = normalizeLinkedInPostUrl(parentLink.href);
-        if (href) {
-          return href;
-        }
+  // Strategy 3: Link wrapping a <time> element OR link with timestamp text
+  for (const link of root.querySelectorAll<HTMLAnchorElement>("a[href]")) {
+    const linkText = (normalizeWhitespace(link.innerText) ?? "").trim();
+    if (link.querySelector("time") || TIMESTAMP_PATTERN.test(linkText)) {
+      const href = normalizeLinkedInPostUrl(link.href);
+      if (href) {
+        return href;
       }
     }
   }
@@ -630,6 +760,28 @@ function firstPostUrl(root: ParentNode): string | null {
         return `https://www.linkedin.com/feed/update/urn:li:activity:${activityMatch[1]}/`;
       }
     }
+  }
+
+  // Strategy 6: Scan all attributes for raw LinkedIn ids as a last fallback.
+  for (const element of root.querySelectorAll<HTMLElement>("*")) {
+    for (const attr of Array.from(element.attributes)) {
+      const idMatch = attr.value.match(RAW_LINKEDIN_ID_PATTERN);
+      if (idMatch) {
+        return `https://www.linkedin.com/feed/update/urn:li:activity:${idMatch[1]}/`;
+      }
+    }
+  }
+
+  // Also check ancestors for raw LinkedIn ids.
+  let urlAncestor = root instanceof HTMLElement ? root.parentElement : null;
+  for (let depth = 0; urlAncestor && depth < 30; depth += 1) {
+    for (const attr of Array.from(urlAncestor.attributes)) {
+      const idMatch = attr.value.match(RAW_LINKEDIN_ID_PATTERN);
+      if (idMatch) {
+        return `https://www.linkedin.com/feed/update/urn:li:activity:${idMatch[1]}/`;
+      }
+    }
+    urlAncestor = urlAncestor.parentElement;
   }
 
   return null;
@@ -763,6 +915,23 @@ function findReactionMetric(root: ParentNode): number {
     if (namedMetric > 0) {
       return namedMetric;
     }
+
+    const othersMatch = text.match(REACTION_SOCIAL_PROOF_OTHERS_PATTERN);
+    if (othersMatch) {
+      const othersCount = parseMetricValue(othersMatch[1] ?? othersMatch[2]);
+      if (othersCount > 0) {
+        return othersCount + 1;
+      }
+    }
+
+    const peopleMatch = text.match(REACTION_SOCIAL_PROOF_TOTAL_PATTERN);
+    if (peopleMatch) {
+      const peopleCount = parseMetricValue(peopleMatch[1]);
+      if (peopleCount > 0) {
+        return peopleCount;
+      }
+    }
+
     if (/^\d+(?:[\.,]\d+)?\s*[km]?$/i.test(text)) {
       return parseMetricValue(text);
     }
@@ -770,12 +939,54 @@ function findReactionMetric(root: ParentNode): number {
   return 0;
 }
 
+function isLikelyAuthorText(
+  value: string,
+  authorName: string | null,
+  authorTitle: string | null,
+): boolean {
+  if (!value) return false;
+  if (value === authorName || value === authorTitle) return true;
+  if (authorTitle && value.length < authorTitle.length + 30) {
+    if (value.startsWith(authorTitle.slice(0, 40))) return true;
+    if (authorTitle.startsWith(value.slice(0, 40))) return true;
+  }
+  if (authorName && value.startsWith(authorName)) {
+    // "AuthorName • Xº Title..." pattern
+    const afterName = value.slice(authorName.length).trim();
+    if (
+      afterName.startsWith("•") ||
+      afterName.startsWith("·") ||
+      afterName.length < 30
+    )
+      return true;
+  }
+  return false;
+}
+
 function extractPostText(
   root: ParentNode,
   authorName: string | null,
   authorTitle: string | null,
 ): string | null {
-  // Strategy 1: Use textContent (includes hidden "see more" text) from structured selectors
+  // Strategy 1: Prefer the explicit expandable text box used by the current feed DOM.
+  const expandableTextCandidates = collectStructuredTexts(root, [
+    "span[data-testid='expandable-text-box']",
+  ])
+    .map((candidate) => sanitizePostText(candidate, authorName, authorTitle))
+    .filter(
+      (candidate): candidate is string =>
+        !!candidate &&
+        candidate.length >= 20 &&
+        !isActionOrNoiseText(candidate) &&
+        !isSocialProofOrMetricsText(candidate) &&
+        !FOLLOW_CTA_PATTERN.test(candidate) &&
+        !isLikelyAuthorText(candidate, authorName, authorTitle),
+    );
+  if (expandableTextCandidates.length > 0) {
+    return chooseLongestText(expandableTextCandidates);
+  }
+
+  // Strategy 2: Use textContent (includes hidden "see more" text) from structured selectors
   const structuredCandidates = collectStructuredTexts(root, POST_TEXT_SELECTORS)
     .map((candidate) => sanitizePostText(candidate, authorName, authorTitle))
     .filter(
@@ -785,14 +996,13 @@ function extractPostText(
         !isActionOrNoiseText(candidate) &&
         !isSocialProofOrMetricsText(candidate) &&
         !FOLLOW_CTA_PATTERN.test(candidate) &&
-        candidate !== authorName &&
-        candidate !== authorTitle,
+        !isLikelyAuthorText(candidate, authorName, authorTitle),
     );
   if (structuredCandidates.length > 0) {
     return chooseLongestText(structuredCandidates);
   }
 
-  // Strategy 2: Use innerText from the same selectors (visible text only)
+  // Strategy 3: Use innerText from the same selectors (visible text only)
   for (const selector of POST_TEXT_SELECTORS) {
     for (const element of root.querySelectorAll<HTMLElement>(selector)) {
       const text = sanitizePostText(
@@ -805,12 +1015,38 @@ function extractPostText(
         text.length >= 20 &&
         !isActionOrNoiseText(text) &&
         !isSocialProofOrMetricsText(text) &&
-        text !== authorName &&
-        text !== authorTitle
+        !isLikelyAuthorText(text, authorName, authorTitle)
       ) {
         return text;
       }
     }
+  }
+
+  // Strategy 4: Generic span[dir='ltr'] outside header scope (works even if class names change)
+  const headerScope = getHeaderScope(root);
+  const dirLtrCandidates: string[] = [];
+  for (const span of root.querySelectorAll<HTMLElement>("span[dir='ltr']")) {
+    if (headerScope instanceof HTMLElement && headerScope.contains(span)) {
+      continue;
+    }
+    const text = sanitizePostText(
+      normalizeWhitespace(span.textContent ?? span.innerText),
+      authorName,
+      authorTitle,
+    );
+    if (
+      text &&
+      text.length >= 30 &&
+      !isActionOrNoiseText(text) &&
+      !isSocialProofOrMetricsText(text) &&
+      !FOLLOW_CTA_PATTERN.test(text) &&
+      !isLikelyAuthorText(text, authorName, authorTitle)
+    ) {
+      dirLtrCandidates.push(text);
+    }
+  }
+  if (dirLtrCandidates.length > 0) {
+    return chooseLongestText(dirLtrCandidates);
   }
 
   return fallbackPostText(root, authorName, authorTitle);
@@ -927,17 +1163,17 @@ function fallbackPostText(
   authorName: string | null,
   authorTitle: string | null,
 ): string | null {
-  const candidates = collectVisibleTextCandidates(root, 20);
+  const candidates = collectVisibleTextCandidates(root, 20, 5000);
   const filtered = candidates
     .map((candidate) => sanitizePostText(candidate, authorName, authorTitle))
     .filter((candidate): candidate is string => {
       if (!candidate) {
         return false;
       }
-      if (candidate === authorName || candidate === authorTitle) {
+      if (isLikelyAuthorText(candidate, authorName, authorTitle)) {
         return false;
       }
-      if (candidate.length < 20 || candidate.length > 1500) {
+      if (candidate.length < 20 || candidate.length > 5000) {
         return false;
       }
       if (
@@ -965,9 +1201,8 @@ export function extractLinkedInPost(
   container: HTMLElement,
   capturedFrom: CapturedFrom,
 ): CapturePreview | null {
-  const headerScope = getHeaderScope(container);
-  const authorName = resolveAuthorName(headerScope);
-  const authorTitle = resolveAuthorTitle(headerScope, authorName);
+  const authorName = resolveAuthorName(container);
+  const authorTitle = resolveAuthorTitle(container, authorName);
   const postText = extractPostText(container, authorName, authorTitle);
   if (!postText) return null;
 

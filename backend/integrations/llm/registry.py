@@ -19,16 +19,19 @@ Uso:
 from __future__ import annotations
 
 import json
+import time
 from datetime import timedelta
+from typing import cast
 
 import structlog
 
 from core.config import Settings
 from core.redis_client import RedisClient
 from integrations.llm.anthropic_provider import AnthropicProvider
-from integrations.llm.base import LLMMessage, LLMProvider, LLMResponse, ModelInfo
+from integrations.llm.base import LLMMessage, LLMProvider, LLMResponse, LLMUsageContext, ModelInfo
 from integrations.llm.gemini_provider import GeminiProvider
 from integrations.llm.openai_provider import OpenAIProvider
+from services.llm_usage_tracker import record_llm_usage
 
 logger = structlog.get_logger()
 
@@ -71,19 +74,40 @@ class LLMRegistry:
         temperature: float = 0.7,
         max_tokens: int = 1024,
         json_mode: bool = False,
+        usage_context: LLMUsageContext | None = None,
     ) -> LLMResponse:
         """
         Executa uma completion com o provider e modelo especificados.
         Levanta ValueError se o provider não estiver configurado.
         """
         llm = self._get_provider(provider)
-        return await llm.complete(
+        started_at = time.perf_counter()
+        response = await llm.complete(
             messages=messages,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
             json_mode=json_mode,
         )
+        if usage_context is not None:
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            try:
+                await record_llm_usage(
+                    messages=messages,
+                    response=response,
+                    usage_context=usage_context,
+                    latency_ms=latency_ms,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "llm.usage_tracking_failed",
+                    provider=provider,
+                    model=model,
+                    module=usage_context.module,
+                    task_type=usage_context.task_type,
+                    error=str(exc),
+                )
+        return response
 
     # ------------------------------------------------------------------
     # Listagem de modelos — com cache Redis 1h
@@ -102,8 +126,8 @@ class LLMRegistry:
                 logger.warning("llm.models.cache_read_error", error=str(exc))
                 cached = None
             if cached:
-                raw: list[dict] = json.loads(cached)
-                return [ModelInfo(**item) for item in raw]
+                raw = cast(list[dict[str, object]], json.loads(cached))
+                return [_model_info_from_cache(item) for item in raw]
 
         all_models: list[ModelInfo] = []
         for provider_name, provider in self._providers.items():
@@ -115,7 +139,7 @@ class LLMRegistry:
                 logger.error("llm.models.fetch_error", provider=provider_name, error=str(exc))
 
         # Salva no cache
-        cache_data = [
+        cache_data: list[dict[str, object]] = [
             {
                 "id": m.id,
                 "name": m.name,
@@ -171,3 +195,44 @@ class LLMRegistry:
             available = list(self._providers.keys())
             raise ValueError(f"Provedor '{provider}' não configurado. Disponíveis: {available}")
         return self._providers[provider]
+
+
+def _model_info_from_cache(item: dict[str, object]) -> ModelInfo:
+    return ModelInfo(
+        id=str(item.get("id", "")),
+        name=str(item.get("name", "")),
+        provider=str(item.get("provider", "")),
+        context_window=_as_int(item.get("context_window")),
+        supports_json_mode=bool(item.get("supports_json_mode", True)),
+        price_input_per_mtok=_as_float(item.get("price_input_per_mtok")),
+        price_output_per_mtok=_as_float(item.get("price_output_per_mtok")),
+        price_is_estimated=bool(item.get("price_is_estimated", True)),
+    )
+
+
+def _as_int(value: object | None) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
+
+
+def _as_float(value: object | None) -> float:
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return 0.0
+    return 0.0

@@ -8,8 +8,10 @@ import {
 } from "@/lib/api/hooks/use-llm-models"
 import { useTenant, useUpdateIntegrations } from "@/lib/api/hooks/use-tenant"
 import { LLMConfigForm, type LLMConfig } from "@/components/cadencias/llm-config-form"
+import { LLMConsumptionPanel } from "@/components/settings/llm-consumption-panel"
 import { useState, useEffect } from "react"
 import {
+  BarChart3,
   CheckCircle2,
   XCircle,
   Loader2,
@@ -23,8 +25,8 @@ import {
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
-type Tab = "padrao" | "modelos" | "testar"
-type ModelFilter = "all" | "openai" | "gemini"
+type Tab = "padrao" | "modelos" | "consumo" | "testar"
+type ModelFilter = "all" | "openai" | "gemini" | "anthropic"
 
 const DEFAULT_LLM = {
   llm_provider: "openai" as const,
@@ -139,6 +141,7 @@ export default function LLMConfigPage() {
   const TABS: { id: Tab; label: string; icon: React.ComponentType<{ size?: number }> }[] = [
     { id: "padrao", label: "Padrões", icon: SlidersHorizontal },
     { id: "modelos", label: "Modelos", icon: LayoutList },
+    { id: "consumo", label: "Consumo", icon: BarChart3 },
     { id: "testar", label: "Testar", icon: FlaskConical },
   ]
 
@@ -277,7 +280,7 @@ export default function LLMConfigPage() {
           <div className="flex items-center gap-2">
             <span className="text-xs text-(--text-secondary)">Filtrar:</span>
             <div className="flex gap-1 rounded-md border border-(--border-default) bg-(--bg-overlay) p-0.5">
-              {(["all", "openai", "gemini"] as ModelFilter[]).map((f) => (
+              {(["all", "openai", "gemini", "anthropic"] as ModelFilter[]).map((f) => (
                 <button
                   key={f}
                   type="button"
@@ -289,7 +292,13 @@ export default function LLMConfigPage() {
                       : "text-(--text-secondary) hover:text-(--text-primary)",
                   )}
                 >
-                  {f === "all" ? "Todos" : f === "openai" ? "OpenAI" : "Gemini"}
+                  {f === "all"
+                    ? "Todos"
+                    : f === "openai"
+                      ? "OpenAI"
+                      : f === "gemini"
+                        ? "Gemini"
+                        : "Anthropic"}
                   <span className="ml-1.5 tabular-nums opacity-50">
                     {f === "all" ? models.length : models.filter((m) => m.provider === f).length}
                   </span>
@@ -360,6 +369,8 @@ export default function LLMConfigPage() {
           )}
         </div>
       )}
+
+      {activeTab === "consumo" && <LLMConsumptionPanel />}
 
       {/* ── Tab: Testar ────────────────────────────────────────────────── */}
       {activeTab === "testar" && (

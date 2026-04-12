@@ -12,8 +12,17 @@ const DEFAULT_API_BASE_URL =
     : "https://api.prospector.compostoweb.com.br");
 const SESSION_KEY = "prospector.session";
 const PREVIEW_KEY = "prospector.preview";
+const SELECTED_PREVIEWS_KEY = "prospector.selectedPreviews";
 const BOOTSTRAP_KEY = "prospector.bootstrap";
 const CONFIG_KEY = "prospector.config";
+
+export const EXTENSION_STORAGE_KEYS = {
+  session: SESSION_KEY,
+  preview: PREVIEW_KEY,
+  selectedPreviews: SELECTED_PREVIEWS_KEY,
+  bootstrap: BOOTSTRAP_KEY,
+  config: CONFIG_KEY,
+} as const;
 
 function normalizeApiBaseUrl(value: string | null | undefined): string {
   const trimmed = value?.trim();
@@ -23,10 +32,50 @@ function normalizeApiBaseUrl(value: string | null | undefined): string {
   return trimmed.replace(/\/+$/, "");
 }
 
-type SessionArea = typeof chrome.storage.session | typeof chrome.storage.local;
+type StorageArea = chrome.storage.StorageArea;
 
-function getSessionArea(): SessionArea {
-  return chrome.storage.session ?? chrome.storage.local;
+function getPersistentStorageArea(): StorageArea {
+  return chrome.storage.local;
+}
+
+function getLegacySessionArea(): StorageArea | null {
+  return chrome.storage.session ?? null;
+}
+
+async function getStoredValue<T>(key: string): Promise<T | null> {
+  const persistentResult = await getPersistentStorageArea().get(key);
+  const persistentValue = persistentResult[key] as T | undefined;
+  if (persistentValue !== undefined) {
+    return persistentValue;
+  }
+
+  const legacySessionArea = getLegacySessionArea();
+  if (!legacySessionArea) {
+    return null;
+  }
+
+  const legacyResult = await legacySessionArea.get(key);
+  const legacyValue = legacyResult[key] as T | undefined;
+  if (legacyValue === undefined) {
+    return null;
+  }
+
+  await getPersistentStorageArea().set({ [key]: legacyValue });
+  await legacySessionArea.remove(key);
+  return legacyValue;
+}
+
+async function setStoredValue<T>(key: string, value: T): Promise<void> {
+  await getPersistentStorageArea().set({ [key]: value });
+}
+
+async function removeStoredValue(key: string): Promise<void> {
+  await getPersistentStorageArea().remove(key);
+
+  const legacySessionArea = getLegacySessionArea();
+  if (legacySessionArea) {
+    await legacySessionArea.remove(key);
+  }
 }
 
 export async function getConfig(): Promise<ExtensionConfig> {
@@ -44,42 +93,53 @@ export async function setConfig(config: ExtensionConfig): Promise<void> {
 }
 
 export async function getSession(): Promise<ExtensionSession | null> {
-  const result = await getSessionArea().get(SESSION_KEY);
-  return (result[SESSION_KEY] as ExtensionSession | undefined) ?? null;
+  return getStoredValue<ExtensionSession>(SESSION_KEY);
 }
 
 export async function setSession(session: ExtensionSession): Promise<void> {
-  await getSessionArea().set({ [SESSION_KEY]: session });
+  await setStoredValue(SESSION_KEY, session);
 }
 
 export async function clearSession(): Promise<void> {
-  await getSessionArea().remove(SESSION_KEY);
+  await removeStoredValue(SESSION_KEY);
 }
 
 export async function getBootstrap(): Promise<ExtensionBootstrap | null> {
-  const result = await getSessionArea().get(BOOTSTRAP_KEY);
-  return (result[BOOTSTRAP_KEY] as ExtensionBootstrap | undefined) ?? null;
+  return getStoredValue<ExtensionBootstrap>(BOOTSTRAP_KEY);
 }
 
 export async function setBootstrap(
   bootstrap: ExtensionBootstrap,
 ): Promise<void> {
-  await getSessionArea().set({ [BOOTSTRAP_KEY]: bootstrap });
+  await setStoredValue(BOOTSTRAP_KEY, bootstrap);
 }
 
 export async function clearBootstrap(): Promise<void> {
-  await getSessionArea().remove(BOOTSTRAP_KEY);
+  await removeStoredValue(BOOTSTRAP_KEY);
 }
 
 export async function getPreview(): Promise<CapturePreview | null> {
-  const result = await getSessionArea().get(PREVIEW_KEY);
-  return (result[PREVIEW_KEY] as CapturePreview | undefined) ?? null;
+  return getStoredValue<CapturePreview>(PREVIEW_KEY);
 }
 
 export async function setPreview(preview: CapturePreview): Promise<void> {
-  await getSessionArea().set({ [PREVIEW_KEY]: preview });
+  await setStoredValue(PREVIEW_KEY, preview);
 }
 
 export async function clearPreview(): Promise<void> {
-  await getSessionArea().remove(PREVIEW_KEY);
+  await removeStoredValue(PREVIEW_KEY);
+}
+
+export async function getSelectedPreviews(): Promise<CapturePreview[]> {
+  return (await getStoredValue<CapturePreview[]>(SELECTED_PREVIEWS_KEY)) ?? [];
+}
+
+export async function setSelectedPreviews(
+  previews: CapturePreview[],
+): Promise<void> {
+  await setStoredValue(SELECTED_PREVIEWS_KEY, previews);
+}
+
+export async function clearSelectedPreviews(): Promise<void> {
+  await removeStoredValue(SELECTED_PREVIEWS_KEY);
 }

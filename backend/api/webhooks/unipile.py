@@ -242,6 +242,9 @@ async def _handle_message_received(
     classification = await parser.classify(
         reply_text=text_content,
         lead_name=lead.name,
+        tenant_id=str(lead.tenant_id),
+        lead_id=str(lead.id),
+        channel=_detect_channel(account_id).value,
     )
 
     intent_str: str = (classification.get("intent") or "NEUTRAL").upper()

@@ -17,11 +17,14 @@ import re
 
 import structlog
 
-from integrations.llm import LLMMessage
+from integrations.llm import LLMMessage, LLMUsageContext
 from integrations.llm.registry import LLMRegistry
 from services.llm_config import ResolvedLLMConfig
 
 logger = structlog.get_logger()
+
+ReferenceAnalysis = dict[str, str | None]
+ICPRelevanceAnalysis = dict[str, bool | str]
 
 # ── Prompts ────────────────────────────────────────────────────────────────────
 
@@ -91,7 +94,8 @@ async def analyze_reference_post(
     post_text: str,
     registry: LLMRegistry,
     llm_config: ResolvedLLMConfig,
-) -> dict:
+    tenant_id: str,
+) -> ReferenceAnalysis:
     """
     Analisa post de referencia e retorna hook_type, pillar, why_it_performed,
     what_to_replicate.
@@ -113,6 +117,12 @@ async def analyze_reference_post(
             model=llm_config.model,
             temperature=llm_config.temperature,
             max_tokens=llm_config.max_tokens,
+            usage_context=LLMUsageContext(
+                tenant_id=tenant_id,
+                module="content_engagement",
+                task_type="analyze_reference_post",
+                feature="linkedin",
+            ),
         )
         return _parse_json_response(response.text, _default_reference_analysis())
     except Exception as exc:
@@ -130,7 +140,8 @@ async def analyze_icp_post_relevance(
     author_company: str,
     registry: LLMRegistry,
     llm_config: ResolvedLLMConfig,
-) -> dict:
+    tenant_id: str,
+) -> ICPRelevanceAnalysis:
     """
     Avalia relevancia de post de ICP para comentar.
 
@@ -156,11 +167,18 @@ async def analyze_icp_post_relevance(
             model=llm_config.model,
             temperature=llm_config.temperature,
             max_tokens=llm_config.max_tokens,
+            usage_context=LLMUsageContext(
+                tenant_id=tenant_id,
+                module="content_engagement",
+                task_type="analyze_icp_post",
+                feature="linkedin",
+            ),
         )
         result = _parse_json_response(response.text, _default_icp_relevance())
         # Garante tipo correto para is_relevant
-        if isinstance(result.get("is_relevant"), str):
-            result["is_relevant"] = result["is_relevant"].lower() == "true"
+        is_relevant = result.get("is_relevant")
+        if isinstance(is_relevant, str):
+            result["is_relevant"] = is_relevant.lower() == "true"
         return result
     except Exception as exc:
         logger.warning(
@@ -173,7 +191,7 @@ async def analyze_icp_post_relevance(
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 
-def _parse_json_response(content: str, default: dict) -> dict:
+def _parse_json_response[T](content: str, default: T) -> T:
     """Faz parse do JSON retornado pelo LLM com fallback para o default."""
     # Remove markdown code blocks se presentes
     cleaned = re.sub(r"```(?:json)?\s*", "", content).strip()
@@ -185,7 +203,7 @@ def _parse_json_response(content: str, default: dict) -> dict:
         return default
 
 
-def _default_reference_analysis() -> dict:
+def _default_reference_analysis() -> ReferenceAnalysis:
     return {
         "hook_type": None,
         "pillar": None,
@@ -194,7 +212,7 @@ def _default_reference_analysis() -> dict:
     }
 
 
-def _default_icp_relevance() -> dict:
+def _default_icp_relevance() -> ICPRelevanceAnalysis:
     return {
         "is_relevant": False,
         "relevance_reason": "Nao foi possivel analisar o post",

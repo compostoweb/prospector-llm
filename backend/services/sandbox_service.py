@@ -28,7 +28,7 @@ from sqlalchemy.orm import selectinload
 from core.config import settings
 from core.redis_client import redis_client
 from integrations.context_fetcher import ContextFetcher
-from integrations.llm import LLMMessage, LLMRegistry
+from integrations.llm import LLMMessage, LLMRegistry, LLMUsageContext
 from integrations.pipedrive_client import PipedriveClient
 from models.cadence import Cadence
 from models.enums import (
@@ -51,6 +51,28 @@ from services.reply_parser import ReplyParser
 logger = structlog.get_logger()
 
 SandboxPayload = dict[str, Any]
+
+
+def _build_sandbox_usage_context(
+    *,
+    tenant_id: uuid.UUID,
+    task_type: str,
+    run_id: uuid.UUID | None = None,
+    step_id: uuid.UUID | None = None,
+    feature: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> LLMUsageContext:
+    return LLMUsageContext(
+        tenant_id=str(tenant_id),
+        module="sandbox",
+        task_type=task_type,
+        feature=feature,
+        entity_type="sandbox_run" if run_id else "sandbox_step",
+        entity_id=str(run_id or step_id) if (run_id or step_id) else None,
+        secondary_entity_type="sandbox_step" if run_id and step_id else None,
+        secondary_entity_id=str(step_id) if run_id and step_id else None,
+        metadata=metadata or {},
+    )
 
 # ── Rate limits por canal ─────────────────────────────────────────────
 
@@ -196,7 +218,12 @@ class SandboxService:
             leads_data = await self._get_real_leads(lead_ids, tenant_id, db)
         elif use_fictitious:
             lead_source = SandboxLeadSource.FICTITIOUS
-            leads_data = await self._generate_fictitious_leads(lead_count, registry, cadence)
+            leads_data = await self._generate_fictitious_leads(
+                lead_count,
+                registry,
+                cadence,
+                tenant_id,
+            )
         else:
             lead_source = SandboxLeadSource.SAMPLE
             leads_data = await self._get_sample_leads(cadence, tenant_id, db, lead_count)
@@ -586,7 +613,15 @@ class SandboxService:
             provider=cadence.llm_provider,
             model=cadence.llm_model,
             temperature=0.8,  # mais criatividade na simulação
-            max_tokens=256,
+            max_tokens=160,
+            usage_context=_build_sandbox_usage_context(
+                tenant_id=tenant_id,
+                task_type="simulate_reply",
+                run_id=step.sandbox_run_id,
+                step_id=step.id,
+                feature=step.channel.value,
+                metadata={"cadence_id": str(cadence.id), "step_number": step.step_number},
+            ),
         )
 
         reply_text = response.text.strip()
@@ -965,6 +1000,8 @@ class SandboxService:
         count: int,
         registry: LLMRegistry,
         cadence: Cadence,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID | None = None,
     ) -> list[SandboxPayload]:
         """Gera leads fictícios: templates base + variações via LLM."""
         # Se count <= templates disponíveis, usa direto
@@ -981,7 +1018,14 @@ class SandboxService:
             provider=cadence.llm_provider,
             model=cadence.llm_model,
             temperature=0.9,
-            max_tokens=2048,
+            max_tokens=min(max(400, count * 160), 1400),
+            usage_context=_build_sandbox_usage_context(
+                tenant_id=tenant_id,
+                task_type="generate_fictitious_leads",
+                run_id=run_id,
+                feature="lead_generation",
+                metadata={"count": count, "cadence_id": str(cadence.id)},
+            ),
         )
 
         try:
@@ -1147,6 +1191,14 @@ class SandboxService:
             model=cadence.llm_model,
             temperature=cadence.llm_temperature,
             max_tokens=cadence.llm_max_tokens,
+            usage_context=_build_sandbox_usage_context(
+                tenant_id=step.tenant_id,
+                task_type="compose_step",
+                run_id=step.sandbox_run_id,
+                step_id=step.id,
+                feature=step.channel.value,
+                metadata={"cadence_id": str(cadence.id), "step_number": step.step_number},
+            ),
         )
 
         llm_info: SandboxPayload = {
@@ -1230,7 +1282,15 @@ class SandboxService:
             provider=cadence.llm_provider,
             model=cadence.llm_model,
             temperature=0.7,
-            max_tokens=64,
+            max_tokens=32,
+            usage_context=_build_sandbox_usage_context(
+                tenant_id=step.tenant_id,
+                task_type="generate_email_subject",
+                run_id=step.sandbox_run_id,
+                step_id=step.id,
+                feature="email",
+                metadata={"cadence_id": str(cadence.id), "step_number": step.step_number},
+            ),
         )
         return response.text.strip()
 
@@ -1276,7 +1336,15 @@ class SandboxService:
             model=llm_config.model,
         )
 
-        result = cast(dict[str, object], await parser.classify(reply_text, lead_name))
+        parser_any = cast(Any, parser)
+        classification_result = await parser_any.classify(
+            reply_text,
+            lead_name,
+            tenant_id=str(step.tenant_id),
+            lead_id=str(step.lead_id) if step.lead_id else None,
+            channel=step.channel.value,
+        )
+        result = cast(dict[str, object], classification_result)
 
         step.simulated_reply = reply_text
         step.simulated_intent = Intent(str(result.get("intent", "neutral")).lower())

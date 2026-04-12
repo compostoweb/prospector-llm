@@ -15,9 +15,10 @@ aceso exclusivamente via LLMRegistry injetado.
 
 from __future__ import annotations
 
-from typing import TypedDict
+import json
+from typing import TypedDict, cast
 
-from integrations.llm import LLMMessage, LLMRegistry
+from integrations.llm import LLMMessage, LLMRegistry, LLMUsageContext
 from services.content.rules import (
     IDEAL_MAX_CHARS,
     IDEAL_MIN_CHARS,
@@ -153,6 +154,19 @@ OBJETIVO: {content_goal_label}
 Lembre-se: retorne APENAS o texto do post, sem nenhuma explicação adicional.\
 """
 
+_MULTI_VARIATION_PROMPT_SUFFIX = """\
+
+Gere EXATAMENTE {variations} variações distintas do mesmo tema.
+Retorne APENAS JSON válido neste formato:
+{{
+    "variations": [
+        "texto da variação 1",
+        "texto da variação 2"
+    ]
+}}
+Sem markdown, sem comentários, sem texto extra.\
+"""
+
 _IMPROVE_SYSTEM_PROMPT = """\
 Você é um especialista em edição de conteúdo para LinkedIn B2B.
 Sua tarefa é melhorar o post fornecido seguindo a instrução exata do autor.
@@ -187,14 +201,50 @@ def _build_few_shot_block(references: list[ReferenceExample]) -> str:
     if not references:
         return ""
     examples = ""
-    for i, ref in enumerate(references[:5], start=1):
+    for i, ref in enumerate(references[:3], start=1):
         examples += _FEW_SHOT_EXAMPLE_TEMPLATE.format(
             index=i,
             hook_type=ref.get("hook_type") or "—",
             pillar=ref.get("pillar") or "—",
-            body=ref.get("body", ""),
+            body=(ref.get("body", "") or "")[:900],
         )
     return _FEW_SHOT_BLOCK_TEMPLATE.format(examples=examples)
+
+
+def _build_usage_context(
+    *,
+    tenant_id: str,
+    task_type: str,
+    feature: str | None,
+    model: str,
+) -> LLMUsageContext:
+    return LLMUsageContext(
+        tenant_id=tenant_id,
+        module="content_hub",
+        task_type=task_type,
+        feature=feature,
+        metadata={"model_requested": model},
+    )
+
+
+def _parse_variations_json(content: str, expected_count: int) -> list[str] | None:
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+    payload_dict = cast(dict[str, object], payload)
+    raw_variations = payload_dict.get("variations")
+    if not isinstance(raw_variations, list):
+        return None
+    variation_items = cast(list[object], raw_variations)
+
+    cleaned = [str(item).strip() for item in variation_items if str(item).strip()]
+    if len(cleaned) < expected_count:
+        return None
+    return cleaned[:expected_count]
 
 
 def _render_system_prompt(
@@ -270,6 +320,7 @@ async def generate_post(
     variations: int,
     references: list[ReferenceExample],
     registry: LLMRegistry,
+    tenant_id: str,
     provider: str,
     model: str,
     temperature: float,
@@ -308,6 +359,41 @@ async def generate_post(
     ]
 
     results: list[GeneratedVariation] = []
+    if variations > 1:
+        batched_messages = [
+            messages[0],
+            LLMMessage(
+                role="user",
+                content=user_prompt + "\n\n" + _MULTI_VARIATION_PROMPT_SUFFIX.format(variations=variations),
+            ),
+        ]
+        response = await registry.complete(
+            messages=batched_messages,
+            provider=provider,
+            model=model,
+            temperature=temperature,
+            max_tokens=min(max_tokens * variations, 1800),
+            json_mode=True,
+            usage_context=_build_usage_context(
+                tenant_id=tenant_id,
+                task_type="generate_post_batch",
+                feature=content_goal,
+                model=model,
+            ),
+        )
+        parsed_variations = _parse_variations_json(response.text, variations)
+        if parsed_variations:
+            for text in parsed_variations:
+                results.append(
+                    {
+                        "text": text,
+                        "character_count": count_characters(text),
+                        "hook_type_used": resolved_hook,
+                        "violations": validate_post(text),
+                    }
+                )
+            return results
+
     for _ in range(variations):
         response = await registry.complete(
             messages=messages,
@@ -315,6 +401,12 @@ async def generate_post(
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
+            usage_context=_build_usage_context(
+                tenant_id=tenant_id,
+                task_type="generate_post",
+                feature=content_goal,
+                model=model,
+            ),
         )
         text = response.text.strip()
         results.append(
@@ -336,6 +428,7 @@ async def improve_post(
     author_name: str,
     author_voice: str,
     registry: LLMRegistry,
+    tenant_id: str,
     provider: str,
     model: str,
     temperature: float = 0.6,
@@ -369,5 +462,11 @@ async def improve_post(
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
+        usage_context=_build_usage_context(
+            tenant_id=tenant_id,
+            task_type="improve_post",
+            feature="editorial",
+            model=model,
+        ),
     )
     return response.text.strip()

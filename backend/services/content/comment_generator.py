@@ -20,14 +20,17 @@ from __future__ import annotations
 
 import json
 import re
+from typing import cast
 
 import structlog
 
-from integrations.llm import LLMMessage
+from integrations.llm import LLMMessage, LLMUsageContext
 from integrations.llm.registry import LLMRegistry
 from services.llm_config import ResolvedLLMConfig
 
 logger = structlog.get_logger()
+
+CommentPayload = dict[str, str]
 
 # ── Prompts ────────────────────────────────────────────────────────────────────
 
@@ -83,6 +86,8 @@ async def generate_comments_for_post(
     author_voice: str,
     registry: LLMRegistry,
     llm_config: ResolvedLLMConfig,
+    tenant_id: str,
+    post_id: str | None = None,
 ) -> tuple[str, str]:
     """
     Gera dois comentarios LLM para um post de ICP.
@@ -114,6 +119,14 @@ async def generate_comments_for_post(
                 model=llm_config.model,
                 temperature=llm_config.temperature,
                 max_tokens=llm_config.max_tokens,
+                usage_context=LLMUsageContext(
+                    tenant_id=tenant_id,
+                    module="content_engagement",
+                    task_type="generate_comments",
+                    feature="linkedin",
+                    entity_type="engagement_post",
+                    entity_id=post_id,
+                ),
             )
             parsed = _parse_comment_json(response.text)
             if parsed:
@@ -139,14 +152,23 @@ async def generate_comments_for_post(
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 
-def _parse_comment_json(content: str) -> dict | None:
+def _parse_comment_json(content: str) -> CommentPayload | None:
     """Faz parse do JSON retornado pelo LLM com fallback None."""
     cleaned = re.sub(r"```(?:json)?\s*", "", content).strip()
     cleaned = cleaned.replace("```", "").strip()
     try:
         data = json.loads(cleaned)
-        if isinstance(data, dict) and "comment_1" in data and "comment_2" in data:
-            return data
+        if not isinstance(data, dict):
+            return None
+        payload = cast(dict[str, object], data)
+        if (
+            isinstance(payload.get("comment_1"), str)
+            and isinstance(payload.get("comment_2"), str)
+        ):
+            return {
+                "comment_1": str(payload["comment_1"]),
+                "comment_2": str(payload["comment_2"]),
+            }
     except (json.JSONDecodeError, ValueError):
         pass
     logger.warning("comment_generator.json_parse_failed", raw_content=content[:200])

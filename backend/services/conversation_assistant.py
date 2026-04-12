@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import structlog
 
-from integrations.llm import LLMMessage, LLMRegistry, LLMResponse
+from integrations.llm import LLMMessage, LLMRegistry, LLMResponse, LLMUsageContext
 
 logger = structlog.get_logger()
 
@@ -49,6 +49,9 @@ class ConversationAssistant:
         tone: str = "formal",
         provider: str | None = None,
         model: str | None = None,
+        tenant_id: str | None = None,
+        lead_id: str | None = None,
+        chat_id: str | None = None,
     ) -> str:
         """
         Gera sugestão de resposta baseada no histórico do chat.
@@ -109,6 +112,20 @@ Sugira a próxima resposta mantendo o tom '{tone}':"""
             model=model,
             temperature=0.7,
             max_tokens=256,
+            usage_context=(
+                LLMUsageContext(
+                    tenant_id=tenant_id,
+                    module="inbox",
+                    task_type="suggest_reply",
+                    feature=tone,
+                    entity_type="lead",
+                    entity_id=lead_id,
+                    secondary_entity_type="chat",
+                    secondary_entity_id=chat_id,
+                )
+                if tenant_id
+                else None
+            ),
         )
 
         logger.info(

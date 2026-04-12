@@ -147,5 +147,6 @@ export interface ExtensionState {
   session: ExtensionSession | null;
   bootstrap: ExtensionBootstrap | null;
   preview: CapturePreview | null;
+  selected_previews: CapturePreview[];
   config: ExtensionConfig;
 }

@@ -234,6 +234,9 @@ async def _handle_native_message(
         classification = await parser.classify(
             reply_text=message.text or "",
             lead_name=lead.name,
+            tenant_id=str(lead.tenant_id),
+            lead_id=str(lead.id),
+            channel=Channel.LINKEDIN_DM.value,
         )
         intent_str = str(classification.get("intent") or Intent.NEUTRAL.value)
         try:

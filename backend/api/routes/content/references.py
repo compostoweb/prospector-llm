@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_effective_tenant_id, get_llm_registry, get_session_flexible
+from integrations.llm import LLMUsageContext
 from integrations.llm.registry import LLMRegistry
 from models.content_reference import ContentReference
 from schemas.content import ContentReferenceCreate, ContentReferenceResponse
@@ -240,8 +241,15 @@ async def analyze_reference_url(
         provider=llm_config.provider,
         model=llm_config.model,
         temperature=llm_config.temperature,
-        max_tokens=llm_config.max_tokens,
+        max_tokens=min(llm_config.max_tokens, 900),
         json_mode=True,
+        usage_context=LLMUsageContext(
+            tenant_id=str(tenant_id),
+            module="content_capture",
+            task_type="analyze_reference_url",
+            feature="reference_import",
+            metadata={"url": body.url[:250]},
+        ),
     )
 
     try:

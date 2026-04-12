@@ -399,6 +399,9 @@ async def suggest_reply(
         tone=body.tone,
         provider=llm_config.provider,
         model=llm_config.model,
+        tenant_id=str(tenant_id),
+        lead_id=str(lead.id) if lead else None,
+        chat_id=chat_id,
     )
 
     return SuggestReplyResponse(suggested_text=suggested, tone=body.tone)
