@@ -1,7 +1,9 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { BarChart3, Bot, Coins, Cpu, FileText, Layers3, Loader2, Sparkles } from "lucide-react"
+import type { Route as AppRoute } from "next"
+import { useMemo } from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { Bot, Coins, Cpu, FileText, Layers3, Loader2, Sparkles } from "lucide-react"
 import {
   Area,
   AreaChart,
@@ -19,16 +21,18 @@ import {
   useLLMUsageSummary,
   useLLMUsageTimeSeries,
   type LLMUsageBreakdownItem,
+  type LLMUsageFilters,
   type LLMUsageGranularity,
 } from "@/lib/api/hooks/use-llm-analytics"
+import { useLLMModels } from "@/lib/api/hooks/use-llm-models"
 import { cn } from "@/lib/utils"
 
 const PERIOD_OPTIONS = [
-  { label: "24h", days: 1 },
-  { label: "7d", days: 7 },
-  { label: "30d", days: 30 },
-  { label: "90d", days: 90 },
-  { label: "12m", days: 365 },
+  { label: "24h", value: 1 },
+  { label: "7d", value: 7 },
+  { label: "30d", value: 30 },
+  { label: "90d", value: 90 },
+  { label: "12m", value: 365 },
 ] as const
 
 const GRANULARITY_OPTIONS: { label: string; value: LLMUsageGranularity }[] = [
@@ -38,32 +42,123 @@ const GRANULARITY_OPTIONS: { label: string; value: LLMUsageGranularity }[] = [
   { label: "Mês", value: "month" },
 ]
 
-export function LLMConsumptionPanel() {
-  const [days, setDays] = useState(30)
-  const [granularity, setGranularity] = useState<LLMUsageGranularity>("day")
+const PERIOD_VALUES = new Set<number>(PERIOD_OPTIONS.map((option) => option.value))
+const GRANULARITY_VALUES = new Set<string>(GRANULARITY_OPTIONS.map((option) => option.value))
 
-  const summary = useLLMUsageSummary(days)
-  const comparison = useLLMUsageComparison(days)
-  const series = useLLMUsageTimeSeries(days, granularity)
-  const modules = useLLMUsageBreakdown("module", days, 6)
-  const tasks = useLLMUsageBreakdown("task_type", days, 6)
-  const features = useLLMUsageBreakdown("feature", days, 6)
-  const models = useLLMUsageBreakdown("model", days, 6)
-  const providers = useLLMUsageBreakdown("provider", days, 4)
+export function LLMConsumptionPanel() {
+  const pathname = usePathname()
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
+  const { data: modelsData } = useLLMModels()
+  const availableModels = modelsData?.models ?? []
+  const rawDays = Number(searchParams.get("consumo_days") ?? "30")
+  const days = PERIOD_VALUES.has(rawDays) ? rawDays : 30
+  const rawGranularity = searchParams.get("consumo_granularity")
+  const granularity: LLMUsageGranularity = GRANULARITY_VALUES.has(
+    rawGranularity as LLMUsageGranularity,
+  )
+    ? (rawGranularity as LLMUsageGranularity)
+    : "day"
+  const rawProvider = searchParams.get("consumo_provider") ?? "all"
+  const knownProviders = new Set<string>(availableModels.map((item) => item.provider))
+  const provider = rawProvider === "all" || knownProviders.has(rawProvider) ? rawProvider : "all"
+  const visibleModelOptions =
+    provider === "all"
+      ? availableModels
+      : availableModels.filter((item) => item.provider === provider)
+  const rawModel = searchParams.get("consumo_model") ?? "all"
+  const model =
+    rawModel === "all" || visibleModelOptions.some((item) => item.id === rawModel)
+      ? rawModel
+      : "all"
+
+  function updateFilters(next: {
+    days?: number
+    granularity?: LLMUsageGranularity
+    provider?: string
+    model?: string
+  }) {
+    const params = new URLSearchParams(searchParams.toString())
+    const nextDays = next.days ?? days
+    const nextGranularity = next.granularity ?? granularity
+    const nextProvider = next.provider ?? provider
+    const nextModel = next.model ?? model
+
+    if (nextDays === 30) {
+      params.delete("consumo_days")
+    } else {
+      params.set("consumo_days", String(nextDays))
+    }
+
+    if (nextGranularity === "day") {
+      params.delete("consumo_granularity")
+    } else {
+      params.set("consumo_granularity", nextGranularity)
+    }
+
+    if (nextProvider === "all") {
+      params.delete("consumo_provider")
+    } else {
+      params.set("consumo_provider", nextProvider)
+    }
+
+    if (nextModel === "all") {
+      params.delete("consumo_model")
+    } else {
+      params.set("consumo_model", nextModel)
+    }
+
+    const query = params.toString()
+    const nextUrl = query ? `${pathname}?${query}` : pathname
+    router.replace(nextUrl as AppRoute, { scroll: false })
+  }
+
+  const filters = useMemo<LLMUsageFilters>(() => {
+    const next: LLMUsageFilters = {}
+    if (provider !== "all") {
+      next.provider = provider
+    }
+    if (model !== "all") {
+      next.model = model
+    }
+    return next
+  }, [model, provider])
+
+  const comparisonEndAt = useMemo(() => {
+    const anchor = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+    return anchor.toISOString()
+  }, [days])
+
+  const summary = useLLMUsageSummary(days, filters)
+  const comparison = useLLMUsageComparison(days, filters)
+  const series = useLLMUsageTimeSeries(days, granularity, filters)
+  const previousSeries = useLLMUsageTimeSeries(days, granularity, {
+    ...filters,
+    endAt: comparisonEndAt,
+  })
+  const modules = useLLMUsageBreakdown("module", days, 6, filters)
+  const tasks = useLLMUsageBreakdown("task_type", days, 6, filters)
+  const features = useLLMUsageBreakdown("feature", days, 6, filters)
+  const models = useLLMUsageBreakdown("model", days, 6, filters)
+  const providers = useLLMUsageBreakdown("provider", days, 4, filters)
 
   const chartData = useMemo(
     () =>
-      (series.data ?? []).map((point) => ({
+      (series.data ?? []).map((point, index) => ({
         ...point,
         label: formatBucket(point.bucket_start, granularity),
+        previous_total_tokens: previousSeries.data?.[index]?.total_tokens ?? 0,
+        previous_estimated_cost_usd: previousSeries.data?.[index]?.estimated_cost_usd ?? 0,
       })),
-    [granularity, series.data],
+    [granularity, previousSeries.data, series.data],
   )
 
   const isLoading =
     summary.isLoading ||
     comparison.isLoading ||
     series.isLoading ||
+    previousSeries.isLoading ||
     modules.isLoading ||
     tasks.isLoading ||
     features.isLoading ||
@@ -86,13 +181,25 @@ export function LLMConsumptionPanel() {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <SegmentedControl
               value={days}
-              onChange={(value) => setDays(value)}
+              onChange={(value) => updateFilters({ days: value })}
               options={PERIOD_OPTIONS}
             />
             <SegmentedControl
               value={granularity}
-              onChange={(value) => setGranularity(value as LLMUsageGranularity)}
+              onChange={(value) => updateFilters({ granularity: value as LLMUsageGranularity })}
               options={GRANULARITY_OPTIONS}
+            />
+            <FilterSelect
+              value={provider}
+              onChange={(value) => updateFilters({ provider: value, model: "all" })}
+              options={buildProviderOptions(availableModels)}
+              ariaLabel="Filtrar provider"
+            />
+            <FilterSelect
+              value={model}
+              onChange={(value) => updateFilters({ model: value })}
+              options={buildModelOptions(visibleModelOptions)}
+              ariaLabel="Filtrar modelo"
             />
           </div>
         </div>
@@ -113,28 +220,28 @@ export function LLMConsumptionPanel() {
                   summary.data?.input_tokens ?? 0,
                   summary.data?.output_tokens ?? 0,
                 )}
-                trend={toTrend(comparison.data?.total_tokens_change_pct)}
+                {...withTrend(toTrend(comparison.data?.total_tokens_change_pct))}
               />
               <StatCard
                 label="Custo estimado"
                 value={formatCurrency(summary.data?.estimated_cost_usd ?? 0)}
                 icon={Coins}
                 description="Estimativa agregada entre todos os providers"
-                trend={toTrend(comparison.data?.estimated_cost_change_pct)}
+                {...withTrend(toTrend(comparison.data?.estimated_cost_change_pct))}
               />
               <StatCard
                 label="Chamadas"
                 value={formatNumber(summary.data?.requests ?? 0)}
                 icon={Cpu}
                 description={`Média ${formatNumber(summary.data?.avg_total_tokens_per_request ?? 0)} tokens/chamada`}
-                trend={toTrend(comparison.data?.requests_change_pct)}
+                {...withTrend(toTrend(comparison.data?.requests_change_pct))}
               />
               <StatCard
                 label="Saída média"
                 value={formatNumber(summary.data?.avg_output_tokens_per_request ?? 0)}
                 icon={FileText}
                 description="Tokens médios de resposta por execução"
-                trend={toTrend(comparison.data?.avg_output_tokens_change_pct)}
+                {...withTrend(toTrend(comparison.data?.avg_output_tokens_change_pct))}
               />
             </div>
 
@@ -169,8 +276,16 @@ export function LLMConsumptionPanel() {
                       {labelForGranularity(granularity).toLowerCase()}.
                     </p>
                   </div>
-                  <div className="rounded-md bg-(--accent-subtle) px-2.5 py-1 text-xs font-medium text-(--accent)">
-                    {formatNumber(summary.data?.requests ?? 0)} chamadas
+                  <div className="flex items-center gap-2">
+                    <div className="rounded-md border border-(--border-default) bg-(--bg-overlay) px-2.5 py-1 text-xs text-(--text-secondary)">
+                      Atual
+                    </div>
+                    <div className="rounded-md border border-(--border-default) bg-(--bg-overlay) px-2.5 py-1 text-xs text-(--text-secondary)">
+                      Anterior
+                    </div>
+                    <div className="rounded-md bg-(--accent-subtle) px-2.5 py-1 text-xs font-medium text-(--accent)">
+                      {formatNumber(summary.data?.requests ?? 0)} chamadas
+                    </div>
                   </div>
                 </div>
                 <div className="h-80">
@@ -225,6 +340,15 @@ export function LLMConsumptionPanel() {
                         strokeWidth={2.5}
                       />
                       <Line
+                        yAxisId="tokens"
+                        type="monotone"
+                        dataKey="previous_total_tokens"
+                        stroke="var(--text-tertiary)"
+                        strokeWidth={1.75}
+                        strokeDasharray="6 4"
+                        dot={false}
+                      />
+                      <Line
                         yAxisId="cost"
                         type="monotone"
                         dataKey="estimated_cost_usd"
@@ -232,9 +356,22 @@ export function LLMConsumptionPanel() {
                         strokeWidth={2}
                         dot={false}
                       />
+                      <Line
+                        yAxisId="cost"
+                        type="monotone"
+                        dataKey="previous_estimated_cost_usd"
+                        stroke="var(--text-tertiary)"
+                        strokeWidth={1.5}
+                        strokeDasharray="3 3"
+                        dot={false}
+                      />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
+                <p className="mt-3 text-xs text-(--text-secondary)">
+                  Linha sólida representa a janela atual; linha tracejada representa a janela
+                  anterior equivalente.
+                </p>
               </div>
 
               <BreakdownCard
@@ -283,6 +420,30 @@ interface SegmentedControlProps<T extends string | number> {
   value: T
   onChange: (value: T) => void
   options: ReadonlyArray<{ label: string; value: T }>
+}
+
+interface FilterSelectProps {
+  value: string
+  onChange: (value: string) => void
+  options: Array<{ label: string; value: string }>
+  ariaLabel: string
+}
+
+function FilterSelect({ value, onChange, options, ariaLabel }: FilterSelectProps) {
+  return (
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      aria-label={ariaLabel}
+      className="rounded-md border border-(--border-default) bg-(--bg-overlay) px-3 py-1.5 text-xs text-(--text-primary) outline-none"
+    >
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  )
 }
 
 function SegmentedControl<T extends string | number>({
@@ -474,4 +635,28 @@ function formatDeltaLabel(value: number | null | undefined): string {
     return "Sem base anterior"
   }
   return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`
+}
+
+function withTrend(trend: { value: number; label: string } | undefined) {
+  return trend ? { trend } : {}
+}
+
+function buildProviderOptions(models: Array<{ provider: string }>) {
+  return [
+    { label: "Todos os providers", value: "all" },
+    ...Array.from(new Set(models.map((item) => item.provider))).map((item) => ({
+      label: item,
+      value: item,
+    })),
+  ]
+}
+
+function buildModelOptions(models: Array<{ id: string; name: string; provider: string }>) {
+  return [
+    { label: "Todos os modelos", value: "all" },
+    ...models.map((item) => ({
+      label: `${item.provider} / ${item.name}`,
+      value: item.id,
+    })),
+  ]
 }

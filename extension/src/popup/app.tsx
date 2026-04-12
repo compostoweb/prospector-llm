@@ -18,7 +18,7 @@ import type {
 } from "../shared/types";
 
 type ExtensionSurfaceMode = "popup" | "sidepanel";
-type PopupStepKey = "selection" | "destination" | "review";
+type PopupStepKey = "selection" | "selected" | "destination" | "review";
 type LoadStateOptions = {
   preferredSessionId?: string | null;
   showLoading?: boolean;
@@ -95,6 +95,34 @@ export function PopupApp({
       );
       if (!changedKeys.some((key) => stateStorageKeys.has(key))) {
         return;
+      }
+
+      if (changes[EXTENSION_STORAGE_KEYS.selectedPreviews]) {
+        setState((current) =>
+          current
+            ? {
+                ...current,
+                selected_previews:
+                  (changes[EXTENSION_STORAGE_KEYS.selectedPreviews]
+                    ?.newValue as CapturePreview[] | undefined) ?? [],
+              }
+            : current,
+        );
+      }
+
+      if (changes[EXTENSION_STORAGE_KEYS.preview]) {
+        setState((current) =>
+          current
+            ? {
+                ...current,
+                preview:
+                  (changes[EXTENSION_STORAGE_KEYS.preview]?.newValue as
+                    | CapturePreview
+                    | null
+                    | undefined) ?? null,
+              }
+            : current,
+        );
       }
 
       if (changes[EXTENSION_STORAGE_KEYS.preview]?.newValue) {
@@ -233,9 +261,7 @@ export function PopupApp({
       );
       applyState(nextState);
       setResultMessage(
-        isSelected
-          ? "Post removido da seleção."
-          : "Post adicionado à seleção.",
+        isSelected ? "Post removido da seleção." : "Post adicionado à seleção.",
       );
     } catch (nextError) {
       setError(
@@ -356,7 +382,9 @@ export function PopupApp({
 
     const missingManualUrls = selectedPreviews.filter((preview) => {
       const candidateKey = buildPreviewKey(preview);
-      return !preview.post_url && !normalizeWhitespace(manualUrls[candidateKey]);
+      return (
+        !preview.post_url && !normalizeWhitespace(manualUrls[candidateKey])
+      );
     });
 
     if (missingManualUrls.length > 0) {
@@ -401,7 +429,9 @@ export function PopupApp({
           });
           applyState(nextState);
           setAvailablePosts((current) =>
-            current.filter((candidate) => buildPreviewKey(candidate) !== candidateKey),
+            current.filter(
+              (candidate) => buildPreviewKey(candidate) !== candidateKey,
+            ),
           );
           successCount += 1;
         } catch (nextError) {
@@ -453,11 +483,19 @@ export function PopupApp({
     return `${sourceLabel} · ${statusLabel} · ${new Date(session.created_at).toLocaleString("pt-BR")}`;
   }
 
-  const scanCountLabel = `${availablePosts.length} ${availablePosts.length === 1 ? "post detectado" : "posts detectados"}`;
-  const selectionCountLabel = `${selectedPreviews.length} ${selectedPreviews.length === 1 ? "post selecionado" : "posts selecionados"}`;
+  const scanCountLabel = `${availablePosts.length} detectados`;
+  const selectionCountLabel = `${selectedPreviews.length} selecionados`;
   const missingRequiredUrlCount = selectedPreviews.filter((preview) => {
-    return !preview.post_url && !normalizeWhitespace(getEditablePostUrl(preview));
+    return (
+      !preview.post_url && !normalizeWhitespace(getEditablePostUrl(preview))
+    );
   }).length;
+  const destinationStepLabel =
+    destination === "reference" ? "Destino: referência" : "Destino: engagement";
+  const reviewStepLabel =
+    missingRequiredUrlCount > 0
+      ? `${missingRequiredUrlCount} links pendentes`
+      : "Lote pronto";
 
   return (
     <div
@@ -468,7 +506,8 @@ export function PopupApp({
           <div className="popup-kicker">LinkedIn Capture V1</div>
           <h1 className="popup-title">Prospector</h1>
           <div className="popup-subtitle">
-            Selecione vários posts, defina o destino e revise os links antes de importar.
+            Selecione vários posts, defina o destino e revise os links antes de
+            importar.
           </div>
         </div>
         {state?.session ? (
@@ -492,13 +531,16 @@ export function PopupApp({
         </p>
       ) : null}
       {importProgress ? (
-        <p className="popup-feedback popup-feedback--warning">{importProgress}</p>
+        <p className="popup-feedback popup-feedback--warning">
+          {importProgress}
+        </p>
       ) : null}
 
       {!state?.session && !loading ? (
         <div className="popup-stack">
           <p>
-            Faça login com Google para liberar a captura e importação no Prospector.
+            Faça login com Google para liberar a captura e importação no
+            Prospector.
           </p>
           <button
             onClick={handleLogin}
@@ -512,7 +554,7 @@ export function PopupApp({
 
       {state?.session ? (
         <div className="popup-stack popup-stack--wide">
-          <section className="popup-card">
+          <section className="popup-card popup-card--account">
             <div className="popup-account-row">
               <div>
                 <div className="popup-card-title">
@@ -521,7 +563,8 @@ export function PopupApp({
                 <div className="popup-muted">{state.session.user.email}</div>
               </div>
               <div className="popup-status-pill">
-                LinkedIn {state.bootstrap?.linkedin.connected ? "ok" : "pendente"}
+                LinkedIn{" "}
+                {state.bootstrap?.linkedin.connected ? "ok" : "pendente"}
               </div>
             </div>
           </section>
@@ -532,8 +575,22 @@ export function PopupApp({
               onClick={() => setActiveStep("selection")}
               className={`popup-step ${activeStep === "selection" ? "is-active" : ""}`}
             >
-              <span className="popup-step__index">1</span>
-              <span>Selecionar posts</span>
+              <span className="popup-step__header">
+                <span className="popup-step__index">1</span>
+                <span className="popup-step__title">Selecionar posts</span>
+              </span>
+              <span className="popup-step__meta">{scanCountLabel}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveStep("selected")}
+              disabled={selectedPreviews.length === 0}
+              className={`popup-step ${activeStep === "selected" ? "is-active" : ""}`}
+            >
+              <span className="popup-step__header">
+                <span className="popup-step__index">2</span>
+                <span className="popup-step__title">Conferir selecionados</span>
+              </span>
               <span className="popup-step__meta">{selectionCountLabel}</span>
             </button>
             <button
@@ -542,11 +599,11 @@ export function PopupApp({
               disabled={selectedPreviews.length === 0}
               className={`popup-step ${activeStep === "destination" ? "is-active" : ""}`}
             >
-              <span className="popup-step__index">2</span>
-              <span>Escolher destino</span>
-              <span className="popup-step__meta">
-                {destination === "reference" ? "Referência" : "Engagement"}
+              <span className="popup-step__header">
+                <span className="popup-step__index">3</span>
+                <span className="popup-step__title">Escolher destino</span>
               </span>
+              <span className="popup-step__meta">{destinationStepLabel}</span>
             </button>
             <button
               type="button"
@@ -554,13 +611,11 @@ export function PopupApp({
               disabled={selectedPreviews.length === 0}
               className={`popup-step ${activeStep === "review" ? "is-active" : ""}`}
             >
-              <span className="popup-step__index">3</span>
-              <span>Revisar e importar</span>
-              <span className="popup-step__meta">
-                {missingRequiredUrlCount > 0
-                  ? `${missingRequiredUrlCount} links pendentes`
-                  : "Pronto para importar"}
+              <span className="popup-step__header">
+                <span className="popup-step__index">4</span>
+                <span className="popup-step__title">Revisar e importar</span>
               </span>
+              <span className="popup-step__meta">{reviewStepLabel}</span>
             </button>
           </section>
 
@@ -584,7 +639,9 @@ export function PopupApp({
                   <div className="popup-diagnostic-summary popup-diagnostic-summary--compact">
                     <div className="popup-diagnostic-summary__row">
                       <span>Candidatos:</span>
-                      <strong>{scanDiagnostic.candidate_container_count}</strong>
+                      <strong>
+                        {scanDiagnostic.candidate_container_count}
+                      </strong>
                     </div>
                     <div className="popup-diagnostic-summary__row">
                       <span>Posts aceitos:</span>
@@ -594,7 +651,8 @@ export function PopupApp({
                 ) : null}
                 {availablePosts.length === 0 ? (
                   <p className="popup-empty">
-                    Nenhum post foi detectado na aba ativa. Abra um feed ou post do LinkedIn e clique em Atualizar lista.
+                    Nenhum post foi detectado na aba ativa. Abra um feed ou post
+                    do LinkedIn e clique em Atualizar lista.
                   </p>
                 ) : null}
                 {availablePosts.length > 0 ? (
@@ -624,7 +682,10 @@ export function PopupApp({
                             {candidate.author_title ?? "Sem headline visível"}
                           </div>
                           <div className="popup-post-item__text">
-                            {truncateText(candidate.post_text, availableTextLimit)}
+                            {truncateText(
+                              candidate.post_text,
+                              availableTextLimit,
+                            )}
                           </div>
                           <div className="popup-post-item__footer">
                             {isSelected
@@ -638,65 +699,16 @@ export function PopupApp({
                 ) : null}
               </section>
 
-              <section className="popup-card">
-                <div className="popup-card-title popup-card-title--spaced">
-                  Posts selecionados
-                </div>
-                {selectedPreviews.length === 0 ? (
-                  <p className="popup-empty">
-                    Selecione posts na lista acima ou clique em Selecionar post dentro do LinkedIn.
-                  </p>
-                ) : (
-                  <div className="popup-selected-list">
-                    {selectedPreviews.map((preview) => {
-                      const candidateKey = buildPreviewKey(preview);
-                      return (
-                        <div key={candidateKey} className="popup-selected-card">
-                          <div className="popup-selected-card__header">
-                            <div>
-                              <div className="popup-selected-card__title">
-                                {preview.author_name ?? "Autor não identificado"}
-                              </div>
-                              <div className="popup-muted">
-                                {preview.author_title ?? "Sem headline visível"}
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => void handleRemoveSelected(candidateKey)}
-                              disabled={busy !== null}
-                              className="popup-button popup-button--secondary"
-                            >
-                              Remover
-                            </button>
-                          </div>
-                          <div className="popup-selected-card__body">
-                            {truncateText(preview.post_text, 180)}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                <div className="popup-actions">
-                  <button
-                    type="button"
-                    onClick={() => void handleClearSelected()}
-                    disabled={busy !== null || selectedPreviews.length === 0}
-                    className="popup-button popup-button--secondary"
-                  >
-                    Limpar seleção
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveStep("destination")}
-                    disabled={busy !== null || selectedPreviews.length === 0}
-                    className="popup-button popup-button--primary"
-                  >
-                    Continuar para destino
-                  </button>
-                </div>
-              </section>
+              <div className="popup-actions">
+                <button
+                  type="button"
+                  onClick={() => setActiveStep("selected")}
+                  disabled={busy !== null || selectedPreviews.length === 0}
+                  className="popup-button popup-button--primary"
+                >
+                  Conferir selecionados
+                </button>
+              </div>
 
               {scanDiagnostic ? (
                 <section className="popup-card">
@@ -706,7 +718,8 @@ export function PopupApp({
                   <div className="popup-diagnostic-panel is-open">
                     <div className="popup-diagnostic-panel__content">
                       <div className="popup-meta">
-                        Fonte: {scanDiagnostic.captured_from} · URL: {scanDiagnostic.page_url ?? "indisponível"}
+                        Fonte: {scanDiagnostic.captured_from} · URL:{" "}
+                        {scanDiagnostic.page_url ?? "indisponível"}
                       </div>
                       {discardReasonEntries.length > 0 ? (
                         <div className="popup-diagnostic-block">
@@ -728,13 +741,94 @@ export function PopupApp({
             </>
           ) : null}
 
+          {activeStep === "selected" ? (
+            <section className="popup-card">
+              <div className="popup-card-title popup-card-title--spaced">
+                2. Conferir posts selecionados
+              </div>
+              <div className="popup-meta popup-meta--spaced">
+                Revise a curadoria antes de definir o destino do lote.
+              </div>
+              {selectedPreviews.length === 0 ? (
+                <p className="popup-empty">
+                  Nenhum post selecionado. Volte para a primeira etapa e monte o
+                  lote.
+                </p>
+              ) : (
+                <div className="popup-selected-list">
+                  {selectedPreviews.map((preview) => {
+                    const candidateKey = buildPreviewKey(preview);
+                    return (
+                      <div key={candidateKey} className="popup-selected-card">
+                        <div className="popup-selected-card__header">
+                          <div>
+                            <div className="popup-selected-card__title">
+                              {preview.author_name ?? "Autor não identificado"}
+                            </div>
+                            <div className="popup-muted">
+                              {preview.author_title ?? "Sem headline visível"}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleRemoveSelected(candidateKey)
+                            }
+                            disabled={busy !== null}
+                            className="popup-button popup-button--secondary"
+                          >
+                            Remover
+                          </button>
+                        </div>
+                        <div className="popup-selected-card__body">
+                          {truncateText(preview.post_text, 220)}
+                        </div>
+                        <div className="popup-selected-card__footer">
+                          {preview.likes} curtidas · {preview.comments}{" "}
+                          comentários · {preview.shares} compartilhamentos
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="popup-actions">
+                <button
+                  type="button"
+                  onClick={() => setActiveStep("selection")}
+                  disabled={busy !== null}
+                  className="popup-button popup-button--secondary"
+                >
+                  Voltar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleClearSelected()}
+                  disabled={busy !== null || selectedPreviews.length === 0}
+                  className="popup-button popup-button--secondary"
+                >
+                  Limpar seleção
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveStep("destination")}
+                  disabled={busy !== null || selectedPreviews.length === 0}
+                  className="popup-button popup-button--primary"
+                >
+                  Continuar para destino
+                </button>
+              </div>
+            </section>
+          ) : null}
+
           {activeStep === "destination" ? (
             <section className="popup-card">
               <div className="popup-card-title popup-card-title--spaced">
-                2. Destino do lote
+                3. Destino do lote
               </div>
               <div className="popup-meta popup-meta--spaced">
-                {selectionCountLabel}. Posts importados pela extensão entram como curadoria manual e não disparam análise por IA nesta etapa.
+                {selectionCountLabel}. Posts importados pela extensão entram
+                como curadoria manual e não disparam análise por IA nesta etapa.
               </div>
               <div className="popup-segmented">
                 <button
@@ -755,7 +849,9 @@ export function PopupApp({
                   <select
                     aria-label="Selecionar sessão de engagement"
                     value={sessionId ?? ""}
-                    onChange={(event) => setSessionId(event.target.value || null)}
+                    onChange={(event) =>
+                      setSessionId(event.target.value || null)
+                    }
                     className="popup-select"
                   >
                     <option value="">Selecione uma sessão</option>
@@ -770,18 +866,21 @@ export function PopupApp({
                     disabled={busy !== null}
                     className="popup-button popup-button--secondary"
                   >
-                    {busy === "create-session" ? "Criando sessão..." : "Nova sessão"}
+                    {busy === "create-session"
+                      ? "Criando sessão..."
+                      : "Nova sessão"}
                   </button>
                 </div>
               ) : (
                 <div className="popup-empty-card">
-                  O lote será salvo como referência curada para consulta dentro do Prospector.
+                  O lote será salvo como referência curada para consulta dentro
+                  do Prospector.
                 </div>
               )}
               <div className="popup-actions">
                 <button
                   type="button"
-                  onClick={() => setActiveStep("selection")}
+                  onClick={() => setActiveStep("selected")}
                   disabled={busy !== null}
                   className="popup-button popup-button--secondary"
                 >
@@ -791,7 +890,9 @@ export function PopupApp({
                   type="button"
                   onClick={() => {
                     if (destination === "engagement" && !sessionId) {
-                      setError("Selecione ou crie uma sessão de engagement antes de continuar.");
+                      setError(
+                        "Selecione ou crie uma sessão de engagement antes de continuar.",
+                      );
                       return;
                     }
                     setActiveStep("review");
@@ -808,14 +909,16 @@ export function PopupApp({
           {activeStep === "review" ? (
             <section className="popup-card">
               <div className="popup-card-title popup-card-title--spaced">
-                3. Revisar links e importar
+                4. Revisar links e importar
               </div>
               <div className="popup-meta popup-meta--spaced">
-                Revise o link de cada post. Quando a URL automática não vier, o preenchimento manual é obrigatório.
+                Revise o link de cada post. Quando a URL automática não vier, o
+                preenchimento manual é obrigatório.
               </div>
               {selectedPreviews.length === 0 ? (
                 <div className="popup-empty-card">
-                  Nenhum post selecionado. Volte para a etapa anterior e monte o lote.
+                  Nenhum post selecionado. Volte para a etapa anterior e monte o
+                  lote.
                 </div>
               ) : (
                 <div className="popup-selected-list">
@@ -823,7 +926,8 @@ export function PopupApp({
                     const candidateKey = buildPreviewKey(preview);
                     const editablePostUrl = getEditablePostUrl(preview);
                     const requiresManualUrl =
-                      !preview.post_url && !normalizeWhitespace(editablePostUrl);
+                      !preview.post_url &&
+                      !normalizeWhitespace(editablePostUrl);
                     return (
                       <div key={candidateKey} className="popup-selected-card">
                         <div className="popup-selected-card__header">
@@ -837,7 +941,9 @@ export function PopupApp({
                           </div>
                           <button
                             type="button"
-                            onClick={() => void handleRemoveSelected(candidateKey)}
+                            onClick={() =>
+                              void handleRemoveSelected(candidateKey)
+                            }
                             disabled={busy !== null}
                             className="popup-button popup-button--secondary"
                           >
@@ -848,10 +954,14 @@ export function PopupApp({
                           {truncateText(preview.post_text, selectedTextLimit)}
                         </div>
                         <div className="popup-selected-card__footer">
-                          {preview.likes} curtidas · {preview.comments} comentários · {preview.shares} compartilhamentos
+                          {preview.likes} curtidas · {preview.comments}{" "}
+                          comentários · {preview.shares} compartilhamentos
                         </div>
                         <div className="popup-field">
-                          <label className="popup-field__label" htmlFor={`post-url-${candidateKey}`}>
+                          <label
+                            className="popup-field__label"
+                            htmlFor={`post-url-${candidateKey}`}
+                          >
                             Link do post
                           </label>
                           <input
@@ -883,7 +993,10 @@ export function PopupApp({
               {importFailures.length > 0 ? (
                 <div className="popup-failure-list">
                   {importFailures.map((failure) => (
-                    <div key={failure.candidateKey} className="popup-failure-item">
+                    <div
+                      key={failure.candidateKey}
+                      className="popup-failure-item"
+                    >
                       <strong>{failure.label}</strong>
                       <span>{failure.message}</span>
                     </div>

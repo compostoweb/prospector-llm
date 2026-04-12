@@ -102,6 +102,35 @@ def _aggregate_since(days: int) -> datetime:
     return _floor_bucket(_utc_days_ago(days), "hour")
 
 
+def _aggregate_since_from_anchor(days: int, anchor: datetime) -> datetime:
+    return _floor_bucket(anchor - timedelta(days=days), "hour")
+
+
+def _window_end_bucket(until: datetime, granularity: Granularity) -> datetime:
+    return _floor_bucket(until - timedelta(microseconds=1), granularity)
+
+
+def _base_filters(
+    *,
+    tenant_id: UUID,
+    since: datetime,
+    until: datetime | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+) -> list[object]:
+    filters: list[object] = [
+        LLMUsageHourlyAggregate.tenant_id == tenant_id,
+        LLMUsageHourlyAggregate.bucket_start >= since,
+    ]
+    if until is not None:
+        filters.append(LLMUsageHourlyAggregate.bucket_start < until)
+    if provider:
+        filters.append(LLMUsageHourlyAggregate.provider == provider)
+    if model:
+        filters.append(LLMUsageHourlyAggregate.model == model)
+    return filters
+
+
 def _percent_change(*, current: int | float, previous: int | float) -> float | None:
     if previous <= 0:
         return None
@@ -114,13 +143,16 @@ async def _query_summary_window(
     tenant_id: UUID,
     since: datetime,
     until: datetime | None = None,
+    provider: str | None = None,
+    model: str | None = None,
 ) -> LLMUsageSummaryResponse:
-    filters = [
-        LLMUsageHourlyAggregate.tenant_id == tenant_id,
-        LLMUsageHourlyAggregate.bucket_start >= since,
-    ]
-    if until is not None:
-        filters.append(LLMUsageHourlyAggregate.bucket_start < until)
+    filters = _base_filters(
+        tenant_id=tenant_id,
+        since=since,
+        until=until,
+        provider=provider,
+        model=model,
+    )
 
     result = await db.execute(
         select(
@@ -155,6 +187,8 @@ async def _query_summary_window(
 @router.get("/summary", response_model=LLMUsageSummaryResponse)
 async def get_llm_usage_summary(
     days: Annotated[int, Query(ge=1, le=365)] = 30,
+    provider: str | None = Query(default=None),
+    model: str | None = Query(default=None),
     db: AsyncSession = Depends(get_session_flexible),
     tenant_id: UUID = Depends(get_effective_tenant_id),
 ) -> LLMUsageSummaryResponse:
@@ -163,12 +197,16 @@ async def get_llm_usage_summary(
         db=db,
         tenant_id=tenant_id,
         since=since,
+        provider=provider,
+        model=model,
     )
 
 
 @router.get("/comparison", response_model=LLMUsageComparisonResponse)
 async def get_llm_usage_comparison(
     days: Annotated[int, Query(ge=1, le=365)] = 30,
+    provider: str | None = Query(default=None),
+    model: str | None = Query(default=None),
     db: AsyncSession = Depends(get_session_flexible),
     tenant_id: UUID = Depends(get_effective_tenant_id),
 ) -> LLMUsageComparisonResponse:
@@ -179,12 +217,16 @@ async def get_llm_usage_comparison(
         db=db,
         tenant_id=tenant_id,
         since=current_since,
+        provider=provider,
+        model=model,
     )
     previous = await _query_summary_window(
         db=db,
         tenant_id=tenant_id,
         since=previous_since,
         until=current_since,
+        provider=provider,
+        model=model,
     )
     return LLMUsageComparisonResponse(
         current=current,
@@ -212,10 +254,15 @@ async def get_llm_usage_comparison(
 async def get_llm_usage_timeseries(
     days: Annotated[int, Query(ge=1, le=365)] = 30,
     granularity: Granularity = Query(default="day"),
+    end_at: datetime | None = Query(default=None),
+    provider: str | None = Query(default=None),
+    model: str | None = Query(default=None),
     db: AsyncSession = Depends(get_session_flexible),
     tenant_id: UUID = Depends(get_effective_tenant_id),
 ) -> list[LLMUsageTimeSeriesPoint]:
-    since = _aggregate_since(days)
+    anchor = end_at.astimezone(UTC) if end_at is not None else datetime.now(UTC)
+    since = _aggregate_since_from_anchor(days, anchor)
+    until = anchor if end_at is not None else None
     bucket_expr = (
         LLMUsageHourlyAggregate.bucket_start
         if granularity == "hour"
@@ -235,8 +282,13 @@ async def get_llm_usage_timeseries(
             ),
         )
         .where(
-            LLMUsageHourlyAggregate.tenant_id == tenant_id,
-            LLMUsageHourlyAggregate.bucket_start >= since,
+            *_base_filters(
+                tenant_id=tenant_id,
+                since=since,
+                until=until,
+                provider=provider,
+                model=model,
+            )
         )
         .group_by(bucket_expr)
         .order_by(bucket_expr.asc())
@@ -250,7 +302,7 @@ async def get_llm_usage_timeseries(
 
     points: list[LLMUsageTimeSeriesPoint] = []
     cursor = _floor_bucket(since, granularity)
-    end = _floor_bucket(datetime.now(UTC), granularity)
+    end = _window_end_bucket(anchor, granularity)
     while cursor <= end:
         row = data_by_bucket.get(cursor)
         points.append(
@@ -273,6 +325,8 @@ async def get_llm_usage_breakdown(
     days: Annotated[int, Query(ge=1, le=365)] = 30,
     dimension: BreakdownDimension = Query(default="module"),
     limit: Annotated[int, Query(ge=1, le=20)] = 8,
+    provider: str | None = Query(default=None),
+    model: str | None = Query(default=None),
     db: AsyncSession = Depends(get_session_flexible),
     tenant_id: UUID = Depends(get_effective_tenant_id),
 ) -> list[LLMUsageBreakdownItem]:
@@ -298,8 +352,12 @@ async def get_llm_usage_breakdown(
                 ),
             )
             .where(
-                LLMUsageHourlyAggregate.tenant_id == tenant_id,
-                LLMUsageHourlyAggregate.bucket_start >= since,
+                *_base_filters(
+                    tenant_id=tenant_id,
+                    since=since,
+                    provider=provider,
+                    model=model,
+                )
             )
             .group_by(LLMUsageHourlyAggregate.provider, LLMUsageHourlyAggregate.model)
             .order_by(
@@ -342,8 +400,12 @@ async def get_llm_usage_breakdown(
             ),
         )
         .where(
-            LLMUsageHourlyAggregate.tenant_id == tenant_id,
-            LLMUsageHourlyAggregate.bucket_start >= since,
+            *_base_filters(
+                tenant_id=tenant_id,
+                since=since,
+                provider=provider,
+                model=model,
+            )
         )
         .group_by(column)
         .order_by(

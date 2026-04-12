@@ -6,7 +6,7 @@ interface StatCardProps {
   value: number | string
   icon: LucideIcon
   description?: string
-  trend?: { value: number; label: string }
+  trend?: { value: number; label: string } | undefined
   className?: string
 }
 
@@ -33,9 +33,7 @@ export function StatCard({
             {label}
           </p>
           <p className="mt-1.5 text-2xl font-semibold text-(--text-primary)">{value}</p>
-          {description && (
-            <p className="mt-0.5 text-xs text-(--text-secondary)">{description}</p>
-          )}
+          {description && <p className="mt-0.5 text-xs text-(--text-secondary)">{description}</p>}
         </div>
         <div className="flex h-9 w-9 items-center justify-center rounded-md bg-(--accent-subtle)">
           <Icon size={18} className="text-(--accent)" aria-hidden="true" />

@@ -47,14 +47,34 @@ export interface LLMUsageBreakdownItem {
   estimated_cost_usd: number
 }
 
-export function useLLMUsageSummary(days = 30) {
+export interface LLMUsageFilters {
+  provider?: string | undefined
+  model?: string | undefined
+  endAt?: string | undefined
+}
+
+function buildAnalyticsQuery(params: Record<string, string | number | undefined>) {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === "") continue
+    query.set(key, String(value))
+  }
+  return query.toString()
+}
+
+export function useLLMUsageSummary(days = 30, filters: LLMUsageFilters = {}) {
   const { data: session } = useSession()
 
   return useQuery({
-    queryKey: ["analytics", "llm", "summary", days],
+    queryKey: ["analytics", "llm", "summary", days, filters.provider, filters.model],
     queryFn: async (): Promise<LLMUsageSummary> => {
       const client = createBrowserClient(session?.accessToken)
-      const { data, error } = await client.GET(`/analytics/llm/summary?days=${days}` as never)
+      const query = buildAnalyticsQuery({
+        days,
+        provider: filters.provider,
+        model: filters.model,
+      })
+      const { data, error } = await client.GET(`/analytics/llm/summary?${query}` as never)
       if (error) throw new Error("Falha ao carregar resumo de consumo LLM")
       return data as LLMUsageSummary
     },
@@ -64,16 +84,34 @@ export function useLLMUsageSummary(days = 30) {
   })
 }
 
-export function useLLMUsageTimeSeries(days = 30, granularity: LLMUsageGranularity = "day") {
+export function useLLMUsageTimeSeries(
+  days = 30,
+  granularity: LLMUsageGranularity = "day",
+  filters: LLMUsageFilters = {},
+) {
   const { data: session } = useSession()
 
   return useQuery({
-    queryKey: ["analytics", "llm", "timeseries", days, granularity],
+    queryKey: [
+      "analytics",
+      "llm",
+      "timeseries",
+      days,
+      granularity,
+      filters.provider,
+      filters.model,
+      filters.endAt,
+    ],
     queryFn: async (): Promise<LLMUsageTimeSeriesPoint[]> => {
       const client = createBrowserClient(session?.accessToken)
-      const { data, error } = await client.GET(
-        `/analytics/llm/timeseries?days=${days}&granularity=${granularity}` as never,
-      )
+      const query = buildAnalyticsQuery({
+        days,
+        granularity,
+        provider: filters.provider,
+        model: filters.model,
+        end_at: filters.endAt,
+      })
+      const { data, error } = await client.GET(`/analytics/llm/timeseries?${query}` as never)
       if (error) throw new Error("Falha ao carregar série temporal de LLM")
       return (data as LLMUsageTimeSeriesPoint[]) ?? []
     },
@@ -83,16 +121,35 @@ export function useLLMUsageTimeSeries(days = 30, granularity: LLMUsageGranularit
   })
 }
 
-export function useLLMUsageBreakdown(dimension: LLMUsageBreakdownDimension, days = 30, limit = 8) {
+export function useLLMUsageBreakdown(
+  dimension: LLMUsageBreakdownDimension,
+  days = 30,
+  limit = 8,
+  filters: LLMUsageFilters = {},
+) {
   const { data: session } = useSession()
 
   return useQuery({
-    queryKey: ["analytics", "llm", "breakdown", dimension, days, limit],
+    queryKey: [
+      "analytics",
+      "llm",
+      "breakdown",
+      dimension,
+      days,
+      limit,
+      filters.provider,
+      filters.model,
+    ],
     queryFn: async (): Promise<LLMUsageBreakdownItem[]> => {
       const client = createBrowserClient(session?.accessToken)
-      const { data, error } = await client.GET(
-        `/analytics/llm/breakdown?days=${days}&dimension=${dimension}&limit=${limit}` as never,
-      )
+      const query = buildAnalyticsQuery({
+        days,
+        dimension,
+        limit,
+        provider: filters.provider,
+        model: filters.model,
+      })
+      const { data, error } = await client.GET(`/analytics/llm/breakdown?${query}` as never)
       if (error) throw new Error("Falha ao carregar breakdown de consumo LLM")
       return (data as LLMUsageBreakdownItem[]) ?? []
     },
@@ -102,14 +159,19 @@ export function useLLMUsageBreakdown(dimension: LLMUsageBreakdownDimension, days
   })
 }
 
-export function useLLMUsageComparison(days = 30) {
+export function useLLMUsageComparison(days = 30, filters: LLMUsageFilters = {}) {
   const { data: session } = useSession()
 
   return useQuery({
-    queryKey: ["analytics", "llm", "comparison", days],
+    queryKey: ["analytics", "llm", "comparison", days, filters.provider, filters.model],
     queryFn: async (): Promise<LLMUsageComparison> => {
       const client = createBrowserClient(session?.accessToken)
-      const { data, error } = await client.GET(`/analytics/llm/comparison?days=${days}` as never)
+      const query = buildAnalyticsQuery({
+        days,
+        provider: filters.provider,
+        model: filters.model,
+      })
+      const { data, error } = await client.GET(`/analytics/llm/comparison?${query}` as never)
       if (error) throw new Error("Falha ao carregar comparação de consumo LLM")
       return data as LLMUsageComparison
     },

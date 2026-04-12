@@ -32,13 +32,6 @@ interface CadenceFormProps {
   cadence?: Cadence
 }
 
-const DEFAULT_LLM = {
-  llm_provider: "openai" as const,
-  llm_model: "gpt-4o-mini",
-  llm_temperature: 0.7,
-  llm_max_tokens: 512,
-}
-
 // ── Section Card ───────────────────────────────────────────────────────────
 
 interface SectionCardProps {

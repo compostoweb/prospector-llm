@@ -31,10 +31,9 @@ body {
 }
 
 .popup-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 10px;
   margin-bottom: 14px;
 }
@@ -77,6 +76,10 @@ body {
   min-width: 0;
 }
 
+.popup-card--account {
+  padding: 10px 12px;
+}
+
 .popup-account-row {
   display: flex;
   justify-content: space-between;
@@ -85,8 +88,18 @@ body {
   flex-wrap: wrap;
 }
 
+.popup-card--account .popup-account-row {
+  align-items: center;
+  gap: 10px;
+}
+
 .popup-card-title {
   font-weight: 700;
+}
+
+.popup-card--account .popup-card-title {
+  font-size: 15px;
+  line-height: 1.2;
 }
 
 .popup-card-title--spaced {
@@ -97,6 +110,11 @@ body {
   font-size: 13px;
   color: #475569;
   margin-top: 4px;
+}
+
+.popup-card--account .popup-muted {
+  margin-top: 2px;
+  font-size: 12px;
 }
 
 .popup-meta {
@@ -121,6 +139,11 @@ body {
   max-width: 100%;
   white-space: normal;
   text-align: center;
+}
+
+.popup-card--account .popup-status-pill {
+  padding: 6px 9px;
+  font-size: 10px;
 }
 
 .popup-empty {
@@ -150,15 +173,30 @@ body {
   margin-bottom: 10px;
 }
 
+.popup-feedback {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.35;
+  border: 1px solid transparent;
+}
+
 .popup-feedback--error {
+  background: rgba(254, 242, 242, 0.92);
+  border-color: rgba(248, 113, 113, 0.22);
   color: #b91c1c;
 }
 
 .popup-feedback--success {
+  background: rgba(240, 253, 244, 0.94);
+  border-color: rgba(74, 222, 128, 0.2);
   color: #166534;
 }
 
 .popup-feedback--warning {
+  background: rgba(255, 251, 235, 0.94);
+  border-color: rgba(251, 191, 36, 0.22);
   color: #92400e;
 }
 
@@ -263,16 +301,23 @@ body {
 
 .popup-steps {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+  align-items: stretch;
 }
 
 .popup-step {
-  display: grid;
-  gap: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 4px;
+  width: 100%;
   min-width: 0;
-  padding: 12px 10px;
-  border-radius: 16px;
+  min-height: 0;
+  padding: 8px 9px 7px;
+  box-sizing: border-box;
+  border-radius: 14px;
   border: 1px solid rgba(15, 23, 42, 0.08);
   background: rgba(255, 255, 255, 0.82);
   color: #475569;
@@ -305,20 +350,36 @@ body {
   font-weight: 700;
 }
 
-.popup-step__meta {
+.popup-step__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.popup-step__title {
   font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: inherit;
+}
+
+.popup-step__meta {
+  font-size: 9px;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
   color: #64748b;
 }
 
 .popup-inline-badge {
   display: inline-flex;
   align-items: center;
-  min-height: 32px;
-  padding: 0 10px;
+  min-height: 28px;
+  padding: 0 9px;
   border-radius: 999px;
   background: rgba(15, 118, 110, 0.08);
   color: #0f766e;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -337,22 +398,22 @@ body {
 .popup-diagnostic-summary {
   display: grid;
   gap: 4px;
-  margin-bottom: 10px;
-  padding: 10px 12px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
   border-radius: 12px;
   background: rgba(248, 250, 252, 0.95);
   border: 1px solid rgba(148, 163, 184, 0.28);
 }
 
 .popup-diagnostic-summary--compact {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .popup-diagnostic-summary__row {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  font-size: 12px;
+  font-size: 11px;
   color: #334155;
 }
 
@@ -432,7 +493,7 @@ body {
 .popup-post-item {
   width: 100%;
   text-align: left;
-  padding: 10px 12px;
+  padding: 9px 11px;
   border-radius: 14px;
   border: 1px solid rgba(15, 118, 110, 0.18);
   background: rgba(255, 255, 255, 0.96);
@@ -459,21 +520,21 @@ body {
 }
 
 .popup-post-item__meta {
-  margin-top: 3px;
-  font-size: 12px;
+  margin-top: 2px;
+  font-size: 11px;
   color: #64748b;
 }
 
 .popup-post-item__text {
-  margin-top: 8px;
-  font-size: 12px;
-  line-height: 1.45;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.4;
   color: #334155;
 }
 
 .popup-post-item__footer {
-  margin-top: 8px;
-  font-size: 12px;
+  margin-top: 6px;
+  font-size: 11px;
   font-weight: 700;
   color: #0f766e;
 }
@@ -572,6 +633,8 @@ body {
 .popup-post-item__meta,
 .popup-post-item__text,
 .popup-step,
+.popup-step__header,
+.popup-step__title,
 .popup-step__meta,
 .popup-inline-badge,
 .popup-selected-card,

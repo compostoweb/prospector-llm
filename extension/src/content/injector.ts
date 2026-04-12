@@ -38,22 +38,21 @@ function createCaptureButton(
   button.type = "button";
   button.textContent = "Selecionar post";
   button.className = BUTTON_CLASSNAME;
-  button.setAttribute(BUTTON_ATTRIBUTE, "1");
   button.style.display = "inline-flex";
   button.style.alignItems = "center";
   button.style.justifyContent = "center";
-  button.style.height = "30px";
-  button.style.padding = "0 12px";
+  button.style.height = "28px";
+  button.style.padding = "0 11px";
   button.style.borderRadius = "999px";
   button.style.border = "1px solid rgba(15, 118, 110, 0.35)";
   button.style.background = "rgba(236, 253, 245, 0.96)";
   button.style.color = "#0f766e";
   button.style.cursor = "pointer";
-  button.style.fontSize = "12px";
+  button.style.fontSize = "11px";
   button.style.fontWeight = "600";
   button.style.whiteSpace = "nowrap";
-  button.style.marginRight = "8px";
   button.style.boxShadow = "0 6px 18px rgba(15, 118, 110, 0.12)";
+  button.style.pointerEvents = "auto";
 
   button.addEventListener("click", async (event) => {
     event.preventDefault();
@@ -81,60 +80,45 @@ function createCaptureButton(
   return button;
 }
 
-function findInjectionTarget(container: HTMLElement): HTMLElement {
-  // Strategy 1: Find the "..." menu button or control area at box top-right
-  const topRightControls = container.querySelector<HTMLElement>(
-    [
-      ".feed-shared-control-menu__trigger",
-      ".feed-shared-control-menu",
-      ".update-components-header__control-menu",
-      ".update-components-header__right-rail",
-      ".update-components-header__text-view + div",
-      "button[aria-label*='Mais']",
-      "button[aria-label*='More']",
-      "button[aria-label*='menu']",
-      "button[aria-label*='Fechar']",
-      "button[aria-label*='Close']",
-      "button[aria-label*='Dispensar']",
-      "button[aria-label*='Dismiss']",
-      // LinkedIn's 3-dot menu SVG icon container
-      "[data-control-name*='overflow']",
-      ".artdeco-dropdown__trigger",
-    ].join(", "),
-  );
-  if (topRightControls?.parentElement instanceof HTMLElement) {
-    const host = topRightControls.parentElement;
-    host.style.display = "flex";
-    host.style.alignItems = "center";
-    host.style.gap = "8px";
-    return host;
+function ensureRelativePosition(element: HTMLElement): void {
+  if (window.getComputedStyle(element).position === "static") {
+    element.style.position = "relative";
   }
+}
 
-  // Strategy 2: Find the actor header area and inject as first child
+function findInjectionTarget(container: HTMLElement): HTMLElement {
   const headerArea = container.querySelector<HTMLElement>(
     ".update-components-actor, .feed-shared-actor",
   );
   if (headerArea instanceof HTMLElement) {
-    headerArea.style.position = "relative";
+    ensureRelativePosition(headerArea);
     return headerArea;
   }
 
-  // Strategy 3: Action bar
-  const actionBar = container.querySelector<HTMLElement>(
-    ".feed-shared-social-action-bar, .social-actions-button, .update-v2-social-activity",
-  );
-  if (actionBar instanceof HTMLElement) {
-    return actionBar;
-  }
-
-  // Strategy 4: Social counts area
-  const socialDetails = container.querySelector<HTMLElement>(
-    ".social-details-social-counts, .social-details-social-activity",
-  );
-  if (socialDetails?.parentElement instanceof HTMLElement) {
-    return socialDetails.parentElement;
-  }
+  ensureRelativePosition(container);
   return container;
+}
+
+function createCaptureButtonHost(
+  target: HTMLElement,
+  postContainer: HTMLElement,
+  capturedFrom: CapturedFrom,
+): HTMLDivElement {
+  const host = document.createElement("div");
+  host.setAttribute(BUTTON_ATTRIBUTE, "1");
+  host.style.position = "absolute";
+  host.style.top = target.matches(".update-components-actor, .feed-shared-actor")
+    ? "0"
+    : "10px";
+  host.style.right = target.matches(".update-components-actor, .feed-shared-actor")
+    ? "0"
+    : "12px";
+  host.style.zIndex = "20";
+  host.style.display = "flex";
+  host.style.justifyContent = "flex-end";
+  host.style.pointerEvents = "none";
+  host.appendChild(createCaptureButton(postContainer, capturedFrom));
+  return host;
 }
 
 function collectLinkedInPosts(
@@ -170,12 +154,8 @@ function installButtonsInScope(
     }
 
     const target = findInjectionTarget(container);
-    const button = createCaptureButton(container, capturedFrom);
-    if (target.firstChild) {
-      target.insertBefore(button, target.firstChild);
-      return;
-    }
-    target.appendChild(button);
+    const host = createCaptureButtonHost(target, container, capturedFrom);
+    target.appendChild(host);
   });
 }
 

@@ -1,5 +1,7 @@
 ﻿"use client"
 
+import type { Route as AppRoute } from "next"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
   useLLMModels,
   useLLMProviders,
@@ -43,8 +45,14 @@ const DEFAULT_COLD_EMAIL_LLM = {
 }
 
 export default function LLMConfigPage() {
-  const [activeTab, setActiveTab] = useState<Tab>("padrao")
   const [modelFilter, setModelFilter] = useState<ModelFilter>("all")
+  const pathname = usePathname()
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
+  const rawTab = searchParams.get("tab")
+  const activeTab: Tab =
+    rawTab === "modelos" || rawTab === "consumo" || rawTab === "testar" ? rawTab : "padrao"
 
   const { data: providersData } = useLLMProviders()
   const { data: modelsData, isLoading: loadingModels } = useLLMModels()
@@ -145,6 +153,19 @@ export default function LLMConfigPage() {
     { id: "testar", label: "Testar", icon: FlaskConical },
   ]
 
+  function handleTabChange(nextTab: Tab) {
+    const params = new URLSearchParams(searchParams.toString())
+    if (nextTab === "padrao") {
+      params.delete("tab")
+    } else {
+      params.set("tab", nextTab)
+    }
+
+    const query = params.toString()
+    const nextUrl = query ? `${pathname}?${query}` : pathname
+    router.replace(nextUrl as AppRoute, { scroll: false })
+  }
+
   return (
     <div className="space-y-6">
       {/* ── Cabeçalho ──────────────────────────────────────────────────── */}
@@ -201,7 +222,7 @@ export default function LLMConfigPage() {
             <button
               key={id}
               type="button"
-              onClick={() => setActiveTab(id)}
+              onClick={() => handleTabChange(id)}
               className={cn(
                 "flex items-center gap-1.5 border-b-2 px-3 pb-2.5 pt-1 text-sm font-medium transition-colors",
                 activeTab === id
