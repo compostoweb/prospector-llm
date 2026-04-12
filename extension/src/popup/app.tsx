@@ -205,6 +205,10 @@ export function PopupApp({
         },
       );
       await loadState();
+      setAvailablePosts((prev) =>
+        prev.filter((p) => buildPreviewKey(p) !== buildPreviewKey(preview)),
+      );
+      void loadAvailablePosts();
       setResultMessage(
         `Importacao concluida: ${result.destination} (${result.result}).`,
       );

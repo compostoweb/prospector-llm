@@ -24,6 +24,7 @@ from api.dependencies import get_effective_tenant_id, get_session_flexible
 from models.cadence import Cadence
 from schemas.cadence import CadenceCreateRequest, CadenceResponse, CadenceUpdateRequest
 from services.cadence_manager import serialize_steps_template
+from services.llm_config import resolve_tenant_llm_config
 
 logger = structlog.get_logger()
 
@@ -58,6 +59,11 @@ async def create_cadence(
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> CadenceResponse:
+    llm_config = body.llm
+    if llm_config is None:
+        scope = "cold_email" if body.cadence_type == "email_only" else "system"
+        llm_config = await resolve_tenant_llm_config(db, tenant_id, scope=scope)
+
     cadence = Cadence(
         tenant_id=tenant_id,
         name=body.name,
@@ -65,10 +71,10 @@ async def create_cadence(
         allow_personal_email=body.allow_personal_email,
         mode=body.mode.value,
         cadence_type=body.cadence_type,
-        llm_provider=body.llm.provider,
-        llm_model=body.llm.model,
-        llm_temperature=body.llm.temperature,
-        llm_max_tokens=body.llm.max_tokens,
+        llm_provider=llm_config.provider,
+        llm_model=llm_config.model,
+        llm_temperature=llm_config.temperature,
+        llm_max_tokens=llm_config.max_tokens,
         tts_provider=body.tts_provider,
         tts_voice_id=body.tts_voice_id,
         tts_speed=body.tts_speed,

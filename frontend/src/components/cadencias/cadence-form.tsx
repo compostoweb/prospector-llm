@@ -1,10 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useCreateCadence, useUpdateCadence } from "@/lib/api/hooks/use-cadences"
 import { useLeadLists } from "@/lib/api/hooks/use-lead-lists"
 import { useEmailAccounts } from "@/lib/api/hooks/use-email-accounts"
 import { useLinkedInAccounts } from "@/lib/api/hooks/use-linkedin-accounts"
+import { getTenantLLMConfig, useTenant } from "@/lib/api/hooks/use-tenant"
 import { LLMConfigForm, type LLMConfig } from "@/components/cadencias/llm-config-form"
 import { TTSConfigForm, type TTSConfig } from "@/components/cadencias/tts-config-form"
 import { Button } from "@/components/ui/button"
@@ -175,6 +176,7 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
   const createCadence = useCreateCadence()
   const updateCadence = useUpdateCadence()
   const { data: lists } = useLeadLists()
+  const { data: tenant } = useTenant()
 
   const [name, setName] = useState(cadence?.name ?? "")
   const [description, setDescription] = useState(cadence?.description ?? "")
@@ -183,11 +185,16 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
     cadence?.cadence_type ?? "mixed",
   )
   const [leadListId, setLeadListId] = useState(cadence?.lead_list_id ?? "")
-  const [llmConfig, setLlmConfig] = useState<LLMConfig>({
-    llm_provider: (cadence?.llm_provider ?? DEFAULT_LLM.llm_provider) as LLMConfig["llm_provider"],
-    llm_model: cadence?.llm_model ?? DEFAULT_LLM.llm_model,
-    llm_temperature: cadence?.llm_temperature ?? DEFAULT_LLM.llm_temperature,
-    llm_max_tokens: cadence?.llm_max_tokens ?? DEFAULT_LLM.llm_max_tokens,
+  const [llmConfig, setLlmConfig] = useState<LLMConfig>(() => {
+    if (cadence) {
+      return {
+        llm_provider: cadence.llm_provider as LLMConfig["llm_provider"],
+        llm_model: cadence.llm_model,
+        llm_temperature: cadence.llm_temperature,
+        llm_max_tokens: cadence.llm_max_tokens,
+      }
+    }
+    return getTenantLLMConfig(tenant?.integration, "system")
   })
   const [ttsConfig, setTtsConfig] = useState<TTSConfig>({
     tts_provider: cadence?.tts_provider ?? null,
@@ -226,6 +233,21 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
 
   // Na edição, preserva os passos existentes da cadência (gerenciados pela aba Passos)
   const existingSteps: CadenceStep[] = cadence?.steps_template ?? []
+
+  useEffect(() => {
+    if (cadence) {
+      setLlmConfig({
+        llm_provider: cadence.llm_provider as LLMConfig["llm_provider"],
+        llm_model: cadence.llm_model,
+        llm_temperature: cadence.llm_temperature,
+        llm_max_tokens: cadence.llm_max_tokens,
+      })
+      return
+    }
+
+    const scope = cadenceType === "email_only" ? "cold_email" : "system"
+    setLlmConfig(getTenantLLMConfig(tenant?.integration, scope))
+  }, [cadence, cadenceType, tenant?.integration])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()

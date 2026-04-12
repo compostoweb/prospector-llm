@@ -18,7 +18,7 @@ Endpoints:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
@@ -30,13 +30,20 @@ from core.config import settings
 from integrations.llm import LLMRegistry
 from integrations.s3_client import S3Client
 from integrations.unipile_client import unipile_client
-from models.enums import Channel, InteractionDirection, LeadSource, LeadStatus, ManualTaskStatus, StepStatus
+from models.cadence import Cadence
+from models.cadence_step import CadenceStep
+from models.enums import (
+    Channel,
+    InteractionDirection,
+    LeadSource,
+    LeadStatus,
+    ManualTaskStatus,
+    StepStatus,
+)
 from models.interaction import Interaction
 from models.lead import Lead
 from models.lead_tag import LeadTag
 from models.manual_task import ManualTask
-from models.cadence_step import CadenceStep
-from models.cadence import Cadence
 from schemas.inbox import (
     AddReactionRequest,
     AddTagRequest,
@@ -57,6 +64,7 @@ from schemas.inbox import (
     SuggestReplyResponse,
 )
 from services.conversation_assistant import ConversationAssistant
+from services.llm_config import resolve_tenant_llm_config
 
 logger = structlog.get_logger()
 
@@ -221,7 +229,7 @@ async def send_message(
             direction=InteractionDirection.OUTBOUND,
             content_text=body.text,
             unipile_message_id=result.message_id,
-            created_at=datetime.now(tz=timezone.utc),
+            created_at=datetime.now(tz=UTC),
         )
         db.add(interaction)
         await db.commit()
@@ -231,7 +239,7 @@ async def send_message(
         sender_id="me",
         sender_name="Eu",
         text=body.text,
-        timestamp=datetime.now(tz=timezone.utc).isoformat(),
+        timestamp=datetime.now(tz=UTC).isoformat(),
         is_own=True,
     )
 
@@ -281,7 +289,7 @@ async def send_voice(
             direction=InteractionDirection.OUTBOUND,
             content_audio_url=audio_url,
             unipile_message_id=result.message_id,
-            created_at=datetime.now(tz=timezone.utc),
+            created_at=datetime.now(tz=UTC),
         )
         db.add(interaction)
         await db.commit()
@@ -299,7 +307,9 @@ async def send_attachments(
 ) -> dict:
     """Envia mensagem com anexos (imagens, documentos, etc.)."""
     if not files:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nenhum arquivo enviado")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Nenhum arquivo enviado"
+        )
 
     chat = await unipile_client.get_chat(chat_id)
     if not chat:
@@ -313,7 +323,9 @@ async def send_attachments(
     attachments: list[tuple[str, bytes, str]] = []
     for f in files:
         file_bytes = await f.read()
-        attachments.append((f.filename or "file", file_bytes, f.content_type or "application/octet-stream"))
+        attachments.append(
+            (f.filename or "file", file_bytes, f.content_type or "application/octet-stream")
+        )
 
     result = await unipile_client.send_linkedin_dm_with_attachments(
         account_id=account_id,
@@ -333,7 +345,7 @@ async def send_attachments(
             direction=InteractionDirection.OUTBOUND,
             content_text=text or None,
             unipile_message_id=result.message_id,
-            created_at=datetime.now(tz=timezone.utc),
+            created_at=datetime.now(tz=UTC),
         )
         db.add(interaction)
         await db.commit()
@@ -380,10 +392,13 @@ async def suggest_reply(
             }
 
     assistant = ConversationAssistant(registry)
+    llm_config = await resolve_tenant_llm_config(db, tenant_id)
     suggested = await assistant.suggest_reply(
         chat_messages=chat_messages,
         lead_data=lead_data,
         tone=body.tone,
+        provider=llm_config.provider,
+        model=llm_config.model,
     )
 
     return SuggestReplyResponse(suggested_text=suggested, tone=body.tone)
@@ -435,10 +450,14 @@ async def get_conversation_lead(
     pending_count_result = await db.execute(
         select(func.count())
         .where(ManualTask.lead_id == lead.id)
-        .where(ManualTask.status.in_([
-            ManualTaskStatus.PENDING,
-            ManualTaskStatus.CONTENT_GENERATED,
-        ]))
+        .where(
+            ManualTask.status.in_(
+                [
+                    ManualTaskStatus.PENDING,
+                    ManualTaskStatus.CONTENT_GENERATED,
+                ]
+            )
+        )
     )
     pending_count = pending_count_result.scalar() or 0
 
@@ -575,7 +594,9 @@ async def send_to_crm(
     deal_id = await pipedrive.create_deal(
         title=f"Prospecção - {name}",
         person_id=person_id,
-        stage_id=settings.PIPEDRIVE_STAGE_INTEREST if hasattr(settings, "PIPEDRIVE_STAGE_INTEREST") else None,
+        stage_id=settings.PIPEDRIVE_STAGE_INTEREST
+        if hasattr(settings, "PIPEDRIVE_STAGE_INTEREST")
+        else None,
     )
 
     logger.info(
@@ -646,6 +667,7 @@ async def remove_reaction(
 # ── Helpers ───────────────────────────────────────────────────────────
 # ── Recent Activity ───────────────────────────────────────────────────
 
+
 @router.get(
     "/conversations/{chat_id}/activity",
     response_model=RecentActivityResponse,
@@ -692,6 +714,7 @@ async def get_lead_recent_activity(
 
 # ── Cadence History ──────────────────────────────────────────────────
 
+
 @router.get(
     "/conversations/{chat_id}/cadences",
     response_model=CadenceHistoryResponse,
@@ -718,9 +741,9 @@ async def get_lead_cadence_history(
             Cadence.mode,
             Cadence.is_active,
             func.count(CadenceStep.id).label("total_steps"),
-            func.count(CadenceStep.id).filter(
-                CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED])
-            ).label("completed_steps"),
+            func.count(CadenceStep.id)
+            .filter(CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED]))
+            .label("completed_steps"),
             func.max(CadenceStep.sent_at).label("last_step_at"),
         )
         .join(CadenceStep, CadenceStep.cadence_id == Cadence.id)
@@ -750,6 +773,7 @@ async def get_lead_cadence_history(
 
 
 # ── Tags ──────────────────────────────────────────────────────────────
+
 
 @router.get(
     "/conversations/{chat_id}/tags",

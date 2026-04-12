@@ -298,6 +298,9 @@ async def _generate_comments_for_engagement_post(
     _, author_voice = await _get_author_settings(tenant_id, db)
 
     from services.content.comment_generator import generate_comments_for_post
+    from services.llm_config import resolve_tenant_llm_config
+
+    llm_config = await resolve_tenant_llm_config(db, tenant_id)
 
     comment_1, comment_2 = await generate_comments_for_post(
         post_text=post.post_text,
@@ -307,6 +310,7 @@ async def _generate_comments_for_engagement_post(
         comment_angle=post.what_to_replicate or "",
         author_voice=author_voice,
         registry=registry,
+        llm_config=llm_config,
     )
 
     existing_comments = cast(
@@ -1065,8 +1069,10 @@ async def regenerate_comment(
 
     # Gerar novo comentario via LLM
     from services.content.comment_generator import generate_comments_for_post
+    from services.llm_config import resolve_tenant_llm_config
 
     comment_angle = post.what_to_replicate or ""
+    llm_config = await resolve_tenant_llm_config(db, tenant_id)
     c1, c2 = await generate_comments_for_post(
         post_text=post.post_text,
         author_name=post.author_name or "",
@@ -1075,6 +1081,7 @@ async def regenerate_comment(
         author_voice=author_voice,
         comment_angle=comment_angle,
         registry=registry,
+        llm_config=llm_config,
     )
 
     # Atualiza somente a variacao correspondente

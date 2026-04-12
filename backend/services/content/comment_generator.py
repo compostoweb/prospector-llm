@@ -13,7 +13,7 @@ Regras obrigatorias (definidas no escopo):
   - Gerar 2 variacoes distintas por post
   - NUNCA postar automaticamente — so sugere
 
-Model hardcoded: gpt-5.4-mini / openai
+Modelo recebido dinamicamente via configuracao efetiva do tenant.
 """
 
 from __future__ import annotations
@@ -25,11 +25,9 @@ import structlog
 
 from integrations.llm import LLMMessage
 from integrations.llm.registry import LLMRegistry
+from services.llm_config import ResolvedLLMConfig
 
 logger = structlog.get_logger()
-
-_PROVIDER = "openai"
-_MODEL = "gpt-5.4-mini"
 
 # ── Prompts ────────────────────────────────────────────────────────────────────
 
@@ -84,6 +82,7 @@ async def generate_comments_for_post(
     comment_angle: str,
     author_voice: str,
     registry: LLMRegistry,
+    llm_config: ResolvedLLMConfig,
 ) -> tuple[str, str]:
     """
     Gera dois comentarios LLM para um post de ICP.
@@ -111,10 +110,10 @@ async def generate_comments_for_post(
         try:
             response = await registry.complete(
                 messages=messages,
-                provider=_PROVIDER,
-                model=_MODEL,
-                temperature=0.7,
-                max_tokens=512,
+                provider=llm_config.provider,
+                model=llm_config.model,
+                temperature=llm_config.temperature,
+                max_tokens=llm_config.max_tokens,
             )
             parsed = _parse_comment_json(response.text)
             if parsed:

@@ -626,11 +626,14 @@ async def _process_email_reply(
             return
 
         # Classifica intent via LLM
+        from services.llm_config import resolve_tenant_llm_config  # noqa: PLC0415
+
         registry = LLMRegistry(settings=settings, redis=redis_client)
+        llm_config = await resolve_tenant_llm_config(db, lead.tenant_id)
         parser = ReplyParser(
             registry=registry,
-            provider=settings.REPLY_PARSER_PROVIDER,
-            model=settings.REPLY_PARSER_MODEL,
+            provider=llm_config.provider,
+            model=llm_config.model,
         )
         classification = await parser.classify(reply_text=body, lead_name=lead.name)
 

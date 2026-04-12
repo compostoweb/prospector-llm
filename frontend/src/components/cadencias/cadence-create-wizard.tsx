@@ -4,7 +4,7 @@ import type { Route as AppRoute } from "next"
 import Link from "next/link"
 import { useSession } from "next-auth/react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   AlertTriangle,
   Bot,
@@ -41,6 +41,7 @@ import {
   type CadenceStep,
   type CreateCadenceBody,
 } from "@/lib/api/hooks/use-cadences"
+import { getTenantLLMConfig, useTenant } from "@/lib/api/hooks/use-tenant"
 import { useEmailAccounts } from "@/lib/api/hooks/use-email-accounts"
 import { useEmailTemplates } from "@/lib/api/hooks/use-email-templates"
 import { useLeadList, useLeadLists } from "@/lib/api/hooks/use-lead-lists"
@@ -71,7 +72,7 @@ interface CadencePreset {
 }
 
 interface WizardLLMConfig {
-  llm_provider: "openai" | "gemini"
+  llm_provider: "openai" | "gemini" | "anthropic"
   llm_model: string
   llm_temperature: number
   llm_max_tokens: number
@@ -84,13 +85,6 @@ interface ReadinessItem {
   href: AppRoute
   icon: LucideIcon
   state: "ready" | "attention" | "optional"
-}
-
-const DEFAULT_LLM = {
-  llm_provider: "openai" as const,
-  llm_model: "gpt-4o-mini",
-  llm_temperature: 0.7,
-  llm_max_tokens: 512,
 }
 
 const SELECT_CLASSNAME =
@@ -467,6 +461,7 @@ export function CadenceCreateWizard({
     defaultPreset ?? resolvePresetId(searchParams.get("preset")),
   )
   const createCadence = useCreateCadence()
+  const { data: tenant, isFetched: tenantFetched, isError: tenantLoadFailed } = useTenant()
   const { data: lists, error: leadListsError, isLoading: loadingLeadLists } = useLeadLists()
   const { data: emailAccountsData } = useEmailAccounts()
   const { data: linkedInAccountsData } = useLinkedInAccounts()
@@ -481,12 +476,18 @@ export function CadenceCreateWizard({
   const [cadenceType, setCadenceType] = useState<CadenceType>(requestedPreset.cadenceType)
   const [leadListId, setLeadListId] = useState("")
   const { data: leadListDetail } = useLeadList(leadListId)
-  const [llmConfig, setLlmConfig] = useState<WizardLLMConfig>({
-    llm_provider: DEFAULT_LLM.llm_provider,
-    llm_model: DEFAULT_LLM.llm_model,
-    llm_temperature: DEFAULT_LLM.llm_temperature,
-    llm_max_tokens: DEFAULT_LLM.llm_max_tokens,
-  })
+  const [llmDirty, setLlmDirty] = useState(false)
+  const llmScope = cadenceType === "email_only" ? "cold_email" : "system"
+  const llmConfigReady = llmDirty || (tenantFetched && !tenantLoadFailed)
+  const llmConfigError = tenantLoadFailed
+    ? "Nao foi possivel carregar as configuracoes de IA do tenant. Recarregue a pagina ou ajuste manualmente antes de criar a cadencia."
+    : "As configuracoes de IA do tenant ainda estao carregando. Aguarde ou ajuste manualmente antes de criar a cadencia."
+  const [llmConfig, setLlmConfig] = useState<WizardLLMConfig>(() =>
+    getTenantLLMConfig(
+      undefined,
+      requestedPreset.cadenceType === "email_only" ? "cold_email" : "system",
+    ),
+  )
   const [steps, setSteps] = useState<CadenceStep[]>(() => cloneSteps(requestedPreset.steps))
   const [ttsConfig, setTtsConfig] = useState<TTSConfig>({
     tts_provider: null,
@@ -629,6 +630,7 @@ export function CadenceCreateWizard({
   ]
 
   const reviewWarnings = [
+    !llmConfigReady ? llmConfigError : null,
     !leadListId
       ? "Nenhuma lista foi vinculada. Você ainda poderá salvar a cadência, mas precisará iniciar leads manualmente depois."
       : null,
@@ -669,6 +671,16 @@ export function CadenceCreateWizard({
     }
 
     setSteps((currentSteps) => normalizeStepsForCadenceType(currentSteps, nextType))
+  }
+
+  useEffect(() => {
+    if (llmDirty) return
+    setLlmConfig(getTenantLLMConfig(tenant?.integration, llmScope))
+  }, [llmDirty, tenant?.integration, llmScope])
+
+  function handleLlmConfigChange(nextConfig: WizardLLMConfig) {
+    setLlmDirty(true)
+    setLlmConfig(nextConfig)
   }
 
   function updateMode(nextMode: CadenceMode) {
@@ -762,16 +774,25 @@ export function CadenceCreateWizard({
       return
     }
 
+    if (!llmConfigReady) {
+      setError(llmConfigError)
+      return
+    }
+
+    const effectiveLlmConfig = llmDirty
+      ? llmConfig
+      : getTenantLLMConfig(tenant?.integration, llmScope)
+
     const body: CreateCadenceBody & { allow_personal_email?: boolean } = {
       name: name.trim(),
       ...(description.trim() ? { description: description.trim() } : {}),
       mode,
       cadence_type: cadenceType,
       llm: {
-        provider: llmConfig.llm_provider,
-        model: llmConfig.llm_model,
-        temperature: llmConfig.llm_temperature,
-        max_tokens: llmConfig.llm_max_tokens,
+        provider: effectiveLlmConfig.llm_provider,
+        model: effectiveLlmConfig.llm_model,
+        temperature: effectiveLlmConfig.llm_temperature,
+        max_tokens: effectiveLlmConfig.llm_max_tokens,
       },
       tts_provider: ttsConfig.tts_provider,
       tts_voice_id: ttsConfig.tts_voice_id,
@@ -1284,7 +1305,7 @@ export function CadenceCreateWizard({
                 <LLMConfigForm
                   value={llmConfig}
                   onChange={(cfg) =>
-                    setLlmConfig({
+                    handleLlmConfigChange({
                       ...cfg,
                       llm_provider: cfg.llm_provider as WizardLLMConfig["llm_provider"],
                     })
@@ -1518,8 +1539,12 @@ export function CadenceCreateWizard({
                   <ChevronRight size={16} aria-hidden="true" />
                 </Button>
               ) : (
-                <Button type="submit" disabled={createCadence.isPending}>
-                  {createCadence.isPending ? "Criando cadência..." : "Criar cadência"}
+                <Button type="submit" disabled={createCadence.isPending || !llmConfigReady}>
+                  {createCadence.isPending
+                    ? "Criando cadência..."
+                    : llmConfigReady
+                      ? "Criar cadência"
+                      : "Carregando IA..."}
                 </Button>
               )}
             </div>

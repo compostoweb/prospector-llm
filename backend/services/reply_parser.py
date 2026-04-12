@@ -2,13 +2,13 @@
 services/reply_parser.py
 
 Classifica a intenção de uma resposta recebida (inbound).
-Usa o provider/modelo configurado nas settings do sistema (não por cadência —
-o lead já saiu da cadência quando responde).
+Usa o provider/modelo efetivo resolvido para o tenant no ponto de chamada.
 """
 
 from __future__ import annotations
 
 import json
+
 import structlog
 
 from integrations.llm import LLMMessage, LLMRegistry, LLMResponse
@@ -37,7 +37,6 @@ Retorne APENAS JSON no formato:
 
 
 class ReplyParser:
-
     def __init__(
         self,
         registry: LLMRegistry,
@@ -64,7 +63,7 @@ class ReplyParser:
             messages=messages,
             provider=self._provider,
             model=self._model,
-            temperature=0.1,    # baixa temperatura para classificação determinística
+            temperature=0.1,  # baixa temperatura para classificação determinística
             max_tokens=256,
             json_mode=True,
         )

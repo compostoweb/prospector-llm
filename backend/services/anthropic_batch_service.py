@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import structlog
@@ -34,14 +34,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.anthropic_batch_job import AnthropicBatchJob
 from models.lead import Lead
+from services.llm_config import resolve_anthropic_batch_model
 
 if TYPE_CHECKING:
     pass
 
 logger = structlog.get_logger()
-
-# Modelo padrão para análise de leads — Haiku 4.5 é o mais barato
-_DEFAULT_BATCH_MODEL = "claude-haiku-4-5"
 
 # Prompt do sistema para análise de ICP
 _ICP_SYSTEM_PROMPT = """Você é um especialista em qualificação de leads B2B para a Composto Web, empresa de tecnologia brasileira especializada em automação e sistemas de gestão empresarial.
@@ -90,7 +88,7 @@ async def submit_lead_analysis_batch(
     leads: list[Lead],
     tenant_id: uuid.UUID,
     db: AsyncSession,
-    model: str = _DEFAULT_BATCH_MODEL,
+    model: str | None = None,
     api_key: str | None = None,
 ) -> AnthropicBatchJob:
     """
@@ -111,6 +109,8 @@ async def submit_lead_analysis_batch(
     if not effective_key:
         raise RuntimeError("ANTHROPIC_API_KEY não configurada.")
 
+    effective_model = await resolve_anthropic_batch_model(db, tenant_id, model=model)
+
     client = AsyncAnthropic(api_key=effective_key)
 
     # Monta os requests do batch
@@ -118,7 +118,7 @@ async def submit_lead_analysis_batch(
     for lead in leads:
         user_prompt = _build_lead_user_prompt(lead)
         params: MessageCreateParamsNonStreaming = {
-            "model": model,
+            "model": effective_model,
             "max_tokens": 256,
             "system": _ICP_SYSTEM_PROMPT,
             "messages": [{"role": "user", "content": user_prompt}],
@@ -134,7 +134,7 @@ async def submit_lead_analysis_batch(
         "anthropic_batch.submitting",
         tenant_id=str(tenant_id),
         lead_count=len(leads),
-        model=model,
+        model=effective_model,
     )
 
     batch = await client.messages.batches.create(requests=requests)
@@ -147,7 +147,7 @@ async def submit_lead_analysis_batch(
         status="in_progress",
         lead_ids_json=json.dumps([str(lead.id) for lead in leads]),
         request_count=len(leads),
-        model=model,
+        model=effective_model,
     )
     db.add(job)
     await db.flush()
@@ -187,7 +187,7 @@ async def poll_batch(
     job.status = batch.processing_status
 
     if batch.processing_status == "ended":
-        job.ended_at = datetime.now(tz=timezone.utc)
+        job.ended_at = datetime.now(tz=UTC)
         job.results_url = str(batch.results_url) if batch.results_url else None
 
         counts = batch.request_counts
@@ -232,7 +232,7 @@ async def process_batch_results(
 
     client = AsyncAnthropic(api_key=effective_key)
     updated = 0
-    analyzed_at = datetime.now(tz=timezone.utc)
+    analyzed_at = datetime.now(tz=UTC)
 
     async for result in await client.messages.batches.results(job.anthropic_batch_id):
         if result.result.type != "succeeded":
@@ -292,8 +292,6 @@ async def get_pending_jobs(
 ) -> list[AnthropicBatchJob]:
     """Retorna todos os jobs com status in_progress para polling."""
     result = await db.execute(
-        select(AnthropicBatchJob)
-        .where(AnthropicBatchJob.status == "in_progress")
-        .limit(limit)
+        select(AnthropicBatchJob).where(AnthropicBatchJob.status == "in_progress").limit(limit)
     )
     return list(result.scalars().all())

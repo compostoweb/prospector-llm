@@ -24,6 +24,7 @@ from api.dependencies import get_effective_tenant_id, get_llm_registry, get_sess
 from integrations.llm.registry import LLMRegistry
 from models.content_reference import ContentReference
 from schemas.content import ContentReferenceCreate, ContentReferenceResponse
+from services.llm_config import resolve_tenant_llm_config
 
 logger = structlog.get_logger()
 
@@ -122,6 +123,7 @@ def _extract_linkedin_profile_url(post_url: str, content: str) -> str | None:
 async def analyze_reference_url(
     body: AnalyzeUrlRequest,
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
     registry: LLMRegistry = Depends(get_llm_registry),
 ) -> AnalyzeUrlResponse:
     from integrations.context_fetcher import ContextFetcher
@@ -231,12 +233,14 @@ async def analyze_reference_url(
         ),
     ]
 
+    llm_config = await resolve_tenant_llm_config(db, tenant_id)
+
     resp = await registry.complete(
         messages=messages,
-        provider="openai",
-        model="gpt-4o-mini",
-        temperature=0.3,
-        max_tokens=1500,
+        provider=llm_config.provider,
+        model=llm_config.model,
+        temperature=llm_config.temperature,
+        max_tokens=llm_config.max_tokens,
         json_mode=True,
     )
 

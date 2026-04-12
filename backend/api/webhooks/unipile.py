@@ -31,7 +31,7 @@ import hashlib
 import hmac
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -41,11 +41,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.dependencies import get_llm_registry, get_session_no_auth
 from core.config import settings
 from integrations.llm import LLMRegistry
+from models.cadence import Cadence
+from models.cadence_step import CadenceStep
 from models.enums import Channel, Intent, InteractionDirection, LeadStatus
 from models.interaction import Interaction
 from models.lead import Lead
-from models.cadence import Cadence
-from models.cadence_step import CadenceStep
+from services.llm_config import resolve_tenant_llm_config
 from services.reply_parser import ReplyParser
 
 logger = structlog.get_logger()
@@ -106,6 +107,7 @@ async def unipile_webhook(
 
 # ── Handlers ──────────────────────────────────────────────────────────
 
+
 async def _handle_relation_created(
     payload: dict,
     db: AsyncSession,
@@ -125,9 +127,7 @@ async def _handle_relation_created(
         logger.warning("webhook.unipile.relation_created.no_profile_id")
         return
 
-    result = await db.execute(
-        select(Lead).where(Lead.linkedin_profile_id == profile_id.strip())
-    )
+    result = await db.execute(select(Lead).where(Lead.linkedin_profile_id == profile_id.strip()))
     lead = result.scalar_one_or_none()
     if not lead:
         logger.info(
@@ -144,7 +144,7 @@ async def _handle_relation_created(
         return
 
     lead.linkedin_connection_status = "connected"
-    lead.linkedin_connected_at = datetime.now(tz=timezone.utc)
+    lead.linkedin_connected_at = datetime.now(tz=UTC)
 
     logger.info(
         "webhook.unipile.relation_created.connected",
@@ -154,20 +154,17 @@ async def _handle_relation_created(
 
     # Se lead está em cadência semi-manual, criar ManualTasks
     step_result = await db.execute(
-        select(CadenceStep.cadence_id)
-        .where(CadenceStep.lead_id == lead.id)
-        .limit(1)
+        select(CadenceStep.cadence_id).where(CadenceStep.lead_id == lead.id).limit(1)
     )
     cadence_id = step_result.scalar_one_or_none()
 
     if cadence_id:
-        cad_result = await db.execute(
-            select(Cadence).where(Cadence.id == cadence_id)
-        )
+        cad_result = await db.execute(select(Cadence).where(Cadence.id == cadence_id))
         cadence = cad_result.scalar_one_or_none()
 
         if cadence and cadence.mode == "semi_manual":
             from services.manual_task_service import ManualTaskService
+
             task_service = ManualTaskService()
             await task_service.create_tasks_for_lead(lead, cadence, db)
             logger.info(
@@ -180,12 +177,16 @@ async def _handle_relation_created(
 
     # Broadcast WebSocket para atualizar UI em tempo real
     from api.routes.ws import broadcast_event
-    await broadcast_event(str(lead.tenant_id), {
-        "type": "connection_accepted",
-        "lead_id": str(lead.id),
-        "lead_name": lead.name,
-        "profile_id": profile_id,
-    })
+
+    await broadcast_event(
+        str(lead.tenant_id),
+        {
+            "type": "connection_accepted",
+            "lead_id": str(lead.id),
+            "lead_name": lead.name,
+            "profile_id": profile_id,
+        },
+    )
 
 
 async def _handle_message_received(
@@ -210,9 +211,9 @@ async def _handle_message_received(
     # ── Idempotência: ignora mensagem já processada ────────────────
     if unipile_message_id:
         existing = await db.execute(
-            select(Interaction.id).where(
-                Interaction.unipile_message_id == unipile_message_id
-            ).limit(1)
+            select(Interaction.id)
+            .where(Interaction.unipile_message_id == unipile_message_id)
+            .limit(1)
         )
         if existing.scalar_one_or_none() is not None:
             logger.debug(
@@ -232,10 +233,11 @@ async def _handle_message_received(
         return
 
     # ── Classifica intenção ───────────────────────────────────────────
+    llm_config = await resolve_tenant_llm_config(db, lead.tenant_id)
     parser = ReplyParser(
         registry=registry,
-        provider=settings.REPLY_PARSER_PROVIDER,
-        model=settings.REPLY_PARSER_MODEL,
+        provider=llm_config.provider,
+        model=llm_config.model,
     )
     classification = await parser.classify(
         reply_text=text_content,
@@ -261,7 +263,7 @@ async def _handle_message_received(
         content_text=text_content,
         intent=intent,
         unipile_message_id=unipile_message_id or None,
-        created_at=datetime.now(tz=timezone.utc),
+        created_at=datetime.now(tz=UTC),
     )
     db.add(interaction)
 
@@ -286,6 +288,7 @@ async def _handle_message_received(
     # ── Notificação via Resend (interesse ou objeção) ─────────────
     if intent in (Intent.INTEREST, Intent.OBJECTION):
         from services.notification import send_reply_notification
+
         await send_reply_notification(
             lead=lead,
             intent=intent.value,
@@ -304,17 +307,22 @@ async def _handle_message_received(
 
     # Broadcast WebSocket para atualizar inbox em tempo real
     from api.routes.ws import broadcast_event
-    await broadcast_event(str(lead.tenant_id), {
-        "type": "new_message",
-        "lead_id": str(lead.id),
-        "lead_name": lead.name,
-        "channel": channel.value,
-        "intent": intent.value,
-        "text_preview": text_content[:100],
-    })
+
+    await broadcast_event(
+        str(lead.tenant_id),
+        {
+            "type": "new_message",
+            "lead_id": str(lead.id),
+            "lead_name": lead.name,
+            "channel": channel.value,
+            "intent": intent.value,
+            "text_preview": text_content[:100],
+        },
+    )
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
+
 
 def _verify_signature(body: bytes, signature_header: str) -> bool:
     """
@@ -333,7 +341,7 @@ def _verify_signature(body: bytes, signature_header: str) -> bool:
     if not signature_header.startswith(expected_prefix):
         return False
 
-    received_digest = signature_header[len(expected_prefix):]
+    received_digest = signature_header[len(expected_prefix) :]
     expected_digest = hmac.new(
         secret.encode(),
         body,
@@ -355,9 +363,7 @@ async def _find_lead_by_sender(sender_id: str, db: AsyncSession) -> Lead | None:
     sender_normalized = sender_id.strip()
 
     # Tenta como linkedin_profile_id
-    result = await db.execute(
-        select(Lead).where(Lead.linkedin_profile_id == sender_normalized)
-    )
+    result = await db.execute(select(Lead).where(Lead.linkedin_profile_id == sender_normalized))
     lead = result.scalar_one_or_none()
     if lead:
         return lead
@@ -365,16 +371,12 @@ async def _find_lead_by_sender(sender_id: str, db: AsyncSession) -> Lead | None:
     # Tenta como e-mail (formato sender para Gmail)
     if "@" in sender_normalized:
         sender_lower = sender_normalized.lower()
-        result = await db.execute(
-            select(Lead).where(Lead.email_corporate == sender_lower)
-        )
+        result = await db.execute(select(Lead).where(Lead.email_corporate == sender_lower))
         lead = result.scalar_one_or_none()
         if lead:
             return lead
 
-        result = await db.execute(
-            select(Lead).where(Lead.email_personal == sender_lower)
-        )
+        result = await db.execute(select(Lead).where(Lead.email_personal == sender_lower))
         return result.scalar_one_or_none()
 
     return None

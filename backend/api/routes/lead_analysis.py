@@ -10,7 +10,6 @@ GET  /leads/analyze-batch/{id} — status do job de análise
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -32,7 +31,8 @@ router = APIRouter(prefix="/leads", tags=["Lead Analysis"])
 class AnalyzeBatchRequest(BaseModel):
     lead_ids: list[uuid.UUID] = Field(..., min_length=1, max_length=500)
     model: str | None = Field(
-        None, description="Modelo Anthropic (padrão: claude-haiku-4-5)"
+        None,
+        description="Modelo Anthropic opcional. Quando omitido, usa o modelo system do tenant se o provider for anthropic.",
     )
 
 

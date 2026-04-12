@@ -20,7 +20,7 @@ Redis key: linkedin:native:cursor:{account_id}  TTL: 7 dias
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -184,6 +184,7 @@ async def _handle_native_message(
     from models.enums import Channel, Intent, InteractionDirection, StepStatus
     from models.interaction import Interaction
     from models.lead import Lead
+    from services.llm_config import resolve_tenant_llm_config
     from services.reply_parser import ReplyParser
 
     tid = _uuid_mod.UUID(tenant_id)
@@ -224,8 +225,17 @@ async def _handle_native_message(
         from core.redis_client import redis_client  # noqa: PLC0415
 
         registry = LLMRegistry(settings=settings, redis=redis_client)
-        parser = ReplyParser(registry=registry)
-        intent_str, summary = await parser.parse(message.text or "")
+        llm_config = await resolve_tenant_llm_config(db, lead.tenant_id)
+        parser = ReplyParser(
+            registry=registry,
+            provider=llm_config.provider,
+            model=llm_config.model,
+        )
+        classification = await parser.classify(
+            reply_text=message.text or "",
+            lead_name=lead.name,
+        )
+        intent_str = str(classification.get("intent") or Intent.NEUTRAL.value)
         try:
             intent = Intent(intent_str)
         except ValueError:
@@ -260,7 +270,7 @@ async def _handle_native_message(
             step.status = StepStatus.REPLIED
 
         # Atualiza lead
-        lead.last_reply_at = datetime.now(tz=timezone.utc)
+        lead.last_reply_at = datetime.now(tz=UTC)
         if intent == Intent.INTEREST:
             lead.linkedin_connection_status = "replied"
 

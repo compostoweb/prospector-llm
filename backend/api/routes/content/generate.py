@@ -23,7 +23,6 @@ from api.dependencies import (
     get_llm_registry,
     get_session_flexible,
 )
-from core.config import settings
 from integrations.llm import LLMRegistry
 from models.content_lead_magnet import ContentLeadMagnet
 from models.content_post import ContentPost
@@ -55,6 +54,7 @@ from services.content.llm_generator import (
     improve_post,
 )
 from services.content.rules import count_characters, validate_post
+from services.llm_config import merge_llm_config, resolve_tenant_llm_config
 
 logger = structlog.get_logger()
 
@@ -89,6 +89,18 @@ async def _get_settings_or_defaults(
         )
     )
     return author_name, author_voice
+
+
+async def _resolve_content_llm_config(
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+) -> tuple[str, str, float, int]:
+    config = await resolve_tenant_llm_config(db, tenant_id)
+    merged = merge_llm_config(config, provider=provider, model=model)
+    return merged.provider, merged.model, merged.temperature, merged.max_tokens
 
 
 # ── POST /content/generate ────────────────────────────────────────────
@@ -134,8 +146,12 @@ async def generate_content(
             for r in refs
         ]
 
-    provider = body.provider or settings.CONTENT_GEN_PROVIDER
-    model = body.model or settings.CONTENT_GEN_MODEL
+    provider, model, _, max_tokens = await _resolve_content_llm_config(
+        db,
+        tenant_id,
+        provider=body.provider,
+        model=body.model,
+    )
     lead_magnet_context: LeadMagnetPromptContext | None = None
 
     if body.content_goal == "lead_magnet_launch":
@@ -190,6 +206,7 @@ async def generate_content(
         provider=provider,
         model=model,
         temperature=body.temperature,
+        max_tokens=max_tokens,
         content_goal=body.content_goal,
         lead_magnet_context=lead_magnet_context,
     )
@@ -264,8 +281,12 @@ async def improve_content(
 
     author_name, author_voice = await _get_settings_or_defaults(db, tenant_id)
 
-    provider = body.provider or settings.CONTENT_GEN_PROVIDER
-    model = body.model or settings.CONTENT_GEN_MODEL
+    provider, model, temperature, max_tokens = await _resolve_content_llm_config(
+        db,
+        tenant_id,
+        provider=body.provider,
+        model=body.model,
+    )
 
     logger.info(
         "content.improve.start",
@@ -283,6 +304,8 @@ async def improve_content(
         registry=registry,
         provider=provider,
         model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
     )
 
     return ImprovePostResponse(
@@ -378,6 +401,7 @@ PILLAR_LABELS = {
 async def vary_theme(
     body: VaryThemeRequest,
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
     registry: LLMRegistry = Depends(get_llm_registry),
 ) -> VaryThemeResponse:
     """
@@ -399,11 +423,12 @@ async def vary_theme(
     from integrations.llm import LLMMessage  # local import para evitar circular
 
     messages = [LLMMessage(role="user", content=prompt)]
+    provider, model, _, _ = await _resolve_content_llm_config(db, tenant_id)
 
     response = await registry.complete(
         messages=messages,
-        provider=settings.CONTENT_GEN_PROVIDER,
-        model=settings.CONTENT_GEN_MODEL,
+        provider=provider,
+        model=model,
         temperature=0.9,
         max_tokens=128,
     )
@@ -412,6 +437,7 @@ async def vary_theme(
     logger.info("vary_theme.done", tenant_id=tenant_id, original=body.theme_title)
 
     return VaryThemeResponse(variation=variation)
+
 
 # ── POST /content/generate/detect-hook ─────────────────────────────────────────────
 
@@ -433,6 +459,7 @@ HOOK_DESCRIPTIONS = (
 async def detect_hook(
     body: DetectHookRequest,
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
     registry: LLMRegistry = Depends(get_llm_registry),
 ) -> DetectHookResponse:
     """
@@ -442,9 +469,7 @@ async def detect_hook(
     from integrations.llm import LLMMessage
 
     # Usa apenas as primeiras 3 linhas não vazias — o gancho é sempre no início
-    first_lines = "\n".join(
-        [l for l in body.body.strip().splitlines() if l.strip()][:3]
-    )
+    first_lines = "\n".join([l for l in body.body.strip().splitlines() if l.strip()][:3])
 
     prompt = (
         "Você é especialista em copywriting para LinkedIn.\n"
@@ -455,10 +480,11 @@ async def detect_hook(
     )
 
     messages = [LLMMessage(role="user", content=prompt)]
+    provider, model, _, _ = await _resolve_content_llm_config(db, tenant_id)
     response = await registry.complete(
         messages=messages,
-        provider=settings.CONTENT_GEN_PROVIDER,
-        model=settings.CONTENT_GEN_MODEL,
+        provider=provider,
+        model=model,
         temperature=0.1,
         max_tokens=16,
     )
@@ -473,6 +499,7 @@ async def detect_hook(
 
     logger.info("detect_hook.done", hook_type=detected, tenant_id=str(tenant_id))
     return DetectHookResponse(hook_type=detected)
+
 
 # ── POST /content/generate/image ─────────────────────────────────────
 

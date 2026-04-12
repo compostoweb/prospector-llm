@@ -28,6 +28,7 @@ from api.dependencies import (
 )
 from api.routes.auth import hash_api_key
 from core.database import AsyncSessionLocal
+from models.cadence import Cadence
 from models.tenant import Tenant, TenantIntegration
 from schemas.tenant import (
     TenantCreateRequest,
@@ -147,6 +148,45 @@ async def update_integrations(
     updates = body.model_dump(exclude_unset=True)
     for field, value in updates.items():
         setattr(integration, field, value)
+
+    system_llm_fields = {
+        "llm_default_provider",
+        "llm_default_model",
+        "llm_default_temperature",
+        "llm_default_max_tokens",
+    }
+    cold_email_llm_fields = {
+        "cold_email_llm_provider",
+        "cold_email_llm_model",
+        "cold_email_llm_temperature",
+        "cold_email_llm_max_tokens",
+    }
+
+    if system_llm_fields.intersection(updates):
+        cadences_result = await db.execute(
+            select(Cadence).where(
+                Cadence.tenant_id == tenant_id,
+                Cadence.cadence_type != "email_only",
+            )
+        )
+        for cadence in cadences_result.scalars().all():
+            cadence.llm_provider = integration.llm_default_provider
+            cadence.llm_model = integration.llm_default_model
+            cadence.llm_temperature = integration.llm_default_temperature
+            cadence.llm_max_tokens = integration.llm_default_max_tokens
+
+    if cold_email_llm_fields.intersection(updates):
+        cadences_result = await db.execute(
+            select(Cadence).where(
+                Cadence.tenant_id == tenant_id,
+                Cadence.cadence_type == "email_only",
+            )
+        )
+        for cadence in cadences_result.scalars().all():
+            cadence.llm_provider = integration.cold_email_llm_provider
+            cadence.llm_model = integration.cold_email_llm_model
+            cadence.llm_temperature = integration.cold_email_llm_temperature
+            cadence.llm_max_tokens = integration.cold_email_llm_max_tokens
 
     await db.commit()
     await db.refresh(integration)

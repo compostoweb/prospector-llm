@@ -117,7 +117,7 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str | None = None
     ANTHROPIC_DEFAULT_MODEL: str = "claude-sonnet-4-6"
 
-    # ── LLM — Reply parser (config global, não por cadência) ──────────
+    # ── LLM — Reply parser (fallback legado de compatibilidade) ───────
     REPLY_PARSER_PROVIDER: str = "openai"
     REPLY_PARSER_MODEL: str = "gpt-4o-mini"
 

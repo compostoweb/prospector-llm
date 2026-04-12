@@ -7,8 +7,7 @@ Dois analisadores:
   1. analyze_reference_post    — posts de alto engajamento (hook, pilar, por que performou)
   2. analyze_icp_post_relevance — posts de ICP (relevancia para comentar + angulo sugerido)
 
-Model hardcoded: gpt-5.4-mini
-Provider: openai
+Modelo e provider recebidos dinamicamente via configuracao efetiva do tenant.
 """
 
 from __future__ import annotations
@@ -20,11 +19,9 @@ import structlog
 
 from integrations.llm import LLMMessage
 from integrations.llm.registry import LLMRegistry
+from services.llm_config import ResolvedLLMConfig
 
 logger = structlog.get_logger()
-
-_PROVIDER = "openai"
-_MODEL = "gpt-5.4-mini"
 
 # ── Prompts ────────────────────────────────────────────────────────────────────
 
@@ -93,6 +90,7 @@ Retorne APENAS o JSON valido.
 async def analyze_reference_post(
     post_text: str,
     registry: LLMRegistry,
+    llm_config: ResolvedLLMConfig,
 ) -> dict:
     """
     Analisa post de referencia e retorna hook_type, pillar, why_it_performed,
@@ -111,10 +109,10 @@ async def analyze_reference_post(
     try:
         response = await registry.complete(
             messages=messages,
-            provider=_PROVIDER,
-            model=_MODEL,
-            temperature=0.2,
-            max_tokens=512,
+            provider=llm_config.provider,
+            model=llm_config.model,
+            temperature=llm_config.temperature,
+            max_tokens=llm_config.max_tokens,
         )
         return _parse_json_response(response.text, _default_reference_analysis())
     except Exception as exc:
@@ -131,6 +129,7 @@ async def analyze_icp_post_relevance(
     author_title: str,
     author_company: str,
     registry: LLMRegistry,
+    llm_config: ResolvedLLMConfig,
 ) -> dict:
     """
     Avalia relevancia de post de ICP para comentar.
@@ -153,10 +152,10 @@ async def analyze_icp_post_relevance(
     try:
         response = await registry.complete(
             messages=messages,
-            provider=_PROVIDER,
-            model=_MODEL,
-            temperature=0.2,
-            max_tokens=256,
+            provider=llm_config.provider,
+            model=llm_config.model,
+            temperature=llm_config.temperature,
+            max_tokens=llm_config.max_tokens,
         )
         result = _parse_json_response(response.text, _default_icp_relevance())
         # Garante tipo correto para is_relevant

@@ -71,6 +71,65 @@ export interface UpdateIntegrationsBody {
   cold_email_llm_max_tokens?: number
 }
 
+export interface TenantLLMConfig {
+  llm_provider: "openai" | "gemini" | "anthropic"
+  llm_model: string
+  llm_temperature: number
+  llm_max_tokens: number
+}
+
+export const DEFAULT_SYSTEM_LLM_CONFIG: TenantLLMConfig = {
+  llm_provider: "openai",
+  llm_model: "gpt-4o-mini",
+  llm_temperature: 0.7,
+  llm_max_tokens: 1024,
+}
+
+export const DEFAULT_COLD_EMAIL_LLM_CONFIG: TenantLLMConfig = {
+  llm_provider: "openai",
+  llm_model: "gpt-4o-mini",
+  llm_temperature: 0.7,
+  llm_max_tokens: 512,
+}
+
+function normalizeProvider(
+  provider: string | null | undefined,
+  fallback: TenantLLMConfig["llm_provider"],
+): TenantLLMConfig["llm_provider"] {
+  if (provider === "openai" || provider === "gemini" || provider === "anthropic") {
+    return provider
+  }
+  return fallback
+}
+
+export function getTenantLLMConfig(
+  integration: TenantIntegration | null | undefined,
+  scope: "system" | "cold_email" = "system",
+): TenantLLMConfig {
+  const fallback =
+    scope === "cold_email" ? DEFAULT_COLD_EMAIL_LLM_CONFIG : DEFAULT_SYSTEM_LLM_CONFIG
+
+  if (!integration) {
+    return fallback
+  }
+
+  if (scope === "cold_email") {
+    return {
+      llm_provider: normalizeProvider(integration.cold_email_llm_provider, fallback.llm_provider),
+      llm_model: integration.cold_email_llm_model || fallback.llm_model,
+      llm_temperature: integration.cold_email_llm_temperature ?? fallback.llm_temperature,
+      llm_max_tokens: integration.cold_email_llm_max_tokens ?? fallback.llm_max_tokens,
+    }
+  }
+
+  return {
+    llm_provider: normalizeProvider(integration.llm_default_provider, fallback.llm_provider),
+    llm_model: integration.llm_default_model || fallback.llm_model,
+    llm_temperature: integration.llm_default_temperature ?? fallback.llm_temperature,
+    llm_max_tokens: integration.llm_default_max_tokens ?? fallback.llm_max_tokens,
+  }
+}
+
 // ── Hooks ─────────────────────────────────────────────────────────────
 
 /** Dados do tenant atual e suas configurações de integração */

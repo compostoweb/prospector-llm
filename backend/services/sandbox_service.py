@@ -196,14 +196,10 @@ class SandboxService:
             leads_data = await self._get_real_leads(lead_ids, tenant_id, db)
         elif use_fictitious:
             lead_source = SandboxLeadSource.FICTITIOUS
-            leads_data = await self._generate_fictitious_leads(
-                lead_count, registry, cadence
-            )
+            leads_data = await self._generate_fictitious_leads(lead_count, registry, cadence)
         else:
             lead_source = SandboxLeadSource.SAMPLE
-            leads_data = await self._get_sample_leads(
-                cadence, tenant_id, db, lead_count
-            )
+            leads_data = await self._get_sample_leads(cadence, tenant_id, db, lead_count)
 
         if not leads_data:
             raise ValueError("Nenhum lead disponível para o sandbox.")
@@ -223,9 +219,13 @@ class SandboxService:
             lead_id = lead_data.get("lead_id")
             fictitious = lead_data.get("fictitious_data")
 
-            for step_number, (channel, day_offset, use_voice, _audio_file_id, step_type) in enumerate(
-                template, start=1
-            ):
+            for step_number, (
+                channel,
+                day_offset,
+                use_voice,
+                _audio_file_id,
+                step_type,
+            ) in enumerate(template, start=1):
                 step = SandboxStep(
                     id=uuid.uuid4(),
                     tenant_id=tenant_id,
@@ -298,7 +298,11 @@ class SandboxService:
 
             try:
                 content, email_subject, llm_info = await self._compose_step(
-                    step, cadence, context_fetcher, registry, db,
+                    step,
+                    cadence,
+                    context_fetcher,
+                    registry,
+                    db,
                     total_steps=total_steps,
                     previous_channel=previous_channel,
                 )
@@ -319,9 +323,7 @@ class SandboxService:
                 message_content = step.message_content
                 if step.use_voice and message_content:
                     try:
-                        audio_url = await self._generate_tts_preview(
-                            cadence, message_content
-                        )
+                        audio_url = await self._generate_tts_preview(cadence, message_content)
                         step.audio_preview_url = audio_url
                     except Exception as tts_exc:
                         logger.warning(
@@ -390,7 +392,11 @@ class SandboxService:
 
         try:
             content, email_subject, llm_info = await self._compose_step(
-                step, cadence, context_fetcher, registry, db,
+                step,
+                cadence,
+                context_fetcher,
+                registry,
+                db,
                 total_steps=total_steps,
                 previous_channel=prev_channel,
             )
@@ -411,9 +417,7 @@ class SandboxService:
             message_content = step.message_content
             if step.use_voice and message_content:
                 try:
-                    audio_url = await self._generate_tts_preview(
-                        cadence, message_content
-                    )
+                    audio_url = await self._generate_tts_preview(cadence, message_content)
                     step.audio_preview_url = audio_url
                 except Exception as tts_exc:
                     logger.warning(
@@ -588,7 +592,9 @@ class SandboxService:
         reply_text = response.text.strip()
 
         # Classifica com ReplyParser
-        return await self._classify_and_save_reply(step, reply_text, lead_info["name"], registry, db)
+        return await self._classify_and_save_reply(
+            step, reply_text, lead_info["name"], registry, db
+        )
 
     async def simulate_reply_manual(
         self,
@@ -602,7 +608,9 @@ class SandboxService:
         step = await self._get_step(step_id, tenant_id, db)
         lead_info = await self._get_lead_info(step, db)
 
-        return await self._classify_and_save_reply(step, reply_text, lead_info["name"], registry, db)
+        return await self._classify_and_save_reply(
+            step, reply_text, lead_info["name"], registry, db
+        )
 
     # ── Rate limits ───────────────────────────────────────────────────
 
@@ -662,7 +670,9 @@ class SandboxService:
                 if adj_date not in daily_counts:
                     daily_counts[adj_date] = {}
                 if channel_val not in daily_counts[adj_date]:
-                    daily_counts[adj_date][channel_val] = real_usage.get(adj_date, {}).get(channel_val, 0)
+                    daily_counts[adj_date][channel_val] = real_usage.get(adj_date, {}).get(
+                        channel_val, 0
+                    )
                 daily_counts[adj_date][channel_val] += 1
             else:
                 step.is_rate_limited = False
@@ -723,23 +733,25 @@ class SandboxService:
                 f"Mensagem original: {(step.message_content or '')[:200]}..."
             )
 
-            results.append({
-                "lead_name": lead_info["name"],
-                "lead_company": lead_info.get("company"),
-                "intent": intent_label,
-                "person": {
-                    "name": lead_info["name"],
-                    "email": email,
-                    "person_exists": person_exists,
-                    "person_id": person_id,
-                },
-                "deal": {
-                    "title": deal_title,
-                    "stage": f"stage_{stage_id}" if stage_id else "default",
-                    "value": 0.0,
-                },
-                "note_preview": note_content,
-            })
+            results.append(
+                {
+                    "lead_name": lead_info["name"],
+                    "lead_company": lead_info.get("company"),
+                    "intent": intent_label,
+                    "person": {
+                        "name": lead_info["name"],
+                        "email": email,
+                        "person_exists": person_exists,
+                        "person_id": person_id,
+                    },
+                    "deal": {
+                        "title": deal_title,
+                        "stage": f"stage_{stage_id}" if stage_id else "default",
+                        "value": 0.0,
+                    },
+                    "note_preview": note_content,
+                }
+            )
 
         # Salva preview no run
         run.pipedrive_dry_run = {"leads": results}
@@ -844,13 +856,15 @@ class SandboxService:
                     )
                     note_added = await client.add_note(deal_id, note_content)
 
-                results.append({
-                    "lead_name": lead_name,
-                    "person_id": person_id,
-                    "deal_id": deal_id,
-                    "note_added": note_added,
-                    "error": None,
-                })
+                results.append(
+                    {
+                        "lead_name": lead_name,
+                        "person_id": person_id,
+                        "deal_id": deal_id,
+                        "note_added": note_added,
+                        "error": None,
+                    }
+                )
 
                 logger.info(
                     "sandbox.pipedrive_pushed",
@@ -865,13 +879,15 @@ class SandboxService:
                     lead_name=lead_name,
                     error=str(exc),
                 )
-                results.append({
-                    "lead_name": lead_name,
-                    "person_id": None,
-                    "deal_id": None,
-                    "note_added": False,
-                    "error": str(exc),
-                })
+                results.append(
+                    {
+                        "lead_name": lead_name,
+                        "person_id": None,
+                        "deal_id": None,
+                        "note_added": False,
+                        "error": str(exc),
+                    }
+                )
 
         return results
 
@@ -902,8 +918,7 @@ class SandboxService:
     ) -> SandboxStep:
         """Carrega step, valida tenant."""
         result = await db.execute(
-            select(SandboxStep)
-            .where(SandboxStep.id == step_id, SandboxStep.tenant_id == tenant_id)
+            select(SandboxStep).where(SandboxStep.id == step_id, SandboxStep.tenant_id == tenant_id)
         )
         step = result.scalar_one_or_none()
         if not step:
@@ -955,10 +970,7 @@ class SandboxService:
         # Se count <= templates disponíveis, usa direto
         if count <= len(_FICTITIOUS_LEAD_TEMPLATES):
             templates = _FICTITIOUS_LEAD_TEMPLATES[:count]
-            return [
-                {"lead_id": None, "fictitious_data": t}
-                for t in templates
-            ]
+            return [{"lead_id": None, "fictitious_data": t} for t in templates]
 
         # Gera via LLM para ter mais variedade
         import json
@@ -982,10 +994,7 @@ class SandboxService:
             # Fallback: usa templates
             leads_data = cast(list[dict[str, str | None]], _FICTITIOUS_LEAD_TEMPLATES[:count])
 
-        return [
-            {"lead_id": None, "fictitious_data": lead}
-            for lead in leads_data[:count]
-        ]
+        return [{"lead_id": None, "fictitious_data": lead} for lead in leads_data[:count]]
 
     async def _compose_step(
         self,
@@ -1021,9 +1030,7 @@ class SandboxService:
             # Lead real — busca via query async (não usar step.lead por lazy loading)
             from sqlalchemy import select as sa_select
 
-            result = await db.execute(
-                sa_select(Lead).where(Lead.id == step.lead_id)
-            )
+            result = await db.execute(sa_select(Lead).where(Lead.id == step.lead_id))
             lead = result.scalar_one_or_none()
             if not lead:
                 raise ValueError(f"Lead {step.lead_id} não encontrado.")
@@ -1083,8 +1090,12 @@ class SandboxService:
             template_step.get("message_template") if template_step else None,
             lead_proxy,
         )
-        subject_variants = cast(list[object], template_step.get("subject_variants") or []) if template_step else []
-        configured_email_template_id = template_step.get("email_template_id") if template_step else None
+        subject_variants = (
+            cast(list[object], template_step.get("subject_variants") or []) if template_step else []
+        )
+        configured_email_template_id = (
+            template_step.get("email_template_id") if template_step else None
+        )
 
         if step.channel == Channel.EMAIL and configured_email_template_id:
             from models.email_template import EmailTemplate
@@ -1103,7 +1114,9 @@ class SandboxService:
 
             if email_template is not None:
                 subject, body = render_saved_email_template(email_template, lead_proxy)
-                cleaned_variants = [str(item).strip() for item in subject_variants if str(item).strip()]
+                cleaned_variants = [
+                    str(item).strip() for item in subject_variants if str(item).strip()
+                ]
                 if cleaned_variants:
                     subject = cleaned_variants[0]
                 llm_bypassed_info["composition_context"] = {
@@ -1115,7 +1128,9 @@ class SandboxService:
         if configured_message:
             email_subject: str | None = None
             if step.channel == Channel.EMAIL:
-                cleaned_variants = [str(item).strip() for item in subject_variants if str(item).strip()]
+                cleaned_variants = [
+                    str(item).strip() for item in subject_variants if str(item).strip()
+                ]
                 if cleaned_variants:
                     email_subject = cleaned_variants[0]
             llm_bypassed_info["composition_context"] = {
@@ -1252,10 +1267,13 @@ class SandboxService:
         db: AsyncSession,
     ) -> SandboxStep:
         """Classifica reply e salva resultado no step."""
+        from services.llm_config import resolve_tenant_llm_config  # noqa: PLC0415
+
+        llm_config = await resolve_tenant_llm_config(db, step.tenant_id)
         parser = ReplyParser(
             registry=registry,
-            provider=settings.REPLY_PARSER_PROVIDER,
-            model=settings.REPLY_PARSER_MODEL,
+            provider=llm_config.provider,
+            model=llm_config.model,
         )
 
         result = cast(dict[str, object], await parser.classify(reply_text, lead_name))
@@ -1304,5 +1322,7 @@ class SandboxService:
                 return check_dt
             check_dt += timedelta(days=1)
         return check_dt  # fallback: 30 dias depois
+
+
 # Singleton
 sandbox_service = SandboxService()

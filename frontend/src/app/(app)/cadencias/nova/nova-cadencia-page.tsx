@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import {
@@ -26,6 +26,7 @@ import {
 import { useLeadLists, useLeadList } from "@/lib/api/hooks/use-lead-lists"
 import { useEmailAccounts } from "@/lib/api/hooks/use-email-accounts"
 import { useLinkedInAccounts } from "@/lib/api/hooks/use-linkedin-accounts"
+import { getTenantLLMConfig, useTenant } from "@/lib/api/hooks/use-tenant"
 import { LLMConfigForm, type LLMConfig } from "@/components/cadencias/llm-config-form"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -173,13 +174,6 @@ const PRESETS: CadencePreset[] = [
     ],
   },
 ]
-
-const DEFAULT_LLM: LLMConfig = {
-  llm_provider: "openai",
-  llm_model: "gpt-4o-mini",
-  llm_temperature: 0.7,
-  llm_max_tokens: 512,
-}
 
 const WIZARD_STEPS = [
   { label: "Estrutura", icon: GitBranch },
@@ -753,6 +747,7 @@ function StepRevisao({
 export default function NovaCadenciaPage() {
   const router = useRouter()
   const createCadence = useCreateCadence()
+  const { data: tenant, isFetched: tenantFetched, isError: tenantLoadFailed } = useTenant()
 
   const [activeStep, setActiveStep] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -769,8 +764,26 @@ export default function NovaCadenciaPage() {
   const [linkedInAccountId, setLinkedInAccountId] = useState("")
 
   // Step 2
-  const [llmConfig, setLlmConfig] = useState<LLMConfig>(DEFAULT_LLM)
+  const [llmDirty, setLlmDirty] = useState(false)
+  const tenantLLMScope = cadenceType === "email_only" ? "cold_email" : "system"
+  const llmConfigReady = llmDirty || (tenantFetched && !tenantLoadFailed)
+  const llmConfigError = tenantLoadFailed
+    ? "Nao foi possivel carregar as configuracoes de IA do tenant. Recarregue a pagina ou ajuste manualmente antes de criar a cadencia."
+    : "As configuracoes de IA do tenant ainda estao carregando. Aguarde ou ajuste manualmente antes de criar a cadencia."
+  const [llmConfig, setLlmConfig] = useState<LLMConfig>(() =>
+    getTenantLLMConfig(undefined, "system"),
+  )
   const [targetSegment, setTargetSegment] = useState("")
+  useEffect(() => {
+    if (llmDirty) return
+    setLlmConfig(getTenantLLMConfig(tenant?.integration, tenantLLMScope))
+  }, [llmDirty, tenant?.integration, tenantLLMScope])
+
+  function handleLlmConfigChange(nextConfig: LLMConfig) {
+    setLlmDirty(true)
+    setLlmConfig(nextConfig)
+  }
+
   const [personaDescription, setPersonaDescription] = useState("")
   const [offerDescription, setOfferDescription] = useState("")
   const [toneInstructions, setToneInstructions] = useState("")
@@ -805,7 +818,15 @@ export default function NovaCadenciaPage() {
       setError("Nome é obrigatório.")
       return
     }
+    if (!llmConfigReady) {
+      setError(llmConfigError)
+      return
+    }
     setError(null)
+
+    const effectiveLlmConfig = llmDirty
+      ? llmConfig
+      : getTenantLLMConfig(tenant?.integration, tenantLLMScope)
 
     const cadenceSteps: CadenceStep[] = steps.map((s) => ({
       channel: s.channel,
@@ -826,10 +847,10 @@ export default function NovaCadenciaPage() {
       mode: PRESETS.find((p) => p.id === presetId)?.mode ?? "automatic",
       cadence_type: cadenceType,
       llm: {
-        provider: llmConfig.llm_provider as "openai" | "gemini",
-        model: llmConfig.llm_model,
-        temperature: llmConfig.llm_temperature,
-        max_tokens: llmConfig.llm_max_tokens,
+        provider: effectiveLlmConfig.llm_provider as "openai" | "gemini",
+        model: effectiveLlmConfig.llm_model,
+        temperature: effectiveLlmConfig.llm_temperature,
+        max_tokens: effectiveLlmConfig.llm_max_tokens,
       },
       lead_list_id: leadListId || null,
       email_account_id: emailAccountId || null,
@@ -874,7 +895,7 @@ export default function NovaCadenciaPage() {
     <StepConteudo
       key="cont"
       llmConfig={llmConfig}
-      setLlmConfig={setLlmConfig}
+      setLlmConfig={handleLlmConfigChange}
       targetSegment={targetSegment}
       setTargetSegment={setTargetSegment}
       personaDescription={personaDescription}
@@ -1011,13 +1032,13 @@ export default function NovaCadenciaPage() {
             <button
               type="button"
               onClick={submit}
-              disabled={createCadence.isPending}
+              disabled={createCadence.isPending || !llmConfigReady}
               className="flex items-center gap-1.5 rounded-md bg-(--accent) px-5 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"
             >
               {createCadence.isPending ? (
                 <Loader2 size={14} className="animate-spin" aria-hidden="true" />
               ) : null}
-              Criar cadência
+              {llmConfigReady ? "Criar cadência" : "Carregando IA..."}
             </button>
           )}
         </div>

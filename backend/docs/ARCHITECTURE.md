@@ -95,7 +95,7 @@ llm_max_tokens   64 – 8192
 Isso permite cadências paralelas com modelos diferentes:
 - Cadência de volume → `gemini-2.5-flash-lite` ($0.10/MTok in)
 - Cadência de alto valor → `gpt-4o` ou `gemini-2.5-pro`
-- Reply parser → sempre `gpt-4o-mini` (settings globais)
+- Reply parser e classificações inbound → configuração efetiva do tenant por escopo
 
 ### Modelos disponíveis (março 2026)
 
@@ -280,7 +280,7 @@ SELECT steps WHERE scheduled_at <= now() AND status = pending
 ### 4. Resposta recebida
 ```
 Unipile webhook → pause_cadence()
-→ reply_parser.classify() via LLMRegistry(settings.REPLY_PARSER_PROVIDER, settings.REPLY_PARSER_MODEL)
+→ resolve_tenant_llm_config(tenant_id) → reply_parser.classify()
 → INTEREST/OBJECTION → pipedrive.create_deal() + notify_seller()
 → NOT_INTERESTED → archive_lead()
 → OUT_OF_OFFICE → reschedule_cadence(return_date)

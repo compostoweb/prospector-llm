@@ -87,7 +87,7 @@ O sistema valida com `hmac.compare_digest()` usando `UNIPILE_WEBHOOK_SECRET`.
 1. Extrai `text`, `unipile_message_id`, `sender_id`, `account_id` do payload
 2. **Idempotência**: verifica se `unipile_message_id` já existe em `interactions`
 3. Localiza o lead por `linkedin_profile_id` → email corporativo → email pessoal
-4. Classifica intent via `ReplyParser` (usa `REPLY_PARSER_PROVIDER` / `REPLY_PARSER_MODEL` do settings)
+4. Resolve a configuração efetiva de LLM do tenant e classifica intent via `ReplyParser`
 5. Salva `Interaction` com `direction=INBOUND`
 6. Ações por intent:
    - `INTEREST` → `lead.status = CONVERTED` + notificação

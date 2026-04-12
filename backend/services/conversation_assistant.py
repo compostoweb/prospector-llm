@@ -10,7 +10,6 @@ from __future__ import annotations
 import structlog
 
 from integrations.llm import LLMMessage, LLMRegistry, LLMResponse
-from core.config import settings
 
 logger = structlog.get_logger()
 
@@ -58,12 +57,13 @@ class ConversationAssistant:
             chat_messages: últimas N mensagens [{sender, text, is_own}]
             lead_data: dados do lead (nome, empresa, cargo, etc)
             tone: tom desejado (formal, casual, objetiva, consultiva)
-            provider: provider LLM (default: settings global)
-            model: modelo LLM (default: settings global)
+            provider: provider LLM
+            model: modelo LLM
         """
+        if not provider or not model:
+            raise ValueError("provider e model sao obrigatorios para suggest_reply")
+
         tone_desc = _TONES.get(tone, _TONES["formal"])
-        llm_provider = provider or settings.REPLY_PARSER_PROVIDER
-        llm_model = model or settings.REPLY_PARSER_MODEL
 
         # Monta contexto do lead
         lead_context = ""
@@ -105,8 +105,8 @@ Sugira a próxima resposta mantendo o tom '{tone}':"""
 
         response: LLMResponse = await self._registry.complete(
             messages=messages,
-            provider=llm_provider,
-            model=llm_model,
+            provider=provider,
+            model=model,
             temperature=0.7,
             max_tokens=256,
         )

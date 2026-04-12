@@ -164,8 +164,8 @@ class CadenceCreateRequest(BaseModel):
         description="Tipo: mixed | email_only. email_only força todos os steps no canal EMAIL.",
     )
 
-    # Configuração LLM — se não informado, usa defaults globais
-    llm: LLMConfigSchema = Field(default_factory=LLMConfigSchema)
+    # Configuração LLM — se não informado, usa o padrão do tenant
+    llm: LLMConfigSchema | None = None
 
     # Configuração TTS — se não informado, usa fallback global (VOICE_PROVIDER)
     tts_provider: str | None = Field(

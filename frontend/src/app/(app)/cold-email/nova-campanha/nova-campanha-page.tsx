@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import {
@@ -22,6 +22,7 @@ import {
   type CadenceStep,
   type CreateCadenceBody,
 } from "@/lib/api/hooks/use-cadences"
+import { getTenantLLMConfig, useTenant } from "@/lib/api/hooks/use-tenant"
 import { useLeadLists, useLeadList } from "@/lib/api/hooks/use-lead-lists"
 import { useEmailAccounts } from "@/lib/api/hooks/use-email-accounts"
 import { LLMConfigForm, type LLMConfig } from "@/components/cadencias/llm-config-form"
@@ -118,13 +119,6 @@ const PRESETS: EmailPreset[] = [
     steps: [{ day_offset: 0, step_type: "email_first", subject_variants: [""] }],
   },
 ]
-
-const DEFAULT_LLM: LLMConfig = {
-  llm_provider: "openai",
-  llm_model: "gpt-4o-mini",
-  llm_temperature: 0.7,
-  llm_max_tokens: 512,
-}
 
 const WIZARD_STEPS = [
   { label: "Sequência", icon: Mail },
@@ -761,6 +755,7 @@ function StepRevisao({
 export default function NovaCampanhaPage() {
   const router = useRouter()
   const createCadence = useCreateCadence()
+  const { data: tenant, isFetched: tenantFetched, isError: tenantLoadFailed } = useTenant()
 
   const [activeStep, setActiveStep] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -776,8 +771,25 @@ export default function NovaCampanhaPage() {
   const [usePersonalFallback, setUsePersonalFallback] = useState(false)
 
   // Step 2
-  const [llmConfig, setLlmConfig] = useState<LLMConfig>(DEFAULT_LLM)
+  const [llmDirty, setLlmDirty] = useState(false)
+  const llmConfigReady = llmDirty || (tenantFetched && !tenantLoadFailed)
+  const llmConfigError = tenantLoadFailed
+    ? "Nao foi possivel carregar as configuracoes de IA do tenant. Recarregue a pagina ou ajuste manualmente antes de criar a campanha."
+    : "As configuracoes de IA do tenant ainda estao carregando. Aguarde ou ajuste manualmente antes de criar a campanha."
+  const [llmConfig, setLlmConfig] = useState<LLMConfig>(() =>
+    getTenantLLMConfig(undefined, "cold_email"),
+  )
   const [targetSegment, setTargetSegment] = useState("")
+  useEffect(() => {
+    if (llmDirty) return
+    setLlmConfig(getTenantLLMConfig(tenant?.integration, "cold_email"))
+  }, [llmDirty, tenant?.integration])
+
+  function handleLlmConfigChange(nextConfig: LLMConfig) {
+    setLlmDirty(true)
+    setLlmConfig(nextConfig)
+  }
+
   const [personaDescription, setPersonaDescription] = useState("")
   const [offerDescription, setOfferDescription] = useState("")
   const [toneInstructions, setToneInstructions] = useState("")
@@ -812,7 +824,15 @@ export default function NovaCampanhaPage() {
       setError("Nome é obrigatório.")
       return
     }
+    if (!llmConfigReady) {
+      setError(llmConfigError)
+      return
+    }
     setError(null)
+
+    const effectiveLlmConfig = llmDirty
+      ? llmConfig
+      : getTenantLLMConfig(tenant?.integration, "cold_email")
 
     const cadenceSteps: CadenceStep[] = steps.map((s) => ({
       channel: "email" as const,
@@ -831,10 +851,10 @@ export default function NovaCampanhaPage() {
       mode: "automatic",
       cadence_type: "email_only",
       llm: {
-        provider: llmConfig.llm_provider as "openai" | "gemini",
-        model: llmConfig.llm_model,
-        temperature: llmConfig.llm_temperature,
-        max_tokens: llmConfig.llm_max_tokens,
+        provider: effectiveLlmConfig.llm_provider as "openai" | "gemini",
+        model: effectiveLlmConfig.llm_model,
+        temperature: effectiveLlmConfig.llm_temperature,
+        max_tokens: effectiveLlmConfig.llm_max_tokens,
       },
       lead_list_id: leadListId || null,
       email_account_id: emailAccountId || null,
@@ -877,7 +897,7 @@ export default function NovaCampanhaPage() {
     <StepConteudo
       key="cont"
       llmConfig={llmConfig}
-      setLlmConfig={setLlmConfig}
+      setLlmConfig={handleLlmConfigChange}
       targetSegment={targetSegment}
       setTargetSegment={setTargetSegment}
       personaDescription={personaDescription}
@@ -1014,7 +1034,7 @@ export default function NovaCampanhaPage() {
             <button
               type="button"
               onClick={() => void submit()}
-              disabled={createCadence.isPending}
+              disabled={createCadence.isPending || !llmConfigReady}
               className="flex items-center gap-1.5 rounded-md bg-(--accent) px-5 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
             >
               {createCadence.isPending ? (
@@ -1022,7 +1042,11 @@ export default function NovaCampanhaPage() {
               ) : (
                 <MailCheck size={14} aria-hidden="true" />
               )}
-              {createCadence.isPending ? "Criando…" : "Criar campanha"}
+              {createCadence.isPending
+                ? "Criando…"
+                : llmConfigReady
+                  ? "Criar campanha"
+                  : "Carregando IA..."}
             </button>
           )}
         </div>

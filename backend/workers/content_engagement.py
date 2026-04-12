@@ -593,6 +593,9 @@ async def _run_scan_async(
         author_voice = (
             content_settings.author_voice if content_settings else None
         ) or "direto, tecnico, coloquial profissional"
+        from services.llm_config import resolve_tenant_llm_config  # noqa: PLC0415
+
+        llm_config = await resolve_tenant_llm_config(db, tenant_uuid)
 
         # Salvar e analisar posts de referencia (Etapa 3a)
         await _set_step(3)
@@ -601,6 +604,7 @@ async def _run_scan_async(
                 analysis = await analyze_reference_post(
                     post_text=post_data["post_text"],
                     registry=registry,
+                    llm_config=llm_config,
                 )
                 canonical_post_url, dedup_key = build_post_identity(
                     post_url=post_data.get("post_url"),
@@ -681,6 +685,7 @@ async def _run_scan_async(
                     author_title=post_data.get("author_title", ""),
                     author_company=post_data.get("author_company", ""),
                     registry=registry,
+                    llm_config=llm_config,
                 )
                 canonical_post_url, dedup_key = build_post_identity(
                     post_url=post_data.get("post_url"),
@@ -752,6 +757,7 @@ async def _run_scan_async(
                         comment_angle=relevance.get("comment_angle", ""),
                         author_voice=author_voice,
                         registry=registry,
+                        llm_config=llm_config,
                     )
 
                     for variation, text in enumerate([comment_1, comment_2], start=1):

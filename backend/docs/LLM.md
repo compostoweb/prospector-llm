@@ -30,7 +30,7 @@ OPENAI_DEFAULT_MODEL=gpt-4o-mini       # padrão global
 GEMINI_API_KEY=...
 GEMINI_DEFAULT_MODEL=gemini-2.5-flash  # padrão global
 
-# Reply Parser (classificação de respostas — usa settings globais)
+# Reply Parser (fallback legado; os fluxos ativos resolvem o modelo pelo tenant)
 REPLY_PARSER_PROVIDER=openai
 REPLY_PARSER_MODEL=gpt-4o-mini
 ```

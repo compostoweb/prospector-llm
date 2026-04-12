@@ -82,6 +82,7 @@ function createCaptureButton(
 }
 
 function findInjectionTarget(container: HTMLElement): HTMLElement {
+  // Strategy 1: Find the "..." menu button or control area at box top-right
   const topRightControls = container.querySelector<HTMLElement>(
     [
       ".feed-shared-control-menu__trigger",
@@ -94,6 +95,11 @@ function findInjectionTarget(container: HTMLElement): HTMLElement {
       "button[aria-label*='menu']",
       "button[aria-label*='Fechar']",
       "button[aria-label*='Close']",
+      "button[aria-label*='Dispensar']",
+      "button[aria-label*='Dismiss']",
+      // LinkedIn's 3-dot menu SVG icon container
+      "[data-control-name*='overflow']",
+      ".artdeco-dropdown__trigger",
     ].join(", "),
   );
   if (topRightControls?.parentElement instanceof HTMLElement) {
@@ -104,6 +110,16 @@ function findInjectionTarget(container: HTMLElement): HTMLElement {
     return host;
   }
 
+  // Strategy 2: Find the actor header area and inject as first child
+  const headerArea = container.querySelector<HTMLElement>(
+    ".update-components-actor, .feed-shared-actor",
+  );
+  if (headerArea instanceof HTMLElement) {
+    headerArea.style.position = "relative";
+    return headerArea;
+  }
+
+  // Strategy 3: Action bar
   const actionBar = container.querySelector<HTMLElement>(
     ".feed-shared-social-action-bar, .social-actions-button, .update-v2-social-activity",
   );
@@ -111,6 +127,7 @@ function findInjectionTarget(container: HTMLElement): HTMLElement {
     return actionBar;
   }
 
+  // Strategy 4: Social counts area
   const socialDetails = container.querySelector<HTMLElement>(
     ".social-details-social-counts, .social-details-social-activity",
   );

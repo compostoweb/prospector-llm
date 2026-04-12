@@ -3,7 +3,9 @@ import type { CapturePreview, CapturedFrom } from "../shared/types";
 const ACTION_TEXT_PATTERN =
   /\b(gostar|like|comentar|comment|compartilhar|share|repost|enviar|send)\b/i;
 const SOCIAL_CONTEXT_PATTERN =
-  /\b(gostou|liked|comentou|commented|repostou|reposted|compartilhou|shared|seguem a empresa|follows the company|conexoes seguem|connections follow)\b/i;
+  /\b(gostou|liked|comentou|commented|repostou|reposted|compartilhou|shared|seguem a empresa|follows the company|conexoes seguem|connections follow|reagiram|reacted|reagiu|celebrou|celebrated|apoiou|supported|achou interessante|found insightful|achou engracado|found funny|amou|loved)\b/i;
+const SOCIAL_PROOF_PATTERN =
+  /\b(e mais \d+|\d+\s*(reações|reactions|curtidas|likes|comentários|comments|compartilhamentos|shares|reposts)|pessoas\s+reagiram|people\s+reacted)\b/i;
 const FOLLOW_CTA_PATTERN =
   /\b(seguir|follow|conectar|connect|acessar meu site|acesse meu site|visit website)\b/i;
 const TIMESTAMP_PATTERN =
@@ -12,22 +14,26 @@ const RELATIVE_TIME_TOKEN_PATTERN =
   /\b(\d+\s*(?:min|minutos?|h|hora|horas|d|dia|dias|sem|semanas?|m|mes|meses|mo))\b/i;
 const POST_TEXT_COLLAPSE_PATTERN = /(?:\.\.\.|…)\s*(mais|more)\b/gi;
 const REACTION_PATTERN = /reaction|reactions|reac|curtida|curtidas|like|likes/i;
-const COMMENT_PATTERN = /comment|comments|comentario|comentarios|comentário|comentários/i;
-const SHARE_PATTERN = /repost|reposts|share|shares|compartilhamento|compartilhamentos|compartilhar/i;
+const COMMENT_PATTERN =
+  /comment|comments|comentario|comentarios|comentário|comentários/i;
+const SHARE_PATTERN =
+  /repost|reposts|share|shares|compartilhamento|compartilhamentos|compartilhar/i;
 
 const POST_URL_SELECTORS = [
   ".update-components-actor__meta-link",
   ".feed-shared-actor__container-link",
   ".feed-shared-actor__meta-link",
   ".update-components-actor__sub-description-link",
+  ".update-components-actor__sub-description-link a",
+  ".update-components-actor__sub-description a",
   ".feed-shared-actor__sub-description-link",
+  ".feed-shared-actor__sub-description-link a",
   'a[href*="/posts/"]',
   'a[href*="/feed/update/"]',
   'a[href*="/activity-"]',
+  'a[href*="/activity/"]',
 ];
 
-const POST_URN_ATTRIBUTE_SELECTORS =
-  "[data-urn], [data-id], [data-activity-urn], [data-entity-urn], [data-update-urn], [data-content-urn]";
 const POST_URN_PATTERN = /urn:li:(activity|share|ugcPost|update):\d+/i;
 
 const AUTHOR_NAME_SELECTORS = [
@@ -110,8 +116,11 @@ const STATIC_CONTAINER_SELECTORS = [
   "div.occludable-update",
   "div[data-id^='urn:li:activity:']",
   "div[data-urn^='urn:li:activity:']",
+  "div[data-id^='urn:li:ugcPost:']",
+  "div[data-id^='urn:li:share:']",
+  "[data-urn*='urn:li:activity:']",
+  "[data-urn*='urn:li:ugcPost:']",
   "article",
-  ".update-components-actor",
 ];
 
 const HEADER_SCOPE_SELECTORS = [
@@ -150,6 +159,15 @@ function isActionOrNoiseText(value: string): boolean {
   return false;
 }
 
+function isSocialProofOrMetricsText(value: string): boolean {
+  if (SOCIAL_PROOF_PATTERN.test(value)) return true;
+  if (SOCIAL_CONTEXT_PATTERN.test(value)) return true;
+  // Pure metrics strings: "42 reações 42 28 comentários 28 comentários"
+  const withoutNumbers = value.replace(/\d+/g, "").trim();
+  if (withoutNumbers.length < 15 && REACTION_PATTERN.test(value)) return true;
+  return false;
+}
+
 function sanitizeAuthorName(value: string | null): string | null {
   const cleaned = normalizeWhitespace(
     value
@@ -168,7 +186,11 @@ function sanitizeAuthorTitle(
   authorName: string | null,
 ): string | null {
   const cleaned = normalizeWhitespace(value);
-  if (!cleaned || cleaned === authorName || SOCIAL_CONTEXT_PATTERN.test(cleaned)) {
+  if (
+    !cleaned ||
+    cleaned === authorName ||
+    SOCIAL_CONTEXT_PATTERN.test(cleaned)
+  ) {
     return null;
   }
   return normalizeWhitespace(cleaned.replace(FOLLOW_CTA_PATTERN, " "));
@@ -179,7 +201,9 @@ function sanitizePostText(
   authorName: string | null,
   authorTitle: string | null,
 ): string | null {
-  let cleaned = normalizeWhitespace(value?.replace(POST_TEXT_COLLAPSE_PATTERN, " "));
+  let cleaned = normalizeWhitespace(
+    value?.replace(POST_TEXT_COLLAPSE_PATTERN, " "),
+  );
   if (!cleaned) {
     return null;
   }
@@ -201,7 +225,10 @@ function sanitizePostText(
     cleaned = cleaned.slice(authorTitle.length);
   }
   cleaned = cleaned.replace(/^[^.!?]{0,220}\b(?:seguir|follow)\b\s*/i, "");
-  cleaned = cleaned.replace(/^(?:acessar meu site|acesse meu site|visit website)\b\s*/i, "");
+  cleaned = cleaned.replace(
+    /^(?:acessar meu site|acesse meu site|visit website)\b\s*/i,
+    "",
+  );
   return normalizeWhitespace(cleaned);
 }
 
@@ -221,10 +248,23 @@ function looksLikeAuthorName(value: string): boolean {
 
 function getHeaderScope(root: ParentNode): ParentNode {
   for (const selector of HEADER_SCOPE_SELECTORS) {
-    const element = root.querySelector<HTMLElement>(selector);
-    if (element) {
-      return element;
+    const elements = Array.from(root.querySelectorAll<HTMLElement>(selector));
+    if (elements.length === 0) continue;
+
+    // If multiple actors exist: social context header comes first, real author comes after
+    // Prefer one whose text does NOT contain social context patterns
+    if (elements.length >= 2) {
+      for (let i = elements.length - 1; i >= 0; i--) {
+        const text = normalizeWhitespace(elements[i].innerText) ?? "";
+        if (!SOCIAL_CONTEXT_PATTERN.test(text) && text.length > 3) {
+          return elements[i];
+        }
+      }
+      // All have social context — return last (deepest/nested = most likely real author)
+      return elements[elements.length - 1];
     }
+
+    return elements[0];
   }
   return root;
 }
@@ -239,7 +279,10 @@ function collectSearchRoots(root: ParentNode): ParentNode[] {
   return searchRoots;
 }
 
-function collectVisibleTextCandidates(root: ParentNode, minLength = 12): string[] {
+function collectVisibleTextCandidates(
+  root: ParentNode,
+  minLength = 12,
+): string[] {
   const values: string[] = [];
   const seen = new Set<string>();
   const elements = root.querySelectorAll<HTMLElement>("span, div, p, a, li");
@@ -265,14 +308,19 @@ function collectVisibleTextCandidates(root: ParentNode, minLength = 12): string[
   return values;
 }
 
-function collectStructuredTexts(root: ParentNode, selectors: string[]): string[] {
+function collectStructuredTexts(
+  root: ParentNode,
+  selectors: string[],
+): string[] {
   const values: string[] = [];
   const seen = new Set<string>();
 
   for (const selector of selectors) {
     for (const element of root.querySelectorAll<HTMLElement>(selector)) {
-      const value = normalizeWhitespace(element.textContent ?? element.innerText);
-      if (!value || value.length < 20 || value.length > 4000) {
+      const value = normalizeWhitespace(
+        element.textContent ?? element.innerText,
+      );
+      if (!value || value.length < 20 || value.length > 8000) {
         continue;
       }
       if (seen.has(value)) {
@@ -292,7 +340,9 @@ function collectSelectorTexts(root: ParentNode, selectors: string[]): string[] {
 
   for (const selector of selectors) {
     for (const element of root.querySelectorAll<HTMLElement>(selector)) {
-      const value = normalizeWhitespace(element.innerText || element.textContent);
+      const value = normalizeWhitespace(
+        element.innerText || element.textContent,
+      );
       if (!value || seen.has(value)) {
         continue;
       }
@@ -320,7 +370,9 @@ function findActionAnchors(scope: ParentNode): HTMLElement[] {
 function getActionSignature(text: string): string {
   const matches = text
     .toLowerCase()
-    .match(/gostar|like|comentar|comment|compartilhar|share|repost|enviar|send/g);
+    .match(
+      /gostar|like|comentar|comment|compartilhar|share|repost|enviar|send/g,
+    );
   return matches ? Array.from(new Set(matches)).sort().join("|") : "";
 }
 
@@ -410,7 +462,10 @@ function resolveAuthorName(root: ParentNode): string | null {
   return fallbackAuthorName(root);
 }
 
-function resolveAuthorTitle(root: ParentNode, authorName: string | null): string | null {
+function resolveAuthorTitle(
+  root: ParentNode,
+  authorName: string | null,
+): string | null {
   for (const candidate of collectSelectorTexts(root, AUTHOR_TITLE_SELECTORS)) {
     const sanitized = sanitizeAuthorTitle(candidate, authorName);
     if (sanitized) {
@@ -432,7 +487,9 @@ function resolveAuthorTitle(root: ParentNode, authorName: string | null): string
   return fallbackAuthorTitle(root, authorName);
 }
 
-function normalizeLinkedInPostUrl(rawUrl: string | null | undefined): string | null {
+function normalizeLinkedInPostUrl(
+  rawUrl: string | null | undefined,
+): string | null {
   const cleaned = normalizeWhitespace(rawUrl);
   if (!cleaned) {
     return null;
@@ -461,7 +518,8 @@ function normalizeLinkedInPostUrl(rawUrl: string | null | undefined): string | n
     }
 
     const updateEntityUrn = normalizeWhitespace(
-      url.searchParams.get("updateEntityUrn") ?? url.searchParams.get("updateEntityUrn"),
+      url.searchParams.get("updateEntityUrn") ??
+        url.searchParams.get("updateEntityUrn"),
     );
     if (updateEntityUrn && POST_URN_PATTERN.test(updateEntityUrn)) {
       return `${url.origin}/feed/update/${updateEntityUrn.replace(/\/+$/, "")}/`;
@@ -491,75 +549,28 @@ function buildLinkedInFeedUrlFromUrn(postUrn: string | null): string | null {
 }
 
 function extractPostUrn(root: ParentNode): string | null {
-  const candidates: string[] = [];
-
+  // Walk up ancestors and check ALL attributes for activity URN pattern
   let currentElement = root instanceof HTMLElement ? root : null;
-  for (let depth = 0; currentElement && depth < 8; depth += 1) {
-    candidates.push(
-      ...[
-        currentElement.dataset.urn,
-        currentElement.dataset.id,
-        currentElement.dataset.activityUrn,
-        currentElement.dataset.entityUrn,
-        currentElement.dataset.updateUrn,
-        currentElement.dataset.contentUrn,
-        currentElement.getAttribute("data-urn"),
-        currentElement.getAttribute("data-id"),
-        currentElement.getAttribute("data-activity-urn"),
-        currentElement.getAttribute("data-entity-urn"),
-        currentElement.getAttribute("data-update-urn"),
-        currentElement.getAttribute("data-content-urn"),
-      ].filter((value): value is string => !!value),
-    );
+  for (let depth = 0; currentElement && depth < 15; depth += 1) {
+    for (const attr of Array.from(currentElement.attributes)) {
+      const match = attr.value.match(POST_URN_PATTERN);
+      if (match) {
+        return match[0];
+      }
+    }
     currentElement = currentElement.parentElement;
   }
 
-  if (root instanceof HTMLElement) {
-    const selfAttributes = [
-      root.dataset.urn,
-      root.dataset.id,
-      root.dataset.activityUrn,
-      root.dataset.entityUrn,
-      root.dataset.updateUrn,
-      root.dataset.contentUrn,
-      root.getAttribute("data-urn"),
-      root.getAttribute("data-id"),
-      root.getAttribute("data-activity-urn"),
-      root.getAttribute("data-entity-urn"),
-      root.getAttribute("data-update-urn"),
-      root.getAttribute("data-content-urn"),
-    ];
-    candidates.push(...selfAttributes.filter((value): value is string => !!value));
-  }
-
-  for (const element of root.querySelectorAll<HTMLElement>(POST_URN_ATTRIBUTE_SELECTORS)) {
-    const attributeCandidates = [
-      element.dataset.urn,
-      element.dataset.id,
-      element.dataset.activityUrn,
-      element.dataset.entityUrn,
-      element.dataset.updateUrn,
-      element.dataset.contentUrn,
-      element.getAttribute("data-urn"),
-      element.getAttribute("data-id"),
-      element.getAttribute("data-activity-urn"),
-      element.getAttribute("data-entity-urn"),
-      element.getAttribute("data-update-urn"),
-      element.getAttribute("data-content-urn"),
-    ];
-
-    for (const candidate of attributeCandidates) {
-      if (!candidate) {
+  // Search descendants — any element with any data attribute containing URN
+  for (const element of root.querySelectorAll<HTMLElement>("*")) {
+    for (const attr of Array.from(element.attributes)) {
+      if (!attr.name.startsWith("data-")) {
         continue;
       }
-      candidates.push(candidate);
-    }
-  }
-
-  for (const candidate of candidates) {
-    const match = candidate.match(POST_URN_PATTERN);
-    if (match) {
-      return match[0];
+      const match = attr.value.match(POST_URN_PATTERN);
+      if (match) {
+        return match[0];
+      }
     }
   }
 
@@ -567,6 +578,13 @@ function extractPostUrn(root: ParentNode): string | null {
 }
 
 function firstPostUrl(root: ParentNode): string | null {
+  // Strategy 1: URN from data attributes (most reliable — scans all attributes)
+  const urnUrl = buildLinkedInFeedUrlFromUrn(extractPostUrn(root));
+  if (urnUrl) {
+    return urnUrl;
+  }
+
+  // Strategy 2: Known selectors in container + ancestors
   for (const searchRoot of collectSearchRoots(root)) {
     for (const selector of POST_URL_SELECTORS) {
       const anchor = searchRoot.querySelector<HTMLAnchorElement>(selector);
@@ -577,27 +595,40 @@ function firstPostUrl(root: ParentNode): string | null {
     }
   }
 
+  // Strategy 3: Link wrapping a <time> element (timestamp links to post)
+  for (const searchRoot of collectSearchRoots(root)) {
+    const timeElements = searchRoot.querySelectorAll<HTMLElement>("time");
+    for (const timeEl of timeElements) {
+      const parentLink = timeEl.closest<HTMLAnchorElement>("a[href]");
+      if (parentLink) {
+        const href = normalizeLinkedInPostUrl(parentLink.href);
+        if (href) {
+          return href;
+        }
+      }
+    }
+  }
+
+  // Strategy 4: Any <a> with LinkedIn post URL pattern
   for (const searchRoot of collectSearchRoots(root)) {
     const anchors = searchRoot.querySelectorAll<HTMLAnchorElement>("a[href]");
     for (const anchor of anchors) {
       const href = normalizeLinkedInPostUrl(anchor.href);
-      if (!href) {
-        continue;
-      }
-      if (
-        href.includes("/posts/") ||
-        href.includes("/feed/update/") ||
-        href.includes("/activity-")
-      ) {
+      if (href) {
         return href;
       }
     }
   }
 
+  // Strategy 5: Extract activity ID from any href containing it
   for (const searchRoot of collectSearchRoots(root)) {
-    const postUrl = buildLinkedInFeedUrlFromUrn(extractPostUrn(searchRoot));
-    if (postUrl) {
-      return postUrl;
+    const anchors = searchRoot.querySelectorAll<HTMLAnchorElement>("a[href]");
+    for (const anchor of anchors) {
+      const hrefText = anchor.href ?? "";
+      const activityMatch = hrefText.match(/activity[:\-](\d{15,25})/i);
+      if (activityMatch) {
+        return `https://www.linkedin.com/feed/update/urn:li:activity:${activityMatch[1]}/`;
+      }
     }
   }
 
@@ -616,7 +647,10 @@ function getMetricScope(root: ParentNode): ParentNode {
 
 function parseMetricValue(rawText: string | null): number {
   if (!rawText) return 0;
-  const normalized = rawText.toLowerCase().replace(/\./g, "").replace(/,/g, ".");
+  const normalized = rawText
+    .toLowerCase()
+    .replace(/\./g, "")
+    .replace(/,/g, ".");
   const match = normalized.match(/(\d+(?:\.\d+)?)(\s*[km])?/);
   if (!match) return 0;
 
@@ -629,14 +663,22 @@ function parseMetricValue(rawText: string | null): number {
   return Math.round(base);
 }
 
-function parseNamedMetricValue(rawText: string | null, pattern: RegExp): number {
+function parseNamedMetricValue(
+  rawText: string | null,
+  pattern: RegExp,
+): number {
   if (!rawText) {
     return 0;
   }
 
   const source = pattern.source;
-  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
-  const regex = new RegExp(`(\\d+(?:[\\.,]\\d+)?)(\\s*[km])?\\s*(?:${source})`, flags);
+  const flags = pattern.flags.includes("g")
+    ? pattern.flags
+    : `${pattern.flags}g`;
+  const regex = new RegExp(
+    `(\\d+(?:[\\.,]\\d+)?)(\\s*[km])?\\s*(?:${source})`,
+    flags,
+  );
   let lastMatch: RegExpExecArray | null = null;
   for (const match of rawText.toLowerCase().matchAll(regex)) {
     lastMatch = match;
@@ -685,7 +727,9 @@ function findNamedMetric(
   }
 
   const scope = getMetricScope(root);
-  for (const element of scope.querySelectorAll<HTMLElement>("button, a, span, div, li")) {
+  for (const element of scope.querySelectorAll<HTMLElement>(
+    "button, a, span, div, li",
+  )) {
     const text = readElementText(element);
     if (!text) {
       continue;
@@ -705,7 +749,9 @@ function findReactionMetric(root: ParentNode): number {
   }
 
   const scope = getMetricScope(root);
-  for (const element of scope.querySelectorAll<HTMLElement>("button, a, span, div, li")) {
+  for (const element of scope.querySelectorAll<HTMLElement>(
+    "button, a, span, div, li",
+  )) {
     const text = readElementText(element);
     if (!text) {
       continue;
@@ -729,6 +775,7 @@ function extractPostText(
   authorName: string | null,
   authorTitle: string | null,
 ): string | null {
+  // Strategy 1: Use textContent (includes hidden "see more" text) from structured selectors
   const structuredCandidates = collectStructuredTexts(root, POST_TEXT_SELECTORS)
     .map((candidate) => sanitizePostText(candidate, authorName, authorTitle))
     .filter(
@@ -736,18 +783,36 @@ function extractPostText(
         !!candidate &&
         candidate.length >= 20 &&
         !isActionOrNoiseText(candidate) &&
-        !SOCIAL_CONTEXT_PATTERN.test(candidate) &&
+        !isSocialProofOrMetricsText(candidate) &&
         !FOLLOW_CTA_PATTERN.test(candidate) &&
-        !RELATIVE_TIME_TOKEN_PATTERN.test(candidate) &&
         candidate !== authorName &&
         candidate !== authorTitle,
     );
   if (structuredCandidates.length > 0) {
-    const preferredCandidate = structuredCandidates.find(
-      (candidate) => /[.!?]/.test(candidate) || candidate.length > 70,
-    );
-    return preferredCandidate ?? chooseLongestText(structuredCandidates);
+    return chooseLongestText(structuredCandidates);
   }
+
+  // Strategy 2: Use innerText from the same selectors (visible text only)
+  for (const selector of POST_TEXT_SELECTORS) {
+    for (const element of root.querySelectorAll<HTMLElement>(selector)) {
+      const text = sanitizePostText(
+        normalizeWhitespace(element.innerText),
+        authorName,
+        authorTitle,
+      );
+      if (
+        text &&
+        text.length >= 20 &&
+        !isActionOrNoiseText(text) &&
+        !isSocialProofOrMetricsText(text) &&
+        text !== authorName &&
+        text !== authorTitle
+      ) {
+        return text;
+      }
+    }
+  }
+
   return fallbackPostText(root, authorName, authorTitle);
 }
 
@@ -758,7 +823,7 @@ function looksLikePostContainer(container: HTMLElement): boolean {
     return false;
   }
   const allText = normalizeWhitespace(container.innerText) ?? "";
-  if (allText.length < 40 || allText.length > 9000) {
+  if (allText.length < 40 || allText.length > 20000) {
     return false;
   }
   const hasPostUrl = !!firstPostUrl(container);
@@ -766,11 +831,15 @@ function looksLikePostContainer(container: HTMLElement): boolean {
     findReactionMetric(container) > 0 ||
     findNamedMetric(container, COMMENT_COUNT_SELECTORS, COMMENT_PATTERN) > 0 ||
     findNamedMetric(container, SHARE_COUNT_SELECTORS, SHARE_PATTERN) > 0;
-  const hasHeader = !!sanitizeAuthorName(firstText(getHeaderScope(container), AUTHOR_NAME_SELECTORS));
+  const hasHeader = !!sanitizeAuthorName(
+    firstText(getHeaderScope(container), AUTHOR_NAME_SELECTORS),
+  );
   return hasPostUrl || hasMetrics || hasHeader;
 }
 
-function findContainerFromActionBar(actionBar: HTMLElement): HTMLElement | null {
+function findContainerFromActionBar(
+  actionBar: HTMLElement,
+): HTMLElement | null {
   let current: HTMLElement | null = actionBar;
   for (let depth = 0; current && depth < 8; depth += 1) {
     if (looksLikePostContainer(current)) {
@@ -785,7 +854,9 @@ export function collectLikelyPostContainers(scope: ParentNode): HTMLElement[] {
   const containers = new Set<HTMLElement>();
 
   for (const selector of STATIC_CONTAINER_SELECTORS) {
-    for (const element of Array.from(scope.querySelectorAll<HTMLElement>(selector))) {
+    for (const element of Array.from(
+      scope.querySelectorAll<HTMLElement>(selector),
+    )) {
       if (looksLikePostContainer(element)) {
         containers.add(element);
       }
@@ -869,7 +940,10 @@ function fallbackPostText(
       if (candidate.length < 20 || candidate.length > 1500) {
         return false;
       }
-      if (isActionOrNoiseText(candidate) || SOCIAL_CONTEXT_PATTERN.test(candidate)) {
+      if (
+        isActionOrNoiseText(candidate) ||
+        isSocialProofOrMetricsText(candidate)
+      ) {
         return false;
       }
       return true;
@@ -907,7 +981,11 @@ export function extractLinkedInPost(
     author_company: parseAuthorCompany(authorTitle),
     author_profile_url: null,
     likes: findReactionMetric(container),
-    comments: findNamedMetric(container, COMMENT_COUNT_SELECTORS, COMMENT_PATTERN),
+    comments: findNamedMetric(
+      container,
+      COMMENT_COUNT_SELECTORS,
+      COMMENT_PATTERN,
+    ),
     shares: findNamedMetric(container, SHARE_COUNT_SELECTORS, SHARE_PATTERN),
     post_type: capturedFrom === "post_detail" ? "icp" : "reference",
     captured_from: capturedFrom,

@@ -16,21 +16,27 @@ Cobre:
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+
+from models.cadence import Cadence
 
 pytestmark = pytest.mark.asyncio
 
 
 # ── POST /tenants ─────────────────────────────────────────────────────
 
+
 async def test_create_tenant_returns_201_and_api_key(
     raw_client: AsyncClient,
     db,
 ) -> None:
     """Onboarding de tenant válido retorna 201 com api_key em plaintext."""
-    from api.routes.auth import _get_raw_session
     from api.main import app
+    from api.routes.auth import _get_raw_session
 
     app.dependency_overrides[_get_raw_session] = _make_db_override(db)
 
@@ -56,8 +62,8 @@ async def test_create_tenant_duplicate_slug_returns_409(
     db,
 ) -> None:
     """Slug já em uso retorna 409 Conflict."""
-    from api.routes.tenants import _get_raw_session
     from api.main import app
+    from api.routes.tenants import _get_raw_session
 
     app.dependency_overrides[_get_raw_session] = _make_db_override(db)
 
@@ -95,6 +101,7 @@ async def test_create_tenant_short_name_returns_422(
 
 # ── GET /tenants/me ───────────────────────────────────────────────────
 
+
 async def test_get_me_returns_tenant_data(
     client: AsyncClient,
     tenant,
@@ -122,6 +129,7 @@ async def test_get_me_without_auth_returns_401(
 
 
 # ── PUT /tenants/me/integrations ─────────────────────────────────────
+
 
 async def test_update_integrations_pipedrive(
     client: AsyncClient,
@@ -214,19 +222,76 @@ async def test_update_integrations_unipile_accounts(
     assert body["unipile_gmail_account_id"] == "gmail_acc_xyz789"
 
 
+async def test_update_integrations_propagates_llm_defaults_to_existing_cadences(
+    client: AsyncClient,
+    db,
+    tenant,
+) -> None:
+    mixed = Cadence(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Cadência Mista",
+        cadence_type="mixed",
+        llm_provider="openai",
+        llm_model="gpt-4o-mini",
+        llm_temperature=0.7,
+        llm_max_tokens=512,
+    )
+    cold_email = Cadence(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Campanha E-mail",
+        cadence_type="email_only",
+        llm_provider="openai",
+        llm_model="gpt-4o-mini",
+        llm_temperature=0.7,
+        llm_max_tokens=512,
+    )
+    db.add(mixed)
+    db.add(cold_email)
+    await db.flush()
+
+    resp = await client.put(
+        "/tenants/me/integrations",
+        json={
+            "llm_default_provider": "openai",
+            "llm_default_model": "gpt-5.4-mini",
+            "llm_default_temperature": 0.3,
+            "llm_default_max_tokens": 2048,
+            "cold_email_llm_provider": "openai",
+            "cold_email_llm_model": "gpt-5.4-mini",
+            "cold_email_llm_temperature": 0.2,
+            "cold_email_llm_max_tokens": 640,
+        },
+    )
+    assert resp.status_code == 200
+
+    result = await db.execute(select(Cadence).order_by(Cadence.name.asc()))
+    cadences = result.scalars().all()
+    assert cadences[0].llm_model == "gpt-5.4-mini"
+    assert cadences[0].llm_temperature == 0.2
+    assert cadences[0].llm_max_tokens == 640
+    assert cadences[1].llm_model == "gpt-5.4-mini"
+    assert cadences[1].llm_temperature == 0.3
+    assert cadences[1].llm_max_tokens == 2048
+
+
 # ── Helpers ───────────────────────────────────────────────────────────
+
 
 def _make_db_override(db):
     """Retorna async gen function que FastAPI reconhece como dependency generator."""
+
     async def _dep():
         yield db
+
     return _dep
 
 
 async def raw_post_tenant(client: AsyncClient, db, slug: str):
     """Reutilizável para tentar criar tenants sem override de session."""
-    from api.routes.tenants import _get_raw_session
     from api.main import app
+    from api.routes.tenants import _get_raw_session
 
     app.dependency_overrides[_get_raw_session] = _make_db_override(db)
     resp = await client.post(
@@ -241,6 +306,7 @@ async def raw_post_tenant(client: AsyncClient, db, slug: str):
 async def raw_client(db):
     """Cliente HTTP sem headers de autenticação."""
     from httpx import ASGITransport, AsyncClient
+
     from api.main import app
 
     async with AsyncClient(
