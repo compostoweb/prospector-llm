@@ -24,6 +24,7 @@ from models.base import Base, TenantMixin, TimestampMixin
 from models.enums import LeadSource, LeadStatus
 
 if TYPE_CHECKING:
+    from models.lead_email import LeadEmail
     from models.lead_list import LeadList
 
 
@@ -162,9 +163,13 @@ class Lead(Base, TenantMixin, TimestampMixin):
         back_populates="leads",
         lazy="selectin",
     )
-    emails: Mapped[list[object]] = relationship(  # type: ignore[name-defined]
+    emails: Mapped[list[LeadEmail]] = relationship(  # type: ignore[name-defined]
         "LeadEmail",
         back_populates="lead",
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+
+
+# Importa o model relacionado em runtime para registrar "LeadEmail" no mapper.
+from models.lead_email import LeadEmail  # noqa: E402,F401
