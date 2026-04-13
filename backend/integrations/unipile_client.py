@@ -337,7 +337,7 @@ class UnipileClient:
         """Envia um email via conta Gmail conectada na Unipile."""
         payload: dict = {
             "account_id": account_id,
-            "to": [{"email": to_email}],
+            "to": [{"identifier": to_email}],
             "subject": subject,
             "body": body_html,
         }
@@ -359,7 +359,7 @@ class UnipileClient:
 
         response.raise_for_status()
         data = response.json()
-        msg_id: str = data.get("id", "")
+        msg_id: str = data.get("id") or data.get("provider_id") or data.get("tracking_id") or ""
         logger.info(
             "unipile.email.sent",
             to=to_email,

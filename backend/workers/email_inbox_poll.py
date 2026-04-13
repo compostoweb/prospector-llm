@@ -26,7 +26,6 @@ import email as email_lib
 import imaplib
 import re
 import uuid as uuid_mod
-from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -566,6 +565,10 @@ async def _process_email_reply(
     from models.cadence_step import CadenceStep  # noqa: PLC0415
     from models.enums import Channel, StepStatus  # noqa: PLC0415
     from models.interaction import Interaction  # noqa: PLC0415
+    from services.email_event_service import (  # noqa: PLC0415
+        classify_inbound_email_event,
+        record_email_bounce,
+    )
     from services.inbound_message_service import (  # noqa: PLC0415
         find_lead_by_email,
         process_inbound_reply,
@@ -582,23 +585,30 @@ async def _process_email_reply(
         if existing.scalar_one_or_none():
             return
 
-        # ── Detecção de NDR/bounce ANTES de tudo ─────────────────────
-        if _is_ndr_message(from_email=from_email, subject=subject, body=body):
-            # Tentamos associar o bounce ao lead a partir do corpo do NDR —
-            # que normalmente inclui o endereço original do destinatário.
-            bounced_email = _extract_bounced_email(body)
-            if bounced_email:
-                lead = await find_lead_by_email(bounced_email, tenant_id, db)
-                if lead and lead.email_bounced_at is None:
-                    lead.email_bounced_at = datetime.now(tz=UTC)
-                    lead.email_bounce_type = "hard"
-                    await db.commit()
-                    logger.info(
-                        "email_inbox_poll.bounce_detected",
-                        lead_id=str(lead.id),
-                        bounced_email=bounced_email,
-                    )
-            return  # NDRs não entram no Reply Parser
+        inbound_event = classify_inbound_email_event(
+            from_email=from_email,
+            subject=subject,
+            body=body,
+        )
+        if inbound_event.kind == "ignored":
+            return
+        if inbound_event.kind == "bounce":
+            if inbound_event.matched_email:
+                await record_email_bounce(
+                    db,
+                    tenant_id,
+                    inbound_event.matched_email,
+                    source="email_inbox_poll",
+                    bounce_type=inbound_event.bounce_type or "hard",
+                )
+            else:
+                logger.info(
+                    "email_inbox_poll.bounce_unmatched",
+                    tenant_id=str(tenant_id),
+                    from_email=from_email,
+                    subject=subject,
+                )
+            return
 
         # Busca lead pelo e-mail do remetente
         lead = await find_lead_by_email(from_email, tenant_id, db)
@@ -645,81 +655,3 @@ async def _process_email_reply(
             intent=result.intent.value,
             confidence=result.classification.get("confidence"),
         )
-
-
-# ── NDR / Bounce detection ────────────────────────────────────────────
-
-# Remetentes típicos de mensagens de bounce (case-insensitive)
-_NDR_SENDERS = (
-    "mailer-daemon@",
-    "postmaster@",
-    "mail-daemon@",
-    "mailerdaemon@",
-    "noreply@bounce",
-    "bounce@",
-    "no-reply@bounce",
-)
-
-# Keywords no subject que indicam bounce permanente
-_NDR_SUBJECTS = (
-    "delivery status notification",
-    "delivery failure",
-    "mail delivery failed",
-    "mail delivery failure",
-    "undeliverable",
-    "returned mail",
-    "failure notice",
-    "non-delivery report",
-    "unable to deliver",
-    "message not delivered",
-    "entrega falhou",
-    "mensagem não entregue",
-)
-
-
-def _is_ndr_message(from_email: str, subject: str, body: str) -> bool:
-    """
-    Heurística para detectar NDR/DSN (Non-Delivery Report).
-
-    Verifica:
-      1. Remetente é mailer-daemon / postmaster
-      2. Subject contém keywords de bounce
-      3. Corpo contém header DSN 'Content-Type: message/delivery-status'
-    """
-    sender = from_email.lower()
-    if any(sender.startswith(ndr) for ndr in _NDR_SENDERS):
-        return True
-
-    subject_lc = subject.lower()
-    if any(kw in subject_lc for kw in _NDR_SUBJECTS):
-        return True
-
-    body_lc = body.lower()
-    if "content-type: message/delivery-status" in body_lc:
-        return True
-
-    return False
-
-
-def _extract_bounced_email(body: str) -> str | None:
-    """
-    Tenta extrair o endereço destinatário original do corpo do NDR.
-
-    DSN headers comuns:
-      Final-Recipient: rfc822; destinatario@domain.com
-      X-Failed-Recipients: destinatario@domain.com
-      To: destinatario@domain.com  (em email original embutido)
-    """
-    patterns = [
-        r"final-recipient:\s*rfc822;\s*([^\s\r\n]+)",
-        r"x-failed-recipients?:\s*([^\s\r\n,]+)",
-        r"original-recipient:\s*rfc822;\s*([^\s\r\n]+)",
-    ]
-    body_lc = body.lower()
-    for pattern in patterns:
-        match = re.search(pattern, body_lc)
-        if match:
-            addr = match.group(1).strip().strip("<>")
-            if "@" in addr:
-                return addr
-    return None

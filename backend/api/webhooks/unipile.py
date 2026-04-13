@@ -50,6 +50,7 @@ from models.cadence_step import CadenceStep
 from models.enums import Intent
 from models.interaction import Interaction
 from models.lead import Lead
+from services.email_event_service import classify_inbound_email_event, record_email_bounce
 from services.inbound_message_service import (
     find_lead_by_sender as _svc_find_lead_by_sender,
 )
@@ -265,6 +266,7 @@ async def _handle_message_received(
     )
     sender_id = _extract_message_sender_id(payload, message)
     text_content: str = _extract_text(message)
+    subject = _extract_subject(message, payload)
     account_id = _extract_message_account_id(payload, message)
     account_type = _extract_account_type(message, payload)
 
@@ -311,6 +313,33 @@ async def _handle_message_received(
         )
         return
     tenant_id = account_context.tenant_id
+
+    if account_context.channel.value == "email":
+        inbound_email_event = classify_inbound_email_event(
+            from_email=sender_id,
+            subject=subject,
+            body=text_content,
+        )
+        if inbound_email_event.kind == "ignored":
+            return
+        if inbound_email_event.kind == "bounce":
+            if inbound_email_event.matched_email:
+                await record_email_bounce(
+                    db,
+                    tenant_id,
+                    inbound_email_event.matched_email,
+                    source="unipile_mail_received",
+                    bounce_type=inbound_email_event.bounce_type or "hard",
+                )
+            else:
+                logger.info(
+                    "webhook.unipile.mail_bounce_unmatched",
+                    tenant_id=str(tenant_id),
+                    sender_id=sender_id or None,
+                    message_id=unipile_message_id or None,
+                    subject=subject or None,
+                )
+            return
 
     lead = await _find_lead_by_sender(sender_id, tenant_id, db)
     if not lead:
@@ -411,8 +440,6 @@ def _extract_text(message: dict) -> str:
     message_text = message.get("message")
     if isinstance(message_text, str) and message_text.strip():
         return message_text.strip()
-    if text := message.get("subject"):
-        return str(text).strip()
     if text := message.get("text"):
         return str(text).strip()
     if body_plain := message.get("body_plain"):
@@ -426,7 +453,13 @@ def _extract_text(message: dict) -> str:
         for part in parts:
             if isinstance(part, dict) and part.get("type") == "text":
                 return str(part.get("content", "")).strip()
+    if text := message.get("subject"):
+        return str(text).strip()
     return ""
+
+
+def _extract_subject(message: dict, payload: dict) -> str:
+    return str(message.get("subject") or payload.get("subject") or "").strip()
 
 
 def _extract_event_type(payload: dict) -> str:

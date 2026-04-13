@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.webhooks import unipile as unipile_webhook
+from models.enums import Channel, LeadStatus
 from models.lead import Lead
 
 
@@ -116,3 +117,162 @@ async def test_verify_signature_accepts_custom_auth_header(
         signature_header="",
         custom_auth_header="secret-123",
     )
+
+
+@pytest.mark.asyncio
+async def test_handle_message_received_processes_linkedin_payload(
+    db: AsyncSession,
+    tenant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lead = Lead(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Lead LinkedIn",
+        linkedin_url=f"https://linkedin.com/in/{uuid.uuid4().hex[:8]}",
+        linkedin_profile_id="linkedin_123",
+        status=LeadStatus.IN_CADENCE,
+        source="manual",
+    )
+    db.add(lead)
+    await db.flush()
+
+    captured: dict[str, object] = {}
+
+    async def _fake_resolve(account_id: str, db_session, **kwargs):  # type: ignore[no-untyped-def]
+        assert account_id == "acc_li_1"
+        return SimpleNamespace(tenant_id=tenant.id, channel=Channel.LINKEDIN_DM)
+
+    async def _fake_process(**kwargs):  # type: ignore[no-untyped-def]
+        captured.update(kwargs)
+        return SimpleNamespace(intent=unipile_webhook.Intent.NEUTRAL, classification={"confidence": 0.91})
+
+    monkeypatch.setattr(unipile_webhook, "resolve_unipile_account_context", _fake_resolve)
+    monkeypatch.setattr(unipile_webhook, "process_inbound_reply", _fake_process)
+
+    payload = {
+        "event": "message_received",
+        "account_id": "acc_li_1",
+        "sender": {"attendee_provider_id": "linkedin_123"},
+        "message": {
+            "id": "msg_li_1",
+            "account_id": "acc_li_1",
+            "message": "Oi, vamos conversar?",
+            "account_type": "LINKEDIN",
+        },
+    }
+
+    await unipile_webhook._handle_message_received(
+        payload,
+        db,
+        cast(object, SimpleNamespace()),
+    )
+
+    assert captured["lead"] == lead
+    assert captured["channel"] == Channel.LINKEDIN_DM
+    assert captured["external_message_id"] == "msg_li_1"
+    assert captured["reply_text"] == "Oi, vamos conversar?"
+
+
+@pytest.mark.asyncio
+async def test_handle_message_received_marks_bounce_for_mail_received(
+    db: AsyncSession,
+    tenant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lead = Lead(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Lead Email",
+        email_corporate="contato@empresa.com",
+        status=LeadStatus.IN_CADENCE,
+        source="manual",
+    )
+    db.add(lead)
+    await db.flush()
+
+    async def _fake_resolve(account_id: str, db_session, **kwargs):  # type: ignore[no-untyped-def]
+        assert account_id == "acc_mail_1"
+        return SimpleNamespace(tenant_id=tenant.id, channel=Channel.EMAIL)
+
+    async def _should_not_process(**kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("bounce não deve cair em process_inbound_reply")
+
+    monkeypatch.setattr(unipile_webhook, "resolve_unipile_account_context", _fake_resolve)
+    monkeypatch.setattr(unipile_webhook, "process_inbound_reply", _should_not_process)
+
+    payload = {
+        "event": "mail_received",
+        "account_id": "acc_mail_1",
+        "sender": {"attendee_provider_id": "mailer-daemon@googlemail.com"},
+        "message": {
+            "id": "mail_1",
+            "account_id": "acc_mail_1",
+            "account_type": "GMAIL",
+            "subject": "Delivery Status Notification",
+            "body": "Content-Type: message/delivery-status\r\nFinal-Recipient: rfc822; contato@empresa.com",
+        },
+    }
+
+    await unipile_webhook._handle_message_received(
+        payload,
+        db,
+        cast(object, SimpleNamespace()),
+    )
+
+    await db.refresh(lead)
+    assert lead.email_bounced_at is not None
+    assert lead.email_bounce_type == "hard"
+
+
+@pytest.mark.asyncio
+async def test_handle_relation_created_accepts_connection_from_payload(
+    db: AsyncSession,
+    tenant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lead = Lead(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Lead Conexao",
+        linkedin_url=f"https://linkedin.com/in/{uuid.uuid4().hex[:8]}",
+        linkedin_profile_id="li_rel_1",
+        linkedin_connection_status="pending",
+        status=LeadStatus.IN_CADENCE,
+        source="manual",
+    )
+    db.add(lead)
+    await db.flush()
+
+    async def _fake_resolve(account_id: str, db_session, **kwargs):  # type: ignore[no-untyped-def]
+        assert account_id == "acc_relation_1"
+        return SimpleNamespace(tenant_id=tenant.id, channel=Channel.LINKEDIN_DM)
+
+    async def _fake_broadcast(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return None
+
+    async def _fake_invalidate(account_id: str) -> None:
+        assert account_id == "acc_relation_1"
+
+    monkeypatch.setattr(unipile_webhook, "resolve_unipile_account_context", _fake_resolve)
+
+    from api.routes import ws as ws_module
+    from integrations.unipile_client import unipile_client
+
+    monkeypatch.setattr(ws_module, "broadcast_event", _fake_broadcast)
+    monkeypatch.setattr(unipile_client, "invalidate_inbox_cache", _fake_invalidate)
+
+    payload = {
+        "event": "new_relation",
+        "relation": {
+            "account_id": "acc_relation_1",
+            "account_type": "LINKEDIN",
+            "user_provider_id": "li_rel_1",
+        },
+    }
+
+    await unipile_webhook._handle_relation_created(payload, db)
+
+    await db.refresh(lead)
+    assert lead.linkedin_connection_status == "connected"
+    assert lead.linkedin_connected_at is not None

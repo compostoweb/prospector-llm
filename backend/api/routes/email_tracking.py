@@ -18,12 +18,9 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Query, Response
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import AsyncSessionLocal
-from models.email_unsubscribe import EmailUnsubscribe
-from models.interaction import Interaction
+from services.email_event_service import mark_email_opened, record_email_unsubscribe
 from services.email_footer import TRANSPARENT_GIF_BYTES, verify_unsubscribe_token
 
 logger = structlog.get_logger()
@@ -33,27 +30,16 @@ router = APIRouter(prefix="/track", tags=["Email Tracking"])
 
 # ── Helpers de DB (sem RLS — acesso público autenticado por UUID/HMAC) ─
 
+
 async def _mark_opened(interaction_id: uuid.UUID) -> None:
     """Background task: marca a interaction como aberta se ainda não estava."""
-    from datetime import datetime, timezone
-
     async with AsyncSessionLocal() as db:
         try:
-            result = await db.execute(
-                select(Interaction).where(Interaction.id == interaction_id)
-            )
-            interaction = result.scalar_one_or_none()
-            if interaction and not interaction.opened:
-                interaction.opened = True
-                interaction.opened_at = datetime.now(timezone.utc)
-                await db.commit()
-                logger.info(
-                    "email.opened",
-                    interaction_id=str(interaction_id),
-                    lead_id=str(interaction.lead_id),
-                )
+            await mark_email_opened(db, interaction_id)
         except Exception as exc:
-            logger.error("email.open_tracking_error", error=str(exc), interaction_id=str(interaction_id))
+            logger.error(
+                "email.open_tracking_error", error=str(exc), interaction_id=str(interaction_id)
+            )
             await db.rollback()
 
 
@@ -61,26 +47,14 @@ async def _record_unsubscribe(tenant_id: uuid.UUID, email: str) -> None:
     """Background task: insere registro de unsubscribe (idempotente)."""
     async with AsyncSessionLocal() as db:
         try:
-            # Verifica se já descadastrado
-            existing = await db.execute(
-                select(EmailUnsubscribe).where(
-                    EmailUnsubscribe.tenant_id == tenant_id,
-                    EmailUnsubscribe.email == email.lower(),
-                )
-            )
-            if existing.scalar_one_or_none() is None:
-                db.add(EmailUnsubscribe(
-                    tenant_id=tenant_id,
-                    email=email.lower(),
-                ))
-                await db.commit()
-                logger.info("email.unsubscribed", tenant_id=str(tenant_id), email=email)
+            await record_email_unsubscribe(db, tenant_id, email)
         except Exception as exc:
             logger.error("email.unsubscribe_error", error=str(exc))
             await db.rollback()
 
 
 # ── Pixel de abertura ─────────────────────────────────────────────────
+
 
 @router.get(
     "/open/{interaction_id}",
@@ -109,6 +83,7 @@ async def track_open(
 
 
 # ── Unsubscribe ───────────────────────────────────────────────────────
+
 
 @router.get(
     "/unsubscribe/{token}",

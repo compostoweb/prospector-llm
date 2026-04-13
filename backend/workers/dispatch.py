@@ -47,6 +47,7 @@ from services.cadence_manager import (
     get_template_step_config,
     get_total_template_steps,
 )
+from services.email_event_service import build_outbound_email_delivery_observation
 from services.message_template_renderer import (
     render_message_template,
     render_saved_email_template,
@@ -247,6 +248,8 @@ async def _dispatch_inner(
             content_audio_url: str | None = None
             # Interaction pré-criada pelo canal EMAIL (necessário antes do envio para o pixel)
             email_interaction: Interaction | None = None
+            email_provider_type: str | None = None
+            email_delivery_observation = None
             result: _DispatchResult
 
             if step.channel == Channel.LINKEDIN_CONNECT:
@@ -524,6 +527,7 @@ async def _dispatch_inner(
                         }
 
                     _registry = EmailRegistry(settings=_cfg)
+                    email_provider_type = str(_email_account.provider_type)
                     _send_result = cast(
                         EmailSendResult,
                         await _registry.send(
@@ -539,6 +543,7 @@ async def _dispatch_inner(
                     )
                 else:
                     # Fallback: usa Unipile global (comportamento anterior)
+                    email_provider_type = "unipile_gmail"
                     _r = await unipile_client.send_email(
                         account_id=gmail_account_id,
                         to_email=email_to,
@@ -548,6 +553,10 @@ async def _dispatch_inner(
                     result = _DispatchResult(success=_r.success, message_id=_r.message_id)
 
                 email_interaction.unipile_message_id = result.message_id if result.success else None
+                email_delivery_observation = build_outbound_email_delivery_observation(
+                    email_provider_type,
+                    success=result.success,
+                )
 
             elif step.channel == Channel.MANUAL_TASK:
                 # MANUAL_TASK: não envia mensagem — notifica admin via email
@@ -702,6 +711,12 @@ async def _dispatch_inner(
                 channel=step.channel.value,
                 lead_id=str(lead.id),
                 use_voice=step.use_voice,
+                delivery_state=email_delivery_observation.state
+                if email_delivery_observation
+                else None,
+                delivery_confirmed=(
+                    email_delivery_observation.confirmed if email_delivery_observation else None
+                ),
             )
 
             # Sucesso — reseta circuit breaker
