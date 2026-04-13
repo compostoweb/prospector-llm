@@ -57,6 +57,14 @@ export interface LeadEmail {
   updated_at: string
 }
 
+export interface LeadEmailPayload {
+  email: string
+  email_type?: "corporate" | "personal" | "unknown"
+  source?: string | null
+  verified?: boolean
+  is_primary?: boolean
+}
+
 export interface LeadMergeResponse {
   lead: Lead
   merged_lead_ids: string[]
@@ -95,13 +103,29 @@ export interface CreateLeadBody {
   phone?: string | null
   email_corporate?: string | null
   email_personal?: string | null
-  emails?: Array<{
-    email: string
-    email_type?: "corporate" | "personal" | "unknown"
-    source?: string | null
-    verified?: boolean
-    is_primary?: boolean
-  }>
+  emails?: LeadEmailPayload[]
+  notes?: string | null
+}
+
+export interface UpdateLeadBody {
+  id: string
+  name?: string
+  first_name?: string | null
+  last_name?: string | null
+  job_title?: string | null
+  company?: string | null
+  company_domain?: string | null
+  website?: string | null
+  industry?: string | null
+  company_size?: string | null
+  linkedin_url?: string | null
+  city?: string | null
+  location?: string | null
+  segment?: string | null
+  phone?: string | null
+  email_corporate?: string | null
+  email_personal?: string | null
+  emails?: LeadEmailPayload[]
   notes?: string | null
 }
 
@@ -285,7 +309,7 @@ export function useUpdateLead() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ id, ...body }: Partial<Lead> & { id: string }) => {
+    mutationFn: async ({ id, ...body }: UpdateLeadBody) => {
       const client = createBrowserClient(session?.accessToken)
       const { data, error } = await client.PATCH(`/leads/${id}` as never, {
         body: body as never,
