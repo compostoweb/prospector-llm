@@ -35,6 +35,15 @@ import type {
   ImportedPostStatusCandidate,
 } from "../shared/types";
 
+const ACTIVE_TAB_SCAN_CACHE_TTL_MS = 3000;
+
+let activeTabScanCache: {
+  tabId: number;
+  url: string;
+  updatedAt: number;
+  scan: ActiveTabPostScanResult;
+} | null = null;
+
 function getExtensionVersion(): string {
   return chrome.runtime.getManifest().version;
 }
@@ -142,6 +151,122 @@ function buildEmptyActiveTabScanResult(
   };
 }
 
+function buildLightweightActiveTabScanResult(
+  url: string,
+  posts: CapturePreview[],
+): ActiveTabPostScanResult {
+  const capturedFrom =
+    url.includes("/posts/") || url.includes("/feed/update/")
+      ? "post_detail"
+      : "feed";
+
+  return {
+    posts,
+    diagnostic: {
+      page_url: url,
+      is_linkedin: true,
+      captured_from: capturedFrom,
+      static_container_count: posts.length,
+      action_anchor_count: 0,
+      action_bar_count: 0,
+      candidate_container_count: posts.length,
+      accepted_post_count: posts.length,
+      discard_reason_counts: {},
+      sample_candidates: [],
+      error_message:
+        posts.length === 0
+          ? "Nenhum post válido foi encontrado na página ativa."
+          : null,
+    },
+  };
+}
+
+function getCachedActiveTabScan(
+  tabId: number,
+  url: string,
+): ActiveTabPostScanResult | null {
+  if (!activeTabScanCache) {
+    return null;
+  }
+
+  if (
+    activeTabScanCache.tabId !== tabId ||
+    activeTabScanCache.url !== url ||
+    Date.now() - activeTabScanCache.updatedAt > ACTIVE_TAB_SCAN_CACHE_TTL_MS
+  ) {
+    activeTabScanCache = null;
+    return null;
+  }
+
+  return activeTabScanCache.scan;
+}
+
+function setCachedActiveTabScan(
+  tabId: number,
+  url: string,
+  scan: ActiveTabPostScanResult,
+): void {
+  activeTabScanCache = {
+    tabId,
+    url,
+    updatedAt: Date.now(),
+    scan,
+  };
+}
+
+async function syncSelectedPreviewsWithScan(
+  scan: ActiveTabPostScanResult,
+): Promise<void> {
+  const currentSelectedPreviews = await getSelectedPreviews();
+  if (currentSelectedPreviews.length === 0) {
+    return;
+  }
+
+  if (!scan.diagnostic.is_linkedin) {
+    return;
+  }
+
+  const errorMessage = (scan.diagnostic.error_message ?? "").toLowerCase();
+  const canTrustVisiblePosts =
+    errorMessage.length === 0 ||
+    errorMessage.includes("nenhum post válido") ||
+    errorMessage.includes("todos os posts detectados");
+
+  if (!canTrustVisiblePosts) {
+    return;
+  }
+
+  const visiblePreviewKeys = new Set(
+    scan.posts.map((preview) => buildPreviewKey(normalizePreview(preview))),
+  );
+  const nextSelectedPreviews = currentSelectedPreviews.filter((preview) =>
+    visiblePreviewKeys.has(buildPreviewKey(normalizePreview(preview))),
+  );
+
+  if (nextSelectedPreviews.length === currentSelectedPreviews.length) {
+    return;
+  }
+
+  await setSelectedPreviews(nextSelectedPreviews);
+
+  const currentPreview = await getPreview();
+  if (
+    currentPreview &&
+    !nextSelectedPreviews.some(
+      (preview) =>
+        buildPreviewKey(normalizePreview(preview)) ===
+        buildPreviewKey(normalizePreview(currentPreview)),
+    )
+  ) {
+    const nextPreview = nextSelectedPreviews[0] ?? null;
+    if (nextPreview) {
+      await setPreview(nextPreview);
+    } else {
+      await clearPreview();
+    }
+  }
+}
+
 function scorePreview(preview: CapturePreview): number {
   const normalized = normalizePreview(preview);
   let score = 0;
@@ -225,7 +350,28 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
     );
   }
 
+  const cachedScan = getCachedActiveTabScan(tab.id, url);
+  if (cachedScan) {
+    return cachedScan;
+  }
+
   try {
+    try {
+      const response = (await chrome.tabs.sendMessage(tab.id, {
+        type: MESSAGE_TYPES.GET_ACTIVE_TAB_POSTS,
+      })) as ExtensionMessageResponse<CapturePreview[]>;
+      if (response.ok && (response.data?.length ?? 0) > 0) {
+        const fastScan = buildLightweightActiveTabScanResult(
+          url,
+          response.data ?? [],
+        );
+        setCachedActiveTabScan(tab.id, url, fastScan);
+        return fastScan;
+      }
+    } catch {
+      // Continua para o scan completo quando o content script nao responder.
+    }
+
     const results = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => {
@@ -1622,17 +1768,20 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
             scanResult.posts,
             response.data ?? [],
           );
-          return {
+          const mergedScan = {
             posts,
             diagnostic: {
               ...scanResult.diagnostic,
               accepted_post_count: posts.length,
             },
           };
+          setCachedActiveTabScan(tab.id, url, mergedScan);
+          return mergedScan;
         }
       } catch {
         // Mantem fallback do scan direto da aba.
       }
+      setCachedActiveTabScan(tab.id, url, scanResult);
       return scanResult;
     }
 
@@ -1641,25 +1790,9 @@ async function scanActiveTab(): Promise<ActiveTabPostScanResult> {
     })) as ExtensionMessageResponse<CapturePreview[]>;
     if (response.ok) {
       const posts = response.data ?? [];
-      return {
-        posts,
-        diagnostic: {
-          page_url: url,
-          is_linkedin: true,
-          captured_from:
-            url.includes("/posts/") || url.includes("/feed/update/")
-              ? "post_detail"
-              : "feed",
-          static_container_count: 0,
-          action_anchor_count: 0,
-          action_bar_count: 0,
-          candidate_container_count: posts.length,
-          accepted_post_count: posts.length,
-          discard_reason_counts: {},
-          sample_candidates: [],
-          error_message: null,
-        },
-      };
+      const fallbackScan = buildLightweightActiveTabScanResult(url, posts);
+      setCachedActiveTabScan(tab.id, url, fallbackScan);
+      return fallbackScan;
     }
     return buildEmptyActiveTabScanResult(
       url,
@@ -1755,11 +1888,14 @@ async function filterImportedPosts(
 
 async function listPostsFromActiveTab(): Promise<CapturePreview[]> {
   const scan = await filterImportedPosts(await scanActiveTab());
+  await syncSelectedPreviewsWithScan(scan);
   return scan.posts;
 }
 
 async function getActiveTabScan(): Promise<ActiveTabPostScanResult> {
-  return filterImportedPosts(await scanActiveTab());
+  const scan = await filterImportedPosts(await scanActiveTab());
+  await syncSelectedPreviewsWithScan(scan);
+  return scan;
 }
 
 async function createManualEngagementSession(): Promise<EngagementSessionSummary> {
