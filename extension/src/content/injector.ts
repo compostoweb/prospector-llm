@@ -80,43 +80,24 @@ function createCaptureButton(
   return button;
 }
 
-function ensureRelativePosition(element: HTMLElement): void {
-  if (window.getComputedStyle(element).position === "static") {
-    element.style.position = "relative";
-  }
-}
-
 function findInjectionTarget(container: HTMLElement): HTMLElement {
-  const headerArea = container.querySelector<HTMLElement>(
-    ".update-components-actor, .feed-shared-actor",
-  );
-  if (headerArea instanceof HTMLElement) {
-    ensureRelativePosition(headerArea);
-    return headerArea;
-  }
-
-  ensureRelativePosition(container);
   return container;
 }
 
 function createCaptureButtonHost(
-  target: HTMLElement,
+  _target: HTMLElement,
   postContainer: HTMLElement,
   capturedFrom: CapturedFrom,
 ): HTMLDivElement {
   const host = document.createElement("div");
   host.setAttribute(BUTTON_ATTRIBUTE, "1");
-  host.style.position = "absolute";
-  host.style.top = target.matches(".update-components-actor, .feed-shared-actor")
-    ? "0"
-    : "10px";
-  host.style.right = target.matches(".update-components-actor, .feed-shared-actor")
-    ? "0"
-    : "12px";
-  host.style.zIndex = "20";
   host.style.display = "flex";
-  host.style.justifyContent = "flex-end";
-  host.style.pointerEvents = "none";
+  host.style.justifyContent = "center";
+  host.style.alignItems = "center";
+  host.style.width = "100%";
+  host.style.boxSizing = "border-box";
+  host.style.padding = "6px 12px 4px";
+  host.style.margin = "0";
   host.appendChild(createCaptureButton(postContainer, capturedFrom));
   return host;
 }
@@ -155,6 +136,10 @@ function installButtonsInScope(
 
     const target = findInjectionTarget(container);
     const host = createCaptureButtonHost(target, container, capturedFrom);
+    if (target.firstChild) {
+      target.insertBefore(host, target.firstChild);
+      return;
+    }
     target.appendChild(host);
   });
 }

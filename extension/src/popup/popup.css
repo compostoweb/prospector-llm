@@ -311,11 +311,11 @@ body {
   flex-direction: column;
   align-items: flex-start;
   justify-content: flex-start;
-  gap: 4px;
+  gap: 3px;
   width: 100%;
   min-width: 0;
   min-height: 0;
-  padding: 8px 9px 7px;
+  padding: 7px 8px 6px;
   box-sizing: border-box;
   border-radius: 14px;
   border: 1px solid rgba(15, 23, 42, 0.08);
@@ -353,7 +353,7 @@ body {
 .popup-step__header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
 }
 
@@ -366,7 +366,7 @@ body {
 
 .popup-step__meta {
   font-size: 9px;
-  line-height: 1.15;
+  line-height: 1.05;
   letter-spacing: 0.01em;
   color: #64748b;
 }
