@@ -25,10 +25,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # 1. Adiciona 'dispatching' ao enum PostgreSQL stepstatus
-    # ALTER TYPE ... ADD VALUE não pode rodar dentro de transaction block
-    # no PostgreSQL, então executamos fora de transação.
-    op.execute("ALTER TYPE stepstatus ADD VALUE IF NOT EXISTS 'dispatching' AFTER 'pending'")
+    # 1. Adiciona 'DISPATCHING' ao enum PostgreSQL cadence_step_status
+    # Os labels no PG são uppercase (PENDING, SENT, etc.) — SQLAlchemy usa .name do Enum.
+    op.execute("ALTER TYPE cadence_step_status ADD VALUE IF NOT EXISTS 'DISPATCHING'")
 
     # 2. Campos de cache de composição LLM no cadence_steps
     op.add_column(
