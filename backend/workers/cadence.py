@@ -29,6 +29,8 @@ from datetime import UTC, datetime
 import structlog
 from sqlalchemy import select
 
+from core.database import WorkerSessionLocal, get_worker_session
+from core.redis_client import redis_client
 from models.cadence_step import CadenceStep
 from models.enums import Channel, LeadStatus, StepStatus
 from models.lead import Lead
@@ -61,9 +63,6 @@ def cadence_tick(self) -> dict:
 
 
 async def _tick_async() -> dict:
-    from core.database import WorkerSessionLocal, get_worker_session
-    from core.redis_client import redis_client
-
     dispatched = 0
     skipped = 0
 
@@ -131,6 +130,8 @@ async def _tick_async() -> dict:
                     # Enfileira o dispatch
                     from workers.dispatch import dispatch_step
 
+                    step.status = StepStatus.DISPATCHING
+                    await db.flush()
                     dispatch_step.delay(str(step.id), str(tid))
                     dispatched += 1
 

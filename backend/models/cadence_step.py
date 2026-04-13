@@ -20,7 +20,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -105,12 +106,26 @@ class CadenceStep(Base, TenantMixin):
         comment="Variante de assunto usada no envio (A/B testing). NULL = subject padrão.",
     )
 
+    # ── Cache de composição LLM (evita recomposição em retry) ─────────
+    composed_text: Mapped[str | None] = mapped_column(
+        Text(),
+        nullable=True,
+        default=None,
+        comment="Cache do texto/body gerado pela LLM — evita recomposição em retry",
+    )
+    composed_subject: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        default=None,
+        comment="Cache do subject gerado pela LLM (email) — evita recomposição em retry",
+    )
+
     # ── Relacionamentos ───────────────────────────────────────────────
-    cadence: Mapped["Cadence"] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    cadence: Mapped[Cadence] = relationship(  # type: ignore[name-defined]  # noqa: F821
         "Cadence",
         lazy="select",
     )
-    lead: Mapped["Lead"] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    lead: Mapped[Lead] = relationship(  # type: ignore[name-defined]  # noqa: F821
         "Lead",
         lazy="select",
     )

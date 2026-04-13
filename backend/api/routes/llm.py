@@ -34,6 +34,7 @@ class ModelResponse(BaseModel):
     supports_json: bool
     input_cost_per_mtok: float
     output_cost_per_mtok: float
+    pricing_tag: str  # "free" | "paid" | ""
 
     @classmethod
     def from_model_info(cls, m: ModelInfo) -> ModelResponse:
@@ -45,6 +46,7 @@ class ModelResponse(BaseModel):
             supports_json=m.supports_json_mode,
             input_cost_per_mtok=m.price_input_per_mtok,
             output_cost_per_mtok=m.price_output_per_mtok,
+            pricing_tag=m.pricing_tag,
         )
 
 

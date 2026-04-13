@@ -59,6 +59,8 @@ async def test_engine():
         connect_args={"timeout": 10},
     )
     async with engine.begin() as conn:
+        await conn.execute(text("SET lock_timeout = '10s'"))
+        await conn.execute(text("SET statement_timeout = '30s'"))
         await conn.run_sync(Base.metadata.create_all)
     yield engine
     await engine.dispose()

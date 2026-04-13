@@ -676,7 +676,7 @@ async def get_cadence_analytics(
             )
             .label("replied"),
             func.count(CadenceStep.id)
-            .filter(CadenceStep.status == StepStatus.PENDING)
+            .filter(CadenceStep.status.in_([StepStatus.PENDING, StepStatus.DISPATCHING]))
             .label("pending"),
             func.count(CadenceStep.id)
             .filter(
@@ -718,7 +718,7 @@ async def get_cadence_analytics(
             )
             .label("replied"),
             func.count(CadenceStep.id)
-            .filter(CadenceStep.status == StepStatus.PENDING)
+            .filter(CadenceStep.status.in_([StepStatus.PENDING, StepStatus.DISPATCHING]))
             .label("pending"),
             func.count(CadenceStep.id)
             .filter(
@@ -770,7 +770,7 @@ async def get_cadence_analytics(
             )
             .label("replied"),
             func.count(CadenceStep.id)
-            .filter(CadenceStep.status == StepStatus.PENDING)
+            .filter(CadenceStep.status.in_([StepStatus.PENDING, StepStatus.DISPATCHING]))
             .label("pending"),
             func.count(CadenceStep.id)
             .filter(

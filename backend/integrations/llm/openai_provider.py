@@ -11,11 +11,26 @@ import httpx
 import structlog
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from integrations.llm.base import LLMMessage, LLMProvider, LLMResponse, ModelInfo
 
 logger = structlog.get_logger()
+
+# Status HTTP que NÃO devem ser retentados (auth/config — retry é inútil)
+_NON_RETRYABLE_STATUSES = {401, 402, 403, 404}
+
+
+def _is_retryable_error(exc: BaseException) -> bool:
+    """Retorna True se o erro deve ser retentado (429, 5xx, timeout)."""
+    from openai import APIConnectionError, APIStatusError, APITimeoutError
+
+    if isinstance(exc, (APITimeoutError, APIConnectionError)):
+        return True
+    if isinstance(exc, APIStatusError):
+        return exc.status_code not in _NON_RETRYABLE_STATUSES
+    return False
+
 
 # Prefixos que identificam modelos de chat/completions — descarta embeddings,
 # whisper, tts, dall-e, moderation, etc.
@@ -32,17 +47,17 @@ _CHAT_PREFIXES = (
 # referência na UI. Podem estar desatualizados. Fonte oficial:
 # https://openai.com/api/pricing  → price_is_estimated=True em ModelInfo
 _KNOWN_PRICES: dict[str, tuple[float, float]] = {
-    "gpt-4o":                (2.50,  10.00),
-    "gpt-4o-mini":           (0.15,   0.60),
-    "gpt-4.1":               (2.00,   8.00),
-    "gpt-4.1-mini":          (0.40,   1.60),
-    "gpt-4.1-nano":          (0.10,   0.40),
-    "gpt-5":                  (0.0,    0.0),   # preco a ser confirmado
-    "o1":                    (15.00,  60.00),
-    "o1-mini":               (3.00,   12.00),
-    "o3":                    (10.00,  40.00),
-    "o3-mini":               (1.10,   4.40),
-    "o4-mini":               (1.10,   4.40),
+    "gpt-4o": (2.50, 10.00),
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4.1": (2.00, 8.00),
+    "gpt-4.1-mini": (0.40, 1.60),
+    "gpt-4.1-nano": (0.10, 0.40),
+    "gpt-5": (0.0, 0.0),  # preco a ser confirmado
+    "o1": (15.00, 60.00),
+    "o1-mini": (3.00, 12.00),
+    "o3": (10.00, 40.00),
+    "o3-mini": (1.10, 4.40),
+    "o4-mini": (1.10, 4.40),
 }
 
 
@@ -70,7 +85,6 @@ def _uses_max_completion_tokens(model: str) -> bool:
 
 
 class OpenAIProvider(LLMProvider):
-
     def __init__(self, api_key: str) -> None:
         self._client = AsyncOpenAI(api_key=api_key)
         self._raw_http = httpx.AsyncClient(
@@ -83,7 +97,12 @@ class OpenAIProvider(LLMProvider):
     def provider_name(self) -> str:
         return "openai"
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(min=1, max=10),
+        retry=retry_if_exception(_is_retryable_error),
+        reraise=True,
+    )
     async def complete(
         self,
         messages: list[LLMMessage],

@@ -191,6 +191,11 @@ class RedisClient:
         """Salva valor no cache com TTL em segundos."""
         await self._get_redis().set(key, value, ex=ttl)
 
+    async def set_if_absent(self, key: str, value: str, ttl: int) -> bool:
+        """SET NX (only if not exists) com TTL. Retorna True se setou, False se já existia."""
+        result = await self._get_redis().set(key, value, ex=ttl, nx=True)
+        return result is not None
+
     async def set_bytes(self, key: str, value: bytes, ttl: int) -> None:
         """Salva bytes no Redis como base64 com TTL em segundos."""
         import base64

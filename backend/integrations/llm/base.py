@@ -14,13 +14,15 @@ from typing import Any
 @dataclass
 class LLMMessage:
     """Mensagem no formato agnóstico ao provedor."""
-    role: str   # "system" | "user" | "assistant"
+
+    role: str  # "system" | "user" | "assistant"
     content: str
 
 
 @dataclass
 class LLMResponse:
     """Resposta normalizada de qualquer provedor."""
+
     text: str
     model: str
     provider: str
@@ -32,6 +34,7 @@ class LLMResponse:
 @dataclass
 class LLMUsageContext:
     """Contexto opcional para observabilidade e analytics de consumo."""
+
     tenant_id: str
     module: str
     task_type: str
@@ -46,14 +49,16 @@ class LLMUsageContext:
 @dataclass
 class ModelInfo:
     """Informações de um modelo disponível."""
+
     id: str
     name: str
-    provider: str                   # "openai" | "gemini"
+    provider: str  # "openai" | "gemini" | "anthropic" | "openrouter"
     context_window: int = 0
     supports_json_mode: bool = True
-    price_input_per_mtok: float = 0.0   # USD por 1M tokens de input
+    price_input_per_mtok: float = 0.0  # USD por 1M tokens de input
     price_output_per_mtok: float = 0.0  # USD por 1M tokens de output
-    price_is_estimated: bool = True     # Preços são aproximados — conferir site do provider
+    price_is_estimated: bool = True  # Preços são aproximados — conferir site do provider
+    pricing_tag: str = ""  # "free" | "paid" | "" (vazio = sem tag)
 
 
 class LLMProvider(ABC):

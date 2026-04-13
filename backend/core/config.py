@@ -117,9 +117,15 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str | None = None
     ANTHROPIC_DEFAULT_MODEL: str = "claude-sonnet-4-6"
 
+    # ── LLM — OpenRouter (acesso multi-modelo: free + pagos) ──────────
+    OPENROUTER_API_KEY: str | None = None
+
     # ── LLM — Reply parser (fallback legado de compatibilidade) ───────
     REPLY_PARSER_PROVIDER: str = "openai"
     REPLY_PARSER_MODEL: str = "gpt-4o-mini"
+
+    # ── LLM — Budget diário por tenant (proteção contra loop) ────────
+    LLM_DAILY_BUDGET_TOKENS: int = 500_000
 
     # ── Voz / TTS ────────────────────────────────────────────────────
     VOICE_PROVIDER: str = "speechify"

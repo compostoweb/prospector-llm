@@ -22,28 +22,44 @@ from __future__ import annotations
 import structlog
 from anthropic import AsyncAnthropic
 from anthropic.types import Message, TextBlock
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from integrations.llm.base import LLMMessage, LLMProvider, LLMResponse, ModelInfo
 
 logger = structlog.get_logger()
+
+# Status HTTP que NÃO devem ser retentados (auth/config — retry é inútil)
+_NON_RETRYABLE_STATUSES = {401, 402, 403, 404}
+
+
+def _is_retryable_error(exc: BaseException) -> bool:
+    """Retorna True se o erro deve ser retentado (429, 5xx, timeout)."""
+    # Anthropic SDK lança APIStatusError com status_code
+    from anthropic import APIConnectionError, APIStatusError, APITimeoutError
+
+    if isinstance(exc, (APITimeoutError, APIConnectionError)):
+        return True
+    if isinstance(exc, APIStatusError):
+        return exc.status_code not in _NON_RETRYABLE_STATUSES
+    return False
+
 
 # Preços ESTIMADOS USD/1M tokens (input / output) — podem estar desatualizados.
 # Fonte oficial: https://platform.claude.com/docs/en/about-claude/models/overview
 # → price_is_estimated=True em ModelInfo
 # Batch API = 50% desses valores.
 _ANTHROPIC_PRICES: dict[str, tuple[float, float]] = {
-    "claude-opus-4-6":   (5.00,  25.00),
-    "claude-opus-4-5":   (5.00,  25.00),
-    "claude-opus-4-1":   (15.00, 75.00),
-    "claude-opus-4":     (15.00, 75.00),
-    "claude-sonnet-4-6": (3.00,  15.00),
-    "claude-sonnet-4-5": (3.00,  15.00),
-    "claude-sonnet-4":   (3.00,  15.00),
-    "claude-haiku-4-5":  (1.00,   5.00),
-    "claude-haiku-3-5":  (0.80,   4.00),
-    "claude-haiku-3":    (0.25,   1.25),
-    "claude-opus-3":     (15.00, 75.00),
+    "claude-opus-4-6": (5.00, 25.00),
+    "claude-opus-4-5": (5.00, 25.00),
+    "claude-opus-4-1": (15.00, 75.00),
+    "claude-opus-4": (15.00, 75.00),
+    "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-sonnet-4-5": (3.00, 15.00),
+    "claude-sonnet-4": (3.00, 15.00),
+    "claude-haiku-4-5": (1.00, 5.00),
+    "claude-haiku-3-5": (0.80, 4.00),
+    "claude-haiku-3": (0.25, 1.25),
+    "claude-opus-3": (15.00, 75.00),
 }
 
 # Padrões de IDs que NÃO são modelos de chat — filtrar da listagem
@@ -92,7 +108,6 @@ def _friendly_name(model_id: str) -> str:
 
 
 class AnthropicProvider(LLMProvider):
-
     def __init__(self, api_key: str) -> None:
         self._client = AsyncAnthropic(api_key=api_key)
 
@@ -100,7 +115,12 @@ class AnthropicProvider(LLMProvider):
     def provider_name(self) -> str:
         return "anthropic"
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(min=1, max=10),
+        retry=retry_if_exception(_is_retryable_error),
+        reraise=True,
+    )
     async def complete(
         self,
         messages: list[LLMMessage],
@@ -131,8 +151,12 @@ class AnthropicProvider(LLMProvider):
         system_text = "\n\n".join(system_parts) if system_parts else None
 
         if json_mode:
-            json_instruction = "Responda EXCLUSIVAMENTE com JSON válido. Sem texto antes ou depois. Sem markdown."
-            system_text = f"{system_text}\n\n{json_instruction}" if system_text else json_instruction
+            json_instruction = (
+                "Responda EXCLUSIVAMENTE com JSON válido. Sem texto antes ou depois. Sem markdown."
+            )
+            system_text = (
+                f"{system_text}\n\n{json_instruction}" if system_text else json_instruction
+            )
 
         kwargs: dict = {
             "model": model,

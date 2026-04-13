@@ -14,6 +14,7 @@ from enum import Enum
 
 class Channel(str, Enum):
     """Canais de comunicação disponíveis."""
+
     LINKEDIN_CONNECT = "linkedin_connect"
     LINKEDIN_DM = "linkedin_dm"
     LINKEDIN_POST_REACTION = "linkedin_post_reaction"
@@ -25,6 +26,7 @@ class Channel(str, Enum):
 
 class LeadSource(str, Enum):
     """Origem do lead no sistema."""
+
     MANUAL = "manual"
     APIFY_MAPS = "apify_maps"
     APIFY_LINKEDIN = "apify_linkedin"
@@ -35,6 +37,7 @@ class LeadSource(str, Enum):
 
 class LeadStatus(str, Enum):
     """Status do lead na jornada de prospecção."""
+
     RAW = "raw"
     ENRICHED = "enriched"
     IN_CADENCE = "in_cadence"
@@ -44,7 +47,9 @@ class LeadStatus(str, Enum):
 
 class StepStatus(str, Enum):
     """Status de execução de um step da cadência."""
+
     PENDING = "pending"
+    DISPATCHING = "dispatching"
     SENT = "sent"
     REPLIED = "replied"
     SKIPPED = "skipped"
@@ -53,6 +58,7 @@ class StepStatus(str, Enum):
 
 class Intent(str, Enum):
     """Intenção detectada em uma resposta inbound."""
+
     INTEREST = "interest"
     OBJECTION = "objection"
     NOT_INTERESTED = "not_interested"
@@ -62,6 +68,7 @@ class Intent(str, Enum):
 
 class EmailType(str, Enum):
     """Tipo de endereço de email."""
+
     CORPORATE = "corporate"
     PERSONAL = "personal"
     UNKNOWN = "unknown"
@@ -69,12 +76,14 @@ class EmailType(str, Enum):
 
 class InteractionDirection(str, Enum):
     """Direção da mensagem na interação."""
+
     OUTBOUND = "outbound"
     INBOUND = "inbound"
 
 
 class StepType(str, Enum):
     """Tipo de instrução para geração de conteúdo do step."""
+
     LINKEDIN_CONNECT = "linkedin_connect"
     LINKEDIN_DM_FIRST = "linkedin_dm_first"
     LINKEDIN_DM_POST_CONNECT = "linkedin_dm_post_connect"
@@ -92,6 +101,7 @@ class StepType(str, Enum):
 
 class SandboxRunStatus(str, Enum):
     """Status de um sandbox run de cadência."""
+
     RUNNING = "running"
     COMPLETED = "completed"
     APPROVED = "approved"
@@ -100,6 +110,7 @@ class SandboxRunStatus(str, Enum):
 
 class SandboxStepStatus(str, Enum):
     """Status de um step dentro do sandbox."""
+
     PENDING = "pending"
     GENERATING = "generating"
     GENERATED = "generated"
@@ -109,6 +120,7 @@ class SandboxStepStatus(str, Enum):
 
 class SandboxLeadSource(str, Enum):
     """Origem dos leads usados no sandbox."""
+
     REAL = "real"
     SAMPLE = "sample"
     FICTITIOUS = "fictitious"
@@ -116,25 +128,29 @@ class SandboxLeadSource(str, Enum):
 
 class CadenceMode(str, Enum):
     """Modo de execução da cadência."""
+
     AUTOMATIC = "automatic"
     SEMI_MANUAL = "semi_manual"
 
 
 class CadenceType(str, Enum):
     """Tipo de cadência — define quais canais são permitidos."""
-    MIXED = "mixed"       # canais múltiplos (LinkedIn + Email)
+
+    MIXED = "mixed"  # canais múltiplos (LinkedIn + Email)
     EMAIL_ONLY = "email_only"  # somente canal EMAIL (cold email)
 
 
 class EmailProviderType(str, Enum):
     """Tipo de provedor de e-mail da conta conectada."""
-    UNIPILE_GMAIL = "unipile_gmail"   # Gmail via Unipile API
-    GOOGLE_OAUTH = "google_oauth"     # Gmail OAuth direto (google-auth)
-    SMTP = "smtp"                     # SMTP genérico (aiosmtplib)
+
+    UNIPILE_GMAIL = "unipile_gmail"  # Gmail via Unipile API
+    GOOGLE_OAUTH = "google_oauth"  # Gmail OAuth direto (google-auth)
+    SMTP = "smtp"  # SMTP genérico (aiosmtplib)
 
 
 class WarmupStatus(str, Enum):
     """Status de uma campanha de warmup de e-mail."""
+
     ACTIVE = "active"
     PAUSED = "paused"
     COMPLETED = "completed"
@@ -142,12 +158,14 @@ class WarmupStatus(str, Enum):
 
 class WarmupLogDirection(str, Enum):
     """Direção de um e-mail de warmup."""
+
     SENT = "sent"
     RECEIVED = "received"
 
 
 class WarmupLogStatus(str, Enum):
     """Status de entrega de um e-mail de warmup."""
+
     DELIVERED = "delivered"
     OPENED = "opened"
     REPLIED = "replied"
@@ -157,6 +175,7 @@ class WarmupLogStatus(str, Enum):
 
 class ManualTaskStatus(str, Enum):
     """Status de uma tarefa manual na cadência semi-automática."""
+
     PENDING = "pending"
     CONTENT_GENERATED = "content_generated"
     SENT = "sent"

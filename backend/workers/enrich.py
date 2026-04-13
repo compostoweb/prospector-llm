@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 import structlog
@@ -42,23 +42,72 @@ _BATCH_SIZE = 50
 @celery_app.task(
     bind=True,
     name="workers.enrich.enrich_pending_batch",
-    max_retries=3,
+    max_retries=1,
     default_retry_delay=120,
     queue="enrich",
 )
 def enrich_pending_batch(
     self,
-    tenant_id: str,
+    tenant_id: str | None = None,
     batch_size: int = _BATCH_SIZE,
 ) -> dict:
     """
-    Enriquece um lote de leads com status RAW no tenant informado.
+    Enriquece lotes de leads RAW.
 
-    Retorna: {"processed": N, "enriched": M, "failed": K}
+    Quando chamado pelo Beat (sem args): itera TODOS os tenants ativos.
+    Quando chamado com tenant_id: processa apenas aquele tenant.
+
+    Retorna: {"total_processed": N, "total_enriched": M, "total_failed": K}
     """
-    return asyncio.run(
-        _enrich_batch_async(tenant_id, batch_size, self)
+    if tenant_id:
+        result = asyncio.run(_enrich_batch_async(tenant_id, batch_size, self))
+        return {
+            "total_processed": result.get("processed", 0),
+            "total_enriched": result.get("enriched", 0),
+            "total_failed": result.get("failed", 0),
+        }
+    return asyncio.run(_enrich_all_tenants_async(batch_size, self))
+
+
+async def _enrich_all_tenants_async(batch_size: int, task) -> dict:
+    """Processa todos os tenants ativos — chamado pelo Beat a cada 30min."""
+    from core.database import WorkerSessionLocal
+    from models.tenant import Tenant
+
+    total_processed = 0
+    total_enriched = 0
+    total_failed = 0
+
+    async with WorkerSessionLocal() as root_session:
+        result = await root_session.execute(select(Tenant).where(Tenant.is_active.is_(True)))
+        tenants = list(result.scalars().all())
+
+    for tenant in tenants:
+        try:
+            result = await _enrich_batch_async(str(tenant.id), batch_size, task)
+            total_processed += result.get("processed", 0)
+            total_enriched += result.get("enriched", 0)
+            total_failed += result.get("failed", 0)
+        except Exception as exc:
+            logger.error(
+                "enrich.tenant_error",
+                tenant_id=str(tenant.id),
+                error=str(exc),
+            )
+            total_failed += 1
+
+    logger.info(
+        "enrich.batch_all_tenants.done",
+        tenants=len(tenants),
+        total_processed=total_processed,
+        total_enriched=total_enriched,
+        total_failed=total_failed,
     )
+    return {
+        "total_processed": total_processed,
+        "total_enriched": total_enriched,
+        "total_failed": total_failed,
+    }
 
 
 @celery_app.task(
@@ -79,9 +128,7 @@ def enrich_lead(
 
     Retorna: {"lead_id": lead_id, "status": "enriched"|"failed"}
     """
-    return asyncio.run(
-        _enrich_single_async(lead_id, tenant_id, self)
-    )
+    return asyncio.run(_enrich_single_async(lead_id, tenant_id, self))
 
 
 async def _enrich_single_async(
@@ -97,9 +144,7 @@ async def _enrich_single_async(
 
     try:
         async for db in get_worker_session(tid):
-            result = await db.execute(
-                select(Lead).where(Lead.id == lid, Lead.tenant_id == tid)
-            )
+            result = await db.execute(select(Lead).where(Lead.id == lid, Lead.tenant_id == tid))
             lead = result.scalar_one_or_none()
             if lead is None:
                 logger.warning("enrich.single_not_found", lead_id=lead_id)
@@ -108,7 +153,7 @@ async def _enrich_single_async(
             try:
                 await _enrich_lead(lead, email_finder)
                 lead.status = LeadStatus.ENRICHED
-                lead.enriched_at = datetime.now(tz=timezone.utc)
+                lead.enriched_at = datetime.now(tz=UTC)
                 lead.score = float(lead_scorer.score(lead))
                 await db.commit()
                 logger.info("enrich.single_done", lead_id=lead_id)
@@ -160,7 +205,7 @@ async def _enrich_batch_async(
                 try:
                     await _enrich_lead(lead, email_finder)
                     lead.status = LeadStatus.ENRICHED
-                    lead.enriched_at = datetime.now(tz=timezone.utc)
+                    lead.enriched_at = datetime.now(tz=UTC)
                     lead.score = float(lead_scorer.score(lead))
                     enriched_count += 1
                 except Exception as exc:  # noqa: BLE001
@@ -227,6 +272,7 @@ async def _enrich_lead(lead: Lead, email_finder: EmailFinderService) -> None:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
+
 
 def _split_name(full_name: str) -> tuple[str, str]:
     """Divide nome completo em primeiro + sobrenome."""

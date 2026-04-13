@@ -31,6 +31,7 @@ from integrations.llm.anthropic_provider import AnthropicProvider
 from integrations.llm.base import LLMMessage, LLMProvider, LLMResponse, LLMUsageContext, ModelInfo
 from integrations.llm.gemini_provider import GeminiProvider
 from integrations.llm.openai_provider import OpenAIProvider
+from integrations.llm.openrouter_provider import OpenRouterProvider
 from services.llm_usage_tracker import record_llm_usage
 
 logger = structlog.get_logger()
@@ -42,6 +43,7 @@ _MODELS_CACHE_TTL = int(timedelta(hours=1).total_seconds())
 class LLMRegistry:
     def __init__(self, settings: Settings, redis: RedisClient) -> None:
         self._redis = redis
+        self._settings = settings
         self._providers: dict[str, LLMProvider] = {}
 
         if settings.OPENAI_API_KEY:
@@ -55,6 +57,10 @@ class LLMRegistry:
         if settings.ANTHROPIC_API_KEY:
             self._providers["anthropic"] = AnthropicProvider(api_key=settings.ANTHROPIC_API_KEY)
             logger.info("llm.registry.provider_loaded", provider="anthropic")
+
+        if settings.OPENROUTER_API_KEY:
+            self._providers["openrouter"] = OpenRouterProvider(api_key=settings.OPENROUTER_API_KEY)
+            logger.info("llm.registry.provider_loaded", provider="openrouter")
 
         if not self._providers:
             raise RuntimeError(
@@ -79,7 +85,12 @@ class LLMRegistry:
         """
         Executa uma completion com o provider e modelo especificados.
         Levanta ValueError se o provider não estiver configurado.
+        Levanta RuntimeError se o budget diário do tenant for excedido.
         """
+        # ── Budget check diário por tenant ────────────────────────────
+        if usage_context and usage_context.tenant_id:
+            await self._check_budget(str(usage_context.tenant_id))
+
         llm = self._get_provider(provider)
         started_at = time.perf_counter()
         response = await llm.complete(
@@ -91,6 +102,10 @@ class LLMRegistry:
         )
         if usage_context is not None:
             latency_ms = int((time.perf_counter() - started_at) * 1000)
+            # Incrementa budget consumido
+            if usage_context.tenant_id:
+                total_tokens = response.input_tokens + response.output_tokens
+                await self._increment_budget(str(usage_context.tenant_id), total_tokens)
             try:
                 await record_llm_usage(
                     messages=messages,
@@ -148,6 +163,7 @@ class LLMRegistry:
                 "supports_json_mode": m.supports_json_mode,
                 "price_input_per_mtok": m.price_input_per_mtok,
                 "price_output_per_mtok": m.price_output_per_mtok,
+                "pricing_tag": m.pricing_tag,
             }
             for m in all_models
         ]
@@ -196,6 +212,44 @@ class LLMRegistry:
             raise ValueError(f"Provedor '{provider}' não configurado. Disponíveis: {available}")
         return self._providers[provider]
 
+    async def _check_budget(self, tenant_id: str) -> None:
+        """Verifica se o tenant excedeu o budget diário de tokens."""
+        from datetime import date
+
+        key = f"llm_budget:{tenant_id}:{date.today()}"
+        try:
+            current = await self._redis.get(key)
+            if current and int(current) >= self._settings.LLM_DAILY_BUDGET_TOKENS:
+                logger.warning(
+                    "llm.budget_exceeded",
+                    tenant_id=tenant_id,
+                    current_tokens=int(current),
+                    limit=self._settings.LLM_DAILY_BUDGET_TOKENS,
+                )
+                raise RuntimeError(
+                    f"Budget diário de tokens LLM excedido: "
+                    f"{int(current)}/{self._settings.LLM_DAILY_BUDGET_TOKENS}"
+                )
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            # Redis indisponível — não bloquear
+            logger.warning("llm.budget_check_error", error=str(exc))
+
+    async def _increment_budget(self, tenant_id: str, tokens: int) -> None:
+        """Incrementa o budget consumido hoje pelo tenant."""
+        from datetime import date
+
+        key = f"llm_budget:{tenant_id}:{date.today()}"
+        try:
+            redis = self._redis._get_redis()
+            pipe = redis.pipeline()
+            pipe.incrby(key, tokens)
+            pipe.expire(key, 86400)
+            await pipe.execute()
+        except Exception as exc:
+            logger.warning("llm.budget_increment_error", error=str(exc))
+
 
 def _model_info_from_cache(item: dict[str, object]) -> ModelInfo:
     return ModelInfo(
@@ -207,6 +261,7 @@ def _model_info_from_cache(item: dict[str, object]) -> ModelInfo:
         price_input_per_mtok=_as_float(item.get("price_input_per_mtok")),
         price_output_per_mtok=_as_float(item.get("price_output_per_mtok")),
         price_is_estimated=bool(item.get("price_is_estimated", True)),
+        pricing_tag=str(item.get("pricing_tag", "")),
     )
 
 

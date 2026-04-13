@@ -67,7 +67,7 @@ class _DispatchResult:
 @celery_app.task(
     bind=True,
     name="workers.dispatch.dispatch_step",
-    max_retries=3,
+    max_retries=1,
     default_retry_delay=60,
     queue="dispatch",
 )
@@ -80,15 +80,37 @@ def dispatch_step(self, step_id: str, tenant_id: str) -> dict:
 
 
 async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: ignore[type-arg]
+
+    tid = uuid.UUID(tenant_id)
+    sid = uuid.UUID(step_id)
+
+    # ── Lock distribuído Redis — impede processamento duplicado ────
+    lock_key = f"dispatch:lock:{step_id}"
+    lock_acquired = await redis_client.set_if_absent(lock_key, "1", ttl=300)
+    if not lock_acquired:
+        logger.info("dispatch.lock_exists", step_id=step_id)
+        return {"step_id": step_id, "status": "locked"}
+
+    try:
+        return await _dispatch_inner(step_id, tenant_id, tid, sid, task, lock_key)
+    finally:
+        await redis_client.delete(lock_key)
+
+
+async def _dispatch_inner(
+    step_id: str,
+    tenant_id: str,
+    tid: uuid.UUID,
+    sid: uuid.UUID,
+    task,  # type: ignore[type-arg]
+    lock_key: str,
+) -> dict:
     from models.cadence import Cadence
     from models.cadence_step import CadenceStep
     from models.enums import Channel, InteractionDirection, StepStatus
     from models.interaction import Interaction
     from models.lead import Lead
     from models.tenant import TenantIntegration
-
-    tid = uuid.UUID(tenant_id)
-    sid = uuid.UUID(step_id)
 
     async for db in get_worker_session(tid):
         # ── Carrega step ─────────────────────────────────────────────
@@ -98,8 +120,8 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
             logger.warning("dispatch.step_not_found", step_id=step_id)
             return {"step_id": step_id, "status": "not_found"}
 
-        # Idempotência — step já processado
-        if step.status != StepStatus.PENDING:
+        # Idempotência — aceita PENDING (legado) e DISPATCHING (novo fluxo)
+        if step.status not in (StepStatus.PENDING, StepStatus.DISPATCHING):
             logger.info(
                 "dispatch.step_already_processed",
                 step_id=step_id,
@@ -109,6 +131,22 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
 
         async def _release_rate_limit_slot() -> None:
             await redis_client.release_rate_limit(step.channel.value, tid)
+
+        # ── Circuit breaker — muitas falhas seguidas pausam o tenant ──
+        cb_key = f"dispatch:failures:{tenant_id}"
+        cb_count = await redis_client.get(cb_key)
+        if cb_count and int(cb_count) >= 5:
+            # Reverter para PENDING para re-tentar depois da pausa
+            step.status = StepStatus.PENDING
+            await db.commit()
+            await _release_rate_limit_slot()
+            logger.warning(
+                "dispatch.circuit_breaker_open",
+                step_id=step_id,
+                tenant_id=tenant_id,
+                failure_count=int(cb_count),
+            )
+            return {"step_id": step_id, "status": "circuit_breaker"}
 
         # ── Carrega Lead e Cadence ────────────────────────────────────
         lead_result = await db.execute(select(Lead).where(Lead.id == step.lead_id))
@@ -170,6 +208,10 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
             if step.channel not in (Channel.LINKEDIN_POST_REACTION, Channel.EMAIL):
                 if configured_message:
                     message_text = configured_message
+                elif step.composed_text:
+                    # Cache hit — reusa composição anterior (retry/re-enqueue)
+                    message_text = step.composed_text
+                    logger.info("dispatch.compose_cache_hit", step_id=step_id)
                 else:
                     message_text = await composer.compose(
                         lead=lead,
@@ -182,6 +224,9 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                         previous_channel=previous_channel,
                         step_type=configured_step_type,
                     )
+                    # Persiste cache de composição para retry
+                    step.composed_text = message_text
+                    await db.flush()
             else:
                 message_text = ""
 
@@ -382,6 +427,11 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                     if configured_message:
                         subject = _build_email_subject(lead, step.step_number)
                         message_text = configured_message
+                    elif step.composed_text and step.composed_subject:
+                        # Cache hit — reusa composição anterior (retry/re-enqueue)
+                        subject = step.composed_subject
+                        message_text = step.composed_text
+                        logger.info("dispatch.compose_email_cache_hit", step_id=step_id)
                     else:
                         # Gera subject + body via LLM em chamada única (JSON internamente)
                         subject, message_text = await composer.compose_email(
@@ -393,6 +443,10 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                             total_steps=total_steps,
                             previous_channel=previous_channel,
                         )
+                        # Persiste cache de composição para retry
+                        step.composed_text = message_text
+                        step.composed_subject = subject
+                        await db.flush()
 
                 # A/B override: se cadência tem subject_variants configurado, tem prioridade
                 if subject_variants:
@@ -636,6 +690,11 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                 lead_id=str(lead.id),
                 use_voice=step.use_voice,
             )
+
+            # Sucesso — reseta circuit breaker
+            cb_key = f"dispatch:failures:{tenant_id}"
+            await redis_client.delete(cb_key)
+
             return {"step_id": step_id, "channel": step.channel.value, "status": "sent"}
 
         except Exception as exc:
@@ -644,13 +703,26 @@ async def _dispatch_async(step_id: str, tenant_id: str, task) -> dict:  # type: 
                 step_id=step_id,
                 error=str(exc),
             )
+
+            # Incrementa circuit breaker (TTL 30min = 1800s)
+            cb_key = f"dispatch:failures:{tenant_id}"
+            await redis_client.increment_with_ttl(cb_key, 1800)
+
             try:
+                # Mantém step em DISPATCHING durante retry do Celery
                 raise task.retry(exc=RuntimeError(f"{type(exc).__name__}: {exc}"))
             except task.MaxRetriesExceededError:
-                step.status = StepStatus.FAILED
+                # Retries esgotados — reverte para PENDING para re-tentativa futura
+                # pelo cadence_tick (em vez de FAILED permanente)
+                step.status = StepStatus.PENDING
                 await db.commit()
                 await _release_rate_limit_slot()
-                return {"step_id": step_id, "status": "failed", "error": str(exc)}
+                logger.warning(
+                    "dispatch.max_retries_reverted_to_pending",
+                    step_id=step_id,
+                    error=str(exc),
+                )
+                return {"step_id": step_id, "status": "pending", "error": str(exc)}
 
     return {"step_id": step_id, "status": "error", "error": "no_session"}
 

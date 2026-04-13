@@ -5,10 +5,10 @@ Testes unitários para workers/cadence._tick_async().
 
 Estratégia:
   - Testa _tick_async diretamente (sem passar pelo Celery .delay)
-  - Banco de dados real via fixture db do conftest para criar fixtures
+  - Usa FakeAsyncSession em memória (sem dependência de DB real)
   - Redis e dispatch_step são mockados para isolar o worker
   - _tick_async usa engine próprio internamente — mockamos também para
-    entregar o db de teste
+    entregar a session fake
 
 Cobre:
   - Steps pendentes vencidos são enfileirados para dispatch
@@ -21,12 +21,13 @@ Cobre:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import operators
+from sqlalchemy.sql.elements import BinaryExpression, BooleanClauseList
 
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
@@ -37,7 +38,144 @@ from models.tenant import Tenant
 pytestmark = pytest.mark.asyncio
 
 
+# ── FakeAsyncSession (sem dependência de DB) ──────────────────────────
+
+
+class _FakeScalars:
+    """Suporta tanto .all() quanto acesso direto ao valor escalar."""
+
+    def __init__(self, items: list[Any], attr: str | None = None) -> None:
+        self._items = items
+        self._attr = attr
+
+    def all(self) -> list[Any]:
+        if self._attr:
+            return [getattr(item, self._attr, item) for item in self._items]
+        return list(self._items)
+
+
+class _FakeResult:
+    """Resultado fake que suporta scalar_one_or_none() e scalars()."""
+
+    def __init__(self, items: list[Any], attr: str | None = None) -> None:
+        self._items = items
+        self._attr = attr
+
+    def scalar_one_or_none(self) -> Any | None:
+        if not self._items:
+            return None
+        val = self._items[0]
+        return getattr(val, self._attr) if self._attr else val
+
+    def scalars(self) -> _FakeScalars:
+        return _FakeScalars(self._items, self._attr)
+
+
+class FakeAsyncSession:
+    """Session fake em memória que suporta os padrões de query do cadence worker."""
+
+    def __init__(self) -> None:
+        self._items: dict[type[Any], list[Any]] = {}
+
+    def add(self, obj: object) -> None:
+        bucket = self._items.setdefault(type(obj), [])
+        if obj not in bucket:
+            bucket.append(obj)
+
+    def add_all(self, objects: list[object]) -> None:
+        for obj in objects:
+            self.add(obj)
+
+    async def execute(self, statement: Any) -> _FakeResult:
+        # Determina a entidade e possível atributo
+        col_desc = (
+            statement.column_descriptions[0] if hasattr(statement, "column_descriptions") else {}
+        )
+        entity = col_desc.get("entity")
+        expr = col_desc.get("expr")
+
+        # Detecta se é select de coluna específica (ex: select(Lead.status))
+        attr: str | None = None
+        if entity and expr is not None and expr is not entity:
+            attr = getattr(expr, "key", None)
+
+        candidates = list(self._items.get(entity, [])) if entity else []
+
+        for criterion in getattr(statement, "_where_criteria", ()):
+            candidates = [item for item in candidates if _matches_criterion(item, criterion)]
+
+        return _FakeResult(candidates, attr)
+
+    async def flush(self) -> None:
+        pass
+
+    async def commit(self) -> None:
+        pass
+
+    async def refresh(self, obj: object) -> None:
+        pass
+
+    async def close(self) -> None:
+        pass
+
+
+def _matches_criterion(obj: object, criterion: object) -> bool:
+    """Avalia critérios WHERE contra objetos em memória."""
+    if isinstance(criterion, BooleanClauseList):
+        return all(_matches_criterion(obj, clause) for clause in criterion.clauses)
+
+    if not isinstance(criterion, BinaryExpression):
+        return True
+
+    field_name = getattr(criterion.left, "key", None)
+    if field_name is None:
+        field_name = getattr(criterion.left, "name", None)
+    if not isinstance(field_name, str):
+        return True
+
+    current_value = getattr(obj, field_name, None)
+    expected_value = getattr(criterion.right, "value", criterion.right)
+
+    if criterion.operator is operators.eq:
+        return current_value == expected_value
+    if criterion.operator is operators.is_:
+        return current_value is expected_value or current_value == expected_value
+    if criterion.operator is operators.le:
+        try:
+            return current_value <= expected_value
+        except TypeError:
+            return True
+    if criterion.operator is operators.in_op:
+        try:
+            return current_value in expected_value
+        except TypeError:
+            return True
+
+    return True
+
+
+# ── Fixtures ──────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def tenant_id() -> uuid.UUID:
+    return uuid.uuid4()
+
+
+@pytest.fixture
+def db() -> FakeAsyncSession:
+    return FakeAsyncSession()
+
+
+@pytest.fixture
+def tenant(db: FakeAsyncSession, tenant_id: uuid.UUID) -> Tenant:
+    t = Tenant(id=tenant_id, name="Tenant Teste", slug="tenant-teste")
+    db.add(t)
+    return t
+
+
 # ── Factories ─────────────────────────────────────────────────────────
+
 
 def _make_lead(tenant_id: uuid.UUID, status: LeadStatus = LeadStatus.IN_CADENCE) -> Lead:
     return Lead(
@@ -72,7 +210,7 @@ def _make_step(
 ) -> CadenceStep:
     if scheduled_at is None:
         # Vencido por padrão (5 minutos atrás)
-        scheduled_at = datetime.now(tz=timezone.utc) - timedelta(minutes=5)
+        scheduled_at = datetime.now(tz=UTC) - timedelta(minutes=5)
     return CadenceStep(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
@@ -89,16 +227,12 @@ def _make_step(
 
 # ── Helper: substitui o engine interno do _tick_async ─────────────────
 
-def _mock_engine_factory(db: AsyncSession, tenants: list[Tenant]):
-    """
-    Retorna um context manager que simula o engine + session_factory
-    usados dentro de _tick_async para listar os tenants.
-    """
-    from unittest.mock import AsyncMock, MagicMock
 
-    mock_engine = MagicMock()
-    mock_engine.dispose = AsyncMock()
-
+def _mock_worker_session_local(db: FakeAsyncSession | None, tenants: list[Tenant]):
+    """
+    Retorna um mock para WorkerSessionLocal() que age como async context manager
+    retornando uma session que lista os tenants fornecidos.
+    """
     mock_root_session = AsyncMock()
     scalar_result = MagicMock()
     scalar_result.scalars.return_value.all.return_value = tenants
@@ -106,15 +240,14 @@ def _mock_engine_factory(db: AsyncSession, tenants: list[Tenant]):
     mock_root_session.__aenter__ = AsyncMock(return_value=mock_root_session)
     mock_root_session.__aexit__ = AsyncMock(return_value=False)
 
-    mock_session_factory = MagicMock(return_value=mock_root_session)
-
-    return mock_engine, mock_session_factory
+    return MagicMock(return_value=mock_root_session)
 
 
 # ── Testes ────────────────────────────────────────────────────────────
 
+
 async def test_tick_dispatches_pending_steps(
-    db: AsyncSession,
+    db: FakeAsyncSession,
     tenant_id: uuid.UUID,
     tenant: Tenant,
 ) -> None:
@@ -127,15 +260,15 @@ async def test_tick_dispatches_pending_steps(
     db.add_all([lead, cadence, step])
     await db.flush()
 
-    mock_engine, mock_session_factory = _mock_engine_factory(db, [tenant])
+    mock_wsl = _mock_worker_session_local(db, [tenant])
 
     with (
-        patch("workers.cadence.create_async_engine", return_value=mock_engine),
-        patch("workers.cadence.async_sessionmaker", return_value=mock_session_factory),
-        patch("workers.cadence.get_session") as mock_get_session,
+        patch("workers.cadence.WorkerSessionLocal", mock_wsl),
+        patch("workers.cadence.get_worker_session") as mock_get_session,
         patch("workers.cadence.redis_client") as mock_redis,
-        patch("workers.cadence.dispatch_step") as mock_dispatch,
+        patch("workers.dispatch.dispatch_step") as mock_dispatch,
     ):
+
         async def _fake_session(_tid):
             yield db
 
@@ -151,7 +284,7 @@ async def test_tick_dispatches_pending_steps(
 
 
 async def test_tick_skips_lead_not_in_cadence(
-    db: AsyncSession,
+    db: FakeAsyncSession,
     tenant_id: uuid.UUID,
     tenant: Tenant,
 ) -> None:
@@ -164,15 +297,15 @@ async def test_tick_skips_lead_not_in_cadence(
     db.add_all([lead, cadence, step])
     await db.flush()
 
-    mock_engine, mock_session_factory = _mock_engine_factory(db, [tenant])
+    mock_wsl = _mock_worker_session_local(db, [tenant])
 
     with (
-        patch("workers.cadence.create_async_engine", return_value=mock_engine),
-        patch("workers.cadence.async_sessionmaker", return_value=mock_session_factory),
-        patch("workers.cadence.get_session") as mock_get_session,
+        patch("workers.cadence.WorkerSessionLocal", mock_wsl),
+        patch("workers.cadence.get_worker_session") as mock_get_session,
         patch("workers.cadence.redis_client") as mock_redis,
-        patch("workers.cadence.dispatch_step") as mock_dispatch,
+        patch("workers.dispatch.dispatch_step") as mock_dispatch,
     ):
+
         async def _fake_session(_tid):
             yield db
 
@@ -190,7 +323,7 @@ async def test_tick_skips_lead_not_in_cadence(
 
 
 async def test_tick_does_not_dispatch_future_steps(
-    db: AsyncSession,
+    db: FakeAsyncSession,
     tenant_id: uuid.UUID,
     tenant: Tenant,
 ) -> None:
@@ -200,21 +333,23 @@ async def test_tick_does_not_dispatch_future_steps(
     lead = _make_lead(tenant_id)
     cadence = _make_cadence(tenant_id)
     future_step = _make_step(
-        tenant_id, lead.id, cadence.id,
-        scheduled_at=datetime.now(tz=timezone.utc) + timedelta(hours=2),
+        tenant_id,
+        lead.id,
+        cadence.id,
+        scheduled_at=datetime.now(tz=UTC) + timedelta(hours=2),
     )
     db.add_all([lead, cadence, future_step])
     await db.flush()
 
-    mock_engine, mock_session_factory = _mock_engine_factory(db, [tenant])
+    mock_wsl = _mock_worker_session_local(db, [tenant])
 
     with (
-        patch("workers.cadence.create_async_engine", return_value=mock_engine),
-        patch("workers.cadence.async_sessionmaker", return_value=mock_session_factory),
-        patch("workers.cadence.get_session") as mock_get_session,
+        patch("workers.cadence.WorkerSessionLocal", mock_wsl),
+        patch("workers.cadence.get_worker_session") as mock_get_session,
         patch("workers.cadence.redis_client") as mock_redis,
-        patch("workers.cadence.dispatch_step") as mock_dispatch,
+        patch("workers.dispatch.dispatch_step") as mock_dispatch,
     ):
+
         async def _fake_session(_tid):
             yield db
 
@@ -229,7 +364,7 @@ async def test_tick_does_not_dispatch_future_steps(
 
 
 async def test_tick_rate_limited_step_not_dispatched(
-    db: AsyncSession,
+    db: FakeAsyncSession,
     tenant_id: uuid.UUID,
     tenant: Tenant,
 ) -> None:
@@ -242,15 +377,15 @@ async def test_tick_rate_limited_step_not_dispatched(
     db.add_all([lead, cadence, step])
     await db.flush()
 
-    mock_engine, mock_session_factory = _mock_engine_factory(db, [tenant])
+    mock_wsl = _mock_worker_session_local(db, [tenant])
 
     with (
-        patch("workers.cadence.create_async_engine", return_value=mock_engine),
-        patch("workers.cadence.async_sessionmaker", return_value=mock_session_factory),
-        patch("workers.cadence.get_session") as mock_get_session,
+        patch("workers.cadence.WorkerSessionLocal", mock_wsl),
+        patch("workers.cadence.get_worker_session") as mock_get_session,
         patch("workers.cadence.redis_client") as mock_redis,
-        patch("workers.cadence.dispatch_step") as mock_dispatch,
+        patch("workers.dispatch.dispatch_step") as mock_dispatch,
     ):
+
         async def _fake_session(_tid):
             yield db
 
@@ -270,7 +405,7 @@ async def test_tick_rate_limited_step_not_dispatched(
 
 
 async def test_tick_returns_correct_counts(
-    db: AsyncSession,
+    db: FakeAsyncSession,
     tenant_id: uuid.UUID,
     tenant: Tenant,
 ) -> None:
@@ -287,15 +422,15 @@ async def test_tick_returns_correct_counts(
     db.add_all([lead_active, lead_archived, cadence, step_ok, step_skip])
     await db.flush()
 
-    mock_engine, mock_session_factory = _mock_engine_factory(db, [tenant])
+    mock_wsl = _mock_worker_session_local(db, [tenant])
 
     with (
-        patch("workers.cadence.create_async_engine", return_value=mock_engine),
-        patch("workers.cadence.async_sessionmaker", return_value=mock_session_factory),
-        patch("workers.cadence.get_session") as mock_get_session,
+        patch("workers.cadence.WorkerSessionLocal", mock_wsl),
+        patch("workers.cadence.get_worker_session") as mock_get_session,
         patch("workers.cadence.redis_client") as mock_redis,
-        patch("workers.cadence.dispatch_step") as mock_dispatch,
+        patch("workers.dispatch.dispatch_step") as mock_dispatch,
     ):
+
         async def _fake_session(_tid):
             yield db
 
@@ -313,22 +448,9 @@ async def test_tick_no_tenants_returns_zero_counts() -> None:
     """Sem tenants ativos, retorna zeros sem erros."""
     from workers.cadence import _tick_async
 
-    mock_engine = MagicMock()
-    mock_engine.dispose = AsyncMock()
+    mock_wsl = _mock_worker_session_local(None, [])
 
-    mock_root_session = AsyncMock()
-    scalar_result = MagicMock()
-    scalar_result.scalars.return_value.all.return_value = []
-    mock_root_session.execute = AsyncMock(return_value=scalar_result)
-    mock_root_session.__aenter__ = AsyncMock(return_value=mock_root_session)
-    mock_root_session.__aexit__ = AsyncMock(return_value=False)
-
-    mock_session_factory = MagicMock(return_value=mock_root_session)
-
-    with (
-        patch("workers.cadence.create_async_engine", return_value=mock_engine),
-        patch("workers.cadence.async_sessionmaker", return_value=mock_session_factory),
-    ):
+    with patch("workers.cadence.WorkerSessionLocal", mock_wsl):
         result = await _tick_async()
 
     assert result["dispatched"] == 0

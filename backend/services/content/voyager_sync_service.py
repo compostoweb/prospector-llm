@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 import structlog
 from sqlalchemy import select
@@ -69,8 +70,8 @@ async def sync_voyager_for_tenant(
 
     Fluxo:
       1. Busca LinkedInAccount (prospeccao) com unipile_account_id
-      2. GET /users/me → provider_id do dono da conta
-      3. GET /users/{provider_id}/posts → posts com metricas
+            2. Resolve identificadores do perfil (provider_id/public_identifier/username salvo)
+            3. GET /users/{identifier}/posts → posts com metricas
       4. Upsert posts no banco (match por linkedin_post_urn)
       5. Atualiza last_voyager_sync_at na ContentLinkedInAccount
 
@@ -94,55 +95,125 @@ async def sync_voyager_for_tenant(
     li_account: LinkedInAccount | None = row.scalar_one_or_none()
 
     if not li_account or not li_account.unipile_account_id:
-        result.error = "Nenhuma conta LinkedIn conectada via Unipile. Conecte em Configurações do Sistema."
+        result.error = (
+            "Nenhuma conta LinkedIn conectada via Unipile. Conecte em Configurações do Sistema."
+        )
         logger.info("unipile_sync.no_account", tenant_id=tenant_id)
         return result
 
     account_id: str = li_account.unipile_account_id
 
-    # 2. Busca provider_id via GET /users/me
-    try:
-        async with UnipileClient() as client:
-            profile = await client.get_own_profile(account_id)
-    except Exception as exc:
-        result.error = f"Erro ao buscar perfil Unipile: {exc}"
-        logger.error("unipile_sync.profile_error", tenant_id=tenant_id, error=str(exc))
-        return result
+    # 2. Resolve identificadores possiveis do perfil
+    profile: dict[str, Any] | None = None
+    profile_error: Exception | None = None
+    candidates: list[tuple[str, str]] = []
 
-    provider_id = profile.get("provider_id") if profile else None
-    if not provider_id:
-        result.error = (
-            "Perfil Unipile nao contem provider_id. "
-            "Verifique se a conta LinkedIn esta conectada corretamente no Unipile."
-        )
-        logger.warning(
-            "unipile_sync.no_provider_id",
-            tenant_id=tenant_id,
-            account_id=account_id,
-            profile_keys=list(profile.keys()) if profile else [],
-        )
-        return result
-
-    identifier: str = provider_id
-    logger.info(
-        "unipile_sync.profile_ok",
-        tenant_id=tenant_id,
-        identifier=identifier,
-        name=profile.get("first_name"),
-    )
+    _append_identifier_candidate(candidates, "linkedin_username", li_account.linkedin_username)
 
     # 3. Busca posts com metricas via Unipile
+    posts_raw: list[dict] | None = None
+    identifier: str | None = None
+    identifier_source: str | None = None
+    attempt_errors: list[str] = []
+    attempted_candidates: set[str] = set()
+
     try:
         async with UnipileClient() as client:
-            posts_raw = await client.get_own_posts_with_metrics(
-                account_id=account_id,
-                identifier=identifier,
-                limit=limit,
-            )
+            for source, candidate in candidates:
+                try:
+                    attempted_candidates.add(candidate)
+                    posts_raw = await client.get_own_posts_with_metrics(
+                        account_id=account_id,
+                        identifier=candidate,
+                        limit=limit,
+                    )
+                    identifier = candidate
+                    identifier_source = source
+                    break
+                except Exception as exc:
+                    attempt_errors.append(f"{source}={candidate}: {exc}")
+                    logger.warning(
+                        "unipile_sync.identifier_attempt_failed",
+                        tenant_id=tenant_id,
+                        source=source,
+                        identifier=candidate,
+                        error=str(exc),
+                    )
+
+            if identifier is None:
+                try:
+                    profile = await client.get_own_profile(account_id)
+                except Exception as exc:
+                    profile_error = exc
+                    logger.warning(
+                        "unipile_sync.profile_error",
+                        tenant_id=tenant_id,
+                        error=str(exc),
+                    )
+                else:
+                    _append_identifier_candidate(
+                        candidates, "provider_id", profile.get("provider_id")
+                    )
+                    _append_identifier_candidate(
+                        candidates,
+                        "public_identifier",
+                        profile.get("public_identifier"),
+                    )
+
+                for source, candidate in candidates:
+                    if candidate in attempted_candidates:
+                        continue
+                    try:
+                        attempted_candidates.add(candidate)
+                        posts_raw = await client.get_own_posts_with_metrics(
+                            account_id=account_id,
+                            identifier=candidate,
+                            limit=limit,
+                        )
+                        identifier = candidate
+                        identifier_source = source
+                        break
+                    except Exception as exc:
+                        attempt_errors.append(f"{source}={candidate}: {exc}")
+                        logger.warning(
+                            "unipile_sync.identifier_attempt_failed",
+                            tenant_id=tenant_id,
+                            source=source,
+                            identifier=candidate,
+                            error=str(exc),
+                        )
     except Exception as exc:
         result.error = f"Erro ao buscar posts: {exc}"
         logger.error("unipile_sync.posts_error", tenant_id=tenant_id, error=str(exc))
         return result
+
+    if identifier is None or posts_raw is None:
+        result.error = (
+            "Nao foi possivel identificar o perfil LinkedIn na Unipile. "
+            "Configure o linkedin_username da conta ou verifique a conexao com a Unipile."
+            if not candidates
+            else "Erro ao buscar posts na Unipile."
+        )
+        if not candidates and profile_error is not None:
+            result.error = f"{result.error} Erro original: {profile_error}"
+        if attempt_errors:
+            result.error = f"{result.error} Tentativas: {' | '.join(attempt_errors)}"
+        logger.error(
+            "unipile_sync.posts_all_identifiers_failed",
+            tenant_id=tenant_id,
+            attempts=attempt_errors,
+            profile_keys=list(profile.keys()) if profile else [],
+            has_linkedin_username=bool(li_account.linkedin_username),
+        )
+        return result
+
+    logger.info(
+        "unipile_sync.profile_ok",
+        tenant_id=tenant_id,
+        identifier=identifier,
+        identifier_source=identifier_source,
+        name=(profile or {}).get("first_name"),
+    )
 
     if not posts_raw:
         logger.info("unipile_sync.no_posts", tenant_id=tenant_id)
@@ -269,3 +340,16 @@ async def _update_sync_timestamp(
     if account:
         account.last_voyager_sync_at = datetime.now(UTC)  # type: ignore[assignment]
         await db.flush()
+
+
+def _append_identifier_candidate(
+    candidates: list[tuple[str, str]],
+    source: str,
+    value: Any,
+) -> None:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return
+    if any(existing == normalized for _, existing in candidates):
+        return
+    candidates.append((source, normalized))

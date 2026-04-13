@@ -16,12 +16,13 @@ from models.enums import CadenceMode, Channel, StepType
 
 # Combinações válidas: provider → lista de prefixos de model aceitos
 # Serve para validação básica — a lista completa vem da API dos providers
-_VALID_PROVIDERS = {"openai", "gemini", "anthropic"}
+_VALID_PROVIDERS = {"openai", "gemini", "anthropic", "openrouter"}
 
 _PROVIDER_MODEL_PREFIXES: dict[str, tuple[str, ...]] = {
     "openai": ("gpt-", "o1", "o3", "o4"),
     "gemini": ("gemini-",),
     "anthropic": ("claude-",),
+    "openrouter": (),  # OpenRouter aceita qualquer modelo — validação dinâmica
 }
 
 

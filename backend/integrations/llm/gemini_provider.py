@@ -19,11 +19,31 @@ from __future__ import annotations
 import structlog
 from google import genai
 from google.genai import types
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from integrations.llm.base import LLMMessage, LLMProvider, LLMResponse, ModelInfo
 
 logger = structlog.get_logger()
+
+# Status HTTP que NÃO devem ser retentados (auth/config — retry é inútil)
+_NON_RETRYABLE_STATUSES = {401, 402, 403, 404}
+
+
+def _is_retryable_error(exc: BaseException) -> bool:
+    """Retorna True se o erro deve ser retentado (429, 5xx, timeout)."""
+    from google.api_core.exceptions import GoogleAPIError
+
+    # google-genai levanta ClientError / ServerError que herdam GoogleAPIError
+    if isinstance(exc, GoogleAPIError):
+        code = getattr(exc, "code", None) or getattr(exc, "grpc_status_code", None)
+        if code and int(code) in _NON_RETRYABLE_STATUSES:
+            return False
+        return True
+    # Timeout / connection errors — sempre retentável
+    if isinstance(exc, (TimeoutError, ConnectionError, OSError)):
+        return True
+    return False
+
 
 # Preços ESTIMADOS USD/1M tokens (input / output) — podem estar desatualizados.
 # Fonte oficial: https://ai.google.dev/gemini-api/docs/pricing
@@ -87,7 +107,12 @@ class GeminiProvider(LLMProvider):
     def provider_name(self) -> str:
         return "gemini"
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(min=1, max=10),
+        retry=retry_if_exception(_is_retryable_error),
+        reraise=True,
+    )
     async def complete(
         self,
         messages: list[LLMMessage],

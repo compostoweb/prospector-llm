@@ -266,6 +266,18 @@ def _make_task_mock() -> MagicMock:
     return task_mock
 
 
+def _mock_redis() -> MagicMock:
+    """Redis client mock com métodos async pré-configurados para o dispatch."""
+    mock = MagicMock()
+    mock.set_if_absent = AsyncMock(return_value=True)
+    mock.delete = AsyncMock()
+    mock.get = AsyncMock(return_value=None)
+    mock.increment_with_ttl = AsyncMock()
+    mock.release_rate_limit = AsyncMock()
+    mock.check_and_increment = AsyncMock(return_value=True)
+    return mock
+
+
 # ── Testes ────────────────────────────────────────────────────────────
 
 
@@ -277,7 +289,10 @@ async def test_dispatch_step_not_found(
     """Step inexistente retorna not_found sem explodir."""
     from workers.dispatch import _dispatch_async
 
-    with patch("workers.dispatch.get_session", new=_mock_worker_session(db)):
+    with (
+        patch("workers.dispatch.get_worker_session", new=_mock_worker_session(db)),
+        patch("workers.dispatch.redis_client", new=_mock_redis()),
+    ):
         task_mock = _make_task_mock()
         result = await _dispatch_async(str(uuid.uuid4()), str(tenant_id), task_mock)
 
@@ -298,7 +313,10 @@ async def test_dispatch_idempotency_already_sent(
     db.add_all([lead, cadence, step])
     await db.flush()
 
-    with patch("workers.dispatch.get_session", new=_mock_worker_session(db)):
+    with (
+        patch("workers.dispatch.get_worker_session", new=_mock_worker_session(db)),
+        patch("workers.dispatch.redis_client", new=_mock_redis()),
+    ):
         task_mock = _make_task_mock()
         result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
 
@@ -320,12 +338,12 @@ async def test_dispatch_linkedin_connect_creates_interaction(
     await db.flush()
 
     with (
-        patch("workers.dispatch.get_session", new=_mock_worker_session(db)),
+        patch("workers.dispatch.get_worker_session", new=_mock_worker_session(db)),
         patch("workers.dispatch.context_fetcher") as mock_ctx,
         patch("workers.dispatch.AIComposer") as mock_composer_cls,
         patch("workers.dispatch.unipile_client") as mock_unipile,
         patch("workers.dispatch.LLMRegistry"),
-        patch("workers.dispatch.redis_client"),
+        patch("workers.dispatch.redis_client", new=_mock_redis()),
     ):
         mock_ctx.fetch_from_website = AsyncMock(return_value="site text")
         mock_ctx.search_company = AsyncMock(return_value="company info")
@@ -372,12 +390,12 @@ async def test_dispatch_linkedin_dm_text(
     await db.flush()
 
     with (
-        patch("workers.dispatch.get_session", new=_mock_worker_session(db)),
+        patch("workers.dispatch.get_worker_session", new=_mock_worker_session(db)),
         patch("workers.dispatch.context_fetcher") as mock_ctx,
         patch("workers.dispatch.AIComposer") as mock_composer_cls,
         patch("workers.dispatch.unipile_client") as mock_unipile,
         patch("workers.dispatch.LLMRegistry"),
-        patch("workers.dispatch.redis_client"),
+        patch("workers.dispatch.redis_client", new=_mock_redis()),
     ):
         mock_ctx.fetch_from_website = AsyncMock(return_value=None)
         mock_ctx.search_company = AsyncMock(return_value=None)
@@ -413,12 +431,12 @@ async def test_dispatch_email_sent(
     await db.flush()
 
     with (
-        patch("workers.dispatch.get_session", new=_mock_worker_session(db)),
+        patch("workers.dispatch.get_worker_session", new=_mock_worker_session(db)),
         patch("workers.dispatch.context_fetcher") as mock_ctx,
         patch("workers.dispatch.AIComposer") as mock_composer_cls,
         patch("workers.dispatch.unipile_client") as mock_unipile,
         patch("workers.dispatch.LLMRegistry"),
-        patch("workers.dispatch.redis_client"),
+        patch("workers.dispatch.redis_client", new=_mock_redis()),
     ):
         mock_ctx.fetch_from_website = AsyncMock(return_value=None)
         mock_ctx.search_company = AsyncMock(return_value=None)
@@ -466,12 +484,12 @@ async def test_dispatch_email_manual_template_body_is_used(
     await db.flush()
 
     with (
-        patch("workers.dispatch.get_session", new=_mock_worker_session(db)),
+        patch("workers.dispatch.get_worker_session", new=_mock_worker_session(db)),
         patch("workers.dispatch.context_fetcher") as mock_ctx,
         patch("workers.dispatch.AIComposer") as mock_composer_cls,
         patch("workers.dispatch.unipile_client") as mock_unipile,
         patch("workers.dispatch.LLMRegistry"),
-        patch("workers.dispatch.redis_client"),
+        patch("workers.dispatch.redis_client", new=_mock_redis()),
     ):
         mock_ctx.fetch_from_website = AsyncMock(return_value=None)
         mock_ctx.search_company = AsyncMock(return_value=None)
@@ -524,12 +542,12 @@ async def test_dispatch_email_saved_template_and_subject_variants(
     await db.flush()
 
     with (
-        patch("workers.dispatch.get_session", new=_mock_worker_session(db)),
+        patch("workers.dispatch.get_worker_session", new=_mock_worker_session(db)),
         patch("workers.dispatch.context_fetcher") as mock_ctx,
         patch("workers.dispatch.AIComposer") as mock_composer_cls,
         patch("workers.dispatch.unipile_client") as mock_unipile,
         patch("workers.dispatch.LLMRegistry"),
-        patch("workers.dispatch.redis_client"),
+        patch("workers.dispatch.redis_client", new=_mock_redis()),
         patch("random.choice", return_value="Variante B"),
     ):
         mock_ctx.fetch_from_website = AsyncMock(return_value=None)
@@ -570,12 +588,12 @@ async def test_dispatch_email_no_address_skips(
     await db.flush()
 
     with (
-        patch("workers.dispatch.get_session", new=_mock_worker_session(db)),
+        patch("workers.dispatch.get_worker_session", new=_mock_worker_session(db)),
         patch("workers.dispatch.context_fetcher") as mock_ctx,
         patch("workers.dispatch.AIComposer") as mock_composer_cls,
         patch("workers.dispatch.unipile_client"),
         patch("workers.dispatch.LLMRegistry"),
-        patch("workers.dispatch.redis_client"),
+        patch("workers.dispatch.redis_client", new=_mock_redis()),
     ):
         mock_ctx.fetch_from_website = AsyncMock(return_value=None)
         mock_ctx.search_company = AsyncMock(return_value=None)
@@ -599,7 +617,7 @@ async def test_dispatch_failure_marks_step_failed(
     tenant_id: uuid.UUID,
     tenant,
 ) -> None:
-    """Quando todas as retentativas se esgotam, step=FAILED."""
+    """Quando todas as retentativas se esgotam, step volta para PENDING (retry futuro pelo tick)."""
     from workers.dispatch import _dispatch_async
 
     lead = _make_lead(tenant_id)
@@ -609,12 +627,12 @@ async def test_dispatch_failure_marks_step_failed(
     await db.flush()
 
     with (
-        patch("workers.dispatch.get_session", new=_mock_worker_session(db)),
+        patch("workers.dispatch.get_worker_session", new=_mock_worker_session(db)),
         patch("workers.dispatch.context_fetcher") as mock_ctx,
         patch("workers.dispatch.AIComposer") as mock_composer_cls,
         patch("workers.dispatch.unipile_client") as mock_unipile,
         patch("workers.dispatch.LLMRegistry"),
-        patch("workers.dispatch.redis_client"),
+        patch("workers.dispatch.redis_client", new=_mock_redis()),
     ):
         mock_ctx.fetch_from_website = AsyncMock(return_value=None)
         mock_ctx.search_company = AsyncMock(return_value=None)
@@ -631,7 +649,7 @@ async def test_dispatch_failure_marks_step_failed(
 
         result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
 
-    assert result["status"] == "failed"
+    assert result["status"] == "pending"
 
     await db.refresh(step)
-    assert step.status == StepStatus.FAILED
+    assert step.status == StepStatus.PENDING
