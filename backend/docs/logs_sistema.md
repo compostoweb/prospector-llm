@@ -1,1055 +1,533 @@
-LOGS Workers Gerais
-
-
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
-    self._handle_dbapi_exception(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2363, in _handle_dbapi_exception
-    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
-    cursor.execute(statement, parameters)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 585, in execute
-    self._adapt_connection.await_(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
-    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
-    value = await result
-            ^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 563, in _prepare_and_execute
-    self._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 513, in _handle_exception
-    self._adapt_connection._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 797, in _handle_exception
-    raise translated_error from error
-sqlalchemy.exc.ProgrammingError: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist
-[SQL: SELECT cadence_steps.id, cadence_steps.cadence_id, cadence_steps.lead_id, cadence_steps.channel, cadence_steps.step_number, cadence_steps.day_offset, cadence_steps.use_voice, cadence_steps.audio_file_id, cadence_steps.status, cadence_steps.scheduled_at, cadence_steps.sent_at, cadence_steps.subject_used, cadence_steps.composed_text, cadence_steps.composed_subject, cadence_steps.tenant_id 
-FROM cadence_steps 
-WHERE cadence_steps.id = $1::UUID]
-[parameters: (UUID('836023a8-28c2-4805-855a-33c297ad7005'),)]
-(Background on this error at: https://sqlalche.me/e/20/f405)
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/pool/base.py", line 375, in _close_connection
-    self._dialect.do_close(connection)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 721, in do_close
-    dbapi_connection.close()
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 903, in close
-    self.await_(self._connection.close())
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
-    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
-    value = await result
-            ^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 1513, in close
-    await self._protocol.close(timeout)
-  File "asyncpg/protocol/protocol.pyx", line 632, in close
-asyncio.exceptions.CancelledError
-[2026-04-13 02:38:56,576: ERROR/ForkPoolWorker-3] Task workers.dispatch.dispatch_step[2ecd0125-a776-4265-b2d1-78ddda8db0e1] raised unexpected: ProgrammingError("(sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist")
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 526, in _prepare_and_execute
-    prepared_stmt, attributes = await adapt_connection._prepare(
-                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 773, in _prepare
-    prepared_stmt = await self._connection.prepare(
-                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 638, in prepare
-    return await self._prepare(
-           ^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 657, in _prepare
-    stmt = await self._get_statement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 443, in _get_statement
-    statement = await self._protocol.prepare(
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "asyncpg/protocol/protocol.pyx", line 165, in prepare
-asyncpg.exceptions.UndefinedColumnError: column cadence_steps.composed_text does not exist
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
-    cursor.execute(statement, parameters)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 585, in execute
-    self._adapt_connection.await_(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
-    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
-    value = await result
-            ^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 563, in _prepare_and_execute
-    self._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 513, in _handle_exception
-    self._adapt_connection._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 797, in _handle_exception
-    raise translated_error from error
-sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.ProgrammingError: <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/celery/app/trace.py", line 585, in trace_task
-    R = retval = fun(*args, **kwargs)
-                 ^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/celery/app/trace.py", line 858, in __protected_call__
-    return self.run(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/workers/dispatch.py", line 79, in dispatch_step
-    return asyncio.run(_dispatch_async(step_id, tenant_id, self))
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/asyncio/runners.py", line 195, in run
-    return runner.run(main)
-           ^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/asyncio/runners.py", line 118, in run
-    return self._loop.run_until_complete(task)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
-    return future.result()
-           ^^^^^^^^^^^^^^^
-  File "/app/workers/dispatch.py", line 95, in _dispatch_async
-    return await _dispatch_inner(step_id, tenant_id, tid, sid, task, lock_key)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/workers/dispatch.py", line 117, in _dispatch_inner
-    step_result = await db.execute(select(CadenceStep).where(CadenceStep.id == sid))
-                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/session.py", line 449, in execute
-    result = await greenlet_spawn(
-             ^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 201, in greenlet_spawn
-    result = context.throw(*sys.exc_info())
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2351, in execute
-    return self._execute_internal(
-           ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2249, in _execute_internal
-    result: Result[Any] = compile_state_cls.orm_execute_statement(
-                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/context.py", line 306, in orm_execute_statement
-    result = conn.execute(
-             ^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
-    return meth(
-           ^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 527, in _execute_on_connection
-    return connection._execute_clauseelement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
-    ret = self._execute_context(
-          ^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
-    return self._exec_single_context(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
-    self._handle_dbapi_exception(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2363, in _handle_dbapi_exception
-    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
-    cursor.execute(statement, parameters)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 585, in execute
-    self._adapt_connection.await_(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
-    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
-    value = await result
-            ^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 563, in _prepare_and_execute
-    self._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 513, in _handle_exception
-    self._adapt_connection._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 797, in _handle_exception
-    raise translated_error from error
-sqlalchemy.exc.ProgrammingError: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist
-[SQL: SELECT cadence_steps.id, cadence_steps.cadence_id, cadence_steps.lead_id, cadence_steps.channel, cadence_steps.step_number, cadence_steps.day_offset, cadence_steps.use_voice, cadence_steps.audio_file_id, cadence_steps.status, cadence_steps.scheduled_at, cadence_steps.sent_at, cadence_steps.subject_used, cadence_steps.composed_text, cadence_steps.composed_subject, cadence_steps.tenant_id 
-FROM cadence_steps 
-WHERE cadence_steps.id = $1::UUID]
-[parameters: (UUID('836023a8-28c2-4805-855a-33c297ad7005'),)]
-(Background on this error at: https://sqlalche.me/e/20/f405)
-[2026-04-13 02:38:56,716: ERROR/ForkPoolWorker-3] Exception closing connection <AdaptedConnection <asyncpg.connection.Connection object at 0x7f12ea90e5d0>>
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 526, in _prepare_and_execute
-    prepared_stmt, attributes = await adapt_connection._prepare(
-                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 773, in _prepare
-    prepared_stmt = await self._connection.prepare(
-                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 638, in prepare
-    return await self._prepare(
-           ^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 657, in _prepare
-    stmt = await self._get_statement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 443, in _get_statement
-    statement = await self._protocol.prepare(
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "asyncpg/protocol/protocol.pyx", line 165, in prepare
-asyncpg.exceptions.UndefinedColumnError: column cadence_steps.composed_text does not exist
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
-    cursor.execute(statement, parameters)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 585, in execute
-    self._adapt_connection.await_(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
-    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
-    value = await result
-            ^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 563, in _prepare_and_execute
-    self._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 513, in _handle_exception
-    self._adapt_connection._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 797, in _handle_exception
-    raise translated_error from error
-sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.ProgrammingError: <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "/usr/local/lib/python3.12/asyncio/runners.py", line 195, in run
-    return runner.run(main)
-           ^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/asyncio/runners.py", line 118, in run
-    return self._loop.run_until_complete(task)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
-    return future.result()
-           ^^^^^^^^^^^^^^^
-  File "/app/workers/dispatch.py", line 95, in _dispatch_async
-    return await _dispatch_inner(step_id, tenant_id, tid, sid, task, lock_key)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/workers/dispatch.py", line 117, in _dispatch_inner
-    step_result = await db.execute(select(CadenceStep).where(CadenceStep.id == sid))
-                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/session.py", line 449, in execute
-    result = await greenlet_spawn(
-             ^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 201, in greenlet_spawn
-    result = context.throw(*sys.exc_info())
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2351, in execute
-    return self._execute_internal(
-           ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2249, in _execute_internal
-    result: Result[Any] = compile_state_cls.orm_execute_statement(
-                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/context.py", line 306, in orm_execute_statement
-    result = conn.execute(
-             ^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
-    return meth(
-           ^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 527, in _execute_on_connection
-    return connection._execute_clauseelement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
-    ret = self._execute_context(
-          ^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
-    return self._exec_single_context(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
-    self._handle_dbapi_exception(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2363, in _handle_dbapi_exception
-    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
-    cursor.execute(statement, parameters)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 585, in execute
-    self._adapt_connection.await_(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
-    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
-    value = await result
-            ^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 563, in _prepare_and_execute
-    self._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 513, in _handle_exception
-    self._adapt_connection._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 797, in _handle_exception
-    raise translated_error from error
-sqlalchemy.exc.ProgrammingError: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist
-[SQL: SELECT cadence_steps.id, cadence_steps.cadence_id, cadence_steps.lead_id, cadence_steps.channel, cadence_steps.step_number, cadence_steps.day_offset, cadence_steps.use_voice, cadence_steps.audio_file_id, cadence_steps.status, cadence_steps.scheduled_at, cadence_steps.sent_at, cadence_steps.subject_used, cadence_steps.composed_text, cadence_steps.composed_subject, cadence_steps.tenant_id 
-FROM cadence_steps 
-WHERE cadence_steps.id = $1::UUID]
-[parameters: (UUID('d15fc91a-db13-4730-b6b6-025323730050'),)]
-(Background on this error at: https://sqlalche.me/e/20/f405)
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/pool/base.py", line 375, in _close_connection
-    self._dialect.do_close(connection)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 721, in do_close
-    dbapi_connection.close()
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 903, in close
-    self.await_(self._connection.close())
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
-    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
-    value = await result
-            ^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 1513, in close
-    await self._protocol.close(timeout)
-  File "asyncpg/protocol/protocol.pyx", line 632, in close
-asyncio.exceptions.CancelledError
-[2026-04-13 02:38:56,743: WARNING/ForkPoolWorker-4] 2026-04-13 02:38:56 [error    ] cadence_tick.tenant_error      error="(sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist\n[SQL: SELECT cadence_steps.id, cadence_steps.cadence_id, cadence_steps.lead_id, cadence_steps.channel, cadence_steps.step_number, cadence_steps.day_offset, cadence_steps.use_voice, cadence_steps.audio_file_id, cadence_steps.status, cadence_steps.scheduled_at, cadence_steps.sent_at, cadence_steps.subject_used, cadence_steps.composed_text, cadence_steps.composed_subject, cadence_steps.tenant_id \nFROM cadence_steps \nWHERE cadence_steps.tenant_id = $1::UUID AND cadence_steps.status = $2::cadence_step_status AND cadence_steps.scheduled_at <= $3::TIMESTAMP WITH TIME ZONE ORDER BY cadence_steps.scheduled_at ASC \n LIMIT $4::INTEGER]\n[parameters: (UUID('c00948b6-76d7-4d9c-8cd5-ba90663af6ac'), 'PENDING', datetime.datetime(2026, 4, 13, 2, 38, 56, 740291, tzinfo=datetime.timezone.utc), 200)]\n(Background on this error at: https://sqlalche.me/e/20/f405)" tenant_id=c00948b6-76d7-4d9c-8cd5-ba90663af6ac
-[2026-04-13 02:38:56,744: WARNING/ForkPoolWorker-4] 2026-04-13 02:38:56 [info     ] cadence_tick.done              dispatched=0 skipped=0 tenants=1
-[2026-04-13 02:38:56,749: ERROR/ForkPoolWorker-3] Task workers.dispatch.dispatch_step[5901a15e-6d5a-4e88-9b66-a85dd17153c1] raised unexpected: ProgrammingError("(sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist")
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 526, in _prepare_and_execute
-    prepared_stmt, attributes = await adapt_connection._prepare(
-                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 773, in _prepare
-    prepared_stmt = await self._connection.prepare(
-                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 638, in prepare
-    return await self._prepare(
-           ^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 657, in _prepare
-    stmt = await self._get_statement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 443, in _get_statement
-    statement = await self._protocol.prepare(
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "asyncpg/protocol/protocol.pyx", line 165, in prepare
-asyncpg.exceptions.UndefinedColumnError: column cadence_steps.composed_text does not exist
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
-    cursor.execute(statement, parameters)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 585, in execute
-    self._adapt_connection.await_(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
-    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
-    value = await result
-            ^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 563, in _prepare_and_execute
-    self._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 513, in _handle_exception
-    self._adapt_connection._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 797, in _handle_exception
-    raise translated_error from error
-sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.ProgrammingError: <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/celery/app/trace.py", line 585, in trace_task
-    R = retval = fun(*args, **kwargs)
-                 ^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/celery/app/trace.py", line 858, in __protected_call__
-    return self.run(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/workers/dispatch.py", line 79, in dispatch_step
-    return asyncio.run(_dispatch_async(step_id, tenant_id, self))
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/asyncio/runners.py", line 195, in run
-    return runner.run(main)
-           ^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/asyncio/runners.py", line 118, in run
-    return self._loop.run_until_complete(task)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
-    return future.result()
-           ^^^^^^^^^^^^^^^
-  File "/app/workers/dispatch.py", line 95, in _dispatch_async
-    return await _dispatch_inner(step_id, tenant_id, tid, sid, task, lock_key)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/workers/dispatch.py", line 117, in _dispatch_inner
-    step_result = await db.execute(select(CadenceStep).where(CadenceStep.id == sid))
-                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/session.py", line 449, in execute
-    result = await greenlet_spawn(
-             ^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 201, in greenlet_spawn
-    result = context.throw(*sys.exc_info())
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2351, in execute
-    return self._execute_internal(
-           ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2249, in _execute_internal
-    result: Result[Any] = compile_state_cls.orm_execute_statement(
-                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/context.py", line 306, in orm_execute_statement
-    result = conn.execute(
-             ^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
-    return meth(
-           ^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 527, in _execute_on_connection
-    return connection._execute_clauseelement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
-    ret = self._execute_context(
-          ^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
-    return self._exec_single_context(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
-    self._handle_dbapi_exception(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2363, in _handle_dbapi_exception
-    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
-    cursor.execute(statement, parameters)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 585, in execute
-    self._adapt_connection.await_(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
-    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
-    value = await result
-            ^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 563, in _prepare_and_execute
-    self._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 513, in _handle_exception
-    self._adapt_connection._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 797, in _handle_exception
-    raise translated_error from error
-sqlalchemy.exc.ProgrammingError: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist
-[SQL: SELECT cadence_steps.id, cadence_steps.cadence_id, cadence_steps.lead_id, cadence_steps.channel, cadence_steps.step_number, cadence_steps.day_offset, cadence_steps.use_voice, cadence_steps.audio_file_id, cadence_steps.status, cadence_steps.scheduled_at, cadence_steps.sent_at, cadence_steps.subject_used, cadence_steps.composed_text, cadence_steps.composed_subject, cadence_steps.tenant_id 
-FROM cadence_steps 
-WHERE cadence_steps.id = $1::UUID]
-[parameters: (UUID('d15fc91a-db13-4730-b6b6-025323730050'),)]
-(Background on this error at: https://sqlalche.me/e/20/f405)
-[2026-04-13 02:38:56,791: WARNING/ForkPoolWorker-3] 2026-04-13 02:38:56 [info     ] dispatch.lock_exists           step_id=1bf3cc1c-9663-4e33-a344-f23c3a544833
-[2026-04-13 02:38:57,164: ERROR/ForkPoolWorker-4] Exception closing connection <AdaptedConnection <asyncpg.connection.Connection object at 0x7f12e968fa70>>
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 526, in _prepare_and_execute
-    prepared_stmt, attributes = await adapt_connection._prepare(
-                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 773, in _prepare
-    prepared_stmt = await self._connection.prepare(
-                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 638, in prepare
-    return await self._prepare(
-           ^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 657, in _prepare
-    stmt = await self._get_statement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 443, in _get_statement
-    statement = await self._protocol.prepare(
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "asyncpg/protocol/protocol.pyx", line 165, in prepare
-asyncpg.exceptions.UndefinedColumnError: column cadence_steps.composed_text does not exist
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
-    cursor.execute(statement, parameters)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 585, in execute
-    self._adapt_connection.await_(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
-    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
-    value = await result
-            ^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 563, in _prepare_and_execute
-    self._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 513, in _handle_exception
-    self._adapt_connection._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 797, in _handle_exception
-    raise translated_error from error
-sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.ProgrammingError: <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "/usr/local/lib/python3.12/asyncio/runners.py", line 195, in run
-    return runner.run(main)
-           ^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/asyncio/runners.py", line 118, in run
-    return self._loop.run_until_complete(task)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
-    return future.result()
-           ^^^^^^^^^^^^^^^
-  File "/app/workers/dispatch.py", line 95, in _dispatch_async
-    return await _dispatch_inner(step_id, tenant_id, tid, sid, task, lock_key)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/workers/dispatch.py", line 117, in _dispatch_inner
-    step_result = await db.execute(select(CadenceStep).where(CadenceStep.id == sid))
-                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/session.py", line 449, in execute
-    result = await greenlet_spawn(
-             ^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 201, in greenlet_spawn
-    result = context.throw(*sys.exc_info())
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2351, in execute
-    return self._execute_internal(
-           ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2249, in _execute_internal
-    result: Result[Any] = compile_state_cls.orm_execute_statement(
-                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/context.py", line 306, in orm_execute_statement
-    result = conn.execute(
-             ^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
-    return meth(
-           ^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 527, in _execute_on_connection
-    return connection._execute_clauseelement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
-    ret = self._execute_context(
-          ^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
-    return self._exec_single_context(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
-    self._handle_dbapi_exception(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2363, in _handle_dbapi_exception
-    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
-    cursor.execute(statement, parameters)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 585, in execute
-    self._adapt_connection.await_(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
-    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
-    value = await result
-            ^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 563, in _prepare_and_execute
-    self._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 513, in _handle_exception
-    self._adapt_connection._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 797, in _handle_exception
-    raise translated_error from error
-sqlalchemy.exc.ProgrammingError: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist
-[SQL: SELECT cadence_steps.id, cadence_steps.cadence_id, cadence_steps.lead_id, cadence_steps.channel, cadence_steps.step_number, cadence_steps.day_offset, cadence_steps.use_voice, cadence_steps.audio_file_id, cadence_steps.status, cadence_steps.scheduled_at, cadence_steps.sent_at, cadence_steps.subject_used, cadence_steps.composed_text, cadence_steps.composed_subject, cadence_steps.tenant_id 
-FROM cadence_steps 
-WHERE cadence_steps.id = $1::UUID]
-[parameters: (UUID('103abec0-a24c-41d7-b249-ad748519ee03'),)]
-(Background on this error at: https://sqlalche.me/e/20/f405)
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/pool/base.py", line 375, in _close_connection
-    self._dialect.do_close(connection)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 721, in do_close
-    dbapi_connection.close()
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 903, in close
-    self.await_(self._connection.close())
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
-    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
-    value = await result
-            ^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 1513, in close
-    await self._protocol.close(timeout)
-  File "asyncpg/protocol/protocol.pyx", line 632, in close
-asyncio.exceptions.CancelledError
-[2026-04-13 02:38:57,207: ERROR/ForkPoolWorker-4] Task workers.dispatch.dispatch_step[6685c463-0405-4116-a0c1-395d4e9ac5a5] raised unexpected: ProgrammingError("(sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist")
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 526, in _prepare_and_execute
-    prepared_stmt, attributes = await adapt_connection._prepare(
-                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 773, in _prepare
-    prepared_stmt = await self._connection.prepare(
-                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 638, in prepare
-    return await self._prepare(
-           ^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 657, in _prepare
-    stmt = await self._get_statement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 443, in _get_statement
-    statement = await self._protocol.prepare(
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "asyncpg/protocol/protocol.pyx", line 165, in prepare
-asyncpg.exceptions.UndefinedColumnError: column cadence_steps.composed_text does not exist
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
-    cursor.execute(statement, parameters)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 585, in execute
-    self._adapt_connection.await_(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
-    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
-    value = await result
-            ^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 563, in _prepare_and_execute
-    self._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 513, in _handle_exception
-    self._adapt_connection._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 797, in _handle_exception
-    raise translated_error from error
-sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.ProgrammingError: <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/celery/app/trace.py", line 585, in trace_task
-    R = retval = fun(*args, **kwargs)
-                 ^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/celery/app/trace.py", line 858, in __protected_call__
-    return self.run(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/workers/dispatch.py", line 79, in dispatch_step
-    return asyncio.run(_dispatch_async(step_id, tenant_id, self))
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/asyncio/runners.py", line 195, in run
-    return runner.run(main)
-           ^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/asyncio/runners.py", line 118, in run
-    return self._loop.run_until_complete(task)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
-    return future.result()
-           ^^^^^^^^^^^^^^^
-  File "/app/workers/dispatch.py", line 95, in _dispatch_async
-    return await _dispatch_inner(step_id, tenant_id, tid, sid, task, lock_key)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/workers/dispatch.py", line 117, in _dispatch_inner
-    step_result = await db.execute(select(CadenceStep).where(CadenceStep.id == sid))
-                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/session.py", line 449, in execute
-    result = await greenlet_spawn(
-             ^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 201, in greenlet_spawn
-    result = context.throw(*sys.exc_info())
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2351, in execute
-    return self._execute_internal(
-           ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2249, in _execute_internal
-    result: Result[Any] = compile_state_cls.orm_execute_statement(
-                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/context.py", line 306, in orm_execute_statement
-    result = conn.execute(
-             ^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
-    return meth(
-           ^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 527, in _execute_on_connection
-    return connection._execute_clauseelement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
-    ret = self._execute_context(
-          ^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
-    return self._exec_single_context(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
-    self._handle_dbapi_exception(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2363, in _handle_dbapi_exception
-    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
-    cursor.execute(statement, parameters)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 585, in execute
-    self._adapt_connection.await_(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
-    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
-    value = await result
-            ^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 563, in _prepare_and_execute
-    self._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 513, in _handle_exception
-    self._adapt_connection._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 797, in _handle_exception
-    raise translated_error from error
-sqlalchemy.exc.ProgrammingError: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist
-[SQL: SELECT cadence_steps.id, cadence_steps.cadence_id, cadence_steps.lead_id, cadence_steps.channel, cadence_steps.step_number, cadence_steps.day_offset, cadence_steps.use_voice, cadence_steps.audio_file_id, cadence_steps.status, cadence_steps.scheduled_at, cadence_steps.sent_at, cadence_steps.subject_used, cadence_steps.composed_text, cadence_steps.composed_subject, cadence_steps.tenant_id 
-FROM cadence_steps 
-WHERE cadence_steps.id = $1::UUID]
-[parameters: (UUID('103abec0-a24c-41d7-b249-ad748519ee03'),)]
-(Background on this error at: https://sqlalche.me/e/20/f405)
-[2026-04-13 02:38:57,402: ERROR/ForkPoolWorker-2] Exception closing connection <AdaptedConnection <asyncpg.connection.Connection object at 0x7f12e86a07d0>>
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 526, in _prepare_and_execute
-    prepared_stmt, attributes = await adapt_connection._prepare(
-                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 773, in _prepare
-    prepared_stmt = await self._connection.prepare(
-                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 638, in prepare
-    return await self._prepare(
-           ^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 657, in _prepare
-    stmt = await self._get_statement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 443, in _get_statement
-    statement = await self._protocol.prepare(
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "asyncpg/protocol/protocol.pyx", line 165, in prepare
-asyncpg.exceptions.UndefinedColumnError: column cadence_steps.composed_text does not exist
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
-    cursor.execute(statement, parameters)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 585, in execute
-    self._adapt_connection.await_(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
-    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
-    value = await result
-            ^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 563, in _prepare_and_execute
-    self._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 513, in _handle_exception
-    self._adapt_connection._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 797, in _handle_exception
-    raise translated_error from error
-sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.ProgrammingError: <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "/usr/local/lib/python3.12/asyncio/runners.py", line 195, in run
-    return runner.run(main)
-           ^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/asyncio/runners.py", line 118, in run
-    return self._loop.run_until_complete(task)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
-    return future.result()
-           ^^^^^^^^^^^^^^^
-  File "/app/workers/dispatch.py", line 95, in _dispatch_async
-    return await _dispatch_inner(step_id, tenant_id, tid, sid, task, lock_key)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/workers/dispatch.py", line 117, in _dispatch_inner
-    step_result = await db.execute(select(CadenceStep).where(CadenceStep.id == sid))
-                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/session.py", line 449, in execute
-    result = await greenlet_spawn(
-             ^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 201, in greenlet_spawn
-    result = context.throw(*sys.exc_info())
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2351, in execute
-    return self._execute_internal(
-           ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2249, in _execute_internal
-    result: Result[Any] = compile_state_cls.orm_execute_statement(
-                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/context.py", line 306, in orm_execute_statement
-    result = conn.execute(
-             ^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
-    return meth(
-           ^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 527, in _execute_on_connection
-    return connection._execute_clauseelement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
-    ret = self._execute_context(
-          ^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
-    return self._exec_single_context(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
-    self._handle_dbapi_exception(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2363, in _handle_dbapi_exception
-    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
-    cursor.execute(statement, parameters)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 585, in execute
-    self._adapt_connection.await_(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
-    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
-    value = await result
-            ^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 563, in _prepare_and_execute
-    self._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 513, in _handle_exception
-    self._adapt_connection._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 797, in _handle_exception
-    raise translated_error from error
-sqlalchemy.exc.ProgrammingError: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist
-[SQL: SELECT cadence_steps.id, cadence_steps.cadence_id, cadence_steps.lead_id, cadence_steps.channel, cadence_steps.step_number, cadence_steps.day_offset, cadence_steps.use_voice, cadence_steps.audio_file_id, cadence_steps.status, cadence_steps.scheduled_at, cadence_steps.sent_at, cadence_steps.subject_used, cadence_steps.composed_text, cadence_steps.composed_subject, cadence_steps.tenant_id 
-FROM cadence_steps 
-WHERE cadence_steps.id = $1::UUID]
-[parameters: (UUID('86bd0508-eb97-4dcb-8897-242f2cbfb3db'),)]
-(Background on this error at: https://sqlalche.me/e/20/f405)
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/pool/base.py", line 375, in _close_connection
-    self._dialect.do_close(connection)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 721, in do_close
-    dbapi_connection.close()
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 903, in close
-    self.await_(self._connection.close())
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
-    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
-    value = await result
-            ^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 1513, in close
-    await self._protocol.close(timeout)
-  File "asyncpg/protocol/protocol.pyx", line 632, in close
-asyncio.exceptions.CancelledError
-[2026-04-13 02:38:57,442: ERROR/ForkPoolWorker-2] Task workers.dispatch.dispatch_step[9e06160e-2061-4d11-918f-605be6d10457] raised unexpected: ProgrammingError("(sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist")
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 526, in _prepare_and_execute
-    prepared_stmt, attributes = await adapt_connection._prepare(
-                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 773, in _prepare
-    prepared_stmt = await self._connection.prepare(
-                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 638, in prepare
-    return await self._prepare(
-           ^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 657, in _prepare
-    stmt = await self._get_statement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 443, in _get_statement
-    statement = await self._protocol.prepare(
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "asyncpg/protocol/protocol.pyx", line 165, in prepare
-asyncpg.exceptions.UndefinedColumnError: column cadence_steps.composed_text does not exist
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
-    cursor.execute(statement, parameters)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 585, in execute
-    self._adapt_connection.await_(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
-    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
-    value = await result
-            ^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 563, in _prepare_and_execute
-    self._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 513, in _handle_exception
-    self._adapt_connection._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 797, in _handle_exception
-    raise translated_error from error
-sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.ProgrammingError: <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "/venv/lib/python3.12/site-packages/celery/app/trace.py", line 585, in trace_task
-    R = retval = fun(*args, **kwargs)
-                 ^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/celery/app/trace.py", line 858, in __protected_call__
-    return self.run(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/workers/dispatch.py", line 79, in dispatch_step
-    return asyncio.run(_dispatch_async(step_id, tenant_id, self))
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/asyncio/runners.py", line 195, in run
-    return runner.run(main)
-           ^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/asyncio/runners.py", line 118, in run
-    return self._loop.run_until_complete(task)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
-    return future.result()
-           ^^^^^^^^^^^^^^^
-  File "/app/workers/dispatch.py", line 95, in _dispatch_async
-    return await _dispatch_inner(step_id, tenant_id, tid, sid, task, lock_key)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/workers/dispatch.py", line 117, in _dispatch_inner
-    step_result = await db.execute(select(CadenceStep).where(CadenceStep.id == sid))
-                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/session.py", line 449, in execute
-    result = await greenlet_spawn(
-             ^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 201, in greenlet_spawn
-    result = context.throw(*sys.exc_info())
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2351, in execute
-    return self._execute_internal(
-           ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2249, in _execute_internal
-    result: Result[Any] = compile_state_cls.orm_execute_statement(
-                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/orm/context.py", line 306, in orm_execute_statement
-    result = conn.execute(
-             ^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
-    return meth(
-           ^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 527, in _execute_on_connection
-    return connection._execute_clauseelement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
-    ret = self._execute_context(
-          ^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
-    return self._exec_single_context(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
-    self._handle_dbapi_exception(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2363, in _handle_dbapi_exception
-    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
-    cursor.execute(statement, parameters)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 585, in execute
-    self._adapt_connection.await_(
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
-    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
-    value = await result
-            ^^^^^^^^^^^^
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 563, in _prepare_and_execute
-    self._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 513, in _handle_exception
-    self._adapt_connection._handle_exception(error)
-  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 797, in _handle_exception
-    raise translated_error from error
-sqlalchemy.exc.ProgrammingError: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist
-[SQL: SELECT cadence_steps.id, cadence_steps.cadence_id, cadence_steps.lead_id, cadence_steps.channel, cadence_steps.step_number, cadence_steps.day_offset, cadence_steps.use_voice, cadence_steps.audio_file_id, cadence_steps.status, cadence_steps.scheduled_at, cadence_steps.sent_at, cadence_steps.subject_used, cadence_steps.composed_text, cadence_steps.composed_subject, cadence_steps.tenant_id 
-FROM cadence_steps 
-WHERE cadence_steps.id = $1::UUID]
-[parameters: (UUID('86bd0508-eb97-4dcb-8897-242f2cbfb3db'),)]
-(Background on this error at: https://sqlalche.me/e/20/f405)
-[2026-04-13 02:38:57,475: WARNING/ForkPoolWorker-4] 2026-04-13 02:38:57 [error    ] cadence_tick.tenant_error      error="(sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedColumnError'>: column cadence_steps.composed_text does not exist\n[SQL: SELECT cadence_steps.id, cadence_steps.cadence_id, cadence_steps.lead_id, cadence_steps.channel, cadence_steps.step_number, cadence_steps.day_offset, cadence_steps.use_voice, cadence_steps.audio_file_id, cadence_steps.status, cadence_steps.scheduled_at, cadence_steps.sent_at, cadence_steps.subject_used, cadence_steps.composed_text, cadence_steps.composed_subject, cadence_steps.tenant_id \nFROM cadence_steps \nWHERE cadence_steps.tenant_id = $1::UUID AND cadence_steps.status = $2::cadence_step_status AND cadence_steps.scheduled_at <= $3::TIMESTAMP WITH TIME ZONE ORDER BY cadence_steps.scheduled_at ASC \n LIMIT $4::INTEGER]\n[parameters: (UUID('c00948b6-76d7-4d9c-8cd5-ba90663af6ac'), 'PENDING', datetime.datetime(2026, 4, 13, 2, 38, 57, 471788, tzinfo=datetime.timezone.utc), 200)]\n(Background on this error at: https://sqlalche.me/e/20/f405)" tenant_id=c00948b6-76d7-4d9c-8cd5-ba90663af6ac
-[2026-04-13 02:38:57,475: WARNING/ForkPoolWorker-4] 2026-04-13 02:38:57 [info     ] cadence_tick.done              dispatched=0 skipped=0 tenants=1
-
-=================================
-Logs Workers Content:
-
- -------------- celery@ab32b9bedaf8 v5.6.3 (recovery)
+-------------- celery@341f0003a10e v5.6.3 (recovery)
 --- ***** ----- 
--- ******* ---- Linux-5.15.0-116-generic-x86_64-with-glibc2.41 2026-04-13 02:35:52
+-- ******* ---- Linux-5.15.0-116-generic-x86_64-with-glibc2.41 2026-04-13 03:12:03
 - *** --- * --- 
 - ** ---------- [config]
-- ** ---------- .> app:         prospector:0x7f7315ff5af0
+- ** ---------- .> app:         prospector:0x7f7166ac8110
 - ** ---------- .> transport:   redis://default:**@chatwoot_redis_prospector_llm:6379/0
 - ** ---------- .> results:     redis://default:**@chatwoot_redis_prospector_llm:6379/1
-- *** --- * --- .> concurrency: 2 (prefork)
+- *** --- * --- .> concurrency: 4 (prefork)
 -- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
 --- ***** ----- 
  -------------- [queues]
-                .> content          exchange=prospector(direct) key=content
-                .> content-engagement exchange=prospector(direct) key=content-engagement
+                .> cadence          exchange=prospector(direct) key=cadence
+                .> capture          exchange=prospector(direct) key=capture
+                .> dispatch         exchange=prospector(direct) key=dispatch
+                .> enrich           exchange=prospector(direct) key=enrich
 
-[2026-04-13 02:36:00,333: WARNING/ForkPoolWorker-2] 2026-04-13 02:36:00 [info     ] content.check_scheduled.done   checked_at=2026-04-13T02:36:00.037745+00:00 dispatched=0
-[2026-04-13 02:37:00,149: WARNING/ForkPoolWorker-2] 2026-04-13 02:37:00 [info     ] content.check_scheduled.done   checked_at=2026-04-13T02:37:00.018643+00:00 dispatched=0
-[2026-04-13 02:38:00,102: WARNING/ForkPoolWorker-2] 2026-04-13 02:38:00 [info     ] content.check_scheduled.done   checked_at=2026-04-13T02:38:00.014871+00:00 dispatched=0
-[2026-04-13 02:39:00,149: WARNING/ForkPoolWorker-2] 2026-04-13 02:39:00 [info     ] content.check_scheduled.done   checked_at=2026-04-13T02:39:00.030408+00:00 dispatched=0
-[2026-04-13 02:40:00,112: WARNING/ForkPoolWorker-2] 2026-04-13 02:40:00 [info     ] content.check_scheduled.done   checked_at=2026-04-13T02:40:00.020448+00:00 dispatched=0
+[2026-04-13 03:12:06,347: WARNING/ForkPoolWorker-2] 2026-04-13 03:12:06 [info     ] anthropic_batch_worker.poll_done ended=0 polled=0 processed_leads=0
+[2026-04-13 03:12:06,721: WARNING/ForkPoolWorker-4] 2026-04-13 03:12:06 [info     ] cadence_tick.done              dispatched=11 skipped=0 tenants=1
+[2026-04-13 03:12:06,770: WARNING/ForkPoolWorker-2] 2026-04-13 03:12:06 [info     ] llm.registry.provider_loaded   provider=openai
+[2026-04-13 03:12:06,812: WARNING/ForkPoolWorker-2] 2026-04-13 03:12:06 [info     ] llm.registry.provider_loaded   provider=gemini
+[2026-04-13 03:12:06,824: WARNING/ForkPoolWorker-2] 2026-04-13 03:12:06 [info     ] llm.registry.provider_loaded   provider=anthropic
+[2026-04-13 03:12:06,840: WARNING/ForkPoolWorker-2] 2026-04-13 03:12:06 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:06,974: WARNING/ForkPoolWorker-1] 2026-04-13 03:12:06 [info     ] llm.registry.provider_loaded   provider=openai
+[2026-04-13 03:12:06,985: WARNING/ForkPoolWorker-4] 2026-04-13 03:12:06 [info     ] llm.registry.provider_loaded   provider=openai
+[2026-04-13 03:12:07,046: WARNING/ForkPoolWorker-1] 2026-04-13 03:12:07 [info     ] llm.registry.provider_loaded   provider=gemini
+[2026-04-13 03:12:07,070: WARNING/ForkPoolWorker-1] 2026-04-13 03:12:07 [info     ] llm.registry.provider_loaded   provider=anthropic
+[2026-04-13 03:12:07,070: WARNING/ForkPoolWorker-4] 2026-04-13 03:12:07 [info     ] llm.registry.provider_loaded   provider=gemini
+[2026-04-13 03:12:07,094: WARNING/ForkPoolWorker-4] 2026-04-13 03:12:07 [info     ] llm.registry.provider_loaded   provider=anthropic
+[2026-04-13 03:12:07,096: WARNING/ForkPoolWorker-1] 2026-04-13 03:12:07 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:07,117: WARNING/ForkPoolWorker-4] 2026-04-13 03:12:07 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:07,986: WARNING/ForkPoolWorker-3] 2026-04-13 03:12:07 [info     ] llm.registry.provider_loaded   provider=openai
+[2026-04-13 03:12:08,058: WARNING/ForkPoolWorker-3] 2026-04-13 03:12:08 [info     ] llm.registry.provider_loaded   provider=gemini
+[2026-04-13 03:12:08,067: WARNING/ForkPoolWorker-2] 2026-04-13 03:12:08 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:08,077: WARNING/ForkPoolWorker-3] 2026-04-13 03:12:08 [info     ] llm.registry.provider_loaded   provider=anthropic
+[2026-04-13 03:12:08,089: WARNING/ForkPoolWorker-3] 2026-04-13 03:12:08 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:08,337: WARNING/ForkPoolWorker-4] 2026-04-13 03:12:08 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:08,347: WARNING/ForkPoolWorker-1] 2026-04-13 03:12:08 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:09,301: WARNING/ForkPoolWorker-3] 2026-04-13 03:12:09 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:10,244: WARNING/ForkPoolWorker-2] 2026-04-13 03:12:10 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:10,391: WARNING/ForkPoolWorker-2] 2026-04-13 03:12:10 [error    ] dispatch.error                 error="Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011Ca13DVb3dS9t6K6QcJFDW'}" step_id=71be3033-145b-434b-a8d6-8752b8fd4ccf
+[2026-04-13 03:12:10,414: ERROR/ForkPoolWorker-2] Exception closing connection <AdaptedConnection <asyncpg.connection.Connection object at 0x7f715e0cc9b0>>
+Traceback (most recent call last):
+  File "/app/workers/dispatch.py", line 437, in _dispatch_inner
+    subject, message_text = await composer.compose_email(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/services/ai_composer.py", line 478, in compose_email
+    response: LLMResponse = await self._registry.complete(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/integrations/llm/registry.py", line 96, in complete
+    response = await llm.complete(
+               ^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 193, in async_wrapped
+    return await copy(fn, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 112, in __call__
+    do = await self.iter(retry_state=retry_state)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 157, in iter
+    result = await action(retry_state)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/_utils.py", line 111, in inner
+    return call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/__init__.py", line 413, in exc_check
+    raise retry_exc.reraise()
+          ^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/__init__.py", line 184, in reraise
+    raise self.last_attempt.result()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 116, in __call__
+    result = await fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/integrations/llm/anthropic_provider.py", line 172, in complete
+    response: Message = await self._client.messages.create(**kwargs)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/anthropic/resources/messages/messages.py", line 2443, in create
+    return await self._post(
+           ^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/anthropic/_base_client.py", line 1996, in post
+    return await self.request(cast_to, opts, stream=stream, stream_cls=stream_cls)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/anthropic/_base_client.py", line 1781, in request
+    raise self._make_status_error_from_response(err.response) from None
+anthropic.BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011Ca13DVb3dS9t6K6QcJFDW'}
 
-===============================
-Logs Beat:
+During handling of the above exception, another exception occurred:
 
-celery beat v5.6.3 (recovery) is starting.
-__    -    ... __   -        _
-LocalTime -> 2026-04-13 02:35:52
-Configuration ->
-    . broker -> redis://default:**@chatwoot_redis_prospector_llm:6379/0
-    . loader -> celery.loaders.app.AppLoader
-    . scheduler -> celery.beat.PersistentScheduler
-    . db -> /tmp/celerybeat-schedule
-    . logfile -> [stderr]@%WARNING
-    . maxinterval -> 5.00 minutes (300s)
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/asyncio/runners.py", line 195, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/app/workers/dispatch.py", line 95, in _dispatch_async
+    return await _dispatch_inner(step_id, tenant_id, tid, sid, task, lock_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/workers/dispatch.py", line 713, in _dispatch_inner
+    raise task.retry(exc=RuntimeError(f"{type(exc).__name__}: {exc}"))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/celery/app/task.py", line 790, in retry
+    raise ret
+celery.exceptions.Retry: Retry in 60s: RuntimeError("BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011Ca13DVb3dS9t6K6QcJFDW'}")
 
-==========================
-Logs backend:
+During handling of the above exception, another exception occurred:
 
-INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     Started parent process [6]
-INFO:     Started server process [8]
-INFO:     Waiting for application startup.
-INFO:     Started server process [9]
-INFO:     Waiting for application startup.
-{"url": "chatwoot_bd_prospector_llm:5432/prospector", "event": "database.connected", "level": "info", "timestamp": "2026-04-13T02:35:58.007707Z"}
-{"url": "chatwoot_bd_prospector_llm:5432/prospector", "event": "database.connected", "level": "info", "timestamp": "2026-04-13T02:35:58.012902Z"}
-{"env": "prod", "debug": false, "event": "api.startup", "level": "info", "timestamp": "2026-04-13T02:35:58.185233Z"}
-INFO:     Application startup complete.
-{"env": "prod", "debug": false, "event": "api.startup", "level": "info", "timestamp": "2026-04-13T02:35:58.192823Z"}
-INFO:     Application startup complete.
-{"method": "GET", "path": "/health", "status": 200, "duration_ms": 13.08, "event": "http.request", "level": "info", "timestamp": "2026-04-13T02:35:58.380151Z"}
-INFO:     127.0.0.1:37552 - "GET /health HTTP/1.1" 200 OK
-INFO:     10.11.0.4:35162 - "WebSocket /ws/events?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0eXBlIjoidXNlciIsInVzZXJfaWQiOiI1YjI5ZmViYi05M2ViLTQ5MjEtOTg3ZS0zZDEwY2MxMWRkNjMiLCJlbWFpbCI6ImFkcmlhbm9AY29tcG9zdG93ZWIuY29tLmJyIiwiaXNfc3VwZXJ1c2VyIjp0cnVlLCJuYW1lIjoiQWRyaWFubyBWYWxhZFx1MDBlM28iLCJleHAiOjE3NzY1MjI2MzF9.G5zd-ZDHhrAyBEtQDr9r5rKpmb_c9Of3BcNgrBBgNa0" [accepted]
-{"user_id": "5b29febb-93eb-4921-987e-3d10cc11dd63", "tenant_id": "", "event": "ws.connected", "level": "info", "timestamp": "2026-04-13T02:36:03.973101Z"}
-INFO:     connection open
-{"method": "GET", "path": "/health", "status": 200, "duration_ms": 15.25, "event": "http.request", "level": "info", "timestamp": "2026-04-13T02:36:28.527533Z"}
-INFO:     127.0.0.1:59004 - "GET /health HTTP/1.1" 200 OK
-{"method": "GET", "path": "/health", "status": 200, "duration_ms": 4.29, "event": "http.request", "level": "info", "timestamp": "2026-04-13T02:36:58.659384Z"}
-INFO:     127.0.0.1:33894 - "GET /health HTTP/1.1" 200 OK
-{"method": "GET", "path": "/health", "status": 200, "duration_ms": 14.98, "event": "http.request", "level": "info", "timestamp": "2026-04-13T02:37:28.795876Z"}
-INFO:     127.0.0.1:40266 - "GET /health HTTP/1.1" 200 OK
-{"method": "GET", "path": "/health", "status": 200, "duration_ms": 5.18, "event": "http.request", "level": "info", "timestamp": "2026-04-13T02:37:58.891084Z"}
-INFO:     127.0.0.1:33074 - "GET /health HTTP/1.1" 200 OK
-{"method": "GET", "path": "/health", "status": 200, "duration_ms": 6.21, "event": "http.request", "level": "info", "timestamp": "2026-04-13T02:38:28.987322Z"}
-INFO:     127.0.0.1:34750 - "GET /health HTTP/1.1" 200 OK
-{"method": "GET", "path": "/health", "status": 200, "duration_ms": 10.78, "event": "http.request", "level": "info", "timestamp": "2026-04-13T02:38:59.140674Z"}
-INFO:     127.0.0.1:47042 - "GET /health HTTP/1.1" 200 OK
-{"method": "GET", "path": "/health", "status": 200, "duration_ms": 8.94, "event": "http.request", "level": "info", "timestamp": "2026-04-13T02:39:29.250960Z"}
-INFO:     127.0.0.1:48814 - "GET /health HTTP/1.1" 200 OK
-{"method": "GET", "path": "/health", "status": 200, "duration_ms": 13.46, "event": "http.request", "level": "info", "timestamp": "2026-04-13T02:39:59.376692Z"}
-INFO:     127.0.0.1:35704 - "GET /health HTTP/1.1" 200 OK
-{"method": "GET", "path": "/health", "status": 200, "duration_ms": 9.3, "event": "http.request", "level": "info", "timestamp": "2026-04-13T02:40:29.495314Z"}
-INFO:     127.0.0.1:33830 - "GET /health HTTP/1.1" 200 OK
-{"method": "GET", "path": "/health", "status": 200, "duration_ms": 10.75, "event": "http.request", "level": "info", "timestamp": "2026-04-13T02:40:59.606110Z"}
-INFO:     127.0.0.1:58978 - "GET /health HTTP/1.1" 200 OK
-{"method": "GET", "path": "/health", "status": 200, "duration_ms": 5.91, "event": "http.request", "level": "info", "timestamp": "2026-04-13T02:41:29.722198Z"}
-INFO:     127.0.0.1:54698 - "GET /health HTTP/1.1" 200 OK
-{"method": "GET", "path": "/health", "status": 200, "duration_ms": 10.63, "event": "http.request", "level": "info", "timestamp": "2026-04-13T02:41:59.834344Z"}
-INFO:     127.0.0.1:32920 - "GET /health HTTP/1.1" 200 OK
-{"method": "GET", "path": "/health", "status": 200, "duration_ms": 8.66, "event": "http.request", "level": "info", "timestamp": "2026-04-13T02:42:29.943532Z"}
-INFO:     127.0.0.1:36520 - "GET /health HTTP/1.1" 200 OK
-{"method": "GET", "path": "/health", "status": 200, "duration_ms": 5.62, "event": "http.request", "level": "info", "timestamp": "2026-04-13T02:43:00.051473Z"}
-INFO:     127.0.0.1:54556 - "GET /health HTTP/1.1" 200 OK
-{"method": "GET", "path": "/health", "status": 200, "duration_ms": 9.57, "event": "http.request", "level": "info", "timestamp": "2026-04-13T02:43:30.176251Z"}
-INFO:     127.0.0.1:40772 - "GET /health HTTP/1.1" 200 OK
+Traceback (most recent call last):
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/pool/base.py", line 375, in _close_connection
+    self._dialect.do_close(connection)
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 721, in do_close
+    dbapi_connection.close()
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 903, in close
+    self.await_(self._connection.close())
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 1513, in close
+    await self._protocol.close(timeout)
+  File "asyncpg/protocol/protocol.pyx", line 632, in close
+asyncio.exceptions.CancelledError
+[2026-04-13 03:12:10,489: WARNING/ForkPoolWorker-4] 2026-04-13 03:12:10 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:10,504: WARNING/ForkPoolWorker-1] 2026-04-13 03:12:10 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:10,648: WARNING/ForkPoolWorker-4] 2026-04-13 03:12:10 [error    ] dispatch.error                 error="Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011Ca13DWhGisuSAZN8VuGPp'}" step_id=d15fc91a-db13-4730-b6b6-025323730050
+[2026-04-13 03:12:10,654: ERROR/ForkPoolWorker-4] Exception closing connection <AdaptedConnection <asyncpg.connection.Connection object at 0x7f715e0b96d0>>
+Traceback (most recent call last):
+  File "/app/workers/dispatch.py", line 437, in _dispatch_inner
+    subject, message_text = await composer.compose_email(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/services/ai_composer.py", line 478, in compose_email
+    response: LLMResponse = await self._registry.complete(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/integrations/llm/registry.py", line 96, in complete
+    response = await llm.complete(
+               ^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 193, in async_wrapped
+    return await copy(fn, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 112, in __call__
+    do = await self.iter(retry_state=retry_state)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 157, in iter
+    result = await action(retry_state)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/_utils.py", line 111, in inner
+    return call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/__init__.py", line 413, in exc_check
+    raise retry_exc.reraise()
+          ^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/__init__.py", line 184, in reraise
+    raise self.last_attempt.result()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 116, in __call__
+    result = await fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/integrations/llm/anthropic_provider.py", line 172, in complete
+    response: Message = await self._client.messages.create(**kwargs)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/anthropic/resources/messages/messages.py", line 2443, in create
+    return await self._post(
+           ^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/anthropic/_base_client.py", line 1996, in post
+    return await self.request(cast_to, opts, stream=stream, stream_cls=stream_cls)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/anthropic/_base_client.py", line 1781, in request
+    raise self._make_status_error_from_response(err.response) from None
+anthropic.BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011Ca13DWhGisuSAZN8VuGPp'}
 
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/asyncio/runners.py", line 195, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/app/workers/dispatch.py", line 95, in _dispatch_async
+    return await _dispatch_inner(step_id, tenant_id, tid, sid, task, lock_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/workers/dispatch.py", line 713, in _dispatch_inner
+    raise task.retry(exc=RuntimeError(f"{type(exc).__name__}: {exc}"))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/celery/app/task.py", line 790, in retry
+    raise ret
+celery.exceptions.Retry: Retry in 60s: RuntimeError("BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011Ca13DWhGisuSAZN8VuGPp'}")
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/pool/base.py", line 375, in _close_connection
+    self._dialect.do_close(connection)
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 721, in do_close
+    dbapi_connection.close()
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 903, in close
+    self.await_(self._connection.close())
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 1513, in close
+    await self._protocol.close(timeout)
+  File "asyncpg/protocol/protocol.pyx", line 632, in close
+asyncio.exceptions.CancelledError
+[2026-04-13 03:12:10,699: WARNING/ForkPoolWorker-1] 2026-04-13 03:12:10 [error    ] dispatch.error                 error="Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011Ca13DWpU42U4ievQZQbpx'}" step_id=1bf3cc1c-9663-4e33-a344-f23c3a544833
+[2026-04-13 03:12:10,780: WARNING/ForkPoolWorker-2] 2026-04-13 03:12:10 [info     ] llm.registry.provider_loaded   provider=openai
+[2026-04-13 03:12:10,876: WARNING/ForkPoolWorker-2] 2026-04-13 03:12:10 [info     ] llm.registry.provider_loaded   provider=gemini
+[2026-04-13 03:12:10,905: WARNING/ForkPoolWorker-2] 2026-04-13 03:12:10 [info     ] llm.registry.provider_loaded   provider=anthropic
+[2026-04-13 03:12:10,911: WARNING/ForkPoolWorker-2] 2026-04-13 03:12:10 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:10,967: WARNING/ForkPoolWorker-4] 2026-04-13 03:12:10 [info     ] llm.registry.provider_loaded   provider=openai
+[2026-04-13 03:12:10,990: WARNING/ForkPoolWorker-1] 2026-04-13 03:12:10 [info     ] llm.registry.provider_loaded   provider=openai
+[2026-04-13 03:12:11,049: WARNING/ForkPoolWorker-4] 2026-04-13 03:12:11 [info     ] llm.registry.provider_loaded   provider=gemini
+[2026-04-13 03:12:11,078: WARNING/ForkPoolWorker-4] 2026-04-13 03:12:11 [info     ] llm.registry.provider_loaded   provider=anthropic
+[2026-04-13 03:12:11,078: WARNING/ForkPoolWorker-1] 2026-04-13 03:12:11 [info     ] llm.registry.provider_loaded   provider=gemini
+[2026-04-13 03:12:11,090: WARNING/ForkPoolWorker-4] 2026-04-13 03:12:11 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:11,100: WARNING/ForkPoolWorker-1] 2026-04-13 03:12:11 [info     ] llm.registry.provider_loaded   provider=anthropic
+[2026-04-13 03:12:11,123: WARNING/ForkPoolWorker-1] 2026-04-13 03:12:11 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:11,452: WARNING/ForkPoolWorker-3] 2026-04-13 03:12:11 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:11,688: WARNING/ForkPoolWorker-3] 2026-04-13 03:12:11 [error    ] dispatch.error                 error="Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011Ca13DayVeXRYqgHFyDbwb'}" step_id=86bd0508-eb97-4dcb-8897-242f2cbfb3db
+[2026-04-13 03:12:11,951: WARNING/ForkPoolWorker-3] 2026-04-13 03:12:11 [info     ] llm.registry.provider_loaded   provider=openai
+[2026-04-13 03:12:11,999: WARNING/ForkPoolWorker-3] 2026-04-13 03:12:11 [info     ] llm.registry.provider_loaded   provider=gemini
+[2026-04-13 03:12:12,015: WARNING/ForkPoolWorker-3] 2026-04-13 03:12:12 [info     ] llm.registry.provider_loaded   provider=anthropic
+[2026-04-13 03:12:12,021: WARNING/ForkPoolWorker-3] 2026-04-13 03:12:12 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:12,119: WARNING/ForkPoolWorker-2] 2026-04-13 03:12:12 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:12,355: WARNING/ForkPoolWorker-4] 2026-04-13 03:12:12 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:12,639: WARNING/ForkPoolWorker-1] 2026-04-13 03:12:12 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:13,222: WARNING/ForkPoolWorker-3] 2026-04-13 03:12:13 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:14,360: WARNING/ForkPoolWorker-2] 2026-04-13 03:12:14 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:14,511: WARNING/ForkPoolWorker-2] 2026-04-13 03:12:14 [error    ] dispatch.error                 error="Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011Ca13DoCTFZB87jLjZYMxs'}" step_id=103abec0-a24c-41d7-b249-ad748519ee03
+[2026-04-13 03:12:14,517: ERROR/ForkPoolWorker-2] Exception closing connection <AdaptedConnection <asyncpg.connection.Connection object at 0x7f715d6259a0>>
+Traceback (most recent call last):
+  File "/app/workers/dispatch.py", line 437, in _dispatch_inner
+    subject, message_text = await composer.compose_email(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/services/ai_composer.py", line 478, in compose_email
+    response: LLMResponse = await self._registry.complete(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/integrations/llm/registry.py", line 96, in complete
+    response = await llm.complete(
+               ^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 193, in async_wrapped
+    return await copy(fn, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 112, in __call__
+    do = await self.iter(retry_state=retry_state)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 157, in iter
+    result = await action(retry_state)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/_utils.py", line 111, in inner
+    return call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/__init__.py", line 413, in exc_check
+    raise retry_exc.reraise()
+          ^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/__init__.py", line 184, in reraise
+    raise self.last_attempt.result()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 116, in __call__
+    result = await fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/integrations/llm/anthropic_provider.py", line 172, in complete
+    response: Message = await self._client.messages.create(**kwargs)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/anthropic/resources/messages/messages.py", line 2443, in create
+    return await self._post(
+           ^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/anthropic/_base_client.py", line 1996, in post
+    return await self.request(cast_to, opts, stream=stream, stream_cls=stream_cls)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/anthropic/_base_client.py", line 1781, in request
+    raise self._make_status_error_from_response(err.response) from None
+anthropic.BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011Ca13DoCTFZB87jLjZYMxs'}
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/asyncio/runners.py", line 195, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/app/workers/dispatch.py", line 95, in _dispatch_async
+    return await _dispatch_inner(step_id, tenant_id, tid, sid, task, lock_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/workers/dispatch.py", line 713, in _dispatch_inner
+    raise task.retry(exc=RuntimeError(f"{type(exc).__name__}: {exc}"))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/celery/app/task.py", line 790, in retry
+    raise ret
+celery.exceptions.Retry: Retry in 60s: RuntimeError("BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011Ca13DoCTFZB87jLjZYMxs'}")
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/pool/base.py", line 375, in _close_connection
+    self._dialect.do_close(connection)
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 721, in do_close
+    dbapi_connection.close()
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 903, in close
+    self.await_(self._connection.close())
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 1513, in close
+    await self._protocol.close(timeout)
+  File "asyncpg/protocol/protocol.pyx", line 632, in close
+asyncio.exceptions.CancelledError
+[2026-04-13 03:12:14,547: WARNING/ForkPoolWorker-4] 2026-04-13 03:12:14 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:14,699: WARNING/ForkPoolWorker-2] 2026-04-13 03:12:14 [warning  ] dispatch.circuit_breaker_open  failure_count=5 step_id=2e16ca2d-ec24-417e-b5fe-8399932ebe71 tenant_id=c00948b6-76d7-4d9c-8cd5-ba90663af6ac
+[2026-04-13 03:12:14,730: WARNING/ForkPoolWorker-4] 2026-04-13 03:12:14 [error    ] dispatch.error                 error="Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011Ca13Dp2pACdTgnrG34f2K'}" step_id=2867e1d6-e06c-4780-acf5-ec5a6cd2524a
+[2026-04-13 03:12:14,737: ERROR/ForkPoolWorker-4] Exception closing connection <AdaptedConnection <asyncpg.connection.Connection object at 0x7f715dff1d60>>
+Traceback (most recent call last):
+  File "/app/workers/dispatch.py", line 437, in _dispatch_inner
+    subject, message_text = await composer.compose_email(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/services/ai_composer.py", line 478, in compose_email
+    response: LLMResponse = await self._registry.complete(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/integrations/llm/registry.py", line 96, in complete
+    response = await llm.complete(
+               ^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 193, in async_wrapped
+    return await copy(fn, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 112, in __call__
+    do = await self.iter(retry_state=retry_state)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 157, in iter
+    result = await action(retry_state)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/_utils.py", line 111, in inner
+    return call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/__init__.py", line 413, in exc_check
+    raise retry_exc.reraise()
+          ^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/__init__.py", line 184, in reraise
+    raise self.last_attempt.result()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 116, in __call__
+    result = await fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/integrations/llm/anthropic_provider.py", line 172, in complete
+    response: Message = await self._client.messages.create(**kwargs)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/anthropic/resources/messages/messages.py", line 2443, in create
+    return await self._post(
+           ^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/anthropic/_base_client.py", line 1996, in post
+    return await self.request(cast_to, opts, stream=stream, stream_cls=stream_cls)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/anthropic/_base_client.py", line 1781, in request
+    raise self._make_status_error_from_response(err.response) from None
+anthropic.BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011Ca13Dp2pACdTgnrG34f2K'}
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/asyncio/runners.py", line 195, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/app/workers/dispatch.py", line 95, in _dispatch_async
+    return await _dispatch_inner(step_id, tenant_id, tid, sid, task, lock_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/workers/dispatch.py", line 713, in _dispatch_inner
+    raise task.retry(exc=RuntimeError(f"{type(exc).__name__}: {exc}"))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/celery/app/task.py", line 790, in retry
+    raise ret
+celery.exceptions.Retry: Retry in 60s: RuntimeError("BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011Ca13Dp2pACdTgnrG34f2K'}")
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/pool/base.py", line 375, in _close_connection
+    self._dialect.do_close(connection)
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 721, in do_close
+    dbapi_connection.close()
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 903, in close
+    self.await_(self._connection.close())
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 1513, in close
+    await self._protocol.close(timeout)
+  File "asyncpg/protocol/protocol.pyx", line 632, in close
+asyncio.exceptions.CancelledError
+[2026-04-13 03:12:14,791: WARNING/ForkPoolWorker-1] 2026-04-13 03:12:14 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:14,844: WARNING/ForkPoolWorker-2] 2026-04-13 03:12:14 [warning  ] dispatch.circuit_breaker_open  failure_count=6 step_id=49ebe07b-6bea-4ac9-9b70-3e0873ca3329 tenant_id=c00948b6-76d7-4d9c-8cd5-ba90663af6ac
+[2026-04-13 03:12:14,942: WARNING/ForkPoolWorker-4] 2026-04-13 03:12:14 [warning  ] dispatch.circuit_breaker_open  failure_count=6 step_id=836023a8-28c2-4805-855a-33c297ad7005 tenant_id=c00948b6-76d7-4d9c-8cd5-ba90663af6ac
+[2026-04-13 03:12:14,949: WARNING/ForkPoolWorker-1] 2026-04-13 03:12:14 [error    ] dispatch.error                 error="Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011Ca13Dq3aa1Y1qQs2yfTgj'}" step_id=22e5e6f9-a04c-4a5e-a161-6ca3052a4faf
+[2026-04-13 03:12:15,399: WARNING/ForkPoolWorker-3] 2026-04-13 03:12:15 [debug    ] anthropic.complete             json_mode=False model=claude-haiku-4-5-20251001
+[2026-04-13 03:12:15,545: WARNING/ForkPoolWorker-3] 2026-04-13 03:12:15 [error    ] dispatch.error                 error="Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011Ca13Dsd7BuuSYrsfW9sz5'}" step_id=40d4703b-d65d-45ba-b07e-aaf04422f140
+[2026-04-13 03:12:15,552: ERROR/ForkPoolWorker-3] Exception closing connection <AdaptedConnection <asyncpg.connection.Connection object at 0x7f715d6324e0>>
+Traceback (most recent call last):
+  File "/app/workers/dispatch.py", line 437, in _dispatch_inner
+    subject, message_text = await composer.compose_email(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/services/ai_composer.py", line 478, in compose_email
+    response: LLMResponse = await self._registry.complete(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/integrations/llm/registry.py", line 96, in complete
+    response = await llm.complete(
+               ^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 193, in async_wrapped
+    return await copy(fn, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 112, in __call__
+    do = await self.iter(retry_state=retry_state)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 157, in iter
+    result = await action(retry_state)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/_utils.py", line 111, in inner
+    return call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/__init__.py", line 413, in exc_check
+    raise retry_exc.reraise()
+          ^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/tenacity/__init__.py", line 184, in reraise
+    raise self.last_attempt.result()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 116, in __call__
+    result = await fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/integrations/llm/anthropic_provider.py", line 172, in complete
+    response: Message = await self._client.messages.create(**kwargs)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/anthropic/resources/messages/messages.py", line 2443, in create
+    return await self._post(
+           ^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/anthropic/_base_client.py", line 1996, in post
+    return await self.request(cast_to, opts, stream=stream, stream_cls=stream_cls)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/anthropic/_base_client.py", line 1781, in request
+    raise self._make_status_error_from_response(err.response) from None
+anthropic.BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011Ca13Dsd7BuuSYrsfW9sz5'}
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/asyncio/runners.py", line 195, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/app/workers/dispatch.py", line 95, in _dispatch_async
+    return await _dispatch_inner(step_id, tenant_id, tid, sid, task, lock_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/workers/dispatch.py", line 713, in _dispatch_inner
+    raise task.retry(exc=RuntimeError(f"{type(exc).__name__}: {exc}"))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/celery/app/task.py", line 790, in retry
+    raise ret
+celery.exceptions.Retry: Retry in 60s: RuntimeError("BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011Ca13Dsd7BuuSYrsfW9sz5'}")
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/pool/base.py", line 375, in _close_connection
+    self._dialect.do_close(connection)
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 721, in do_close
+    dbapi_connection.close()
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 903, in close
+    self.await_(self._connection.close())
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "/venv/lib/python3.12/site-packages/asyncpg/connection.py", line 1513, in close
+    await self._protocol.close(timeout)
+  File "asyncpg/protocol/protocol.pyx", line 632, in close
+asyncio.exceptions.CancelledError

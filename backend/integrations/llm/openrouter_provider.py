@@ -23,7 +23,7 @@ logger = structlog.get_logger()
 _BASE_URL = "https://openrouter.ai/api/v1"
 
 # Status HTTP que NÃO devem ser retentados
-_NON_RETRYABLE_STATUSES = {401, 402, 403, 404}
+_NON_RETRYABLE_STATUSES = {400, 401, 402, 403, 404}
 
 # Prefixos de modelos que não são de chat (filtrar)
 _EXCLUDE_PREFIXES = (

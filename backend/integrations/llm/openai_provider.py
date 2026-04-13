@@ -18,7 +18,7 @@ from integrations.llm.base import LLMMessage, LLMProvider, LLMResponse, ModelInf
 logger = structlog.get_logger()
 
 # Status HTTP que NÃO devem ser retentados (auth/config — retry é inútil)
-_NON_RETRYABLE_STATUSES = {401, 402, 403, 404}
+_NON_RETRYABLE_STATUSES = {400, 401, 402, 403, 404}
 
 
 def _is_retryable_error(exc: BaseException) -> bool:

@@ -61,6 +61,12 @@ class ModelInfo:
     pricing_tag: str = ""  # "free" | "paid" | "" (vazio = sem tag)
 
 
+class LLMNonRetryableError(Exception):
+    """Erro permanente de LLM que não deve ser retentado (billing, auth, config)."""
+
+    pass
+
+
 class LLMProvider(ABC):
     """Interface base para provedores de LLM."""
 

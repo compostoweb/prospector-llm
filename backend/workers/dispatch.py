@@ -39,6 +39,7 @@ from core.database import get_worker_session
 from core.redis_client import redis_client
 from integrations.context_fetcher import context_fetcher
 from integrations.llm import LLMRegistry
+from integrations.llm.base import LLMNonRetryableError
 from integrations.unipile_client import unipile_client
 from services.ai_composer import AIComposer
 from services.cadence_manager import (
@@ -696,6 +697,18 @@ async def _dispatch_inner(
             await redis_client.delete(cb_key)
 
             return {"step_id": step_id, "channel": step.channel.value, "status": "sent"}
+
+        except LLMNonRetryableError as exc:
+            # Erro permanente de LLM (billing, auth, config) — NÃO retentar
+            logger.error(
+                "dispatch.permanent_llm_error",
+                step_id=step_id,
+                error=str(exc),
+            )
+            step.status = StepStatus.FAILED
+            await db.commit()
+            await _release_rate_limit_slot()
+            return {"step_id": step_id, "status": "failed", "error": str(exc)}
 
         except Exception as exc:
             logger.error(

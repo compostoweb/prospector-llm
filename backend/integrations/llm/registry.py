@@ -28,7 +28,14 @@ import structlog
 from core.config import Settings
 from core.redis_client import RedisClient
 from integrations.llm.anthropic_provider import AnthropicProvider
-from integrations.llm.base import LLMMessage, LLMProvider, LLMResponse, LLMUsageContext, ModelInfo
+from integrations.llm.base import (
+    LLMMessage,
+    LLMNonRetryableError,
+    LLMProvider,
+    LLMResponse,
+    LLMUsageContext,
+    ModelInfo,
+)
 from integrations.llm.gemini_provider import GeminiProvider
 from integrations.llm.openai_provider import OpenAIProvider
 from integrations.llm.openrouter_provider import OpenRouterProvider
@@ -38,6 +45,29 @@ logger = structlog.get_logger()
 
 _MODELS_CACHE_KEY = "llm:models:all"
 _MODELS_CACHE_TTL = int(timedelta(hours=1).total_seconds())
+
+# Status HTTP permanentes — retry é inútil
+_NON_RETRYABLE_HTTP_STATUSES = {400, 401, 402, 403, 404}
+
+# Frases de erro que indicam problema permanente de billing/auth
+_PERMANENT_ERROR_PATTERNS = [
+    "credit balance",
+    "insufficient_quota",
+    "exceeded your current quota",
+    "billing",
+    "invalid_api_key",
+    "invalid api key",
+    "account is not active",
+]
+
+
+def _is_non_retryable_llm_error(exc: BaseException) -> bool:
+    """Detecta erros permanentes de LLM (billing, auth, config inválida)."""
+    status_code = getattr(exc, "status_code", None)
+    if status_code and status_code in _NON_RETRYABLE_HTTP_STATUSES:
+        return True
+    error_lower = str(exc).lower()
+    return any(p in error_lower for p in _PERMANENT_ERROR_PATTERNS)
 
 
 class LLMRegistry:
@@ -93,13 +123,20 @@ class LLMRegistry:
 
         llm = self._get_provider(provider)
         started_at = time.perf_counter()
-        response = await llm.complete(
-            messages=messages,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            json_mode=json_mode,
-        )
+        try:
+            response = await llm.complete(
+                messages=messages,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                json_mode=json_mode,
+            )
+        except LLMNonRetryableError:
+            raise
+        except Exception as exc:
+            if _is_non_retryable_llm_error(exc):
+                raise LLMNonRetryableError(str(exc)) from exc
+            raise
         if usage_context is not None:
             latency_ms = int((time.perf_counter() - started_at) * 1000)
             # Incrementa budget consumido
