@@ -392,16 +392,20 @@ class UnipileClient:
             return []
         return [item for item in items if isinstance(item, dict)]
 
-    async def ensure_messaging_webhook(
+    async def ensure_webhook(
         self,
         request_url: str,
         secret: str,
-        events: list[str],
+        source: str,
+        events: list[str] | None = None,
+        name: str | None = None,
     ) -> dict[str, Any]:
-        """Garante que existe um webhook ativo para a URL informada."""
+        """Garante que existe um webhook ativo para a URL e source informados."""
         existing_webhooks = await self.list_webhooks()
         for webhook in existing_webhooks:
             if webhook.get("request_url") != request_url:
+                continue
+            if webhook.get("source") != source:
                 continue
             if webhook.get("enabled") is False:
                 continue
@@ -411,6 +415,7 @@ class UnipileClient:
                 "unipile.webhook.already_registered",
                 request_url=request_url,
                 webhook_id=webhook_id,
+                source=source,
             )
             return {
                 "created": False,
@@ -419,17 +424,18 @@ class UnipileClient:
             }
 
         payload = {
-            "name": "prospector-inbox-webhook",
+            "name": name or f"prospector-{source}-webhook",
             "request_url": request_url,
-            "source": "messaging",
+            "source": source,
             "format": "json",
             "enabled": True,
-            "events": events,
             "headers": [
                 {"key": "Content-Type", "value": "application/json"},
                 {"key": "Unipile-Auth", "value": secret},
             ],
         }
+        if events:
+            payload["events"] = events
         response = await self._client.post("/webhooks", json=payload)
 
         if 400 <= response.status_code < 500:
@@ -438,6 +444,7 @@ class UnipileClient:
                 "unipile.webhook.create_client_error",
                 status=response.status_code,
                 request_url=request_url,
+                source=source,
                 response_body=body_text,
             )
             raise UnipileNonRetryableError(f"Unipile {response.status_code}: {body_text}")
@@ -449,7 +456,8 @@ class UnipileClient:
             "unipile.webhook.registered",
             request_url=request_url,
             webhook_id=webhook_id,
-            event_count=len(events),
+            source=source,
+            event_count=len(events or []),
         )
         return {
             "created": True,
@@ -457,13 +465,12 @@ class UnipileClient:
             "webhook_id": str(webhook_id) if webhook_id else None,
         }
 
-    async def get_webhook_by_url(self, request_url: str) -> dict[str, Any] | None:
-        """Retorna o primeiro webhook cadastrado para a URL informada."""
+    async def get_webhooks_by_url(self, request_url: str) -> list[dict[str, Any]]:
+        """Retorna todos os webhooks cadastrados para a URL informada."""
         existing_webhooks = await self.list_webhooks()
-        for webhook in existing_webhooks:
-            if webhook.get("request_url") == request_url:
-                return webhook
-        return None
+        return [
+            webhook for webhook in existing_webhooks if webhook.get("request_url") == request_url
+        ]
 
     # ── Perfil LinkedIn ───────────────────────────────────────────────
 

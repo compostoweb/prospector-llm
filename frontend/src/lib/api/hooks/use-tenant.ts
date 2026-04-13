@@ -40,6 +40,7 @@ export interface UnipileWebhookStatus {
   docs_url: string
   dashboard_url: string
   expected_events: string[]
+  expected_sources: UnipileWebhookSourceStatus[]
   secret_configured: boolean
   public_endpoint_healthy: boolean
   public_endpoint_status_code: number | null
@@ -49,10 +50,7 @@ export interface UnipileWebhookStatus {
   api_registration_ready: boolean
   api_registration_blockers: string[]
   registered_in_unipile: boolean
-  registered_webhook_id: string | null
-  registered_webhook_enabled: boolean | null
-  registered_webhook_source: string | null
-  registered_webhook_events: string[]
+  registered_webhooks: UnipileRegisteredWebhook[]
   registration_lookup_error: string | null
   supports_signature_auth: boolean
   supports_custom_header_auth: boolean
@@ -60,14 +58,39 @@ export interface UnipileWebhookStatus {
   ready: boolean
 }
 
-export interface UnipileWebhookRegistrationResult {
+export interface UnipileWebhookSourceStatus {
+  source: string
+  label: string
+  expected_events: string[]
+  registered: boolean
+  webhook_id: string | null
+  enabled: boolean | null
+  registered_events: string[]
+  missing_events: string[]
+  extra_events: string[]
+}
+
+export interface UnipileRegisteredWebhook {
+  webhook_id: string | null
+  source: string | null
+  enabled: boolean | null
+  events: string[]
+}
+
+export interface UnipileWebhookRegistrationItem {
+  source: string
+  events: string[]
   created: boolean
   already_exists: boolean
   webhook_id: string | null
+}
+
+export interface UnipileWebhookRegistrationResult {
+  created: boolean
+  already_exists: boolean
   request_url: string
-  source: "messaging"
   auth_header: "Unipile-Auth"
-  events: string[]
+  webhooks: UnipileWebhookRegistrationItem[]
   message: string
 }
 

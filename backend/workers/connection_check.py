@@ -16,17 +16,18 @@ Task:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
 from models.enums import Channel, StepStatus
 from models.lead import Lead
-from models.tenant import Tenant
+from models.linkedin_account import LinkedInAccount
+from models.tenant import TenantIntegration
 from workers.celery_app import celery_app
 
 logger = structlog.get_logger()
@@ -70,14 +71,18 @@ async def _check_async() -> dict:
         if not leads:
             return {"checked": 0, "connected": 0, "expired": 0}
 
-        account_id = settings.UNIPILE_ACCOUNT_ID_LINKEDIN or ""
-        if not account_id:
-            logger.warning("connection_check.no_account_id")
-            return {"checked": 0, "connected": 0, "expired": 0, "error": "no_account_id"}
-
         for lead in leads:
             checked += 1
             try:
+                account_id = await _resolve_unipile_account_id_for_lead(lead, db)
+                if not account_id:
+                    logger.debug(
+                        "connection_check.account_unresolved",
+                        lead_id=str(lead.id),
+                        tenant_id=str(lead.tenant_id),
+                    )
+                    continue
+
                 status = await unipile_client.get_relation_status(
                     account_id=account_id,
                     linkedin_profile_id=lead.linkedin_profile_id,  # type: ignore[arg-type]
@@ -85,24 +90,60 @@ async def _check_async() -> dict:
 
                 if status and status.upper() == "CONNECTED":
                     lead.linkedin_connection_status = "connected"
-                    lead.linkedin_connected_at = datetime.now(tz=timezone.utc)
+                    lead.linkedin_connected_at = datetime.now(tz=UTC)
                     connected += 1
 
                     # Cria ManualTasks se cadência semi-manual
-                    await _create_tasks_if_semi_manual(lead, db)
+                    step_result = await db.execute(
+                        select(CadenceStep.cadence_id)
+                        .where(CadenceStep.lead_id == lead.id)
+                        .limit(1)
+                    )
+                    cadence_id = step_result.scalar_one_or_none()
+                    if cadence_id:
+                        cad_result = await db.execute(
+                            select(Cadence).where(Cadence.id == cadence_id)
+                        )
+                        cadence = cad_result.scalar_one_or_none()
+                        if cadence and cadence.mode == "semi_manual":
+                            from services.manual_task_service import ManualTaskService
+
+                            task_service = ManualTaskService()
+                            await task_service.create_tasks_for_lead(lead, cadence, db)
 
                     logger.info(
                         "connection_check.connected",
                         lead_id=str(lead.id),
                     )
 
-                elif await _is_expired(lead, db):
-                    lead.linkedin_connection_status = None
-                    expired += 1
-                    logger.info(
-                        "connection_check.expired",
-                        lead_id=str(lead.id),
-                    )
+                else:
+                    sent_at: datetime | None = None
+                    try:
+                        step_result = await db.execute(
+                            select(CadenceStep)
+                            .where(CadenceStep.lead_id == lead.id)
+                            .where(CadenceStep.channel == Channel.LINKEDIN_CONNECT)
+                            .where(CadenceStep.status == StepStatus.SENT)
+                            .limit(1)
+                        )
+                        step = step_result.scalar_one_or_none()
+                        if step:
+                            sent_at = step.sent_at
+                    except Exception:
+                        sent_at = None
+
+                    reference = sent_at or lead.created_at
+                    if reference and reference.tzinfo is None:
+                        reference = reference.replace(tzinfo=UTC)
+
+                    cutoff = datetime.now(tz=UTC) - timedelta(days=_EXPIRY_DAYS)
+                    if reference and reference < cutoff:
+                        lead.linkedin_connection_status = None
+                        expired += 1
+                        logger.info(
+                            "connection_check.expired",
+                            lead_id=str(lead.id),
+                        )
 
             except Exception:
                 logger.exception(
@@ -123,60 +164,39 @@ async def _check_async() -> dict:
     return {"checked": checked, "connected": connected, "expired": expired}
 
 
-async def _create_tasks_if_semi_manual(lead: Lead, db: async_sessionmaker) -> None:  # type: ignore[type-arg]
-    """Cria ManualTasks se o lead está em cadência semi-manual."""
+async def _resolve_unipile_account_id_for_lead(lead: Lead, db: AsyncSession) -> str | None:
+    from core.config import settings
+
     step_result = await db.execute(
         select(CadenceStep.cadence_id)
-        .where(CadenceStep.lead_id == lead.id)
+        .where(
+            CadenceStep.lead_id == lead.id,
+            CadenceStep.channel == Channel.LINKEDIN_CONNECT,
+        )
+        .order_by(CadenceStep.sent_at.desc().nulls_last(), CadenceStep.scheduled_at.desc())
         .limit(1)
     )
     cadence_id = step_result.scalar_one_or_none()
-    if not cadence_id:
-        return
+    if cadence_id is not None:
+        cadence_result = await db.execute(select(Cadence).where(Cadence.id == cadence_id))
+        cadence = cadence_result.scalar_one_or_none()
+        if cadence and cadence.linkedin_account_id:
+            account_result = await db.execute(
+                select(LinkedInAccount).where(LinkedInAccount.id == cadence.linkedin_account_id)
+            )
+            account = account_result.scalar_one_or_none()
+            if account is None:
+                return None
+            if account.provider_type == "native":
+                return None
+            if account.unipile_account_id:
+                return account.unipile_account_id
 
-    cad_result = await db.execute(
-        select(Cadence).where(Cadence.id == cadence_id)
+    integration_result = await db.execute(
+        select(TenantIntegration).where(TenantIntegration.tenant_id == lead.tenant_id)
     )
-    cadence = cad_result.scalar_one_or_none()
+    integration = integration_result.scalar_one_or_none()
+    if integration and integration.unipile_linkedin_account_id:
+        return integration.unipile_linkedin_account_id
 
-    if cadence and cadence.mode == "semi_manual":
-        from services.manual_task_service import ManualTaskService
-        task_service = ManualTaskService()
-        await task_service.create_tasks_for_lead(lead, cadence, db)
-
-
-def _is_expired(lead: Lead) -> bool:
-    """Mantido por compatibilidade — use _is_expired() async para precisão."""
-    if not lead.created_at:
-        return False
-    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=_EXPIRY_DAYS)
-    return lead.created_at < cutoff
-
-
-async def _is_expired(lead: Lead, db) -> bool:  # type: ignore[misc]
-    """
-    Verifica se o convite de conexão expirou (mais de 14 dias desde o envio).
-    Usa sent_at do step LINKEDIN_CONNECT para precisão — fallback para lead.created_at.
-    """
-    sent_at: datetime | None = None
-    try:
-        step_result = await db.execute(
-            select(CadenceStep)
-            .where(CadenceStep.lead_id == lead.id)
-            .where(CadenceStep.channel == Channel.LINKEDIN_CONNECT)
-            .where(CadenceStep.status == StepStatus.SENT)
-            .limit(1)
-        )
-        step = step_result.scalar_one_or_none()
-        if step:
-            sent_at = step.sent_at
-    except Exception:
-        pass
-
-    reference = sent_at or lead.created_at
-    if not reference:
-        return False
-    if reference.tzinfo is None:
-        reference = reference.replace(tzinfo=timezone.utc)
-    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=_EXPIRY_DAYS)
-    return reference < cutoff
+    return settings.UNIPILE_ACCOUNT_ID_LINKEDIN or None

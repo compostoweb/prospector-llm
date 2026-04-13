@@ -118,6 +118,29 @@ class TenantIntegrationResponse(BaseModel):
     created_at: datetime
 
 
+class UnipileWebhookSourceStatus(BaseModel):
+    """Status esperado x registrado para um source específico da Unipile."""
+
+    source: str
+    label: str
+    expected_events: list[str]
+    registered: bool
+    webhook_id: str | None
+    enabled: bool | None
+    registered_events: list[str]
+    missing_events: list[str]
+    extra_events: list[str]
+
+
+class UnipileRegisteredWebhookResponse(BaseModel):
+    """Webhook detectado na Unipile para a URL atual."""
+
+    webhook_id: str | None
+    source: str | None
+    enabled: bool | None
+    events: list[str]
+
+
 class UnipileWebhookStatusResponse(BaseModel):
     """Status operacional do webhook da Unipile para o tenant atual."""
 
@@ -125,6 +148,7 @@ class UnipileWebhookStatusResponse(BaseModel):
     docs_url: str
     dashboard_url: str
     expected_events: list[str]
+    expected_sources: list[UnipileWebhookSourceStatus]
     secret_configured: bool
     public_endpoint_healthy: bool
     public_endpoint_status_code: int | None
@@ -134,10 +158,7 @@ class UnipileWebhookStatusResponse(BaseModel):
     api_registration_ready: bool
     api_registration_blockers: list[str]
     registered_in_unipile: bool
-    registered_webhook_id: str | None
-    registered_webhook_enabled: bool | None
-    registered_webhook_source: str | None
-    registered_webhook_events: list[str]
+    registered_webhooks: list[UnipileRegisteredWebhookResponse]
     registration_lookup_error: str | None
     supports_signature_auth: bool = True
     supports_custom_header_auth: bool = True
@@ -145,14 +166,22 @@ class UnipileWebhookStatusResponse(BaseModel):
     ready: bool
 
 
+class UnipileWebhookRegistrationItem(BaseModel):
+    """Resultado do registro de um source específico do webhook."""
+
+    source: str
+    events: list[str]
+    created: bool
+    already_exists: bool
+    webhook_id: str | None
+
+
 class UnipileWebhookRegistrationResponse(BaseModel):
     """Resultado do registro automático do webhook da Unipile."""
 
     created: bool
     already_exists: bool
-    webhook_id: str | None
     request_url: str
-    source: Literal["messaging"]
     auth_header: Literal["Unipile-Auth"]
-    events: list[str]
+    webhooks: list[UnipileWebhookRegistrationItem]
     message: str

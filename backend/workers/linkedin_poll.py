@@ -181,13 +181,11 @@ async def _handle_native_message(
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from core.config import settings
+    from core.redis_client import redis_client
     from integrations.llm import LLMRegistry
-    from models.cadence_step import CadenceStep
-    from models.enums import Channel, Intent, InteractionDirection, LeadStatus, StepStatus
+    from models.enums import Channel
     from models.interaction import Interaction
-    from models.lead import Lead
-    from services.llm_config import resolve_tenant_llm_config
-    from services.reply_parser import ReplyParser
+    from services.inbound_message_service import find_lead_by_sender, process_inbound_reply
 
     tid = _uuid_mod.UUID(tenant_id)
 
@@ -196,13 +194,7 @@ async def _handle_native_message(
 
     async with session_factory() as db:
         # Busca lead pelo linkedin_profile_id
-        lead_result = await db.execute(
-            select(Lead).where(
-                Lead.tenant_id == tid,
-                Lead.linkedin_profile_id == attendee_id,
-            )
-        )
-        lead = lead_result.scalar_one_or_none()
+        lead = await find_lead_by_sender(attendee_id, tid, db)
         if not lead:
             logger.debug(
                 "linkedin_poll.lead_not_found",
@@ -223,94 +215,21 @@ async def _handle_native_message(
             await engine.dispose()
             return
 
-        # Parse da intenção via LLM
-        from core.redis_client import redis_client  # noqa: PLC0415
-
         registry = LLMRegistry(settings=settings, redis=redis_client)
-        llm_config = await resolve_tenant_llm_config(db, lead.tenant_id)
-        parser = ReplyParser(
+        result = await process_inbound_reply(
+            db=db,
             registry=registry,
-            provider=llm_config.provider,
-            model=llm_config.model,
-        )
-        classification = await parser.classify(
-            reply_text=message.text or "",
-            lead_name=lead.name,
-            tenant_id=str(lead.tenant_id),
-            lead_id=str(lead.id),
-            channel=Channel.LINKEDIN_DM.value,
-        )
-        intent_str = str(classification.get("intent") or Intent.NEUTRAL.value)
-        try:
-            intent = Intent(intent_str)
-        except ValueError:
-            intent = Intent.NEUTRAL
-
-        # Salva Interaction inbound
-        interaction = Interaction(
             tenant_id=tid,
-            lead_id=lead.id,
+            lead=lead,
             channel=Channel.LINKEDIN_DM,
-            direction=InteractionDirection.INBOUND,
-            content_text=message.text or "",
-            intent=intent,
-            unipile_message_id=message.id,
-            unipile_chat_id=conversation_id,
+            reply_text=message.text or "",
+            external_message_id=message.id,
         )
-        db.add(interaction)
-
-        # Atualiza step mais recente SENT → REPLIED
-        step_result = await db.execute(
-            select(CadenceStep)
-            .where(
-                CadenceStep.lead_id == lead.id,
-                CadenceStep.status == StepStatus.SENT,
-                CadenceStep.channel.in_([Channel.LINKEDIN_DM, Channel.LINKEDIN_CONNECT]),
-            )
-            .order_by(CadenceStep.sent_at.desc())
-            .limit(1)
-        )
-        step = step_result.scalar_one_or_none()
-        if step:
-            step.status = StepStatus.REPLIED
-
-        # Atualiza lead conforme a intenção detectada
-        if intent == Intent.INTEREST:
-            lead.status = LeadStatus.CONVERTED
-        elif intent == Intent.NOT_INTERESTED:
-            lead.status = LeadStatus.ARCHIVED
-
-        await db.commit()
         logger.info(
             "linkedin_poll.message_processed",
             lead_id=str(lead.id),
-            intent=intent.value,
+            intent=result.intent.value,
             tenant_id=tenant_id,
-        )
-
-        if intent in (Intent.INTEREST, Intent.OBJECTION):
-            from services.notification import send_reply_notification  # noqa: PLC0415
-
-            await send_reply_notification(
-                lead=lead,
-                intent=intent.value,
-                reply_text=message.text or "",
-                tenant_id=lead.tenant_id,
-                db=db,
-            )
-
-        from api.routes.ws import broadcast_event  # noqa: PLC0415
-
-        await broadcast_event(
-            str(lead.tenant_id),
-            {
-                "type": "new_message",
-                "lead_id": str(lead.id),
-                "lead_name": lead.name,
-                "channel": Channel.LINKEDIN_DM.value,
-                "intent": intent.value,
-                "text_preview": (message.text or "")[:100],
-            },
         )
 
     await engine.dispose()

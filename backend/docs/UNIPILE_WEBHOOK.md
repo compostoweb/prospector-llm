@@ -33,12 +33,13 @@ Arquivo: `api/webhooks/unipile.py`
 
 ## Eventos tratados
 
-| Evento | Ação |
-|---|---|
-| `message_received` | Classifica intent, salva Interaction inbound, notifica, broadcast WS |
-| `relation_created` | Marca lead como `connected`, cria ManualTasks se cadência semi-manual |
-| `account_connected` | Log informativo |
-| Outros | Ignorados silenciosamente (retorna 200) |
+| Source | Evento | Ação |
+|---|---|---|
+| `messaging` | `message_received` | Classifica intent, salva Interaction inbound, notifica, broadcast WS |
+| `users` | `new_relation` | Marca lead como `connected`, cria ManualTasks se cadência semi-manual |
+| `mailing` | `mail_received` | Processa resposta inbound de email via Gmail |
+| `account_status` | `ok`, `reconnected`, `sync_success`, etc. | Log informativo e observabilidade da conta |
+| qualquer outro | qualquer outro | Ignorado silenciosamente (retorna 200) |
 
 ---
 
@@ -49,11 +50,16 @@ Arquivo: `api/webhooks/unipile.py`
 No painel da Unipile (https://dashboard.unipile.com), configurar:
 
 - **Webhook URL**: `https://api.prospector.compostoweb.com.br/webhooks/unipile`
-- **Eventos**: `message_received`, `relation_created`, `account_connected`
+- **Sources/Eventos esperados pelo sistema**:
+     - `messaging` → `message_received`
+     - `users` → `new_relation`
+     - `mailing` → `mail_received` quando houver conta Gmail conectada
+
+Eventos de `account_status` como `ok`, `reconnected` e `sync_success` podem existir na sua workspace e aparecer no painel, mas são tratados como observabilidade da conexão, não como gatilhos principais de inbox ou cadência.
 
 Também é possível registrar o webhook direto pela tela
 `/configuracoes/unipile` usando o botão **Registrar via API da Unipile**.
-Nesse caso, o backend cria um webhook `source=messaging` com headers:
+Nesse caso, o backend cria os webhooks necessários por source (`messaging`, `users` e `mailing` quando aplicável) com headers:
 
 - `Content-Type: application/json`
 - `Unipile-Auth: <UNIPILE_WEBHOOK_SECRET>`
@@ -63,8 +69,8 @@ URL **HTTPS pública**. Endereços locais como `http://localhost:8000` são
 bloqueados para evitar cadastrar um webhook inalcançável pela nuvem da Unipile.
 
 O painel também consulta a lista de webhooks já cadastrados na Unipile para
-mostrar de forma persistente se a URL atual já está registrada, incluindo o
-`webhook_id` quando disponível.
+mostrar de forma persistente quais sources já estão registrados para a URL atual,
+incluindo os respectivos `webhook_id` quando disponíveis.
 
 ### 2. Variável de ambiente
 
@@ -120,7 +126,7 @@ como documentado em `https://developer.unipile.com/docs/webhooks-2`.
 
 ---
 
-## Fluxo `relation_created` (detalhado)
+## Fluxo `new_relation` (detalhado)
 
 1. Extrai `linkedin_profile_id` e tenta resolver o tenant pela `account_id`
 2. Localiza o lead no banco dentro do tenant resolvido
@@ -183,6 +189,9 @@ frescos só quando realmente necessário.
 ## Checklist de deploy
 
 - [ ] Configurar webhook URL no painel Unipile para `https://api.prospector.compostoweb.com.br/webhooks/unipile`
+- [ ] Garantir o source `messaging` com evento `message_received`
+- [ ] Garantir o source `users` com evento `new_relation`
+- [ ] Garantir o source `mailing` com evento `mail_received` se houver Gmail conectado
 - [ ] Definir `UNIPILE_WEBHOOK_SECRET` em `backend/.env.prod`
 - [ ] Garantir que a porta/domínio está acessível externamente (HTTPS obrigatório)
 - [ ] Testar com `curl -X POST https://api.prospector.compostoweb.com.br/webhooks/unipile` (deve retornar 401)

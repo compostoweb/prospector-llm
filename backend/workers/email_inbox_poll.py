@@ -465,6 +465,7 @@ def _imap_fetch_messages(
     Função síncrona — executada via asyncio.to_thread.
     Conecta ao IMAP, busca mensagens não processadas e retorna lista de dicts.
     """
+    conn: imaplib.IMAP4
     if use_ssl:
         conn = imaplib.IMAP4_SSL(imap_host, imap_port)
     else:
@@ -476,10 +477,10 @@ def _imap_fetch_messages(
 
         # Busca mensagens mais recentes que o último UID processado
         if last_uid:
-            status, data = conn.uid("SEARCH", None, f"UID {int(last_uid) + 1}:*")
+            status, data = conn.uid("SEARCH", "", f"UID {int(last_uid) + 1}:*")
         else:
             # Primeira execução: processa os últimos 50 e-mails não lidos
-            status, data = conn.uid("SEARCH", None, "UNSEEN")
+            status, data = conn.uid("SEARCH", "", "UNSEEN")
 
         if status != "OK" or not data[0]:
             return []
@@ -513,13 +514,17 @@ def _imap_fetch_messages(
                 for part in msg.walk():
                     if part.get_content_type() == "text/plain":
                         try:
-                            body = part.get_payload(decode=True).decode("utf-8", errors="replace")
-                            break
+                            payload = part.get_payload(decode=True)
+                            if isinstance(payload, (bytes, bytearray)):
+                                body = payload.decode("utf-8", errors="replace")
+                                break
                         except Exception:
                             pass
             else:
                 try:
-                    body = msg.get_payload(decode=True).decode("utf-8", errors="replace")
+                    payload = msg.get_payload(decode=True)
+                    if isinstance(payload, (bytes, bytearray)):
+                        body = payload.decode("utf-8", errors="replace")
                 except Exception:
                     pass
 
@@ -559,15 +564,12 @@ async def _process_email_reply(
     from core.redis_client import redis_client  # noqa: PLC0415
     from integrations.llm import LLMRegistry  # noqa: PLC0415
     from models.cadence_step import CadenceStep  # noqa: PLC0415
-    from models.enums import (  # noqa: PLC0415
-        Channel,
-        Intent,
-        InteractionDirection,
-        LeadStatus,
-        StepStatus,
-    )
+    from models.enums import Channel, StepStatus  # noqa: PLC0415
     from models.interaction import Interaction  # noqa: PLC0415
-    from services.reply_parser import ReplyParser  # noqa: PLC0415
+    from services.inbound_message_service import (  # noqa: PLC0415
+        find_lead_by_email,
+        process_inbound_reply,
+    )
 
     if not body.strip():
         return
@@ -586,7 +588,7 @@ async def _process_email_reply(
             # que normalmente inclui o endereço original do destinatário.
             bounced_email = _extract_bounced_email(body)
             if bounced_email:
-                lead = await _find_lead_by_email(bounced_email, tenant_id, db)
+                lead = await find_lead_by_email(bounced_email, tenant_id, db)
                 if lead and lead.email_bounced_at is None:
                     lead.email_bounced_at = datetime.now(tz=UTC)
                     lead.email_bounce_type = "hard"
@@ -599,7 +601,7 @@ async def _process_email_reply(
             return  # NDRs não entram no Reply Parser
 
         # Busca lead pelo e-mail do remetente
-        lead = await _find_lead_by_email(from_email, tenant_id, db)
+        lead = await find_lead_by_email(from_email, tenant_id, db)
         if not lead:
             logger.debug(
                 "email_inbox_poll.lead_not_found",
@@ -625,113 +627,24 @@ async def _process_email_reply(
             # Não enviamos e-mail para este lead — ignorar
             return
 
-        # Classifica intent via LLM
-        from services.llm_config import resolve_tenant_llm_config  # noqa: PLC0415
-
         registry = LLMRegistry(settings=settings, redis=redis_client)
-        llm_config = await resolve_tenant_llm_config(db, lead.tenant_id)
-        parser = ReplyParser(
+        result = await process_inbound_reply(
+            db=db,
             registry=registry,
-            provider=llm_config.provider,
-            model=llm_config.model,
-        )
-        classification = await parser.classify(
-            reply_text=body,
-            lead_name=lead.name,
-            tenant_id=str(lead.tenant_id),
-            lead_id=str(lead.id),
-            channel=Channel.EMAIL.value,
-        )
-
-        intent_str: str = (classification.get("intent") or "NEUTRAL").upper()
-        try:
-            intent = Intent[intent_str]
-        except KeyError:
-            intent = Intent.NEUTRAL
-
-        # Salva Interaction INBOUND
-        interaction = Interaction(
-            id=uuid_mod.uuid4(),
             tenant_id=tenant_id,
-            lead_id=lead.id,
+            lead=lead,
             channel=Channel.EMAIL,
-            direction=InteractionDirection.INBOUND,
-            content_text=body,
-            intent=intent,
-            unipile_message_id=message_id,
-            created_at=datetime.now(tz=UTC),
+            reply_text=body,
+            external_message_id=message_id,
         )
-        db.add(interaction)
-
-        # Atualiza step → REPLIED
-        latest_step.status = StepStatus.REPLIED
-
-        # Atualiza lead por intent
-        if intent == Intent.INTEREST:
-            lead.status = LeadStatus.CONVERTED
-        elif intent == Intent.NOT_INTERESTED:
-            lead.status = LeadStatus.ARCHIVED
-
-        await db.commit()
 
         logger.info(
             "email_inbox_poll.reply_processed",
             lead_id=str(lead.id),
             from_email=from_email,
-            intent=intent.value,
-            confidence=classification.get("confidence"),
+            intent=result.intent.value,
+            confidence=result.classification.get("confidence"),
         )
-
-        # Notificação
-        if intent in (Intent.INTEREST, Intent.OBJECTION):
-            from services.notification import send_reply_notification  # noqa: PLC0415
-
-            await send_reply_notification(
-                lead=lead,
-                intent=intent.value,
-                reply_text=body,
-                tenant_id=tenant_id,
-                db=db,
-            )
-
-        # Broadcast WebSocket
-        from api.routes.ws import broadcast_event  # noqa: PLC0415
-
-        await broadcast_event(
-            str(tenant_id),
-            {
-                "type": "new_message",
-                "lead_id": str(lead.id),
-                "lead_name": lead.name,
-                "channel": Channel.EMAIL.value,
-                "intent": intent.value,
-                "text_preview": body[:100],
-            },
-        )
-
-
-async def _find_lead_by_email(
-    email: str,
-    tenant_id: uuid_mod.UUID,
-    db: Any,
-) -> Any | None:
-    """Busca lead pelo e-mail (corporativo ou pessoal)."""
-    from sqlalchemy import or_, select  # noqa: PLC0415
-
-    from models.lead import Lead  # noqa: PLC0415
-
-    result = await db.execute(
-        select(Lead)
-        .where(
-            Lead.tenant_id == tenant_id,
-            or_(
-                Lead.email_corporate == email,
-                Lead.email_personal == email,
-            ),
-        )
-        .limit(1)
-    )
-    return result.scalar_one_or_none()
 
 
 # ── NDR / Bounce detection ────────────────────────────────────────────

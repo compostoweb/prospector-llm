@@ -14,6 +14,7 @@ from __future__ import annotations
 import ipaddress
 import uuid
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from secrets import token_urlsafe
 from typing import Any
 from urllib.parse import urlparse
@@ -41,7 +42,10 @@ from schemas.tenant import (
     TenantIntegrationResponse,
     TenantIntegrationUpdate,
     TenantResponse,
+    UnipileRegisteredWebhookResponse,
+    UnipileWebhookRegistrationItem,
     UnipileWebhookRegistrationResponse,
+    UnipileWebhookSourceStatus,
     UnipileWebhookStatusResponse,
 )
 from services.content.theme_bank import seed_theme_bank_for_tenant
@@ -50,13 +54,36 @@ logger = structlog.get_logger()
 
 router = APIRouter(prefix="/tenants", tags=["Tenants"])
 
-_UNIPILE_WEBHOOK_EVENTS = [
-    "message_received",
-    "relation_created",
-    "account_connected",
-]
+
+@dataclass(frozen=True)
+class UnipileWebhookSourceConfig:
+    source: str
+    label: str
+    events: tuple[str, ...]
+    request_events: tuple[str, ...] | None = None
+
+
 _UNIPILE_WEBHOOK_DOCS_URL = "https://developer.unipile.com/docs/webhooks-2"
 _UNIPILE_WEBHOOK_DASHBOARD_URL = "https://dashboard.unipile.com"
+_UNIPILE_WEBHOOK_SOURCES: tuple[UnipileWebhookSourceConfig, ...] = (
+    UnipileWebhookSourceConfig(
+        source="messaging",
+        label="Mensagens LinkedIn",
+        events=("message_received",),
+        request_events=("message_received",),
+    ),
+    UnipileWebhookSourceConfig(
+        source="users",
+        label="Novas conexões LinkedIn",
+        events=("new_relation",),
+    ),
+    UnipileWebhookSourceConfig(
+        source="mailing",
+        label="Emails inbound",
+        events=("mail_received",),
+        request_events=("mail_received",),
+    ),
+)
 
 
 # ── Helper: session sem RLS (para criação de tenant) ─────────────────
@@ -157,12 +184,26 @@ async def get_unipile_webhook_status(
     secret = (settings.UNIPILE_WEBHOOK_SECRET or "").strip()
     secret_configured = bool(secret and secret != "...")
     api_registration_supported = bool(settings.UNIPILE_API_KEY and settings.UNIPILE_BASE_URL)
-    api_registration_blockers = _get_unipile_webhook_registration_blockers(url=url)
-    registered_webhook: dict[str, Any] | None = None
+    linkedin_account_configured = bool(
+        (integration and integration.unipile_linkedin_account_id)
+        or settings.UNIPILE_ACCOUNT_ID_LINKEDIN
+    )
+    gmail_account_configured = bool(
+        (integration and integration.unipile_gmail_account_id) or settings.UNIPILE_ACCOUNT_ID_GMAIL
+    )
+    expected_source_keys = _get_expected_unipile_sources(
+        linkedin_account_configured=linkedin_account_configured,
+        gmail_account_configured=gmail_account_configured,
+    )
+    api_registration_blockers = _get_unipile_webhook_registration_blockers(
+        url=url,
+        expected_source_keys=expected_source_keys,
+    )
+    registered_webhooks: list[dict[str, Any]] = []
     registration_lookup_error: str | None = None
     if api_registration_supported:
         try:
-            registered_webhook = await unipile_client.get_webhook_by_url(url)
+            registered_webhooks = await unipile_client.get_webhooks_by_url(url)
         except UnipileNonRetryableError as exc:
             registration_lookup_error = str(exc)
             logger.warning(
@@ -179,19 +220,19 @@ async def get_unipile_webhook_status(
                 error=str(exc),
                 request_url=url,
             )
-    linkedin_account_configured = bool(
-        (integration and integration.unipile_linkedin_account_id)
-        or settings.UNIPILE_ACCOUNT_ID_LINKEDIN
-    )
-    gmail_account_configured = bool(
-        (integration and integration.unipile_gmail_account_id) or settings.UNIPILE_ACCOUNT_ID_GMAIL
+    expected_sources = _build_unipile_source_statuses(
+        expected_source_keys=expected_source_keys,
+        registered_webhooks=registered_webhooks,
     )
 
     return UnipileWebhookStatusResponse(
         url=url,
         docs_url=_UNIPILE_WEBHOOK_DOCS_URL,
         dashboard_url=_UNIPILE_WEBHOOK_DASHBOARD_URL,
-        expected_events=list(_UNIPILE_WEBHOOK_EVENTS),
+        expected_events=[
+            event_name for item in expected_sources for event_name in item.expected_events
+        ],
+        expected_sources=expected_sources,
         secret_configured=secret_configured,
         public_endpoint_healthy=endpoint_healthy,
         public_endpoint_status_code=status_code,
@@ -200,11 +241,16 @@ async def get_unipile_webhook_status(
         api_registration_supported=api_registration_supported,
         api_registration_ready=not api_registration_blockers,
         api_registration_blockers=api_registration_blockers,
-        registered_in_unipile=registered_webhook is not None,
-        registered_webhook_id=_coerce_webhook_value(registered_webhook, "id", "webhook_id"),
-        registered_webhook_enabled=_coerce_webhook_bool(registered_webhook, "enabled"),
-        registered_webhook_source=_coerce_webhook_value(registered_webhook, "source"),
-        registered_webhook_events=_coerce_webhook_events(registered_webhook),
+        registered_in_unipile=bool(registered_webhooks),
+        registered_webhooks=[
+            UnipileRegisteredWebhookResponse(
+                webhook_id=_coerce_webhook_value(webhook, "id", "webhook_id"),
+                source=_coerce_webhook_value(webhook, "source"),
+                enabled=_coerce_webhook_bool(webhook, "enabled"),
+                events=_coerce_webhook_events(webhook),
+            )
+            for webhook in registered_webhooks
+        ],
         registration_lookup_error=registration_lookup_error,
         auth_headers=["X-Unipile-Signature", "Unipile-Auth"],
         ready=(
@@ -221,10 +267,29 @@ async def get_unipile_webhook_status(
 )
 async def register_unipile_webhook(
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
 ) -> UnipileWebhookRegistrationResponse:
     """Registra o webhook da Unipile via API para o tenant atual."""
+    db_result = await db.execute(
+        select(TenantIntegration).where(TenantIntegration.tenant_id == tenant_id)
+    )
+    integration = db_result.scalar_one_or_none()
+
     url = _build_unipile_webhook_url()
-    blockers = _get_unipile_webhook_registration_blockers(url=url)
+    expected_source_keys = _get_expected_unipile_sources(
+        linkedin_account_configured=bool(
+            (integration and integration.unipile_linkedin_account_id)
+            or settings.UNIPILE_ACCOUNT_ID_LINKEDIN
+        ),
+        gmail_account_configured=bool(
+            (integration and integration.unipile_gmail_account_id)
+            or settings.UNIPILE_ACCOUNT_ID_GMAIL
+        ),
+    )
+    blockers = _get_unipile_webhook_registration_blockers(
+        url=url,
+        expected_source_keys=expected_source_keys,
+    )
     if blockers:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -232,13 +297,28 @@ async def register_unipile_webhook(
         )
 
     secret = (settings.UNIPILE_WEBHOOK_SECRET or "").strip()
+    registration_items: list[UnipileWebhookRegistrationItem] = []
 
     try:
-        result = await unipile_client.ensure_messaging_webhook(
-            request_url=url,
-            secret=secret,
-            events=list(_UNIPILE_WEBHOOK_EVENTS),
-        )
+        for source in expected_source_keys:
+            config = _get_unipile_source_config(source)
+            registration_result: dict[str, Any] = await unipile_client.ensure_webhook(
+                request_url=url,
+                secret=secret,
+                source=source,
+                events=list(config.request_events) if config.request_events else None,
+                name=f"prospector-{source}-webhook",
+            )
+            webhook_id_raw = registration_result.get("webhook_id")
+            registration_items.append(
+                UnipileWebhookRegistrationItem(
+                    source=source,
+                    events=list(config.events),
+                    created=bool(registration_result.get("created")),
+                    already_exists=bool(registration_result.get("already_exists")),
+                    webhook_id=str(webhook_id_raw) if webhook_id_raw else None,
+                )
+            )
     except UnipileNonRetryableError as exc:
         logger.warning(
             "tenant.unipile_webhook_register_rejected",
@@ -260,32 +340,28 @@ async def register_unipile_webhook(
             detail="Falha ao registrar webhook na Unipile.",
         ) from exc
 
-    created = bool(result.get("created"))
-    already_exists = bool(result.get("already_exists"))
-    webhook_id_raw = result.get("webhook_id")
-    webhook_id = str(webhook_id_raw) if webhook_id_raw else None
+    created = any(item.created for item in registration_items)
+    already_exists = all(item.already_exists for item in registration_items)
 
     logger.info(
         "tenant.unipile_webhook_registered",
         tenant_id=str(tenant_id),
         created=created,
         already_exists=already_exists,
-        webhook_id=webhook_id,
+        source_count=len(registration_items),
         request_url=url,
     )
 
     return UnipileWebhookRegistrationResponse(
         created=created,
         already_exists=already_exists,
-        webhook_id=webhook_id,
         request_url=url,
-        source="messaging",
         auth_header="Unipile-Auth",
-        events=list(_UNIPILE_WEBHOOK_EVENTS),
+        webhooks=registration_items,
         message=(
-            "Webhook registrado com sucesso na Unipile."
-            if created
-            else "Já existe um webhook ativo da Unipile apontando para esta URL."
+            "Webhooks registrados com sucesso na Unipile."
+            if created and not already_exists
+            else "Os webhooks esperados já existem na Unipile para esta URL."
         ),
     )
 
@@ -383,7 +459,24 @@ def _build_unipile_webhook_url() -> str:
     return f"{settings.API_PUBLIC_URL.rstrip('/')}/webhooks/unipile"
 
 
-def _get_unipile_webhook_registration_blockers(url: str) -> list[str]:
+def _get_expected_unipile_sources(
+    *,
+    linkedin_account_configured: bool,
+    gmail_account_configured: bool,
+) -> list[str]:
+    expected: list[str] = []
+
+    if linkedin_account_configured or not (linkedin_account_configured or gmail_account_configured):
+        expected.extend(["messaging", "users"])
+    if gmail_account_configured or not (linkedin_account_configured or gmail_account_configured):
+        expected.append("mailing")
+
+    return expected
+
+
+def _get_unipile_webhook_registration_blockers(
+    url: str, expected_source_keys: list[str]
+) -> list[str]:
     blockers: list[str] = []
     if not settings.UNIPILE_API_KEY or not settings.UNIPILE_BASE_URL:
         blockers.append("Preencha UNIPILE_API_KEY e UNIPILE_BASE_URL no backend.")
@@ -395,6 +488,11 @@ def _get_unipile_webhook_registration_blockers(url: str) -> list[str]:
     if not _is_public_webhook_target(url):
         blockers.append(
             "API_PUBLIC_URL precisa ser uma URL HTTPS pública para registro automático."
+        )
+
+    if not expected_source_keys:
+        blockers.append(
+            "Configure ao menos uma conta LinkedIn ou Gmail antes de registrar o webhook."
         )
 
     return blockers
@@ -460,3 +558,56 @@ def _coerce_webhook_events(webhook: dict[str, Any] | None) -> list[str]:
     if not isinstance(events, list):
         return []
     return [str(event) for event in events if str(event).strip()]
+
+
+def _build_unipile_source_statuses(
+    *,
+    expected_source_keys: list[str],
+    registered_webhooks: list[dict[str, Any]],
+) -> list[UnipileWebhookSourceStatus]:
+    statuses: list[UnipileWebhookSourceStatus] = []
+    for source in expected_source_keys:
+        config = _get_unipile_source_config(source)
+        webhook = _select_webhook_for_source(registered_webhooks, source)
+        registered_events = _coerce_webhook_events(webhook)
+        expected_events = list(config.events)
+        statuses.append(
+            UnipileWebhookSourceStatus(
+                source=source,
+                label=config.label,
+                expected_events=expected_events,
+                registered=webhook is not None,
+                webhook_id=_coerce_webhook_value(webhook, "id", "webhook_id"),
+                enabled=_coerce_webhook_bool(webhook, "enabled"),
+                registered_events=registered_events,
+                missing_events=[
+                    event_name
+                    for event_name in expected_events
+                    if event_name not in registered_events
+                ],
+                extra_events=[
+                    event_name
+                    for event_name in registered_events
+                    if event_name not in expected_events
+                ],
+            )
+        )
+    return statuses
+
+
+def _select_webhook_for_source(
+    registered_webhooks: list[dict[str, Any]],
+    source: str,
+) -> dict[str, Any] | None:
+    source_matches = [webhook for webhook in registered_webhooks if webhook.get("source") == source]
+    for webhook in source_matches:
+        if webhook.get("enabled") is not False:
+            return webhook
+    return source_matches[0] if source_matches else None
+
+
+def _get_unipile_source_config(source: str) -> UnipileWebhookSourceConfig:
+    for config in _UNIPILE_WEBHOOK_SOURCES:
+        if config.source == source:
+            return config
+    raise KeyError(f"Unknown Unipile webhook source: {source}")

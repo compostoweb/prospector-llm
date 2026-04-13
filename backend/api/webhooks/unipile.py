@@ -13,9 +13,11 @@ Segurança:
   - Falha na validação é logada mas não revela o secret
 
 Eventos tratados:
-  - message_received  → classifica intent via ReplyParser → salva Interaction
-  - account_connected → log informativo
-  - (outros eventos)  → ignorados silenciosamente
+    - message_received  → classifica intent via ReplyParser → salva Interaction
+    - mail_received     → classifica intent via ReplyParser → salva Interaction
+    - new_relation      → marca conexão LinkedIn aceita
+    - account status    → log informativo
+    - (outros eventos)  → ignorados silenciosamente
 
 Fluxo message_received:
   1. Extrai texto + unipile_message_id + account_id do payload
@@ -33,10 +35,11 @@ import hmac
 import json
 import uuid
 from datetime import UTC, datetime
+from typing import Any, cast
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_llm_registry, get_session_no_auth
@@ -44,13 +47,16 @@ from core.config import settings
 from integrations.llm import LLMRegistry
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
-from models.enums import Channel, Intent, InteractionDirection, LeadStatus, StepStatus
+from models.enums import Intent
 from models.interaction import Interaction
 from models.lead import Lead
-from models.lead_email import LeadEmail
-from models.tenant import Tenant, TenantIntegration
-from services.llm_config import resolve_tenant_llm_config
-from services.reply_parser import ReplyParser
+from services.inbound_message_service import (
+    find_lead_by_sender as _svc_find_lead_by_sender,
+)
+from services.inbound_message_service import (
+    process_inbound_reply,
+    resolve_unipile_account_context,
+)
 
 logger = structlog.get_logger()
 
@@ -59,6 +65,17 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 # Canais de mensagem que o Unipile pode reportar
 _LINKEDIN_ACCOUNT_TYPE = "LINKEDIN"
 _EMAIL_ACCOUNT_TYPE = "GMAIL"
+_ACCOUNT_STATUS_EVENTS = {
+    "ok",
+    "error",
+    "stopped",
+    "credentials",
+    "connecting",
+    "deleted",
+    "creation_success",
+    "reconnected",
+    "sync_success",
+}
 
 
 @router.post("/unipile", status_code=status.HTTP_200_OK)
@@ -92,17 +109,21 @@ async def unipile_webhook(
             detail="Payload inválido",
         )
 
-    event_type: str = payload.get("event", "")
+    event_type = _extract_event_type(payload)
     logger.info("webhook.unipile.received", event_type=event_type)
 
-    if event_type == "message_received":
+    if event_type in {"message_received", "mail_received"}:
         await _handle_message_received(payload, db, registry)
-    elif event_type == "relation_created":
+    elif event_type in {"new_relation", "relation_created"}:
         await _handle_relation_created(payload, db)
-    elif event_type == "account_connected":
+    elif event_type in _ACCOUNT_STATUS_EVENTS:
+        account_status = (
+            payload.get("AccountStatus") if isinstance(payload.get("AccountStatus"), dict) else {}
+        )
         logger.info(
-            "webhook.unipile.account_connected",
-            account_id=payload.get("account_id"),
+            "webhook.unipile.account_status",
+            account_id=account_status.get("account_id") or payload.get("account_id"),
+            status=event_type,
         )
     # Outros eventos são ignorados silenciosamente
 
@@ -123,23 +144,31 @@ async def _handle_relation_created(
     relation = payload.get("relation") or payload
     profile_id: str = (
         relation.get("linkedin_profile_id")
+        or relation.get("user_provider_id")
         or relation.get("provider_id")
         or relation.get("profile_id")
         or ""
     )
     account_id: str = relation.get("account_id") or payload.get("account_id") or ""
+    account_type = _extract_account_type(relation, payload)
     if not profile_id:
         logger.warning("webhook.unipile.relation_created.no_profile_id")
         return
 
-    tenant_id = await _resolve_tenant_id_for_unipile_account(account_id, db)
-    if tenant_id is None:
+    account_context = await resolve_unipile_account_context(
+        account_id,
+        db,
+        account_type=account_type or _LINKEDIN_ACCOUNT_TYPE,
+    )
+    if account_context is None:
         logger.warning(
             "webhook.unipile.relation_created.tenant_unresolved",
             account_id=account_id or None,
+            account_type=account_type or None,
             profile_id=profile_id,
         )
         return
+    tenant_id = account_context.tenant_id
 
     result = await db.execute(
         select(Lead).where(
@@ -227,11 +256,25 @@ async def _handle_message_received(
     Processa um evento message_received da Unipile.
     Identifica o lead, classifica a intent e salva a Interaction.
     """
-    message = payload.get("message") or payload
-    unipile_message_id: str = message.get("id") or message.get("message_id") or ""
-    sender_id: str = message.get("sender_id") or message.get("from") or ""
+    message = _extract_message_payload(payload)
+    unipile_message_id = (
+        str(message.get("id") or "")
+        or str(message.get("message_id") or "")
+        or str(payload.get("message_id") or "")
+        or str(payload.get("email_id") or "")
+    )
+    sender_id = _extract_message_sender_id(payload, message)
     text_content: str = _extract_text(message)
-    account_id: str = message.get("account_id") or ""
+    account_id = _extract_message_account_id(payload, message)
+    account_type = _extract_account_type(message, payload)
+
+    if _is_outbound_message_event(payload):
+        logger.debug(
+            "webhook.unipile.outbound_message_ignored",
+            message_id=unipile_message_id or None,
+            account_id=account_id or None,
+        )
+        return
 
     if not text_content:
         logger.debug("webhook.unipile.empty_message", message_id=unipile_message_id)
@@ -252,15 +295,22 @@ async def _handle_message_received(
             return
 
     # Tenta encontrar o lead pelo sender_id (linkedin_profile_id ou e-mail)
-    tenant_id = await _resolve_tenant_id_for_unipile_account(account_id, db)
-    if tenant_id is None:
+    account_context = await resolve_unipile_account_context(
+        account_id,
+        db,
+        account_type=account_type,
+        sender_id=sender_id,
+    )
+    if account_context is None:
         logger.warning(
             "webhook.unipile.tenant_unresolved",
             account_id=account_id or None,
+            account_type=account_type or None,
             sender_id=sender_id or None,
             message_id=unipile_message_id or None,
         )
         return
+    tenant_id = account_context.tenant_id
 
     lead = await _find_lead_by_sender(sender_id, tenant_id, db)
     if not lead:
@@ -271,102 +321,35 @@ async def _handle_message_received(
         )
         return
 
-    # ── Classifica intenção ───────────────────────────────────────────
-    llm_config = await resolve_tenant_llm_config(db, lead.tenant_id)
-    parser = ReplyParser(
-        registry=registry,
-        provider=llm_config.provider,
-        model=llm_config.model,
-    )
-    classification = await parser.classify(
-        reply_text=text_content,
-        lead_name=lead.name,
-        tenant_id=str(lead.tenant_id),
-        lead_id=str(lead.id),
-        channel=_detect_channel(account_id).value,
-    )
-
-    intent_str: str = (classification.get("intent") or "NEUTRAL").upper()
-    try:
-        intent = Intent[intent_str]
-    except KeyError:
-        intent = Intent.NEUTRAL
-
-    # ── Detecta canal pela conta Unipile ─────────────────────────────
-    channel = _detect_channel(account_id)
-
-    # ── Salva Interaction inbound ─────────────────────────────────────
-    interaction = Interaction(
-        id=uuid.uuid4(),
-        tenant_id=lead.tenant_id,
-        lead_id=lead.id,
-        channel=channel,
-        direction=InteractionDirection.INBOUND,
-        content_text=text_content,
-        intent=intent,
-        unipile_message_id=unipile_message_id or None,
-        created_at=datetime.now(tz=UTC),
-    )
-    db.add(interaction)
-
-    await _mark_latest_step_replied(
-        lead_id=lead.id,
-        tenant_id=lead.tenant_id,
-        channel=channel,
+    result = await process_inbound_reply(
         db=db,
+        registry=registry,
+        tenant_id=lead.tenant_id,
+        lead=lead,
+        channel=account_context.channel,
+        reply_text=text_content,
+        external_message_id=unipile_message_id or None,
     )
 
-    # ── Ações por intenção ────────────────────────────────────────────
-    if intent == Intent.NOT_INTERESTED:
-        lead.status = LeadStatus.ARCHIVED
+    if result.intent == Intent.NOT_INTERESTED:
         logger.info(
             "webhook.unipile.lead_archived",
             lead_id=str(lead.id),
             reason="NOT_INTERESTED",
         )
-    elif intent == Intent.INTEREST:
-        lead.status = LeadStatus.CONVERTED
+    elif result.intent == Intent.INTEREST:
         logger.info(
             "webhook.unipile.lead_converted",
             lead_id=str(lead.id),
-            classification=classification,
-        )
-
-    await db.commit()
-
-    # ── Notificação via Resend (interesse ou objeção) ─────────────
-    if intent in (Intent.INTEREST, Intent.OBJECTION):
-        from services.notification import send_reply_notification
-
-        await send_reply_notification(
-            lead=lead,
-            intent=intent.value,
-            reply_text=text_content,
-            tenant_id=lead.tenant_id,
-            db=db,
+            classification=result.classification,
         )
 
     logger.info(
         "webhook.unipile.processed",
         lead_id=str(lead.id),
-        intent=intent.value,
-        confidence=classification.get("confidence"),
-        summary=classification.get("summary"),
-    )
-
-    # Broadcast WebSocket para atualizar inbox em tempo real
-    from api.routes.ws import broadcast_event
-
-    await broadcast_event(
-        str(lead.tenant_id),
-        {
-            "type": "new_message",
-            "lead_id": str(lead.id),
-            "lead_name": lead.name,
-            "channel": channel.value,
-            "intent": intent.value,
-            "text_preview": text_content[:100],
-        },
+        intent=result.intent.value,
+        confidence=result.classification.get("confidence"),
+        summary=result.classification.get("summary"),
     )
 
 
@@ -409,57 +392,10 @@ async def _resolve_tenant_id_for_unipile_account(
     account_id: str,
     db: AsyncSession,
 ) -> uuid.UUID | None:
-    """
-    Resolve o tenant pela conta Unipile configurada.
-    Se houver apenas um tenant ativo, faz fallback seguro para ambiente MVP.
-    """
-    normalized_account_id = account_id.strip()
-
-    if normalized_account_id:
-        result = await db.execute(
-            select(TenantIntegration.tenant_id).where(
-                or_(
-                    TenantIntegration.unipile_linkedin_account_id == normalized_account_id,
-                    TenantIntegration.unipile_gmail_account_id == normalized_account_id,
-                )
-            )
-        )
-        tenant_ids = list(dict.fromkeys(result.scalars().all()))
-        if len(tenant_ids) == 1:
-            return tenant_ids[0]
-        if len(tenant_ids) > 1:
-            logger.error(
-                "webhook.unipile.account_ambiguous",
-                account_id=normalized_account_id,
-                tenant_count=len(tenant_ids),
-            )
-            return None
-
-        known_global_accounts = {
-            value
-            for value in (
-                settings.UNIPILE_ACCOUNT_ID_LINKEDIN or "",
-                settings.UNIPILE_ACCOUNT_ID_GMAIL or "",
-            )
-            if value
-        }
-        if known_global_accounts and normalized_account_id not in known_global_accounts:
-            logger.warning(
-                "webhook.unipile.unknown_account",
-                account_id=normalized_account_id,
-            )
-            return None
-
-    active_tenants_result = await db.execute(
-        select(Tenant.id)
-        .where(Tenant.is_active.is_(True))
-        .order_by(Tenant.created_at.asc())
-        .limit(2)
-    )
-    active_tenants = active_tenants_result.scalars().all()
-    if len(active_tenants) == 1:
-        return active_tenants[0]
-    return None
+    account_context = await resolve_unipile_account_context(account_id, db)
+    if account_context is None:
+        return None
+    return account_context.tenant_id
 
 
 async def _find_lead_by_sender(
@@ -467,92 +403,20 @@ async def _find_lead_by_sender(
     tenant_id: uuid.UUID,
     db: AsyncSession,
 ) -> Lead | None:
-    """
-    Localiza o lead pelo sender_id do Unipile.
-    Tenta: linkedin_profile_id → e-mail corporativo → e-mail pessoal.
-    """
-    if not sender_id:
-        return None
-
-    # Normaliza para comparar corretamente (case-insensitive)
-    sender_normalized = sender_id.strip()
-
-    # Tenta como linkedin_profile_id
-    result = await db.execute(
-        select(Lead).where(
-            Lead.tenant_id == tenant_id,
-            Lead.linkedin_profile_id == sender_normalized,
-        )
-    )
-    lead = result.scalar_one_or_none()
-    if lead:
-        return lead
-
-    # Tenta como e-mail (formato sender para Gmail)
-    if "@" in sender_normalized:
-        sender_lower = sender_normalized.lower()
-        result = await db.execute(
-            select(Lead).where(
-                Lead.tenant_id == tenant_id,
-                func.lower(Lead.email_corporate) == sender_lower,
-            )
-        )
-        lead = result.scalar_one_or_none()
-        if lead:
-            return lead
-
-        result = await db.execute(
-            select(Lead).where(
-                Lead.tenant_id == tenant_id,
-                func.lower(Lead.email_personal) == sender_lower,
-            )
-        )
-        lead = result.scalar_one_or_none()
-        if lead:
-            return lead
-
-        result = await db.execute(
-            select(Lead)
-            .join(LeadEmail, LeadEmail.lead_id == Lead.id)
-            .where(
-                Lead.tenant_id == tenant_id,
-                LeadEmail.email == sender_lower,
-            )
-            .limit(1)
-        )
-        return result.scalar_one_or_none()
-
-    return None
-
-
-async def _mark_latest_step_replied(
-    lead_id: uuid.UUID,
-    tenant_id: uuid.UUID,
-    channel: Channel,
-    db: AsyncSession,
-) -> None:
-    """Marca o step enviado mais recente do mesmo canal como respondido."""
-    result = await db.execute(
-        select(CadenceStep)
-        .where(
-            CadenceStep.lead_id == lead_id,
-            CadenceStep.tenant_id == tenant_id,
-            CadenceStep.channel == channel,
-            CadenceStep.status == StepStatus.SENT,
-        )
-        .order_by(CadenceStep.sent_at.desc().nulls_last(), CadenceStep.scheduled_at.desc())
-        .limit(1)
-    )
-    latest_step = result.scalar_one_or_none()
-    if latest_step is not None:
-        latest_step.status = StepStatus.REPLIED
+    return await _svc_find_lead_by_sender(sender_id, tenant_id, db)
 
 
 def _extract_text(message: dict) -> str:
     """Extrai o texto do corpo da mensagem Unipile — trata formatos variados."""
-    # Formato LinkedIn
+    message_text = message.get("message")
+    if isinstance(message_text, str) and message_text.strip():
+        return message_text.strip()
+    if text := message.get("subject"):
+        return str(text).strip()
     if text := message.get("text"):
         return str(text).strip()
+    if body_plain := message.get("body_plain"):
+        return str(body_plain).strip()
     # Formato e-mail
     if body := message.get("body"):
         return str(body).strip()
@@ -565,12 +429,88 @@ def _extract_text(message: dict) -> str:
     return ""
 
 
-def _detect_channel(account_id: str) -> Channel:
-    """Detecta o canal pelo ID da conta Unipile."""
-    linkedin_account = settings.UNIPILE_ACCOUNT_ID_LINKEDIN or ""
-    gmail_account = settings.UNIPILE_ACCOUNT_ID_GMAIL or ""
+def _extract_event_type(payload: dict) -> str:
+    event = payload.get("event")
+    if isinstance(event, str) and event.strip():
+        return event.strip().lower()
 
-    if account_id == gmail_account:
-        return Channel.EMAIL
-    # Default para LinkedIn DM (inbound sempre é DM, nunca connect)
-    return Channel.LINKEDIN_DM
+    account_status = payload.get("AccountStatus")
+    if isinstance(account_status, dict):
+        message = account_status.get("message")
+        if isinstance(message, str) and message.strip():
+            return message.strip().lower()
+
+    return ""
+
+
+def _extract_message_payload(payload: dict) -> dict:
+    message = payload.get("message")
+    if isinstance(message, dict):
+        return message
+    return payload
+
+
+def _extract_message_sender_id(payload: dict, message: dict) -> str:
+    raw_sender = payload.get("sender")
+    if isinstance(raw_sender, dict):
+        sender = cast(dict[str, Any], raw_sender)
+    else:
+        sender = {}
+
+    raw_from_attendee = payload.get("from_attendee")
+    if isinstance(raw_from_attendee, dict):
+        from_attendee = cast(dict[str, Any], raw_from_attendee)
+    else:
+        from_attendee = {}
+
+    return str(
+        sender.get("attendee_provider_id")
+        or from_attendee.get("identifier")
+        or message.get("sender_id")
+        or message.get("from")
+        or payload.get("sender_id")
+        or payload.get("from")
+        or ""
+    ).strip()
+
+
+def _extract_message_account_id(payload: dict, message: dict) -> str:
+    return str(message.get("account_id") or payload.get("account_id") or "").strip()
+
+
+def _extract_account_type(*payloads: dict) -> str:
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+
+        account_type = payload.get("account_type")
+        if account_type:
+            return str(account_type).strip()
+
+        account = payload.get("account")
+        if isinstance(account, dict) and account.get("type"):
+            return str(account["type"]).strip()
+
+    return ""
+
+
+def _is_outbound_message_event(payload: dict) -> bool:
+    event_type = _extract_event_type(payload)
+    if event_type != "message_received":
+        return False
+
+    raw_sender = payload.get("sender")
+    if isinstance(raw_sender, dict):
+        sender = cast(dict[str, Any], raw_sender)
+    else:
+        sender = {}
+
+    raw_account_info = payload.get("account_info")
+    if isinstance(raw_account_info, dict):
+        account_info = cast(dict[str, Any], raw_account_info)
+    else:
+        account_info = {}
+
+    sender_provider_id = str(sender.get("attendee_provider_id") or "").strip()
+    account_user_id = str(account_info.get("user_id") or "").strip()
+    return bool(sender_provider_id and account_user_id and sender_provider_id == account_user_id)

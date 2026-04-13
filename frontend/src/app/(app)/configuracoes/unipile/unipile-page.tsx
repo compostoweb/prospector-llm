@@ -247,10 +247,15 @@ function WebhookStatusPanel({
   registerResult?: UnipileWebhookRegistrationResult
   registerError: string | null
 }) {
-  const eventComparison = compareWebhookEvents(
-    status.expected_events,
-    status.registered_webhook_events,
-  )
+  const sourceAlignment =
+    status.expected_sources.length > 0 &&
+    status.expected_sources.every(
+      (sourceStatus) =>
+        sourceStatus.registered &&
+        sourceStatus.enabled !== false &&
+        sourceStatus.missing_events.length === 0 &&
+        sourceStatus.extra_events.length === 0,
+    )
 
   return (
     <div className="space-y-4 xl:space-y-5">
@@ -289,11 +294,10 @@ function WebhookStatusPanel({
           {status.registered_in_unipile ? (
             <div className="rounded-lg bg-(--success-subtle) px-3 py-2 text-sm text-(--success-subtle-fg)">
               <p className="font-medium">Webhook já cadastrado na Unipile.</p>
-              {status.registered_webhook_id ? <p>ID: {status.registered_webhook_id}</p> : null}
               <p>
-                {status.registered_webhook_enabled === false
-                  ? "Cadastro encontrado, mas está desativado na Unipile."
-                  : "Cadastro ativo encontrado para a URL atual."}
+                {status.registered_webhooks.length === 1
+                  ? "Cadastro detectado para a URL atual."
+                  : `${status.registered_webhooks.length} webhooks detectados para a URL atual.`}
               </p>
             </div>
           ) : null}
@@ -305,7 +309,14 @@ function WebhookStatusPanel({
           {registerResult ? (
             <div className="rounded-lg bg-(--success-subtle) px-3 py-2 text-sm text-(--success-subtle-fg)">
               <p>{registerResult.message}</p>
-              {registerResult.webhook_id ? <p>ID: {registerResult.webhook_id}</p> : null}
+              <div className="mt-2 space-y-1">
+                {registerResult.webhooks.map((webhook) => (
+                  <p key={`${webhook.source}-${webhook.webhook_id ?? "none"}`}>
+                    {formatSourceLabel(webhook.source)}: {webhook.created ? "criado" : "já existia"}
+                    {webhook.webhook_id ? ` (${webhook.webhook_id})` : ""}
+                  </p>
+                ))}
+              </div>
             </div>
           ) : null}
           {status.api_registration_blockers.length > 0 ? (
@@ -398,54 +409,96 @@ function WebhookStatusPanel({
         />
         <StatusRow
           label="Cadastrado na Unipile"
-          ok={status.registered_in_unipile && status.registered_webhook_enabled !== false}
+          ok={status.registered_in_unipile}
           detail={
             status.registered_in_unipile
-              ? status.registered_webhook_id
-                ? `Webhook ID ${status.registered_webhook_id}`
-                : "Webhook encontrado para a URL atual"
+              ? `${status.registered_webhooks.length} webhook(s) encontrados para a URL atual`
               : (status.registration_lookup_error ?? "Nenhum webhook encontrado para esta URL")
           }
         />
         <StatusRow
-          label="Eventos alinhados"
-          ok={
-            status.registered_in_unipile
-              ? eventComparison.missing.length === 0 && eventComparison.extra.length === 0
-              : false
-          }
+          label="Sources alinhados"
+          ok={sourceAlignment}
           detail={
-            status.registered_in_unipile
-              ? eventComparison.missing.length === 0 && eventComparison.extra.length === 0
-                ? "Os eventos cadastrados na Unipile batem com os eventos esperados pelo sistema"
-                : [
-                    eventComparison.missing.length > 0
-                      ? `faltando: ${eventComparison.missing.join(", ")}`
-                      : "",
-                    eventComparison.extra.length > 0
-                      ? `extras: ${eventComparison.extra.join(", ")}`
-                      : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" | ")
-              : "Cadastre ou detecte um webhook ativo para comparar os eventos"
+            sourceAlignment
+              ? "Todos os sources esperados pelo sistema estão ativos e com eventos compatíveis"
+              : summarizeSourceAlignment(status.expected_sources)
           }
         />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <div className="space-y-2 rounded-xl border border-(--border-default) bg-(--bg-page) p-4">
+        <div className="space-y-2 rounded-xl border border-(--border-default) bg-(--bg-page) p-4 xl:col-span-2">
           <p className="text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
-            Eventos esperados
+            Sources esperados
           </p>
-          <div className="flex flex-wrap gap-2">
-            {status.expected_events.map((eventName) => (
-              <span
-                key={eventName}
-                className="rounded-full bg-(--bg-overlay) px-2.5 py-1 text-xs font-medium text-(--text-secondary)"
-              >
-                {eventName}
-              </span>
+          <div className="grid gap-3 xl:grid-cols-3">
+            {status.expected_sources.map((sourceStatus) => (
+              <div key={sourceStatus.source} className="space-y-3 rounded-lg bg-(--bg-overlay) p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-medium text-(--text-primary)">
+                      {sourceStatus.label}
+                    </p>
+                    <p className="text-xs text-(--text-tertiary)">{sourceStatus.source}</p>
+                  </div>
+                  <span
+                    className={
+                      sourceStatus.registered && sourceStatus.enabled !== false
+                        ? statusPillClass.ready
+                        : statusPillClass.pending
+                    }
+                  >
+                    {sourceStatus.registered
+                      ? sourceStatus.enabled === false
+                        ? "desativado"
+                        : "detectado"
+                      : "faltando"}
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
+                    Eventos esperados
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {sourceStatus.expected_events.map((eventName) => (
+                      <span
+                        key={eventName}
+                        className="rounded-full bg-(--bg-page) px-2.5 py-1 text-xs font-medium text-(--text-secondary)"
+                      >
+                        {eventName}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {sourceStatus.registered ? (
+                  <div className="space-y-2 text-xs text-(--text-secondary)">
+                    {sourceStatus.webhook_id ? <p>ID {sourceStatus.webhook_id}</p> : null}
+                    <div className="flex flex-wrap gap-2">
+                      {sourceStatus.registered_events.map((eventName) => (
+                        <span
+                          key={eventName}
+                          className="rounded-full bg-(--accent-subtle) px-2.5 py-1 font-medium text-(--accent-subtle-fg)"
+                        >
+                          {eventName}
+                        </span>
+                      ))}
+                    </div>
+                    {sourceStatus.missing_events.length > 0 ? (
+                      <p>Faltando: {sourceStatus.missing_events.join(", ")}</p>
+                    ) : null}
+                    {sourceStatus.extra_events.length > 0 ? (
+                      <p>Extras: {sourceStatus.extra_events.join(", ")}</p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="text-xs text-(--text-secondary)">
+                    Nenhum webhook deste source foi encontrado para a URL atual.
+                  </p>
+                )}
+              </div>
             ))}
           </div>
         </div>
@@ -468,97 +521,47 @@ function WebhookStatusPanel({
 
         <div className="space-y-2 rounded-xl border border-(--border-default) bg-(--bg-page) p-4 xl:col-span-2">
           <p className="text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
-            Cadastro detectado na Unipile
+            Cadastros detectados na Unipile
           </p>
-          {status.registered_in_unipile ? (
+          {status.registered_webhooks.length > 0 ? (
             <div className="space-y-3">
-              <div className="flex flex-wrap gap-2">
-                {status.registered_webhook_id ? (
-                  <span className="rounded-full bg-(--success-subtle) px-2.5 py-1 text-xs font-medium text-(--success-subtle-fg)">
-                    ID {status.registered_webhook_id}
-                  </span>
-                ) : null}
-                {status.registered_webhook_source ? (
-                  <span className="rounded-full bg-(--bg-overlay) px-2.5 py-1 text-xs font-medium text-(--text-secondary)">
-                    source {status.registered_webhook_source}
-                  </span>
-                ) : null}
-                <span
-                  className={
-                    status.registered_webhook_enabled === false
-                      ? "rounded-full bg-(--warning-subtle) px-2.5 py-1 text-xs font-medium text-(--warning-subtle-fg)"
-                      : "rounded-full bg-(--success-subtle) px-2.5 py-1 text-xs font-medium text-(--success-subtle-fg)"
-                  }
-                >
-                  {status.registered_webhook_enabled === false ? "desativado" : "ativo"}
-                </span>
-              </div>
-
               <div className="grid gap-3 xl:grid-cols-2">
-                <div className="space-y-2 rounded-lg bg-(--bg-overlay) p-3">
-                  <p className="text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
-                    Eventos cadastrados
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {status.registered_webhook_events.map((eventName) => (
-                      <span
-                        key={eventName}
-                        className="rounded-full bg-(--accent-subtle) px-2.5 py-1 text-xs font-medium text-(--accent-subtle-fg)"
-                      >
-                        {eventName}
+                {status.registered_webhooks.map((webhook, index) => (
+                  <div
+                    key={`${webhook.source ?? "unknown"}-${webhook.webhook_id ?? index}`}
+                    className="space-y-3 rounded-lg bg-(--bg-overlay) p-3"
+                  >
+                    <div className="flex flex-wrap gap-2">
+                      {webhook.webhook_id ? (
+                        <span className="rounded-full bg-(--success-subtle) px-2.5 py-1 text-xs font-medium text-(--success-subtle-fg)">
+                          ID {webhook.webhook_id}
+                        </span>
+                      ) : null}
+                      <span className="rounded-full bg-(--bg-page) px-2.5 py-1 text-xs font-medium text-(--text-secondary)">
+                        source {formatSourceLabel(webhook.source)}
                       </span>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-2 rounded-lg bg-(--bg-overlay) p-3">
-                  <p className="text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
-                    Divergências detectadas
-                  </p>
-                  {eventComparison.missing.length === 0 && eventComparison.extra.length === 0 ? (
-                    <p className="text-sm text-(--text-secondary)">
-                      Nenhuma divergência. O cadastro da Unipile está alinhado com os eventos
-                      esperados.
-                    </p>
-                  ) : (
-                    <div className="space-y-2">
-                      {eventComparison.missing.length > 0 ? (
-                        <div className="space-y-1">
-                          <p className="text-xs font-medium text-(--warning-subtle-fg)">
-                            Faltando na Unipile
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            {eventComparison.missing.map((eventName) => (
-                              <span
-                                key={eventName}
-                                className="rounded-full bg-(--warning-subtle) px-2.5 py-1 text-xs font-medium text-(--warning-subtle-fg)"
-                              >
-                                {eventName}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                      {eventComparison.extra.length > 0 ? (
-                        <div className="space-y-1">
-                          <p className="text-xs font-medium text-(--text-secondary)">
-                            Extras cadastrados
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            {eventComparison.extra.map((eventName) => (
-                              <span
-                                key={eventName}
-                                className="rounded-full bg-(--bg-page) px-2.5 py-1 text-xs font-medium text-(--text-secondary)"
-                              >
-                                {eventName}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
+                      <span
+                        className={
+                          webhook.enabled === false
+                            ? "rounded-full bg-(--warning-subtle) px-2.5 py-1 text-xs font-medium text-(--warning-subtle-fg)"
+                            : "rounded-full bg-(--success-subtle) px-2.5 py-1 text-xs font-medium text-(--success-subtle-fg)"
+                        }
+                      >
+                        {webhook.enabled === false ? "desativado" : "ativo"}
+                      </span>
                     </div>
-                  )}
-                </div>
+                    <div className="flex flex-wrap gap-2">
+                      {webhook.events.map((eventName) => (
+                        <span
+                          key={eventName}
+                          className="rounded-full bg-(--accent-subtle) px-2.5 py-1 text-xs font-medium text-(--accent-subtle-fg)"
+                        >
+                          {eventName}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           ) : (
@@ -609,12 +612,45 @@ const statusPillClass = {
     "inline-flex items-center rounded-full bg-(--warning-subtle) px-3 py-1 text-xs font-semibold text-(--warning-subtle-fg)",
 }
 
-function compareWebhookEvents(expectedEvents: string[], registeredEvents: string[]) {
-  const expectedSet = new Set(expectedEvents)
-  const registeredSet = new Set(registeredEvents)
+function summarizeSourceAlignment(statuses: UnipileWebhookStatus["expected_sources"]) {
+  const pending = statuses
+    .filter(
+      (sourceStatus) =>
+        !sourceStatus.registered ||
+        sourceStatus.enabled === false ||
+        sourceStatus.missing_events.length > 0 ||
+        sourceStatus.extra_events.length > 0,
+    )
+    .map((sourceStatus) => {
+      if (!sourceStatus.registered) {
+        return `${sourceStatus.label}: não cadastrado`
+      }
+      if (sourceStatus.enabled === false) {
+        return `${sourceStatus.label}: desativado`
+      }
+      if (sourceStatus.missing_events.length > 0) {
+        return `${sourceStatus.label}: faltando ${sourceStatus.missing_events.join(", ")}`
+      }
+      if (sourceStatus.extra_events.length > 0) {
+        return `${sourceStatus.label}: extras ${sourceStatus.extra_events.join(", ")}`
+      }
+      return `${sourceStatus.label}: revisar`
+    })
 
-  return {
-    missing: expectedEvents.filter((eventName) => !registeredSet.has(eventName)),
-    extra: registeredEvents.filter((eventName) => !expectedSet.has(eventName)),
+  return pending.join(" | ") || "Cadastre ou detecte os sources esperados para comparar"
+}
+
+function formatSourceLabel(source: string | null) {
+  switch (source) {
+    case "messaging":
+      return "messaging"
+    case "users":
+      return "users"
+    case "mailing":
+      return "mailing"
+    case "account_status":
+      return "account_status"
+    default:
+      return source ?? "desconhecido"
   }
 }

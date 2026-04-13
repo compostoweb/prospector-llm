@@ -1,186 +1,110 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.webhooks import unipile as unipile_webhook
-from models.cadence import Cadence
-from models.cadence_step import CadenceStep
-from models.enums import Channel, LeadSource, LeadStatus, StepStatus
 from models.lead import Lead
 
-pytestmark = pytest.mark.asyncio
 
-
-class _FakeScalarSequence:
-    def __init__(self, values: list[object]) -> None:
-        self._values = values
-
-    def all(self) -> list[object]:
-        return self._values
-
-
-class _FakeResult:
-    def __init__(self, value: object | None = None, values: list[object] | None = None) -> None:
-        self._value = value
-        self._values = values or []
-
-    def scalar_one_or_none(self) -> object | None:
-        return self._value
-
-    def scalars(self) -> _FakeScalarSequence:
-        return _FakeScalarSequence(self._values)
-
-
-class _FakeAsyncSession:
-    def __init__(self, *results: _FakeResult) -> None:
-        self._results = list(results)
-        self.statements: list[Any] = []
-
-    async def execute(self, statement: Any) -> _FakeResult:
-        self.statements.append(statement)
-        if not self._results:
-            raise AssertionError("Unexpected execute() call without fake result")
-        return self._results.pop(0)
-
-
-def _make_cadence(tenant_id: uuid.UUID) -> Cadence:
-    return Cadence(
-        id=uuid.uuid4(),
-        tenant_id=tenant_id,
-        name="Cadência Teste",
-        llm_provider="openai",
-        llm_model="gpt-4o-mini",
-        llm_temperature=0.7,
-        llm_max_tokens=512,
-    )
-
-
-def _make_lead(
-    tenant_id: uuid.UUID,
-    *,
-    email_corporate: str | None = None,
-    linkedin_profile_id: str | None = None,
-) -> Lead:
-    return Lead(
-        id=uuid.uuid4(),
-        tenant_id=tenant_id,
-        name="Lead Teste",
-        company="Acme",
-        linkedin_url=f"https://linkedin.com/in/{uuid.uuid4().hex[:10]}",
-        linkedin_profile_id=linkedin_profile_id,
-        email_corporate=email_corporate,
-        source=LeadSource.MANUAL,
-        status=LeadStatus.IN_CADENCE,
-    )
-
-
-def _make_step(
-    tenant_id: uuid.UUID,
-    lead_id: uuid.UUID,
-    cadence_id: uuid.UUID,
-    *,
-    channel: Channel,
-    status: StepStatus,
-    sent_at: datetime | None,
-) -> CadenceStep:
-    return CadenceStep(
-        id=uuid.uuid4(),
-        tenant_id=tenant_id,
-        lead_id=lead_id,
-        cadence_id=cadence_id,
-        channel=channel,
-        step_number=1,
-        day_offset=0,
-        scheduled_at=datetime.now(tz=UTC),
-        status=status,
-        sent_at=sent_at,
-    )
-
-
-def _compiled_params(statement: Any) -> dict[str, object]:
-    return statement.compile().params
-
-
-async def test_resolve_tenant_id_for_account_uses_tenant_integration() -> None:
+@pytest.mark.asyncio
+async def test_resolve_tenant_id_for_account_uses_account_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     tenant_id = uuid.uuid4()
-    db = _FakeAsyncSession(_FakeResult(values=[tenant_id]))
-    session = cast(Any, db)
+
+    async def _fake_resolve(account_id: str, db, **kwargs):  # type: ignore[no-untyped-def]
+        assert account_id == "linkedin-account-123"
+        return SimpleNamespace(tenant_id=tenant_id)
+
+    monkeypatch.setattr(unipile_webhook, "resolve_unipile_account_context", _fake_resolve)
+    db = cast(AsyncSession, SimpleNamespace())
 
     resolved = await unipile_webhook._resolve_tenant_id_for_unipile_account(
         "linkedin-account-123",
-        session,
-    )
+        db,
+    )  # type: ignore[arg-type]
 
     assert resolved == tenant_id
-    params = _compiled_params(db.statements[0])
-    assert "linkedin-account-123" in params.values()
 
 
-async def test_find_lead_by_sender_is_scoped_by_tenant() -> None:
+@pytest.mark.asyncio
+async def test_find_lead_by_sender_delegates_to_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     tenant_id = uuid.uuid4()
-    lead = _make_lead(tenant_id, email_corporate="contato@empresa.com")
-    db = _FakeAsyncSession(
-        _FakeResult(None),
-        _FakeResult(lead),
-    )
-    session = cast(Any, db)
+    lead = cast(Lead, object())
+
+    async def _fake_find(sender_id: str, tenant_id_arg: uuid.UUID, db):  # type: ignore[no-untyped-def]
+        assert sender_id == "contato@empresa.com"
+        assert tenant_id_arg == tenant_id
+        return lead
+
+    monkeypatch.setattr(unipile_webhook, "_svc_find_lead_by_sender", _fake_find)
+    db = cast(AsyncSession, SimpleNamespace())
 
     found = await unipile_webhook._find_lead_by_sender(
         "contato@empresa.com",
         tenant_id,
-        session,
-    )
+        db,
+    )  # type: ignore[arg-type]
 
     assert found is lead
-    assert len(db.statements) == 2
-    for statement in db.statements:
-        assert tenant_id in _compiled_params(statement).values()
 
 
-async def test_mark_latest_step_replied_updates_most_recent_matching_step() -> None:
-    tenant_id = uuid.uuid4()
-    cadence = _make_cadence(tenant_id)
-    lead = _make_lead(tenant_id, email_corporate="lead@empresa.com")
-
-    older_step = _make_step(
-        tenant_id,
-        lead.id,
-        cadence.id,
-        channel=Channel.EMAIL,
-        status=StepStatus.SENT,
-        sent_at=datetime.now(tz=UTC) - timedelta(days=1),
-    )
-    newer_step = _make_step(
-        tenant_id,
-        lead.id,
-        cadence.id,
-        channel=Channel.EMAIL,
-        status=StepStatus.SENT,
-        sent_at=datetime.now(tz=UTC),
-    )
-    db = _FakeAsyncSession(_FakeResult(newer_step))
-    session = cast(Any, db)
-
-    await unipile_webhook._mark_latest_step_replied(
-        lead_id=lead.id,
-        tenant_id=tenant_id,
-        channel=Channel.EMAIL,
-        db=session,
+def test_extract_text_supports_unipile_message_payload() -> None:
+    assert (
+        unipile_webhook._extract_text(
+            {
+                "message": "Hello World !",
+                "event": "message_received",
+            }
+        )
+        == "Hello World !"
     )
 
-    assert older_step.status == StepStatus.SENT
-    assert newer_step.status == StepStatus.REPLIED
-    params = _compiled_params(db.statements[0])
-    assert tenant_id in params.values()
-    assert lead.id in params.values()
-    assert Channel.EMAIL in params.values()
-    assert StepStatus.SENT in params.values()
+
+def test_extract_text_supports_mail_payload() -> None:
+    assert (
+        unipile_webhook._extract_text(
+            {
+                "event": "mail_received",
+                "body": "Resposta por email",
+            }
+        )
+        == "Resposta por email"
+    )
 
 
+def test_extract_event_type_supports_account_status_payload() -> None:
+    assert (
+        unipile_webhook._extract_event_type(
+            {
+                "AccountStatus": {
+                    "account_id": "acc_123",
+                    "message": "SYNC_SUCCESS",
+                }
+            }
+        )
+        == "sync_success"
+    )
+
+
+def test_is_outbound_message_event_detects_own_sender() -> None:
+    assert unipile_webhook._is_outbound_message_event(
+        {
+            "event": "message_received",
+            "account_info": {"user_id": "me-123"},
+            "sender": {"attendee_provider_id": "me-123"},
+        }
+    )
+
+
+@pytest.mark.asyncio
 async def test_verify_signature_accepts_custom_auth_header(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

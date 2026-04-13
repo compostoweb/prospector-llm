@@ -131,20 +131,29 @@ async def test_get_unipile_webhook_status_reports_ready_state(
         assert url == "https://api.prospector.compostoweb.com.br/webhooks/unipile"
         return 401
 
-    async def _fake_get_webhook_by_url(request_url: str) -> dict[str, Any] | None:
+    async def _fake_get_webhooks_by_url(request_url: str) -> list[dict[str, Any]]:
         assert request_url == "https://api.prospector.compostoweb.com.br/webhooks/unipile"
-        return {
-            "id": "wh_existing_123",
-            "request_url": request_url,
-            "enabled": True,
-            "source": "messaging",
-            "events": ["message_received", "relation_created", "account_connected"],
-        }
+        return [
+            {
+                "id": "wh_existing_123",
+                "request_url": request_url,
+                "enabled": True,
+                "source": "messaging",
+                "events": ["message_received"],
+            },
+            {
+                "id": "wh_existing_456",
+                "request_url": request_url,
+                "enabled": True,
+                "source": "users",
+                "events": ["new_relation"],
+            },
+        ]
 
     monkeypatch.setattr("api.routes.tenants._probe_unipile_webhook_endpoint", _fake_probe)
     monkeypatch.setattr(
-        "api.routes.tenants.unipile_client.get_webhook_by_url",
-        _fake_get_webhook_by_url,
+        "api.routes.tenants.unipile_client.get_webhooks_by_url",
+        _fake_get_webhooks_by_url,
     )
     monkeypatch.setattr(app_settings, "API_PUBLIC_URL", "https://api.prospector.compostoweb.com.br")
     monkeypatch.setattr(app_settings, "UNIPILE_WEBHOOK_SECRET", "secret-123")
@@ -172,22 +181,48 @@ async def test_get_unipile_webhook_status_reports_ready_state(
     assert body["api_registration_ready"] is True
     assert body["api_registration_blockers"] == []
     assert body["registered_in_unipile"] is True
-    assert body["registered_webhook_id"] == "wh_existing_123"
-    assert body["registered_webhook_enabled"] is True
-    assert body["registered_webhook_source"] == "messaging"
-    assert body["registered_webhook_events"] == [
-        "message_received",
-        "relation_created",
-        "account_connected",
+    assert body["registered_webhooks"] == [
+        {
+            "webhook_id": "wh_existing_123",
+            "source": "messaging",
+            "enabled": True,
+            "events": ["message_received"],
+        },
+        {
+            "webhook_id": "wh_existing_456",
+            "source": "users",
+            "enabled": True,
+            "events": ["new_relation"],
+        },
     ]
     assert body["registration_lookup_error"] is None
     assert body["supports_signature_auth"] is True
     assert body["supports_custom_header_auth"] is True
     assert body["auth_headers"] == ["X-Unipile-Signature", "Unipile-Auth"]
-    assert body["expected_events"] == [
-        "message_received",
-        "relation_created",
-        "account_connected",
+    assert body["expected_events"] == ["message_received", "new_relation"]
+    assert body["expected_sources"] == [
+        {
+            "source": "messaging",
+            "label": "Mensagens LinkedIn",
+            "expected_events": ["message_received"],
+            "registered": True,
+            "webhook_id": "wh_existing_123",
+            "enabled": True,
+            "registered_events": ["message_received"],
+            "missing_events": [],
+            "extra_events": [],
+        },
+        {
+            "source": "users",
+            "label": "Novas conexões LinkedIn",
+            "expected_events": ["new_relation"],
+            "registered": True,
+            "webhook_id": "wh_existing_456",
+            "enabled": True,
+            "registered_events": ["new_relation"],
+            "missing_events": [],
+            "extra_events": [],
+        },
     ]
     assert body["ready"] is True
 
@@ -197,37 +232,71 @@ async def test_register_unipile_webhook_returns_created_result(
     tenant,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _fake_register(*, request_url: str, secret: str, events: list[str]) -> dict[str, Any]:
+    register_calls: list[tuple[str, list[str] | None]] = []
+
+    async def _fake_register(
+        *,
+        request_url: str,
+        secret: str,
+        source: str,
+        events: list[str] | None,
+        name: str | None,
+    ) -> dict[str, Any]:
         assert request_url == "https://api.prospector.compostoweb.com.br/webhooks/unipile"
         assert secret == "secret-123"
-        assert events == ["message_received", "relation_created", "account_connected"]
+        assert name == f"prospector-{source}-webhook"
+        register_calls.append((source, events))
         return {
-            "created": True,
-            "already_exists": False,
-            "webhook_id": "wh_123",
+            "created": source == "messaging",
+            "already_exists": source == "users",
+            "webhook_id": f"wh_{source}",
         }
 
     monkeypatch.setattr(app_settings, "API_PUBLIC_URL", "https://api.prospector.compostoweb.com.br")
     monkeypatch.setattr(app_settings, "UNIPILE_WEBHOOK_SECRET", "secret-123")
     monkeypatch.setattr(app_settings, "UNIPILE_API_KEY", "api-key-123")
     monkeypatch.setattr(app_settings, "UNIPILE_BASE_URL", "https://api38.unipile.com:16847/api/v1")
+    monkeypatch.setattr(app_settings, "UNIPILE_ACCOUNT_ID_LINKEDIN", None)
+    monkeypatch.setattr(app_settings, "UNIPILE_ACCOUNT_ID_GMAIL", None)
+    update_resp = await client.put(
+        "/tenants/me/integrations",
+        json={"unipile_linkedin_account_id": "li_acc_abc123"},
+    )
+    assert update_resp.status_code == 200
     monkeypatch.setattr(
-        "api.routes.tenants.unipile_client.ensure_messaging_webhook",
+        "api.routes.tenants.unipile_client.ensure_webhook",
         _fake_register,
     )
 
     resp = await client.post("/tenants/me/unipile/webhook/register")
     assert resp.status_code == 200
     body = resp.json()
+    assert register_calls == [
+        ("messaging", ["message_received"]),
+        ("users", None),
+    ]
     assert body == {
         "created": True,
         "already_exists": False,
-        "webhook_id": "wh_123",
         "request_url": "https://api.prospector.compostoweb.com.br/webhooks/unipile",
-        "source": "messaging",
         "auth_header": "Unipile-Auth",
-        "events": ["message_received", "relation_created", "account_connected"],
-        "message": "Webhook registrado com sucesso na Unipile.",
+        "webhooks": [
+            {
+                "source": "messaging",
+                "events": ["message_received"],
+                "created": True,
+                "already_exists": False,
+                "webhook_id": "wh_messaging",
+            },
+            {
+                "source": "users",
+                "events": ["new_relation"],
+                "created": False,
+                "already_exists": True,
+                "webhook_id": "wh_users",
+            },
+        ],
+        "message": "Webhooks registrados com sucesso na Unipile.",
     }
 
 
