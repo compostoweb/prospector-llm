@@ -5,7 +5,10 @@ import { persist } from "zustand/middleware"
 
 interface ActiveFilters {
   status?: string[]
+  source?: string
   cadence_id?: string
+  list_id?: string
+  segment?: string
   search?: string
   score_min?: number
   score_max?: number

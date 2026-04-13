@@ -20,8 +20,11 @@ export function SettingsTabsNav() {
   const pathname = usePathname()
 
   return (
-    <div className="border-b border-(--border-default) mb-6">
-      <nav aria-label="Configurações" className="flex overflow-x-auto -mb-px">
+    <div className="border-b border-(--border-default) bg-(--bg-page)">
+      <nav
+        aria-label="Configurações"
+        className="-mb-px flex w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
         {tabs.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || pathname.startsWith(href + "/")
           return (
@@ -29,14 +32,14 @@ export function SettingsTabsNav() {
               key={href}
               href={href}
               className={cn(
-                "flex shrink-0 items-center gap-2 border-b-2 px-4 py-3 text-sm transition-colors",
+                "flex shrink-0 items-center gap-2 border-b-2 px-3 py-3 text-sm transition-colors md:px-4",
                 active
-                  ? "border-(--accent) text-(--accent-subtle-fg) font-medium"
+                  ? "border-(--accent) font-medium text-(--accent-subtle-fg)"
                   : "border-transparent text-(--text-secondary) hover:border-(--border-default) hover:text-(--text-primary)",
               )}
             >
               <Icon size={15} aria-hidden="true" className="shrink-0" />
-              <span>{label}</span>
+              <span className="whitespace-nowrap">{label}</span>
             </Link>
           )
         })}

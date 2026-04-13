@@ -48,8 +48,23 @@ Arquivo: `api/webhooks/unipile.py`
 
 No painel da Unipile (https://dashboard.unipile.com), configurar:
 
-- **Webhook URL**: `https://SEU-DOMINIO/webhooks/unipile`
+- **Webhook URL**: `https://api.prospector.compostoweb.com.br/webhooks/unipile`
 - **Eventos**: `message_received`, `relation_created`, `account_connected`
+
+Também é possível registrar o webhook direto pela tela
+`/configuracoes/unipile` usando o botão **Registrar via API da Unipile**.
+Nesse caso, o backend cria um webhook `source=messaging` com headers:
+
+- `Content-Type: application/json`
+- `Unipile-Auth: <UNIPILE_WEBHOOK_SECRET>`
+
+O registro automático só é liberado quando `API_PUBLIC_URL` aponta para uma
+URL **HTTPS pública**. Endereços locais como `http://localhost:8000` são
+bloqueados para evitar cadastrar um webhook inalcançável pela nuvem da Unipile.
+
+O painel também consulta a lista de webhooks já cadastrados na Unipile para
+mostrar de forma persistente se a URL atual já está registrada, incluindo o
+`webhook_id` quando disponível.
 
 ### 2. Variável de ambiente
 
@@ -58,6 +73,8 @@ Copiar o **Webhook Secret** gerado pela Unipile e adicionar ao `.env.prod`:
 ```env
 UNIPILE_WEBHOOK_SECRET=seu_secret_aqui
 ```
+
+No repositório atual, o arquivo alvo é `backend/.env.prod`.
 
 > Em `ENV=dev` sem secret configurado, a validação de assinatura é ignorada
 > (com warning no log). Em `ENV=prod`, requisições sem assinatura válida são
@@ -75,6 +92,10 @@ X-Unipile-Signature: sha256=<hex_digest>
 
 O sistema valida com `hmac.compare_digest()` usando `UNIPILE_WEBHOOK_SECRET`.
 
+Além do fluxo padrão do dashboard com `X-Unipile-Signature`, o backend também
+aceita o header `Unipile-Auth` com o mesmo secret para webhooks criados via API,
+como documentado em `https://developer.unipile.com/docs/webhooks-2`.
+
 | Ambiente | Sem secret | Com secret inválido |
 |---|---|---|
 | `dev` | Aceita (warning no log) | Rejeita 401 |
@@ -86,24 +107,26 @@ O sistema valida com `hmac.compare_digest()` usando `UNIPILE_WEBHOOK_SECRET`.
 
 1. Extrai `text`, `unipile_message_id`, `sender_id`, `account_id` do payload
 2. **Idempotência**: verifica se `unipile_message_id` já existe em `interactions`
-3. Localiza o lead por `linkedin_profile_id` → email corporativo → email pessoal
-4. Resolve a configuração efetiva de LLM do tenant e classifica intent via `ReplyParser`
-5. Salva `Interaction` com `direction=INBOUND`
-6. Ações por intent:
-   - `INTEREST` → `lead.status = CONVERTED` + notificação
-   - `OBJECTION` → notificação
-   - `NOT_INTERESTED` → `lead.status = ARCHIVED`
-7. Broadcast WebSocket `new_message` → frontend invalida queries do inbox
+3. Resolve o `tenant_id` pela `account_id` da Unipile; em ambiente com um único tenant ativo faz fallback automático
+4. Localiza o lead por `linkedin_profile_id` → email corporativo → email pessoal dentro do tenant resolvido
+5. Marca o `CadenceStep` enviado mais recente do mesmo canal como `REPLIED`
+6. Resolve a configuração efetiva de LLM do tenant e classifica intent via `ReplyParser`
+7. Salva `Interaction` com `direction=INBOUND`
+8. Ações por intent:
+     - `INTEREST` → `lead.status = CONVERTED` + notificação
+     - `OBJECTION` → notificação
+     - `NOT_INTERESTED` → `lead.status = ARCHIVED`
+9. Broadcast WebSocket `inbox.new_message` → frontend invalida queries do inbox
 
 ---
 
 ## Fluxo `relation_created` (detalhado)
 
-1. Extrai `linkedin_profile_id` do payload
-2. Localiza o lead no banco
+1. Extrai `linkedin_profile_id` e tenta resolver o tenant pela `account_id`
+2. Localiza o lead no banco dentro do tenant resolvido
 3. Atualiza `linkedin_connection_status = "connected"` e `linkedin_connected_at`
 4. Se lead em cadência `semi_manual` → cria `ManualTasks` para próximos passos
-5. Broadcast WebSocket `connection_accepted` → frontend atualiza
+5. Broadcast WebSocket `connection.accepted` → frontend atualiza
 
 ---
 
@@ -115,6 +138,25 @@ O frontend escuta em `lib/ws/use-events.ts` e:
 - Invalida queries TanStack Query automaticamente (inbox, leads, tasks)
 - Mostra notificações toast para eventos relevantes
 
+Envelope enviado para o frontend:
+
+```json
+{
+     "type": "inbox.new_message",
+     "data": {
+          "lead_id": "...",
+          "lead_name": "...",
+          "channel": "email",
+          "intent": "interest",
+          "text_preview": "..."
+     },
+     "tenant_id": "...",
+     "timestamp": "2026-04-13T12:00:00+00:00"
+}
+```
+
+Eventos legados como `new_message` e `connection_accepted` são normalizados no backend para manter compatibilidade com o frontend atual.
+
 ---
 
 ## Complemento: Polling com cache Redis
@@ -124,19 +166,48 @@ polling via `GET /inbox/conversations` com cache Redis multi-nível:
 
 | Nível | TTL | O que cacheia |
 |---|---|---|
-| Lista de conversas | 2 min | Response completa da listagem |
+| Lista de conversas | 10 min | Response completa da listagem |
 | Preview de mensagem | 5 min | Última mensagem de cada chat |
 | Perfil de usuário | 24h | Nome/foto do LinkedIn |
 
 O botão de sync (`POST /inbox/sync`) força resincronização da conta Unipile
 e limpa os caches Redis do inbox.
 
+Além disso, a lista do inbox no frontend mantém o resultado em cache por 5 minutos
+e deixa de refazer fetch automático ao simplesmente trocar de tela e voltar.
+Novas mensagens, envios e sync invalidam o cache explicitamente para buscar dados
+frescos só quando realmente necessário.
+
 ---
 
 ## Checklist de deploy
 
-- [ ] Configurar webhook URL no painel Unipile
-- [ ] Definir `UNIPILE_WEBHOOK_SECRET` no `.env.prod`
+- [ ] Configurar webhook URL no painel Unipile para `https://api.prospector.compostoweb.com.br/webhooks/unipile`
+- [ ] Definir `UNIPILE_WEBHOOK_SECRET` em `backend/.env.prod`
 - [ ] Garantir que a porta/domínio está acessível externamente (HTTPS obrigatório)
-- [ ] Testar com `curl -X POST https://seu-dominio/webhooks/unipile` (deve retornar 401)
+- [ ] Testar com `curl -X POST https://api.prospector.compostoweb.com.br/webhooks/unipile` (deve retornar 401)
 - [ ] Verificar logs com `structlog` para confirmar recebimento: `webhook.unipile.received`
+
+---
+
+## Migration em produção
+
+O `.env.prod` desta base usa hostnames internos do EasyPanel, por exemplo
+`chatwoot_bd_prospector_llm`, então a migration não roda a partir de uma máquina
+local fora da rede interna do servidor.
+
+Execute no container/app de produção:
+
+```bash
+cd /app/backend
+ENV=prod python -m alembic upgrade head
+```
+
+Se quiser validar especificamente a nova migration antes do upgrade:
+
+```bash
+cd /app/backend
+ENV=prod python -m alembic current
+ENV=prod python -m alembic upgrade 059
+ENV=prod python -m alembic current
+```

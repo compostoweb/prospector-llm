@@ -13,7 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from models.enums import LeadSource, LeadStatus
+from models.enums import EmailType, LeadSource, LeadStatus
 
 
 class LeadListSummary(BaseModel):
@@ -21,6 +21,32 @@ class LeadListSummary(BaseModel):
 
     id: uuid.UUID
     name: str
+
+
+class LeadEmailInput(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+    email_type: EmailType = EmailType.UNKNOWN
+    source: str | None = Field(default=None, max_length=100)
+    verified: bool = False
+    is_primary: bool = False
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return value.strip().lower()
+
+
+class LeadEmailResponse(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    email: str
+    email_type: EmailType
+    source: str | None
+    verified: bool
+    is_primary: bool
+    created_at: datetime
+    updated_at: datetime
 
 
 class LeadCreateRequest(BaseModel):
@@ -42,6 +68,7 @@ class LeadCreateRequest(BaseModel):
     phone: str | None = Field(default=None, max_length=30)
     email_corporate: str | None = None
     email_personal: str | None = None
+    emails: list[LeadEmailInput] = Field(default_factory=list)
     notes: str | None = None
     source: LeadSource = LeadSource.MANUAL
 
@@ -72,6 +99,7 @@ class LeadUpdateRequest(BaseModel):
     phone: str | None = None
     email_corporate: str | None = None
     email_personal: str | None = None
+    emails: list[LeadEmailInput] | None = None
     notes: str | None = None
     status: LeadStatus | None = None
 
@@ -113,6 +141,7 @@ class LeadResponse(BaseModel):
     email_corporate_verified: bool
     email_personal: str | None
     email_personal_source: str | None
+    emails: list[LeadEmailResponse] = []
     phone: str | None
     enriched_at: datetime | None
     notes: str | None

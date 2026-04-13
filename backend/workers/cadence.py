@@ -36,7 +36,7 @@ from models.cadence_step import CadenceStep
 from models.enums import Channel, LeadStatus, StepStatus
 from models.lead import Lead
 from models.lead_list import lead_list_members
-from models.tenant import Tenant
+from models.tenant import Tenant, TenantIntegration
 from workers.celery_app import celery_app
 
 logger = structlog.get_logger()
@@ -77,6 +77,11 @@ async def _tick_async() -> dict:
         try:
             async for db in get_worker_session(tid):
                 now = datetime.now(tz=UTC)
+                integration_result = await db.execute(
+                    select(TenantIntegration).where(TenantIntegration.tenant_id == tid)
+                )
+                integration = integration_result.scalar_one_or_none()
+                tenant_limits = _resolve_tenant_limits(integration)
 
                 # Busca steps pendentes e vencidos deste tenant
                 # Só despacha steps de cadências ativas
@@ -113,7 +118,7 @@ async def _tick_async() -> dict:
                         continue
 
                     # Verifica rate limit
-                    limit = _DEFAULT_LIMITS.get(step.channel, 40)
+                    limit = tenant_limits.get(step.channel, _DEFAULT_LIMITS.get(step.channel, 40))
                     today = datetime.now(tz=UTC).strftime("%Y-%m-%d")
                     rate_key = f"ratelimit:{tid}:{step.channel.value}:{today}"
 
@@ -160,6 +165,17 @@ async def _tick_async() -> dict:
         tenants=len(tenants),
     )
     return {"dispatched": dispatched, "skipped": skipped}
+
+
+def _resolve_tenant_limits(integration: TenantIntegration | None) -> dict[Channel, int]:
+    if integration is None:
+        return dict(_DEFAULT_LIMITS)
+
+    return {
+        Channel.LINKEDIN_CONNECT: integration.limit_linkedin_connect or _DEFAULT_LIMITS[Channel.LINKEDIN_CONNECT],
+        Channel.LINKEDIN_DM: integration.limit_linkedin_dm or _DEFAULT_LIMITS[Channel.LINKEDIN_DM],
+        Channel.EMAIL: integration.limit_email or _DEFAULT_LIMITS[Channel.EMAIL],
+    }
 
 
 async def _auto_enroll_list_members(db, tenant_id: uuid.UUID) -> int:

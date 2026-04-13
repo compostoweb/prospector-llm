@@ -20,7 +20,6 @@ Redis key: linkedin:native:cursor:{account_id}  TTL: 7 dias
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -71,7 +70,10 @@ async def _poll_async() -> dict:
 
     for account in accounts:
         try:
-            li_at = decrypt_credential(account.li_at_cookie)
+            li_at_cookie = account.li_at_cookie
+            if not li_at_cookie:
+                continue
+            li_at = decrypt_credential(li_at_cookie)
             cursor_key = _CURSOR_KEY.format(account_id=str(account.id))
             cursor = await redis_client.get(cursor_key)
             if isinstance(cursor, bytes):
@@ -181,7 +183,7 @@ async def _handle_native_message(
     from core.config import settings
     from integrations.llm import LLMRegistry
     from models.cadence_step import CadenceStep
-    from models.enums import Channel, Intent, InteractionDirection, StepStatus
+    from models.enums import Channel, Intent, InteractionDirection, LeadStatus, StepStatus
     from models.interaction import Interaction
     from models.lead import Lead
     from services.llm_config import resolve_tenant_llm_config
@@ -272,10 +274,11 @@ async def _handle_native_message(
         if step:
             step.status = StepStatus.REPLIED
 
-        # Atualiza lead
-        lead.last_reply_at = datetime.now(tz=UTC)
+        # Atualiza lead conforme a intenção detectada
         if intent == Intent.INTEREST:
-            lead.linkedin_connection_status = "replied"
+            lead.status = LeadStatus.CONVERTED
+        elif intent == Intent.NOT_INTERESTED:
+            lead.status = LeadStatus.ARCHIVED
 
         await db.commit()
         logger.info(
@@ -283,6 +286,31 @@ async def _handle_native_message(
             lead_id=str(lead.id),
             intent=intent.value,
             tenant_id=tenant_id,
+        )
+
+        if intent in (Intent.INTEREST, Intent.OBJECTION):
+            from services.notification import send_reply_notification  # noqa: PLC0415
+
+            await send_reply_notification(
+                lead=lead,
+                intent=intent.value,
+                reply_text=message.text or "",
+                tenant_id=lead.tenant_id,
+                db=db,
+            )
+
+        from api.routes.ws import broadcast_event  # noqa: PLC0415
+
+        await broadcast_event(
+            str(lead.tenant_id),
+            {
+                "type": "new_message",
+                "lead_id": str(lead.id),
+                "lead_name": lead.name,
+                "channel": Channel.LINKEDIN_DM.value,
+                "intent": intent.value,
+                "text_preview": (message.text or "")[:100],
+            },
         )
 
     await engine.dispose()

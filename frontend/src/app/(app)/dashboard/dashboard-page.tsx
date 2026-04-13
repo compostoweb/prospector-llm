@@ -11,6 +11,7 @@ import {
   Archive,
   ClipboardList,
   Mail,
+  AlertTriangle,
 } from "lucide-react"
 import { StatCard } from "@/components/dashboard/stat-card"
 import { ChannelChart } from "@/components/dashboard/channel-chart"
@@ -52,14 +53,50 @@ function trendProps(value: number | undefined): { trend?: { value: number; label
 export default function DashboardPage() {
   const [days, setDays] = useState(30)
 
-  const { data: stats, isLoading: loadingStats } = useDashboardStats(days)
-  const { data: channels, isLoading: loadingChannels } = useChannelBreakdown(days)
-  const { data: replies, isLoading: loadingReplies } = useRecentReplies()
-  const { data: intents, isLoading: loadingIntents } = useIntentBreakdown(days)
-  const { data: funnel, isLoading: loadingFunnel } = useFunnel()
-  const { data: cadences, isLoading: loadingCadences } = useCadencePerformance(days)
-  const { data: emailStats, isLoading: loadingEmail } = useEmailStats(days)
+  const {
+    data: stats,
+    isLoading: loadingStats,
+    isError: statsError,
+  } = useDashboardStats(days)
+  const {
+    data: channels,
+    isLoading: loadingChannels,
+    isError: channelsError,
+  } = useChannelBreakdown(days)
+  const {
+    data: replies,
+    isLoading: loadingReplies,
+    isError: repliesError,
+  } = useRecentReplies()
+  const {
+    data: intents,
+    isLoading: loadingIntents,
+    isError: intentsError,
+  } = useIntentBreakdown(days)
+  const {
+    data: funnel,
+    isLoading: loadingFunnel,
+    isError: funnelError,
+  } = useFunnel()
+  const {
+    data: cadences,
+    isLoading: loadingCadences,
+    isError: cadencesError,
+  } = useCadencePerformance(days)
+  const {
+    data: emailStats,
+    isLoading: loadingEmail,
+    isError: emailError,
+  } = useEmailStats(days)
   const { data: taskStats } = useManualTaskStats()
+  const hasAnalyticsError =
+    statsError ||
+    channelsError ||
+    repliesError ||
+    intentsError ||
+    funnelError ||
+    cadencesError ||
+    emailError
 
   return (
     <div className="space-y-6">
@@ -71,6 +108,18 @@ export default function DashboardPage() {
         </div>
         <PeriodFilter value={days} onChange={setDays} />
       </div>
+
+      {hasAnalyticsError && (
+        <div className="flex items-start gap-3 rounded-lg border border-(--warning) bg-(--warning-subtle) px-4 py-3 text-sm text-(--warning-subtle-fg)">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <div>
+            <p className="font-medium">Não foi possível carregar o dashboard completo.</p>
+            <p className="mt-1 text-(--text-secondary)">
+              Verifique se a API e o WebSocket do backend estão acessíveis no ambiente atual.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Stat cards — 6 itens */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">

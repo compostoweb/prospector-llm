@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Linkedin, Plus, Trash2, CheckCircle2, XCircle, Loader2, Zap, KeyRound } from "lucide-react"
+import { Linkedin, Plus, Trash2, CheckCircle2, XCircle, Loader2, Zap, KeyRound, AlertTriangle } from "lucide-react"
 import {
   useLinkedInAccounts,
   useCreateUnipileLinkedInAccount,
@@ -15,7 +15,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -24,6 +23,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Switch } from "@/components/ui/switch"
+import { SettingsPageShell, SettingsPanel } from "@/components/settings/settings-shell"
+import { SettingsCallout } from "@/components/settings/settings-shell"
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -49,10 +50,10 @@ function AccountCard({
   onToggleActive: (id: string, active: boolean) => void
 }) {
   return (
-    <div className="flex items-center justify-between rounded-lg border border-(--border-default) bg-(--bg-surface) p-4">
+    <div className="flex items-center justify-between rounded-xl border border-(--border-default) bg-(--bg-surface) px-3.5 py-3.5">
       <div className="flex min-w-0 items-center gap-3">
         <div
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs ${
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs ${
             account.is_active
               ? "bg-(--brand-subtle) text-(--brand)"
               : "bg-(--bg-overlay) text-(--text-tertiary)"
@@ -69,12 +70,12 @@ function AccountCard({
               linkedin.com/in/{account.linkedin_username}
             </p>
           )}
-          <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-(--bg-overlay) px-2 py-0.5 text-xs text-(--text-tertiary)">
+          <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-(--bg-overlay) px-2 py-0.5 text-[11px] text-(--text-tertiary)">
             {PROVIDER_LABELS[account.provider_type] ?? account.provider_type}
           </span>
         </div>
       </div>
-      <div className="ml-4 flex shrink-0 items-center gap-3">
+      <div className="ml-4 flex shrink-0 items-center gap-2.5">
         {account.is_active ? (
           <CheckCircle2 size={15} className="text-(--success)" />
         ) : (
@@ -279,7 +280,7 @@ export default function LinkedInAccountsPage() {
   const [showUnipileModal, setShowUnipileModal] = useState(false)
   const [showNativeModal, setShowNativeModal] = useState(false)
 
-  const { data, isLoading } = useLinkedInAccounts()
+  const { data, isLoading, isError, error } = useLinkedInAccounts()
   const updateAccount = useUpdateLinkedInAccount()
   const deleteAccount = useDeleteLinkedInAccount()
 
@@ -300,16 +301,12 @@ export default function LinkedInAccountsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-6">
-      {/* Cabeçalho */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold text-(--text-primary)">Contas LinkedIn</h1>
-          <p className="mt-1 text-sm text-(--text-secondary)">
-            Conecte contas LinkedIn para prospecção. Cada cadência pode usar uma conta diferente.
-          </p>
-        </div>
-        <div className="flex gap-2">
+    <SettingsPageShell
+      title="Contas LinkedIn"
+      description="Conecte perfis usados na prospecção e distribua melhor lista, ações e contexto operacional no desktop."
+      width="wide"
+      actions={
+        <>
           <Button
             variant="outline"
             size="sm"
@@ -323,23 +320,38 @@ export default function LinkedInAccountsPage() {
             <Plus size={14} />
             Via Cookie
           </Button>
-        </div>
-      </div>
+        </>
+      }
+    >
+      {isError ? (
+        <SettingsCallout
+          icon={<AlertTriangle size={16} aria-hidden="true" />}
+          title="Não foi possível carregar as contas LinkedIn"
+          className="border-(--warning-subtle) bg-(--warning-subtle) text-(--warning-subtle-fg)"
+        >
+          <p>{error instanceof Error ? error.message : "Erro ao buscar contas LinkedIn."}</p>
+          <p>Se a API estiver fora do ar, a lista de contas e os modais não vão refletir o estado real.</p>
+        </SettingsCallout>
+      ) : null}
 
-      {/* Lista de contas */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium">
-            Contas configuradas ({accounts.length})
-          </CardTitle>
-          <CardDescription className="text-xs">
-            Contas Unipile usam webhook para inbox. Contas nativas usam polling a cada minuto.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_320px]">
+        <SettingsPanel
+          title="Contas configuradas"
+          description="Contas Unipile usam webhook para inbox. Contas nativas usam polling a cada minuto."
+          headerAside={
+            <span className="rounded-full bg-(--bg-overlay) px-2.5 py-1 text-xs font-medium text-(--text-secondary)">
+              {accounts.length} conta(s)
+            </span>
+          }
+        >
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 size={20} className="animate-spin text-(--text-tertiary)" />
+            </div>
+          ) : isError ? (
+            <div className="flex flex-col items-center gap-2 py-10 text-center">
+              <AlertTriangle size={28} className="text-(--warning)" />
+              <p className="text-sm text-(--text-secondary)">Não foi possível consultar as contas.</p>
             </div>
           ) : accounts.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-10 text-center">
@@ -350,21 +362,57 @@ export default function LinkedInAccountsPage() {
               </p>
             </div>
           ) : (
-            accounts.map((account) => (
-              <AccountCard
-                key={account.id}
-                account={account}
-                onDelete={handleDelete}
-                onToggleActive={handleToggleActive}
-              />
-            ))
+            <div className="grid gap-2.5">
+              {accounts.map((account) => (
+                <AccountCard
+                  key={account.id}
+                  account={account}
+                  onDelete={handleDelete}
+                  onToggleActive={handleToggleActive}
+                />
+              ))}
+            </div>
           )}
-        </CardContent>
-      </Card>
+        </SettingsPanel>
 
-      {/* Modals */}
+        <div className="space-y-4 lg:sticky lg:top-4 lg:self-start">
+          <SettingsPanel
+            title="Métodos de conexão"
+            description="Escolha o modo com base no nível de controle e no setup disponível."
+          >
+            <div className="space-y-3 text-sm text-(--text-secondary)">
+              <div className="flex gap-2.5">
+                <Zap size={15} className="mt-0.5 shrink-0 text-(--brand)" />
+                <p>
+                  <strong className="text-(--text-primary)">Via Unipile:</strong> configuração mais
+                  simples quando você já opera LinkedIn e inbox pela Unipile.
+                </p>
+              </div>
+              <div className="flex gap-2.5">
+                <KeyRound size={15} className="mt-0.5 shrink-0 text-(--brand)" />
+                <p>
+                  <strong className="text-(--text-primary)">Via Cookie:</strong> oferece um caminho
+                  nativo quando você precisa operar com cookie li_at e controle mais direto da
+                  sessão.
+                </p>
+              </div>
+            </div>
+          </SettingsPanel>
+
+          <SettingsPanel
+            title="Boas práticas"
+            description="Evite instabilidade operacional entre contas concorrentes."
+          >
+            <p className="text-sm leading-6 text-(--text-secondary)">
+              Mantenha somente uma conta ativa por perfil operacional, remova conexões obsoletas e
+              prefira nomes de exibição claros para cada uso de cadência.
+            </p>
+          </SettingsPanel>
+        </div>
+      </div>
+
       <UnipileModal open={showUnipileModal} onClose={() => setShowUnipileModal(false)} />
       <NativeModal open={showNativeModal} onClose={() => setShowNativeModal(false)} />
-    </div>
+    </SettingsPageShell>
   )
 }

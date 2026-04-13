@@ -39,6 +39,7 @@ import {
   MessageSquare,
   ArrowUpRight,
   ArrowDownLeft,
+  AlertTriangle,
 } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
@@ -49,20 +50,24 @@ interface ContactSidebarProps {
 }
 
 export function ContactSidebar({ chatId }: ContactSidebarProps) {
-  const { data: lead, isLoading } = useConversationLead(chatId)
+  const { data: lead, isLoading, isError, error } = useConversationLead(chatId)
   const quickCreate = useQuickCreateLead()
   const sendCRM = useSendToCRM()
   const [crmSent, setCrmSent] = useState(false)
 
   function handleCreateLead() {
     if (!lead) return
+    const body = {
+      name: lead.attendee_name || "Contato LinkedIn",
+      ...(lead.attendee_headline ? { job_title: lead.attendee_headline } : {}),
+      ...(lead.attendee_company ? { company: lead.attendee_company } : {}),
+      ...(lead.attendee_profile_url ? { linkedin_url: lead.attendee_profile_url } : {}),
+      ...(lead.attendee_id ? { linkedin_profile_id: lead.attendee_id } : {}),
+    }
+
     quickCreate.mutate({
       chatId,
-      body: {
-        name: lead.attendee_name || "Contato LinkedIn",
-        linkedin_url: lead.attendee_profile_url ?? undefined,
-        linkedin_profile_id: lead.attendee_id ?? undefined,
-      },
+      body,
     })
   }
 
@@ -83,6 +88,20 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
         {isLoading ? (
           <div className="flex h-40 items-center justify-center">
             <Loader2 size={20} className="animate-spin text-(--text-tertiary)" />
+          </div>
+        ) : isError ? (
+          <div className="rounded-lg border border-(--warning-subtle) bg-(--warning-subtle) px-4 py-3 text-sm text-(--warning-subtle-fg)">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+              <div className="space-y-1">
+                <p className="font-medium">Contato indisponível</p>
+                <p>
+                  {error instanceof Error
+                    ? error.message
+                    : "Não foi possível carregar os dados desta conversa."}
+                </p>
+              </div>
+            </div>
           </div>
         ) : !lead?.has_lead ? (
           /* ── Estado sem lead vinculado ─────────────────────────────── */
@@ -115,6 +134,12 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
                 {lead?.attendee_headline && (
                   <p className="mt-1 text-xs leading-relaxed text-(--text-secondary)">
                     {lead.attendee_headline}
+                  </p>
+                )}
+                {lead?.attendee_company && (
+                  <p className="mt-0.5 flex items-center justify-center gap-1 text-sm text-(--text-secondary)">
+                    <Building2 size={12} aria-hidden="true" />
+                    {lead.attendee_company}
                   </p>
                 )}
               </div>
@@ -266,10 +291,10 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
                     {lead.job_title ?? lead.attendee_headline}
                   </p>
                 )}
-                {lead.company && (
+                {(lead.company ?? lead.attendee_company) && (
                   <p className="mt-0.5 flex items-center justify-center gap-1 text-sm text-(--text-secondary)">
                     <Building2 size={12} aria-hidden="true" />
-                    {lead.company}
+                    {lead.company ?? lead.attendee_company}
                   </p>
                 )}
               </div>
@@ -386,6 +411,19 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
               {lead.email_personal && (
                 <InfoRow icon={Mail} label="Email pessoal" value={lead.email_personal} />
               )}
+              {lead.emails
+                .filter(
+                  (email) =>
+                    email.email !== lead.email_corporate && email.email !== lead.email_personal,
+                )
+                .map((email) => (
+                  <InfoRow
+                    key={email.id}
+                    icon={Mail}
+                    label={sidebarLeadEmailLabel(email.email_type)}
+                    value={email.email}
+                  />
+                ))}
               {!lead.email_corporate && !lead.email_personal && lead.attendee_email && (
                 <InfoRow icon={Mail} label="Email" value={lead.attendee_email} />
               )}
@@ -438,6 +476,12 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
   )
 }
 
+function sidebarLeadEmailLabel(type: "corporate" | "personal" | "unknown") {
+  if (type === "corporate") return "Email corp. extra"
+  if (type === "personal") return "Email pessoal extra"
+  return "Email adicional"
+}
+
 // ── Tags Section ──────────────────────────────────────────────────────
 
 const TAG_COLORS = [
@@ -476,7 +520,7 @@ function getTagColorClasses(color: string | null | undefined): { pill: string; s
 }
 
 function TagsSection({ chatId }: { chatId: string }) {
-  const { data: tags } = useLeadTags(chatId)
+  const { data: tags, isError } = useLeadTags(chatId)
   const addTag = useAddTag()
   const removeTag = useRemoveTag()
   const [showInput, setShowInput] = useState(false)
@@ -510,6 +554,12 @@ function TagsSection({ chatId }: { chatId: string }) {
           <Plus size={12} aria-hidden="true" />
         </button>
       </div>
+
+      {isError ? (
+        <p className="text-[11px] text-(--warning-fg, var(--warning-subtle-fg))">
+          Não foi possível carregar as tags deste contato.
+        </p>
+      ) : null}
 
       {/* Existing tags */}
       {tags && tags.length > 0 && (
@@ -592,10 +642,34 @@ const CHANNEL_LABELS: Record<string, string> = {
 }
 
 function RecentActivitySection({ chatId }: { chatId: string }) {
-  const { data } = useRecentActivity(chatId)
+  const { data, isError } = useRecentActivity(chatId)
   const [open, setOpen] = useState(false)
 
-  if (!data?.items || data.items.length === 0) return null
+  if (isError) {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
+          Atividade recente
+        </p>
+        <p className="text-[11px] text-(--warning-fg, var(--warning-subtle-fg))">
+          Não foi possível carregar a atividade recente.
+        </p>
+      </div>
+    )
+  }
+
+  if (!data?.items || data.items.length === 0) {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
+          Atividade recente
+        </p>
+        <p className="text-[11px] text-(--text-tertiary)">
+          Ainda não houve atividade registrada para este lead.
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-2">
@@ -661,10 +735,34 @@ function RecentActivitySection({ chatId }: { chatId: string }) {
 // ── Cadence History Section ──────────────────────────────────────────
 
 function CadenceHistorySection({ chatId }: { chatId: string }) {
-  const { data } = useCadenceHistory(chatId)
+  const { data, isError } = useCadenceHistory(chatId)
   const [open, setOpen] = useState(false)
 
-  if (!data?.items || data.items.length === 0) return null
+  if (isError) {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
+          Cadências
+        </p>
+        <p className="text-[11px] text-(--warning-fg, var(--warning-subtle-fg))">
+          Não foi possível carregar o histórico de cadências.
+        </p>
+      </div>
+    )
+  }
+
+  if (!data?.items || data.items.length === 0) {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
+          Cadências
+        </p>
+        <p className="text-[11px] text-(--text-tertiary)">
+          Este lead ainda não participou de nenhuma cadência.
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-2">

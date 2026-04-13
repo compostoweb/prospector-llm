@@ -17,11 +17,13 @@ Cobre:
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
+from core.config import settings as app_settings
 from models.cadence import Cadence
 
 pytestmark = pytest.mark.asyncio
@@ -118,6 +120,133 @@ async def test_get_me_returns_tenant_data(
     # Campo sensível não deve vazar
     assert "api_key_hash" not in body
     assert "api_key" not in body
+
+
+async def test_get_unipile_webhook_status_reports_ready_state(
+    client: AsyncClient,
+    tenant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_probe(url: str) -> int | None:
+        assert url == "https://api.prospector.compostoweb.com.br/webhooks/unipile"
+        return 401
+
+    async def _fake_get_webhook_by_url(request_url: str) -> dict[str, Any] | None:
+        assert request_url == "https://api.prospector.compostoweb.com.br/webhooks/unipile"
+        return {
+            "id": "wh_existing_123",
+            "request_url": request_url,
+            "enabled": True,
+            "source": "messaging",
+            "events": ["message_received", "relation_created", "account_connected"],
+        }
+
+    monkeypatch.setattr("api.routes.tenants._probe_unipile_webhook_endpoint", _fake_probe)
+    monkeypatch.setattr(
+        "api.routes.tenants.unipile_client.get_webhook_by_url",
+        _fake_get_webhook_by_url,
+    )
+    monkeypatch.setattr(app_settings, "API_PUBLIC_URL", "https://api.prospector.compostoweb.com.br")
+    monkeypatch.setattr(app_settings, "UNIPILE_WEBHOOK_SECRET", "secret-123")
+    monkeypatch.setattr(app_settings, "UNIPILE_API_KEY", "api-key-123")
+    monkeypatch.setattr(app_settings, "UNIPILE_BASE_URL", "https://api38.unipile.com:16847/api/v1")
+    monkeypatch.setattr(app_settings, "UNIPILE_ACCOUNT_ID_LINKEDIN", None)
+    monkeypatch.setattr(app_settings, "UNIPILE_ACCOUNT_ID_GMAIL", None)
+
+    update_resp = await client.put(
+        "/tenants/me/integrations",
+        json={"unipile_linkedin_account_id": "li_acc_abc123"},
+    )
+    assert update_resp.status_code == 200
+
+    resp = await client.get("/tenants/me/unipile/webhook")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["url"] == "https://api.prospector.compostoweb.com.br/webhooks/unipile"
+    assert body["secret_configured"] is True
+    assert body["public_endpoint_healthy"] is True
+    assert body["public_endpoint_status_code"] == 401
+    assert body["linkedin_account_configured"] is True
+    assert body["gmail_account_configured"] is False
+    assert body["api_registration_supported"] is True
+    assert body["api_registration_ready"] is True
+    assert body["api_registration_blockers"] == []
+    assert body["registered_in_unipile"] is True
+    assert body["registered_webhook_id"] == "wh_existing_123"
+    assert body["registered_webhook_enabled"] is True
+    assert body["registered_webhook_source"] == "messaging"
+    assert body["registered_webhook_events"] == [
+        "message_received",
+        "relation_created",
+        "account_connected",
+    ]
+    assert body["registration_lookup_error"] is None
+    assert body["supports_signature_auth"] is True
+    assert body["supports_custom_header_auth"] is True
+    assert body["auth_headers"] == ["X-Unipile-Signature", "Unipile-Auth"]
+    assert body["expected_events"] == [
+        "message_received",
+        "relation_created",
+        "account_connected",
+    ]
+    assert body["ready"] is True
+
+
+async def test_register_unipile_webhook_returns_created_result(
+    client: AsyncClient,
+    tenant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_register(*, request_url: str, secret: str, events: list[str]) -> dict[str, Any]:
+        assert request_url == "https://api.prospector.compostoweb.com.br/webhooks/unipile"
+        assert secret == "secret-123"
+        assert events == ["message_received", "relation_created", "account_connected"]
+        return {
+            "created": True,
+            "already_exists": False,
+            "webhook_id": "wh_123",
+        }
+
+    monkeypatch.setattr(app_settings, "API_PUBLIC_URL", "https://api.prospector.compostoweb.com.br")
+    monkeypatch.setattr(app_settings, "UNIPILE_WEBHOOK_SECRET", "secret-123")
+    monkeypatch.setattr(app_settings, "UNIPILE_API_KEY", "api-key-123")
+    monkeypatch.setattr(app_settings, "UNIPILE_BASE_URL", "https://api38.unipile.com:16847/api/v1")
+    monkeypatch.setattr(
+        "api.routes.tenants.unipile_client.ensure_messaging_webhook",
+        _fake_register,
+    )
+
+    resp = await client.post("/tenants/me/unipile/webhook/register")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {
+        "created": True,
+        "already_exists": False,
+        "webhook_id": "wh_123",
+        "request_url": "https://api.prospector.compostoweb.com.br/webhooks/unipile",
+        "source": "messaging",
+        "auth_header": "Unipile-Auth",
+        "events": ["message_received", "relation_created", "account_connected"],
+        "message": "Webhook registrado com sucesso na Unipile.",
+    }
+
+
+async def test_register_unipile_webhook_rejects_non_public_url(
+    client: AsyncClient,
+    tenant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(app_settings, "API_PUBLIC_URL", "http://localhost:8000")
+    monkeypatch.setattr(app_settings, "UNIPILE_WEBHOOK_SECRET", "secret-123")
+    monkeypatch.setattr(app_settings, "UNIPILE_API_KEY", "api-key-123")
+    monkeypatch.setattr(app_settings, "UNIPILE_BASE_URL", "https://api38.unipile.com:16847/api/v1")
+
+    resp = await client.post("/tenants/me/unipile/webhook/register")
+    assert resp.status_code == 400
+    assert (
+        resp.json()["detail"]
+        == "API_PUBLIC_URL precisa ser uma URL HTTPS pública para registro automático."
+    )
 
 
 async def test_get_me_without_auth_returns_401(

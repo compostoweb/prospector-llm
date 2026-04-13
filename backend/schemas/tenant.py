@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 
 class TenantCreateRequest(BaseModel):
     """Onboarding de novo tenant/cliente."""
+
     name: str = Field(..., min_length=2, max_length=200)
     slug: str = Field(..., min_length=2, max_length=100, pattern=r"^[a-z0-9-]+$")
 
@@ -28,7 +30,7 @@ class TenantResponse(BaseModel):
     slug: str
     is_active: bool
     created_at: datetime
-    integration: "TenantIntegrationResponse | None" = None
+    integration: TenantIntegrationResponse | None = None
 
 
 class TenantCreateResponse(TenantResponse):
@@ -37,6 +39,7 @@ class TenantCreateResponse(TenantResponse):
     Inclui a api_key em plaintext — exibida UMA única vez.
     Nunca retornada em outros endpoints.
     """
+
     api_key: str  # plaintext — não armazenado, só retornado aqui
 
 
@@ -113,3 +116,43 @@ class TenantIntegrationResponse(BaseModel):
     cold_email_llm_temperature: float
     cold_email_llm_max_tokens: int
     created_at: datetime
+
+
+class UnipileWebhookStatusResponse(BaseModel):
+    """Status operacional do webhook da Unipile para o tenant atual."""
+
+    url: str
+    docs_url: str
+    dashboard_url: str
+    expected_events: list[str]
+    secret_configured: bool
+    public_endpoint_healthy: bool
+    public_endpoint_status_code: int | None
+    linkedin_account_configured: bool
+    gmail_account_configured: bool
+    api_registration_supported: bool
+    api_registration_ready: bool
+    api_registration_blockers: list[str]
+    registered_in_unipile: bool
+    registered_webhook_id: str | None
+    registered_webhook_enabled: bool | None
+    registered_webhook_source: str | None
+    registered_webhook_events: list[str]
+    registration_lookup_error: str | None
+    supports_signature_auth: bool = True
+    supports_custom_header_auth: bool = True
+    auth_headers: list[Literal["X-Unipile-Signature", "Unipile-Auth"]]
+    ready: bool
+
+
+class UnipileWebhookRegistrationResponse(BaseModel):
+    """Resultado do registro automático do webhook da Unipile."""
+
+    created: bool
+    already_exists: bool
+    webhook_id: str | None
+    request_url: str
+    source: Literal["messaging"]
+    auth_header: Literal["Unipile-Auth"]
+    events: list[str]
+    message: str

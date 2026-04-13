@@ -3,6 +3,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useSession } from "next-auth/react"
 import { createBrowserClient } from "@/lib/api/client"
+import { env } from "@/env"
+import type { LeadEmail } from "@/lib/api/hooks/use-leads"
 
 // ── Tipos ─────────────────────────────────────────────────────────────
 
@@ -61,6 +63,7 @@ export interface ConversationLead {
   linkedin_url: string | null
   email_corporate: string | null
   email_personal: string | null
+  emails: LeadEmail[]
   phone: string | null
   city: string | null
   segment: string | null
@@ -75,6 +78,7 @@ export interface ConversationLead {
   attendee_profile_picture_url: string | null
   attendee_id: string | null
   attendee_headline: string | null
+  attendee_company: string | null
   attendee_location: string | null
   attendee_email: string | null
   attendee_connections_count: number | null
@@ -138,7 +142,11 @@ export function useConversations(opts?: {
       if (error) throw new Error("Falha ao carregar conversas")
       return data as ConversationListResponse
     },
-    staleTime: 60 * 1000,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     enabled: !!session?.accessToken,
   })
 }
@@ -233,7 +241,7 @@ export function useSendVoiceMessage() {
       formData.append("audio", audioBlob, "voice-note.webm")
 
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/inbox/conversations/${encodeURIComponent(chatId)}/send-voice`,
+        `${env.NEXT_PUBLIC_API_URL}/inbox/conversations/${encodeURIComponent(chatId)}/send-voice`,
         {
           method: "POST",
           headers: { Authorization: `Bearer ${accessToken}` },
@@ -352,7 +360,7 @@ export function useSendAttachments() {
       }
 
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/inbox/conversations/${encodeURIComponent(chatId)}/send-attachments`,
+        `${env.NEXT_PUBLIC_API_URL}/inbox/conversations/${encodeURIComponent(chatId)}/send-attachments`,
         {
           method: "POST",
           headers: { Authorization: `Bearer ${accessToken}` },

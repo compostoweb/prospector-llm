@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -96,10 +96,10 @@ class FakeAsyncSession:
 
         # Detecta se é select de coluna específica (ex: select(Lead.status))
         attr: str | None = None
-        if entity and expr is not None and expr is not entity:
+        if entity is not None and expr is not None and expr is not entity:
             attr = getattr(expr, "key", None)
 
-        candidates = list(self._items.get(entity, [])) if entity else []
+        candidates = list(self._items.get(entity, [])) if entity is not None else []
 
         for criterion in getattr(statement, "_where_criteria", ()):
             candidates = [item for item in candidates if _matches_criterion(item, criterion)]
@@ -132,17 +132,26 @@ def _matches_criterion(obj: object, criterion: object) -> bool:
         field_name = getattr(criterion.left, "name", None)
     if not isinstance(field_name, str):
         return True
+    if not hasattr(obj, field_name):
+        return True
 
-    current_value = getattr(obj, field_name, None)
-    expected_value = getattr(criterion.right, "value", criterion.right)
+    current_value = cast(object, getattr(obj, field_name, None))
+    expected_value_raw = getattr(criterion.right, "value", criterion.right)
+    expected_class_name = type(expected_value_raw).__name__
+    if expected_class_name == "True_":
+        expected_value = True
+    elif expected_class_name == "False_":
+        expected_value = False
+    else:
+        expected_value = cast(object, expected_value_raw)
 
     if criterion.operator is operators.eq:
-        return current_value == expected_value
+        return current_value == expected_value  # type: ignore[return-value]
     if criterion.operator is operators.is_:
-        return current_value is expected_value or current_value == expected_value
+        return current_value is expected_value or current_value == expected_value  # type: ignore[return-value]
     if criterion.operator is operators.le:
         try:
-            return current_value <= expected_value
+            return cast(bool, current_value <= expected_value)  # type: ignore[return-value]
         except TypeError:
             return True
     if criterion.operator is operators.in_op:
@@ -402,6 +411,58 @@ async def test_tick_rate_limited_step_not_dispatched(
     # Step deve continuar PENDING (não marcado SKIPPED por rate limit)
     await db.refresh(step)
     assert step.status == StepStatus.PENDING
+
+
+async def test_tick_uses_tenant_specific_rate_limit(
+    db: FakeAsyncSession,
+    tenant_id: uuid.UUID,
+    tenant: Tenant,
+) -> None:
+    """Worker usa override de rate limit do tenant quando existir."""
+    from models.tenant import TenantIntegration
+    from workers.cadence import _tick_async
+
+    lead = _make_lead(tenant_id)
+    cadence = _make_cadence(tenant_id)
+    step = _make_step(
+        tenant_id,
+        lead.id,
+        cadence.id,
+        channel=Channel.EMAIL,
+    )
+    integration = TenantIntegration(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        limit_linkedin_connect=11,
+        limit_linkedin_dm=22,
+        limit_email=77,
+    )
+    db.add_all([lead, cadence, step, integration])
+    await db.flush()
+
+    mock_wsl = _mock_worker_session_local(db, [tenant])
+
+    with (
+        patch("workers.cadence.WorkerSessionLocal", mock_wsl),
+        patch("workers.cadence.get_worker_session") as mock_get_session,
+        patch("workers.cadence.redis_client") as mock_redis,
+        patch("workers.dispatch.dispatch_step") as mock_dispatch,
+    ):
+
+        async def _fake_session(_tid):
+            yield db
+
+        mock_get_session.side_effect = _fake_session
+        mock_redis.check_and_increment = AsyncMock(return_value=True)
+        mock_dispatch.delay = MagicMock()
+
+        await _tick_async()
+
+    mock_redis.check_and_increment.assert_called_once_with(
+        channel=Channel.EMAIL.value,
+        tenant_id=tenant_id,
+        limit=77,
+    )
 
 
 async def test_tick_returns_correct_counts(

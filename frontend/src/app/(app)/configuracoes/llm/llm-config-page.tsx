@@ -26,9 +26,25 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { SettingsPageShell } from "@/components/settings/settings-shell"
 
 type Tab = "padrao" | "modelos" | "consumo" | "testar"
 type ModelFilter = "all" | "openai" | "gemini" | "anthropic" | "openrouter"
+
+function getProviderLabel(provider: string): string {
+  switch (provider) {
+    case "openai":
+      return "OpenAI"
+    case "gemini":
+      return "Google Gemini"
+    case "anthropic":
+      return "Anthropic"
+    case "openrouter":
+      return "OpenRouter"
+    default:
+      return provider
+  }
+}
 
 const DEFAULT_LLM = {
   llm_provider: "openai" as const,
@@ -171,16 +187,12 @@ export default function LLMConfigPage() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* ── Cabeçalho ──────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold text-(--text-primary)">Modelos LLM</h1>
-          <p className="mt-1 text-sm text-(--text-secondary)">
-            Configure provedores e modelos padrão para o sistema.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <SettingsPageShell
+      title="Modelos LLM"
+      description="Configure provedores e modelos padrão com uma distribuição mais eficiente entre ações, abas e conteúdo técnico."
+      width="wide"
+      actions={
+        <>
           <button
             type="button"
             onClick={async () => {
@@ -192,7 +204,7 @@ export default function LLMConfigPage() {
               }
             }}
             disabled={syncModels.isPending}
-            className="flex items-center gap-1.5 rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-1.5 text-xs font-medium text-(--text-secondary) hover:bg-(--bg-overlay) disabled:opacity-50 transition-colors"
+            className="flex items-center gap-1.5 rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-1.5 text-xs font-medium text-(--text-secondary) transition-colors hover:bg-(--bg-overlay) disabled:opacity-50"
           >
             <RefreshCw size={12} className={syncModels.isPending ? "animate-spin" : ""} />
             {syncModels.isPending ? "Sincronizando…" : "Sincronizar modelos"}
@@ -208,19 +220,13 @@ export default function LLMConfigPage() {
               )}
             >
               {p.configured ? <CheckCircle2 size={11} /> : <XCircle size={11} />}
-              {p.provider === "openai"
-                ? "OpenAI"
-                : p.provider === "gemini"
-                  ? "Gemini"
-                  : p.provider === "anthropic"
-                    ? "Anthropic"
-                    : "OpenRouter"}
-              {p.configured && <span className="opacity-60">· {p.models_count}</span>}
+              {getProviderLabel(p.provider)}
+              {p.configured ? <span className="opacity-60">· {p.models_count}</span> : null}
             </span>
           ))}
-        </div>
-      </div>
-
+        </>
+      }
+    >
       {/* ── Tabs ───────────────────────────────────────────────────────── */}
       <div className="border-b border-(--border-default)">
         <nav className="flex gap-1" aria-label="Seções LLM">
@@ -320,15 +326,7 @@ export default function LLMConfigPage() {
                         : "text-(--text-secondary) hover:text-(--text-primary)",
                     )}
                   >
-                    {f === "all"
-                      ? "Todos"
-                      : f === "openai"
-                        ? "OpenAI"
-                        : f === "gemini"
-                          ? "Gemini"
-                          : f === "anthropic"
-                            ? "Anthropic"
-                            : "OpenRouter"}
+                    {f === "all" ? "Todos" : getProviderLabel(f)}
                     <span className="ml-1.5 tabular-nums opacity-50">
                       {f === "all" ? models.length : models.filter((m) => m.provider === f).length}
                     </span>
@@ -374,7 +372,7 @@ export default function LLMConfigPage() {
                                 : "bg-(--info-subtle) text-(--info-subtle-fg)",
                             )}
                           >
-                            {m.provider === "openai" ? "OpenAI" : "Gemini"}
+                            {getProviderLabel(m.provider)}
                           </span>
                         </td>
                         <td className="px-4 py-2.5 font-mono text-xs text-(--text-secondary)">
@@ -433,11 +431,7 @@ export default function LLMConfigPage() {
                     .filter((p) => p.configured)
                     .map((p) => (
                       <option key={p.provider} value={p.provider}>
-                        {p.provider === "openai"
-                          ? "OpenAI"
-                          : p.provider === "gemini"
-                            ? "Google Gemini"
-                            : "Anthropic"}
+                        {getProviderLabel(p.provider)}
                       </option>
                     ))}
                 </select>
@@ -554,6 +548,6 @@ export default function LLMConfigPage() {
           </div>
         </div>
       )}
-    </div>
+    </SettingsPageShell>
   )
 }

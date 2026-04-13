@@ -1,8 +1,7 @@
 "use client"
 
-import type { Route as AppRoute } from "next"
-import { useMemo } from "react"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { useEffect, useMemo, useState } from "react"
+import { usePathname, useSearchParams } from "next/navigation"
 import { Bot, Coins, Cpu, FileText, Layers3, Loader2, Sparkles } from "lucide-react"
 import {
   Area,
@@ -15,6 +14,7 @@ import {
   YAxis,
 } from "recharts"
 import { StatCard } from "@/components/dashboard/stat-card"
+import { SettingsPanel } from "@/components/settings/settings-shell"
 import {
   useLLMUsageBreakdown,
   useLLMUsageComparison,
@@ -47,72 +47,76 @@ const GRANULARITY_VALUES = new Set<string>(GRANULARITY_OPTIONS.map((option) => o
 
 export function LLMConsumptionPanel() {
   const pathname = usePathname()
-  const router = useRouter()
   const searchParams = useSearchParams()
 
   const { data: modelsData } = useLLMModels()
   const availableModels = modelsData?.models ?? []
-  const rawDays = Number(searchParams.get("consumo_days") ?? "30")
-  const days = PERIOD_VALUES.has(rawDays) ? rawDays : 30
-  const rawGranularity = searchParams.get("consumo_granularity")
-  const granularity: LLMUsageGranularity = GRANULARITY_VALUES.has(
-    rawGranularity as LLMUsageGranularity,
+  const [days, setDays] = useState<number>(() => resolveDays(searchParams.get("consumo_days")))
+  const [granularity, setGranularity] = useState<LLMUsageGranularity>(() =>
+    resolveGranularity(searchParams.get("consumo_granularity")),
   )
-    ? (rawGranularity as LLMUsageGranularity)
-    : "day"
-  const rawProvider = searchParams.get("consumo_provider") ?? "all"
+  const [provider, setProvider] = useState<string>(
+    () => searchParams.get("consumo_provider") ?? "all",
+  )
+  const [model, setModel] = useState<string>(() => searchParams.get("consumo_model") ?? "all")
+
   const knownProviders = new Set<string>(availableModels.map((item) => item.provider))
-  const provider = rawProvider === "all" || knownProviders.has(rawProvider) ? rawProvider : "all"
   const visibleModelOptions =
     provider === "all"
       ? availableModels
       : availableModels.filter((item) => item.provider === provider)
-  const rawModel = searchParams.get("consumo_model") ?? "all"
-  const model =
-    rawModel === "all" || visibleModelOptions.some((item) => item.id === rawModel)
-      ? rawModel
-      : "all"
 
-  function updateFilters(next: {
-    days?: number
-    granularity?: LLMUsageGranularity
-    provider?: string
-    model?: string
-  }) {
-    const params = new URLSearchParams(searchParams.toString())
-    const nextDays = next.days ?? days
-    const nextGranularity = next.granularity ?? granularity
-    const nextProvider = next.provider ?? provider
-    const nextModel = next.model ?? model
+  useEffect(() => {
+    setDays(resolveDays(searchParams.get("consumo_days")))
+    setGranularity(resolveGranularity(searchParams.get("consumo_granularity")))
+    setProvider(searchParams.get("consumo_provider") ?? "all")
+    setModel(searchParams.get("consumo_model") ?? "all")
+  }, [searchParams])
 
-    if (nextDays === 30) {
+  useEffect(() => {
+    if (provider !== "all" && !knownProviders.has(provider)) {
+      setProvider("all")
+      setModel("all")
+    }
+  }, [knownProviders, provider])
+
+  useEffect(() => {
+    if (model !== "all" && !visibleModelOptions.some((item) => item.id === model)) {
+      setModel("all")
+    }
+  }, [model, visibleModelOptions])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+
+    if (days === 30) {
       params.delete("consumo_days")
     } else {
-      params.set("consumo_days", String(nextDays))
+      params.set("consumo_days", String(days))
     }
 
-    if (nextGranularity === "day") {
+    if (granularity === "day") {
       params.delete("consumo_granularity")
     } else {
-      params.set("consumo_granularity", nextGranularity)
+      params.set("consumo_granularity", granularity)
     }
 
-    if (nextProvider === "all") {
+    if (provider === "all") {
       params.delete("consumo_provider")
     } else {
-      params.set("consumo_provider", nextProvider)
+      params.set("consumo_provider", provider)
     }
 
-    if (nextModel === "all") {
+    if (model === "all") {
       params.delete("consumo_model")
     } else {
-      params.set("consumo_model", nextModel)
+      params.set("consumo_model", model)
     }
 
     const query = params.toString()
     const nextUrl = query ? `${pathname}?${query}` : pathname
-    router.replace(nextUrl as AppRoute, { scroll: false })
-  }
+    window.history.replaceState(null, "", nextUrl)
+  }, [days, granularity, model, pathname, provider])
 
   const filters = useMemo<LLMUsageFilters>(() => {
     const next: LLMUsageFilters = {}
@@ -167,37 +171,31 @@ export function LLMConsumptionPanel() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 rounded-lg border border-(--border-default) bg-(--bg-surface) p-5 shadow-(--shadow-sm)">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h2 className="text-sm font-semibold text-(--text-primary)">
-              Consumo e custo estimado
-            </h2>
-            <p className="mt-1 text-xs text-(--text-secondary)">
-              Acompanha uso por hora, dia, semana e mês com ranking por módulo, tarefa, provider e
-              modelo.
-            </p>
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <SegmentedControl
-              value={days}
-              onChange={(value) => updateFilters({ days: value })}
-              options={PERIOD_OPTIONS}
-            />
+      <SettingsPanel
+        title="Consumo e custo estimado"
+        description="Acompanhe uso por hora, dia, semana e mês com leitura rápida, séries temporais e ranking por módulo, tarefa, provider e modelo."
+        contentClassName="space-y-4"
+      >
+        <div className="flex flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center xl:justify-end">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center xl:ml-auto">
+            <SegmentedControl value={days} onChange={setDays} options={PERIOD_OPTIONS} />
             <SegmentedControl
               value={granularity}
-              onChange={(value) => updateFilters({ granularity: value as LLMUsageGranularity })}
+              onChange={(value) => setGranularity(value as LLMUsageGranularity)}
               options={GRANULARITY_OPTIONS}
             />
             <FilterSelect
               value={provider}
-              onChange={(value) => updateFilters({ provider: value, model: "all" })}
+              onChange={(value) => {
+                setProvider(value)
+                setModel("all")
+              }}
               options={buildProviderOptions(availableModels)}
               ariaLabel="Filtrar provider"
             />
             <FilterSelect
               value={model}
-              onChange={(value) => updateFilters({ model: value })}
+              onChange={setModel}
               options={buildModelOptions(visibleModelOptions)}
               ariaLabel="Filtrar modelo"
             />
@@ -264,7 +262,7 @@ export function LLMConsumptionPanel() {
               />
             </div>
 
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+            <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(0,1.7fr)_minmax(340px,0.9fr)]">
               <div className="rounded-lg border border-(--border-default) bg-(--bg-page) p-4">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
@@ -382,7 +380,7 @@ export function LLMConsumptionPanel() {
               />
             </div>
 
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-4">
               <BreakdownCard
                 title="Módulos"
                 description="Onde os tokens estão sendo consumidos"
@@ -411,7 +409,7 @@ export function LLMConsumptionPanel() {
             </div>
           </div>
         )}
-      </div>
+      </SettingsPanel>
     </div>
   )
 }
@@ -645,7 +643,7 @@ function buildProviderOptions(models: Array<{ provider: string }>) {
   return [
     { label: "Todos os providers", value: "all" },
     ...Array.from(new Set(models.map((item) => item.provider))).map((item) => ({
-      label: item,
+      label: formatProviderLabel(item),
       value: item,
     })),
   ]
@@ -655,8 +653,34 @@ function buildModelOptions(models: Array<{ id: string; name: string; provider: s
   return [
     { label: "Todos os modelos", value: "all" },
     ...models.map((item) => ({
-      label: `${item.provider} / ${item.name}`,
+      label: `${formatProviderLabel(item.provider)} / ${item.name}`,
       value: item.id,
     })),
   ]
+}
+
+function resolveDays(value: string | null): number {
+  const parsed = Number(value ?? "30")
+  return PERIOD_VALUES.has(parsed) ? parsed : 30
+}
+
+function resolveGranularity(value: string | null): LLMUsageGranularity {
+  return GRANULARITY_VALUES.has(value as LLMUsageGranularity)
+    ? (value as LLMUsageGranularity)
+    : "day"
+}
+
+function formatProviderLabel(provider: string): string {
+  switch (provider) {
+    case "openai":
+      return "OpenAI"
+    case "gemini":
+      return "Google Gemini"
+    case "anthropic":
+      return "Anthropic"
+    case "openrouter":
+      return "OpenRouter"
+    default:
+      return provider
+  }
 }

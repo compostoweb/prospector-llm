@@ -17,9 +17,17 @@ import {
   Archive,
   Workflow,
   List,
+  Sparkles,
 } from "lucide-react"
 import Link from "next/link"
-import { useLead, useLeadSteps, useArchiveLead, useEnrollLead } from "@/lib/api/hooks/use-leads"
+import { toast } from "sonner"
+import {
+  useLead,
+  useLeadSteps,
+  useArchiveLead,
+  useEnrollLead,
+  useEnrichLead,
+} from "@/lib/api/hooks/use-leads"
 import { useCadences } from "@/lib/api/hooks/use-cadences"
 import { LeadDeleteDialog } from "@/components/leads/lead-delete-dialog"
 import { LeadEditDialog } from "@/components/leads/lead-edit-dialog"
@@ -54,6 +62,7 @@ export default function LeadDetailPage() {
   const { data: cadences } = useCadences()
   const { mutate: archiveLead, isPending: archiving } = useArchiveLead()
   const { mutate: enrollLead, isPending: enrolling } = useEnrollLead()
+  const { mutate: enrichLead, isPending: enriching } = useEnrichLead()
   const [showEnroll, setShowEnroll] = useState(false)
 
   if (isLoading) {
@@ -95,6 +104,17 @@ export default function LeadDetailPage() {
     enrollLead({ leadId, cadenceId }, { onSuccess: () => setShowEnroll(false) })
   }
 
+  function handleEnrich() {
+    enrichLead(leadId, {
+      onSuccess: () => {
+        toast.success("Enriquecimento iniciado")
+      },
+      onError: (error) => {
+        toast.error(error instanceof Error ? error.message : "Falha ao iniciar enriquecimento")
+      },
+    })
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -120,6 +140,12 @@ export default function LeadDetailPage() {
         </div>
         <div className="flex shrink-0 gap-2">
           <LeadEditDialog lead={lead} />
+          {lead.status !== "archived" && (
+            <Button variant="outline" size="sm" disabled={enriching} onClick={handleEnrich}>
+              <Sparkles size={14} aria-hidden="true" />
+              Enriquecer
+            </Button>
+          )}
           {lead.status !== "archived" && lead.status !== "in_cadence" && (
             <Button variant="outline" size="sm" onClick={() => setShowEnroll(!showEnroll)}>
               <GitBranch size={14} aria-hidden="true" />
@@ -210,6 +236,19 @@ export default function LeadDetailPage() {
               {lead.email_personal && (
                 <InfoRow icon={Mail} label="Email pessoal" value={lead.email_personal} />
               )}
+              {lead.emails
+                .filter(
+                  (email) =>
+                    email.email !== lead.email_corporate && email.email !== lead.email_personal,
+                )
+                .map((email) => (
+                  <InfoRow
+                    key={email.id}
+                    icon={Mail}
+                    label={labelForLeadEmail(email.email_type, email.is_primary)}
+                    value={email.email}
+                  />
+                ))}
               {lead.phone && <InfoRow icon={Phone} label="Telefone" value={lead.phone} />}
               {lead.linkedin_url && (
                 <InfoRow icon={Linkedin} label="LinkedIn" value={lead.linkedin_url} link />
@@ -288,6 +327,12 @@ export default function LeadDetailPage() {
       </div>
     </div>
   )
+}
+
+function labelForLeadEmail(type: "corporate" | "personal" | "unknown", isPrimary: boolean) {
+  if (type === "corporate") return isPrimary ? "Email corporativo" : "Email corporativo extra"
+  if (type === "personal") return isPrimary ? "Email pessoal" : "Email pessoal extra"
+  return isPrimary ? "Email principal" : "Email adicional"
 }
 
 // ── Componente auxiliar ───────────────────────────────────────────────

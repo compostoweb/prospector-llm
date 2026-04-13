@@ -1,3 +1,34 @@
+## Análise rápida — 2026-04-13
+
+### Sintoma principal
+
+- O worker de dispatch conseguiu compor cold email, mas o envio falhou com `400 Bad Request` na rota `/api/v1/emails` da Unipile.
+
+### O que o log já confirma
+
+- A cadência chegou até `ai_composer.compose_email`.
+- O problema não foi LLM nem fila; a falha ocorreu no provider de envio Unipile.
+- O worker entrou em retry automático de 60s.
+
+### Checklist operacional para esse erro
+
+- Confirmar se a cadência está usando uma conta de e-mail válida em `email_account_id` ou `TenantIntegration.unipile_gmail_account_id`.
+- Confirmar no painel da Unipile se a conta Gmail continua conectada e ativa.
+- Validar se o `account_id` configurado no backend é o mesmo exibido no painel da Unipile.
+- Testar envio manual pelo endpoint interno com um lead real para comparar payload válido vs inválido.
+- Revisar se o corpo HTML enviado contém algo que a Unipile rejeita para essa conta.
+- Se houver conta de e-mail conectada no sistema fora da Unipile, preferir `EmailRegistry` via `email_account_id` para evitar esse fallback.
+
+### Ação recomendada de validação fim a fim
+
+1. Criar um lead com `email_corporate` válido.
+2. Vincular a cadência a uma `email_account_id` explícita.
+3. Disparar um step EMAIL.
+4. Confirmar no banco a `Interaction` outbound e no frontend o reflexo no dashboard.
+5. Responder o e-mail e verificar `CadenceStep -> REPLIED`, `Interaction` inbound e evento `inbox.new_message`.
+
+---
+
  -------------- celery@60324ac3700f v5.6.3 (recovery)
 --- ***** ----- 
 -- ******* ---- Linux-5.15.0-116-generic-x86_64-with-glibc2.41 2026-04-13 03:49:26

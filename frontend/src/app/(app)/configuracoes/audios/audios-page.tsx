@@ -31,6 +31,7 @@ import {
   RotateCcw,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { SettingsPageShell, SettingsPanel } from "@/components/settings/settings-shell"
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 const ACCEPTED_TYPES = ["audio/mpeg", "audio/wav", "audio/ogg", "audio/mp4", "audio/webm"]
@@ -296,359 +297,367 @@ export default function AudiosPage() {
   }
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-xl font-semibold text-(--text-primary)">Biblioteca de Áudios</h1>
-        <p className="mt-1 text-sm text-(--text-secondary)">
-          Faça upload de áudios pré-gravados para usar como voice notes em cadências do LinkedIn.
-        </p>
-      </div>
-
-      {/* Tab switcher */}
-      <div className="flex gap-1 rounded-md border border-(--border-default) bg-(--bg-surface) p-1">
-        <button
-          type="button"
-          onClick={() => setActiveTab("upload")}
-          className={cn(
-            "flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors",
-            activeTab === "upload"
-              ? "bg-(--accent-subtle) text-(--accent-subtle-fg)"
-              : "text-(--text-secondary) hover:text-(--text-primary)",
-          )}
-        >
-          <Upload className="h-3.5 w-3.5" />
-          Enviar arquivo
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab("record")}
-          className={cn(
-            "flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors",
-            activeTab === "record"
-              ? "bg-(--accent-subtle) text-(--accent-subtle-fg)"
-              : "text-(--text-secondary) hover:text-(--text-primary)",
-          )}
-        >
-          <Mic className="h-3.5 w-3.5" />
-          Gravar áudio
-        </button>
-      </div>
-
-      {/* Upload section */}
-      {activeTab === "upload" && (
-        <section className="space-y-4 rounded-md border border-(--border-default) bg-(--bg-overlay) p-4">
-          <div className="flex items-center gap-2">
-            <Upload className="h-4 w-4 text-(--text-tertiary)" />
-            <h2 className="text-sm font-semibold text-(--text-primary)">Enviar novo áudio</h2>
+    <SettingsPageShell
+      title="Biblioteca de Áudios"
+      description="Envie ou grave voice notes e mantenha a biblioteca acessível sem empilhar seções desnecessariamente."
+      width="wide"
+    >
+      <div className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
+        <div className="space-y-4 lg:sticky lg:top-4 lg:self-start">
+          <div className="flex gap-1 rounded-md border border-(--border-default) bg-(--bg-surface) p-1">
+            <button
+              type="button"
+              onClick={() => setActiveTab("upload")}
+              className={cn(
+                "flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors",
+                activeTab === "upload"
+                  ? "bg-(--accent-subtle) text-(--accent-subtle-fg)"
+                  : "text-(--text-secondary) hover:text-(--text-primary)",
+              )}
+            >
+              <Upload className="h-3.5 w-3.5" />
+              Enviar arquivo
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("record")}
+              className={cn(
+                "flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors",
+                activeTab === "record"
+                  ? "bg-(--accent-subtle) text-(--accent-subtle-fg)"
+                  : "text-(--text-secondary) hover:text-(--text-primary)",
+              )}
+            >
+              <Mic className="h-3.5 w-3.5" />
+              Gravar áudio
+            </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="mb-1 block text-xs">Nome do áudio</Label>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Ex: Apresentação comercial"
-                className="h-8 text-xs"
-              />
-            </div>
-            <div>
-              <Label className="mb-1 block text-xs">Idioma</Label>
-              <Select value={language} onValueChange={setLanguage}>
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="pt-BR" className="text-xs">
-                    Português (BR)
-                  </SelectItem>
-                  <SelectItem value="en-US" className="text-xs">
-                    English (US)
-                  </SelectItem>
-                  <SelectItem value="es-ES" className="text-xs">
-                    Español
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div>
-            <Label htmlFor="audio-file-upload" className="mb-1 block text-xs">
-              Arquivo de áudio (MP3, WAV, OGG — até 10 MB)
-            </Label>
-            <input
-              id="audio-file-upload"
-              type="file"
-              accept="audio/*"
-              onChange={handleFileChange}
-              title="Selecione um arquivo de áudio"
-              className="block w-full text-xs text-(--text-secondary) file:mr-2 file:rounded file:border-0 file:bg-(--bg-surface) file:px-3 file:py-1.5 file:text-xs file:font-medium"
-            />
-          </div>
-
-          {uploadError && (
-            <div className="flex items-center gap-2 text-xs text-(--danger-fg)">
-              <AlertCircle className="h-3.5 w-3.5" />
-              {uploadError}
-            </div>
-          )}
-
-          {uploadSuccess && (
-            <div className="flex items-center gap-2 text-xs text-(--success-fg)">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              Áudio enviado com sucesso!
-            </div>
-          )}
-
-          <Button
-            onClick={handleUpload}
-            disabled={uploadAudio.isPending || !file || !name.trim()}
-            size="sm"
-          >
-            {uploadAudio.isPending ? (
-              <>
-                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                Enviando…
-              </>
-            ) : (
-              <>
-                <Upload className="mr-1 h-3.5 w-3.5" />
-                Enviar áudio
-              </>
-            )}
-          </Button>
-        </section>
-      )}
-
-      {/* Record section */}
-      {activeTab === "record" && (
-        <section className="space-y-4 rounded-md border border-(--border-default) bg-(--bg-overlay) p-4">
-          <div className="flex items-center gap-2">
-            <Mic className="h-4 w-4 text-(--text-tertiary)" />
-            <h2 className="text-sm font-semibold text-(--text-primary)">Gravar áudio</h2>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="mb-1 block text-xs">Nome do áudio</Label>
-              <Input
-                value={recName}
-                onChange={(e) => setRecName(e.target.value)}
-                placeholder="Ex: Apresentação comercial"
-                className="h-8 text-xs"
-              />
-            </div>
-            <div>
-              <Label className="mb-1 block text-xs">Idioma</Label>
-              <Select value={recLanguage} onValueChange={setRecLanguage}>
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="pt-BR" className="text-xs">
-                    Português (BR)
-                  </SelectItem>
-                  <SelectItem value="en-US" className="text-xs">
-                    English (US)
-                  </SelectItem>
-                  <SelectItem value="es-ES" className="text-xs">
-                    Español
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Recorder controls */}
-          <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-(--border-default) bg-(--bg-surface) py-6">
-            {!isRecording && !recordedBlob && (
-              <>
-                <button
-                  type="button"
-                  onClick={startRecording}
-                  className="flex h-14 w-14 items-center justify-center rounded-full bg-(--danger) text-white transition-transform hover:scale-105 active:scale-95"
-                  title="Iniciar gravação"
-                >
-                  <Mic className="h-6 w-6" />
-                </button>
-                <p className="text-xs text-(--text-tertiary)">Clique para iniciar a gravação</p>
-              </>
-            )}
-
-            {isRecording && (
-              <>
-                <div className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-(--danger)" />
-                  <span className="text-sm font-medium text-(--text-primary) tabular-nums">
-                    {formatDuration(recordDuration)}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={stopRecording}
-                  className="flex h-14 w-14 items-center justify-center rounded-full bg-(--border-default) text-(--text-primary) transition-transform hover:scale-105 active:scale-95"
-                  title="Parar gravação"
-                >
-                  <Square className="h-5 w-5" />
-                </button>
-                <p className="text-xs text-(--text-tertiary)">Gravando… Clique para parar.</p>
-              </>
-            )}
-
-            {!isRecording && recordedBlob && (
-              <>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-(--text-primary) tabular-nums">
-                    {formatDuration(recordDuration)}
-                  </span>
-                  <span className="text-xs text-(--text-disabled)">
-                    ({formatFileSize(recordedBlob.size)})
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={togglePreview} className="gap-1">
-                    {isPlayingPreview ? (
-                      <>
-                        <Pause className="h-3.5 w-3.5" />
-                        Pausar
-                      </>
-                    ) : (
-                      <>
-                        <Play className="h-3.5 w-3.5" />
-                        Ouvir prévia
-                      </>
-                    )}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={discardRecording}
-                    className="gap-1 text-(--danger-fg) hover:text-(--danger-fg)"
-                  >
-                    <RotateCcw className="h-3.5 w-3.5" />
-                    Descartar
-                  </Button>
-                </div>
-              </>
-            )}
-          </div>
-
-          {recorderError && (
-            <div className="flex items-center gap-2 text-xs text-(--danger-fg)">
-              <AlertCircle className="h-3.5 w-3.5" />
-              {recorderError}
-            </div>
-          )}
-
-          {recUploadError && (
-            <div className="flex items-center gap-2 text-xs text-(--danger-fg)">
-              <AlertCircle className="h-3.5 w-3.5" />
-              {recUploadError}
-            </div>
-          )}
-
-          {recUploadSuccess && (
-            <div className="flex items-center gap-2 text-xs text-(--success-fg)">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              Áudio gravado e salvo com sucesso!
-            </div>
-          )}
-
-          <Button
-            onClick={handleSaveRecording}
-            disabled={uploadAudio.isPending || !recordedBlob || !recName.trim()}
-            size="sm"
-          >
-            {uploadAudio.isPending ? (
-              <>
-                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                Salvando…
-              </>
-            ) : (
-              <>
-                <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                Salvar gravação
-              </>
-            )}
-          </Button>
-
-          {/* Hidden preview player for recorder */}
-          <audio ref={recorderAudioRef} onEnded={handlePreviewEnded} className="hidden" />
-        </section>
-      )}
-
-      {/* Audio library list */}
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-(--text-primary)">
-          Áudios enviados ({audioFiles.length})
-        </h2>
-
-        {isLoading ? (
-          <div className="flex items-center gap-2 text-sm text-(--text-tertiary)">
-            <Loader2 className="h-4 w-4 animate-spin" /> Carregando áudios…
-          </div>
-        ) : audioFiles.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 rounded-md border border-dashed border-(--border-default) py-8 text-center">
-            <FileAudio className="h-8 w-8 text-(--text-disabled)" />
-            <p className="text-sm text-(--text-disabled)">Nenhum áudio enviado ainda.</p>
-            <p className="text-xs text-(--text-tertiary)">
-              Envie seu primeiro áudio acima para usar em cadências.
-            </p>
-          </div>
-        ) : (
-          <div className="grid gap-2">
-            {audioFiles.map((af) => (
-              <div
-                key={af.id}
-                className="flex items-center justify-between rounded-md border border-(--border-default) bg-(--bg-surface) px-4 py-3"
-              >
-                <div className="flex items-center gap-3 overflow-hidden">
-                  <Music className="h-4 w-4 shrink-0 text-(--accent)" />
-                  <div className="min-w-0">
-                    <span className="block truncate text-sm font-medium text-(--text-primary)">
-                      {af.name}
-                    </span>
-                    <span className="text-[11px] text-(--text-disabled)">
-                      {af.language} · {formatFileSize(af.size_bytes)} ·{" "}
-                      {formatDuration(af.duration_seconds)}
-                    </span>
+          {activeTab === "upload" ? (
+            <SettingsPanel
+              title="Enviar novo áudio"
+              description="Faça upload de um arquivo pronto para reutilizar em cadências."
+            >
+              <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                  <div>
+                    <Label className="mb-1 block text-xs">Nome do áudio</Label>
+                    <Input
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Ex: Apresentação comercial"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <Label className="mb-1 block text-xs">Idioma</Label>
+                    <Select value={language} onValueChange={setLanguage}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="pt-BR" className="text-xs">
+                          Português (BR)
+                        </SelectItem>
+                        <SelectItem value="en-US" className="text-xs">
+                          English (US)
+                        </SelectItem>
+                        <SelectItem value="es-ES" className="text-xs">
+                          Español
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
 
-                <div className="flex shrink-0 gap-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handlePlay(af.url, af.id)}
-                    className="h-7 px-2"
-                    title={playingId === af.id ? "Pausar" : "Reproduzir"}
-                  >
-                    {playingId === af.id ? (
-                      <Pause className="h-3.5 w-3.5" />
-                    ) : (
-                      <Play className="h-3.5 w-3.5" />
-                    )}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleDelete(af.id)}
-                    disabled={deleteAudio.isPending}
-                    className="h-7 px-2 text-(--danger-fg) hover:text-(--danger-fg)"
-                    title="Excluir áudio"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                <div>
+                  <Label htmlFor="audio-file-upload" className="mb-1 block text-xs">
+                    Arquivo de áudio (MP3, WAV, OGG — até 10 MB)
+                  </Label>
+                  <input
+                    id="audio-file-upload"
+                    type="file"
+                    accept="audio/*"
+                    onChange={handleFileChange}
+                    title="Selecione um arquivo de áudio"
+                    className="block w-full text-xs text-(--text-secondary) file:mr-2 file:rounded file:border-0 file:bg-(--bg-surface) file:px-3 file:py-1.5 file:text-xs file:font-medium"
+                  />
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
 
-      {/* Hidden audio player */}
+                {uploadError ? (
+                  <div className="flex items-center gap-2 text-xs text-(--danger-fg)">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    {uploadError}
+                  </div>
+                ) : null}
+
+                {uploadSuccess ? (
+                  <div className="flex items-center gap-2 text-xs text-(--success-fg)">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    Áudio enviado com sucesso!
+                  </div>
+                ) : null}
+
+                <Button
+                  onClick={handleUpload}
+                  disabled={uploadAudio.isPending || !file || !name.trim()}
+                  size="sm"
+                >
+                  {uploadAudio.isPending ? (
+                    <>
+                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                      Enviando…
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="mr-1 h-3.5 w-3.5" />
+                      Enviar áudio
+                    </>
+                  )}
+                </Button>
+              </div>
+            </SettingsPanel>
+          ) : (
+            <SettingsPanel
+              title="Gravar áudio"
+              description="Grave rapidamente uma voice note e já salve na biblioteca."
+            >
+              <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                  <div>
+                    <Label className="mb-1 block text-xs">Nome do áudio</Label>
+                    <Input
+                      value={recName}
+                      onChange={(e) => setRecName(e.target.value)}
+                      placeholder="Ex: Apresentação comercial"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <Label className="mb-1 block text-xs">Idioma</Label>
+                    <Select value={recLanguage} onValueChange={setRecLanguage}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="pt-BR" className="text-xs">
+                          Português (BR)
+                        </SelectItem>
+                        <SelectItem value="en-US" className="text-xs">
+                          English (US)
+                        </SelectItem>
+                        <SelectItem value="es-ES" className="text-xs">
+                          Español
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-(--border-default) bg-(--bg-surface) py-6">
+                  {!isRecording && !recordedBlob ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={startRecording}
+                        className="flex h-14 w-14 items-center justify-center rounded-full bg-(--danger) text-white transition-transform hover:scale-105 active:scale-95"
+                        title="Iniciar gravação"
+                      >
+                        <Mic className="h-6 w-6" />
+                      </button>
+                      <p className="text-xs text-(--text-tertiary)">
+                        Clique para iniciar a gravação
+                      </p>
+                    </>
+                  ) : null}
+
+                  {isRecording ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-(--danger)" />
+                        <span className="tabular-nums text-sm font-medium text-(--text-primary)">
+                          {formatDuration(recordDuration)}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={stopRecording}
+                        className="flex h-14 w-14 items-center justify-center rounded-full bg-(--border-default) text-(--text-primary) transition-transform hover:scale-105 active:scale-95"
+                        title="Parar gravação"
+                      >
+                        <Square className="h-5 w-5" />
+                      </button>
+                      <p className="text-xs text-(--text-tertiary)">Gravando… Clique para parar.</p>
+                    </>
+                  ) : null}
+
+                  {!isRecording && recordedBlob ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="tabular-nums text-sm font-medium text-(--text-primary)">
+                          {formatDuration(recordDuration)}
+                        </span>
+                        <span className="text-xs text-(--text-disabled)">
+                          ({formatFileSize(recordedBlob.size)})
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={togglePreview}
+                          className="gap-1"
+                        >
+                          {isPlayingPreview ? (
+                            <>
+                              <Pause className="h-3.5 w-3.5" />
+                              Pausar
+                            </>
+                          ) : (
+                            <>
+                              <Play className="h-3.5 w-3.5" />
+                              Ouvir prévia
+                            </>
+                          )}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={discardRecording}
+                          className="gap-1 text-(--danger-fg) hover:text-(--danger-fg)"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          Descartar
+                        </Button>
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+
+                {recorderError ? (
+                  <div className="flex items-center gap-2 text-xs text-(--danger-fg)">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    {recorderError}
+                  </div>
+                ) : null}
+
+                {recUploadError ? (
+                  <div className="flex items-center gap-2 text-xs text-(--danger-fg)">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    {recUploadError}
+                  </div>
+                ) : null}
+
+                {recUploadSuccess ? (
+                  <div className="flex items-center gap-2 text-xs text-(--success-fg)">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    Áudio gravado e salvo com sucesso!
+                  </div>
+                ) : null}
+
+                <Button
+                  onClick={handleSaveRecording}
+                  disabled={uploadAudio.isPending || !recordedBlob || !recName.trim()}
+                  size="sm"
+                >
+                  {uploadAudio.isPending ? (
+                    <>
+                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                      Salvando…
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                      Salvar gravação
+                    </>
+                  )}
+                </Button>
+
+                <audio ref={recorderAudioRef} onEnded={handlePreviewEnded} className="hidden" />
+              </div>
+            </SettingsPanel>
+          )}
+
+          <SettingsPanel
+            title="Boas práticas"
+            description="Arquivos curtos e nomes claros facilitam o uso em cadências."
+          >
+            <p className="text-sm leading-6 text-(--text-secondary)">
+              Use nomes que indiquem intenção, idioma ou etapa da cadência. Isso reduz confusão ao
+              escolher voice notes no momento do envio.
+            </p>
+          </SettingsPanel>
+        </div>
+
+        <SettingsPanel
+          title={`Áudios enviados (${audioFiles.length})`}
+          description="Biblioteca central para revisão, reprodução e remoção dos arquivos disponíveis."
+        >
+          {isLoading ? (
+            <div className="flex items-center gap-2 text-sm text-(--text-tertiary)">
+              <Loader2 className="h-4 w-4 animate-spin" /> Carregando áudios…
+            </div>
+          ) : audioFiles.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 rounded-md border border-dashed border-(--border-default) py-8 text-center">
+              <FileAudio className="h-8 w-8 text-(--text-disabled)" />
+              <p className="text-sm text-(--text-disabled)">Nenhum áudio enviado ainda.</p>
+              <p className="text-xs text-(--text-tertiary)">
+                Envie ou grave o primeiro áudio usando o painel lateral.
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-2">
+              {audioFiles.map((af) => (
+                <div
+                  key={af.id}
+                  className="flex items-center justify-between rounded-xl border border-(--border-default) bg-(--bg-surface) px-4 py-3"
+                >
+                  <div className="flex items-center gap-3 overflow-hidden">
+                    <Music className="h-4 w-4 shrink-0 text-(--accent)" />
+                    <div className="min-w-0">
+                      <span className="block truncate text-sm font-medium text-(--text-primary)">
+                        {af.name}
+                      </span>
+                      <span className="text-[11px] text-(--text-disabled)">
+                        {af.language} · {formatFileSize(af.size_bytes)} ·{" "}
+                        {formatDuration(af.duration_seconds)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex shrink-0 gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handlePlay(af.url, af.id)}
+                      className="h-7 px-2"
+                      title={playingId === af.id ? "Pausar" : "Reproduzir"}
+                    >
+                      {playingId === af.id ? (
+                        <Pause className="h-3.5 w-3.5" />
+                      ) : (
+                        <Play className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDelete(af.id)}
+                      disabled={deleteAudio.isPending}
+                      className="h-7 px-2 text-(--danger-fg) hover:text-(--danger-fg)"
+                      title="Excluir áudio"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </SettingsPanel>
+      </div>
+
       <audio ref={audioRef} onEnded={handleAudioEnded} className="hidden" />
-    </div>
+    </SettingsPageShell>
   )
 }

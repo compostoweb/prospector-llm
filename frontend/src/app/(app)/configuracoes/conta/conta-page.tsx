@@ -10,8 +10,8 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
+import { SettingsPageShell, SettingsPanel } from "@/components/settings/settings-shell"
 
 // ── Tipos locais ──────────────────────────────────────────────────────
 
@@ -32,8 +32,7 @@ function CheckboxRow({ id, label, checked, onChange }: CheckboxRowProps) {
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="h-4 w-4 cursor-pointer rounded"
-        style={{ accentColor: "var(--accent)" }}
+        className="h-4 w-4 cursor-pointer rounded accent-(--accent)"
       />
       <label htmlFor={id} className="cursor-pointer select-none text-sm text-(--text-secondary)">
         {label}
@@ -97,40 +96,21 @@ export default function ContaPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-8">
-      <div>
-        <h1 className="text-xl font-semibold text-(--text-primary)">Conta</h1>
-        <p className="mt-1 text-sm text-(--text-secondary)">
-          Configurações da conta e preferências do tenant.
-        </p>
-      </div>
-
-      {/* Informações do tenant — somente leitura */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Informações</CardTitle>
-          <CardDescription>Dados do workspace atual. Somente leitura.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="tenant-name">Nome</Label>
-            <Input id="tenant-name" value={tenant?.name ?? ""} disabled />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="tenant-slug">Slug</Label>
-            <Input id="tenant-slug" value={tenant?.slug ?? ""} disabled />
-          </div>
-        </CardContent>
-      </Card>
-
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Notificações */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Notificações</CardTitle>
-            <CardDescription>Configure o e-mail e os eventos que disparam alertas.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+    <SettingsPageShell
+      title="Conta"
+      description="Ajuste notificações, preferências de envio e limites diários do workspace sem desperdiçar espaço na tela."
+      width="content"
+    >
+      <form
+        onSubmit={handleSubmit}
+        className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]"
+      >
+        <div className="space-y-4">
+          <SettingsPanel
+            title="Notificações"
+            description="Configure o e-mail e os eventos que disparam alertas automáticos."
+            contentClassName="space-y-4"
+          >
             <div className="space-y-1.5">
               <Label htmlFor="notify-email">E-mail de notificação</Label>
               <Input
@@ -157,34 +137,13 @@ export default function ContaPage() {
                 onChange={setNotifyOnObjection}
               />
             </fieldset>
-          </CardContent>
-        </Card>
+          </SettingsPanel>
 
-        {/* Preferências */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Preferências</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <CheckboxRow
-              id="allow-personal-email"
-              label="Permitir envio para e-mails pessoais (além dos corporativos)"
-              checked={allowPersonalEmail}
-              onChange={setAllowPersonalEmail}
-            />
-          </CardContent>
-        </Card>
-
-        {/* Limites diários */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Limites diários por canal</CardTitle>
-            <CardDescription>
-              Máximo de disparos por dia para proteger a reputação da conta.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <SettingsPanel
+            title="Limites diários por canal"
+            description="Máximo de disparos por dia para preservar a reputação da conta."
+          >
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div className="space-y-1.5">
                 <Label htmlFor="limit-connect">LinkedIn Connect</Label>
                 <Input
@@ -219,43 +178,78 @@ export default function ContaPage() {
                 />
               </div>
             </div>
-          </CardContent>
-        </Card>
+          </SettingsPanel>
+        </div>
 
-        {/* Feedback do save */}
-        {isError && (
-          <p
-            role="alert"
-            className="rounded-md bg-(--danger-subtle) px-3 py-2 text-sm text-(--danger-subtle-fg)"
+        <div className="space-y-4 lg:sticky lg:top-4 lg:self-start">
+          <SettingsPanel
+            title="Informações do workspace"
+            description="Dados básicos da conta atual. Campos somente leitura."
           >
-            {error instanceof Error ? error.message : "Erro ao salvar configurações."}
-          </p>
-        )}
-        {isSuccess && (
-          <p
-            role="status"
-            className="rounded-md bg-(--success-subtle) px-3 py-2 text-sm text-(--success-subtle-fg)"
-          >
-            Configurações salvas com sucesso.
-          </p>
-        )}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+              <div className="space-y-1.5">
+                <Label htmlFor="tenant-name">Nome</Label>
+                <Input id="tenant-name" value={tenant?.name ?? ""} disabled />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="tenant-slug">Slug</Label>
+                <Input id="tenant-slug" value={tenant?.slug ?? ""} disabled />
+              </div>
+            </div>
+          </SettingsPanel>
 
-        <div className="flex justify-end">
-          <Button type="submit" disabled={isPending}>
-            {isPending ? (
-              <>
-                <Loader2 size={14} className="animate-spin" aria-hidden="true" />
-                Salvando…
-              </>
-            ) : (
-              <>
-                <Save size={14} aria-hidden="true" />
-                Salvar alterações
-              </>
-            )}
-          </Button>
+          <SettingsPanel
+            title="Preferências"
+            description="Ajustes operacionais aplicados ao envio de campanhas."
+          >
+            <CheckboxRow
+              id="allow-personal-email"
+              label="Permitir envio para e-mails pessoais (além dos corporativos)"
+              checked={allowPersonalEmail}
+              onChange={setAllowPersonalEmail}
+            />
+          </SettingsPanel>
+
+          <SettingsPanel
+            title="Salvar alterações"
+            description="Revise os ajustes antes de aplicar ao tenant."
+          >
+            <div className="space-y-3">
+              {isError ? (
+                <p
+                  role="alert"
+                  className="rounded-md bg-(--danger-subtle) px-3 py-2 text-sm text-(--danger-subtle-fg)"
+                >
+                  {error instanceof Error ? error.message : "Erro ao salvar configurações."}
+                </p>
+              ) : null}
+              {isSuccess ? (
+                <p
+                  role="status"
+                  className="rounded-md bg-(--success-subtle) px-3 py-2 text-sm text-(--success-subtle-fg)"
+                >
+                  Configurações salvas com sucesso.
+                </p>
+              ) : null}
+              <div className="pt-1">
+                <Button type="submit" disabled={isPending} className="w-full justify-center">
+                  {isPending ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                      Salvando…
+                    </>
+                  ) : (
+                    <>
+                      <Save size={14} aria-hidden="true" />
+                      Salvar alterações
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </SettingsPanel>
         </div>
       </form>
-    </div>
+    </SettingsPageShell>
   )
 }

@@ -9,6 +9,7 @@ Endpoints:
   GET    /leads/{id}         — detalhes
   PATCH  /leads/{id}         — atualização parcial
   DELETE /leads/{id}         — arquiva (status=ARCHIVED, não apaga)
+    POST   /leads/{id}/enrich  — dispara enriquecimento manual
   POST   /leads/{id}/enroll  — inscreve em cadência
   GET    /leads/{id}/interactions — histórico de interações paginado
 """
@@ -31,6 +32,7 @@ from models.cadence_step import CadenceStep
 from models.enums import LeadSource, LeadStatus
 from models.interaction import Interaction
 from models.lead import Lead
+from models.lead_list import LeadList
 from schemas.interaction import InteractionListResponse, InteractionResponse
 from schemas.lead import (
     LeadCreateRequest,
@@ -51,15 +53,19 @@ from schemas.lead import (
 from services.cadence_manager import CadenceManager
 from services.lead_generation import preview_generated_leads
 from services.lead_management import (
+    additional_lead_email_specs,
     apply_candidate_to_lead,
+    build_lead_email_specs,
     delete_lead_permanently,
     ensure_list_membership,
     find_existing_lead,
     get_lead_with_lists,
     get_or_create_list,
     merge_leads,
+    replace_lead_email_records,
     serialize_lead,
 )
+from services.lead_scorer import lead_scorer
 
 logger = structlog.get_logger()
 
@@ -77,19 +83,45 @@ async def list_leads(
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     status_filter: Annotated[LeadStatus | None, Query(alias="status")] = None,
     source_filter: Annotated[LeadSource | None, Query(alias="source")] = None,
-    min_score: Annotated[float | None, Query(ge=0.0, le=1.0)] = None,
+    min_score: Annotated[float | None, Query(ge=0.0, le=100.0)] = None,
+    score_min: Annotated[float | None, Query(alias="score_min", ge=0.0, le=100.0)] = None,
+    score_max: Annotated[float | None, Query(alias="score_max", ge=0.0, le=100.0)] = None,
+    cadence_id: uuid.UUID | None = Query(default=None),
+    list_id: uuid.UUID | None = Query(default=None),
+    segment: Annotated[str | None, Query(max_length=200)] = None,
     search: Annotated[str | None, Query(max_length=200)] = None,
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> LeadListResponse:
-    query = select(Lead).where(Lead.tenant_id == tenant_id).options(selectinload(Lead.lists))  # type: ignore[arg-type]
+    query = (
+        select(Lead)
+        .where(Lead.tenant_id == tenant_id)
+        .options(selectinload(Lead.lists), selectinload(Lead.emails))
+    )  # type: ignore[arg-type]
+    effective_min_score = score_min if score_min is not None else min_score
 
     if status_filter is not None:
         query = query.where(Lead.status == status_filter)
     if source_filter is not None:
         query = query.where(Lead.source == source_filter)
-    if min_score is not None:
-        query = query.where(Lead.score >= min_score)
+    if effective_min_score is not None:
+        query = query.where(Lead.score >= effective_min_score)
+    if score_max is not None:
+        query = query.where(Lead.score <= score_max)
+    if cadence_id is not None:
+        enrolled_subquery = (
+            select(CadenceStep.lead_id)
+            .where(
+                CadenceStep.tenant_id == tenant_id,
+                CadenceStep.cadence_id == cadence_id,
+            )
+            .distinct()
+        )
+        query = query.where(Lead.id.in_(enrolled_subquery))
+    if list_id is not None:
+        query = query.where(Lead.lists.any(LeadList.id == list_id))
+    if segment:
+        query = query.where(Lead.segment.ilike(f"%{segment}%"))
     if search:
         pattern = f"%{search}%"
         query = query.where(
@@ -163,6 +195,17 @@ async def create_lead(
         source=body.source,
     )
     db.add(lead)
+    await db.flush()
+    await replace_lead_email_records(
+        db,
+        lead=lead,
+        specs=build_lead_email_specs(
+            email_corporate=body.email_corporate,
+            email_personal=body.email_personal,
+            extra_emails=body.emails,
+        ),
+    )
+    lead.score = float(lead_scorer.score(lead))
     await db.commit()
     await db.refresh(lead)
 
@@ -205,14 +248,58 @@ async def update_lead(
     lead = await _get_lead_or_404(lead_id, tenant_id, db)
 
     updates = body.model_dump(exclude_unset=True)
+    email_updates = updates.pop("emails", None)
     for field, value in updates.items():
         setattr(lead, field, value)
+
+    if email_updates is not None:
+        await replace_lead_email_records(
+            db,
+            lead=lead,
+            specs=build_lead_email_specs(
+                email_corporate=lead.email_corporate,
+                email_corporate_source=lead.email_corporate_source,
+                email_corporate_verified=lead.email_corporate_verified,
+                email_personal=lead.email_personal,
+                email_personal_source=lead.email_personal_source,
+                extra_emails=email_updates,
+            ),
+        )
+    elif "email_corporate" in updates or "email_personal" in updates:
+        await replace_lead_email_records(
+            db,
+            lead=lead,
+            specs=build_lead_email_specs(
+                email_corporate=lead.email_corporate,
+                email_corporate_source=lead.email_corporate_source,
+                email_corporate_verified=lead.email_corporate_verified,
+                email_personal=lead.email_personal,
+                email_personal_source=lead.email_personal_source,
+                extra_emails=additional_lead_email_specs(lead),
+            ),
+        )
+
+    if _should_recalculate_score(updates) or email_updates is not None:
+        lead.score = float(lead_scorer.score(lead))
 
     await db.commit()
     lead = await _get_lead_or_404(lead_id, tenant_id, db)
 
     logger.info("lead.updated", lead_id=str(lead_id), fields=list(updates.keys()))
     return serialize_lead(lead)
+
+
+@router.post("/{lead_id}/enrich")
+async def enrich_lead_manually(
+    lead_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> dict[str, str]:
+    lead = await _get_lead_or_404(lead_id, tenant_id, db)
+    enrichment_task = import_module("workers.enrich").enrich_lead
+    enrichment_task.delay(str(lead.id), str(tenant_id))
+    logger.info("lead.enrich_queued", lead_id=str(lead.id), tenant_id=str(tenant_id))
+    return {"status": "queued", "lead_id": str(lead.id)}
 
 
 # ── Arquivamento ──────────────────────────────────────────────────────
@@ -289,6 +376,12 @@ async def enroll_lead(
 ) -> dict[str, Any]:
     lead = await _get_lead_or_404(lead_id, tenant_id, db)
 
+    if lead.status == LeadStatus.ARCHIVED:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Lead arquivado não pode ser inscrito em cadência.",
+        )
+
     # Verifica se a cadência pertence ao tenant
     cadence_result = await db.execute(
         select(Cadence).where(
@@ -302,12 +395,6 @@ async def enroll_lead(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Cadência não encontrada ou inativa.",
-        )
-
-    if lead.status == LeadStatus.ARCHIVED:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Lead arquivado não pode ser inscrito em cadência.",
         )
 
     try:
@@ -571,6 +658,18 @@ async def generate_leads_import(
                 apply_candidate_to_lead(
                     existing, item, source=body.source, overwrite_missing_only=True
                 )
+                await replace_lead_email_records(
+                    db,
+                    lead=existing,
+                    specs=build_lead_email_specs(
+                        email_corporate=existing.email_corporate,
+                        email_corporate_source=existing.email_corporate_source,
+                        email_corporate_verified=existing.email_corporate_verified,
+                        email_personal=existing.email_personal,
+                        email_personal_source=existing.email_personal_source,
+                        extra_emails=additional_lead_email_specs(existing),
+                    ),
+                )
                 updated += 1
                 if existing.id not in lead_ids:
                     lead_ids.append(existing.id)
@@ -587,6 +686,17 @@ async def generate_leads_import(
         apply_candidate_to_lead(lead, item, source=body.source, overwrite_missing_only=False)
         db.add(lead)
         await db.flush()
+        await replace_lead_email_records(
+            db,
+            lead=lead,
+            specs=build_lead_email_specs(
+                email_corporate=lead.email_corporate,
+                email_corporate_source=lead.email_corporate_source,
+                email_corporate_verified=lead.email_corporate_verified,
+                email_personal=lead.email_personal,
+                email_personal_source=lead.email_personal_source,
+            ),
+        )
         if target_list is not None:
             await ensure_list_membership(db, lead_id=lead.id, list_id=target_list.id)
         lead_ids.append(lead.id)
@@ -758,3 +868,18 @@ async def _get_lead_or_404(
             detail="Lead não encontrado.",
         )
     return lead
+
+
+def _should_recalculate_score(updates: dict[str, Any]) -> bool:
+    score_fields = {
+        "linkedin_url",
+        "company",
+        "website",
+        "phone",
+        "segment",
+        "city",
+        "email_corporate",
+        "email_personal",
+        "emails",
+    }
+    return any(field in updates for field in score_fields)

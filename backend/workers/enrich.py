@@ -79,15 +79,17 @@ async def _enrich_all_tenants_async(batch_size: int, task) -> dict:
     total_failed = 0
 
     async with WorkerSessionLocal() as root_session:
-        result = await root_session.execute(select(Tenant).where(Tenant.is_active.is_(True)))
-        tenants = list(result.scalars().all())
+        tenants_result = await root_session.execute(
+            select(Tenant).where(Tenant.is_active.is_(True))
+        )
+        tenants = list(tenants_result.scalars().all())
 
     for tenant in tenants:
         try:
-            result = await _enrich_batch_async(str(tenant.id), batch_size, task)
-            total_processed += result.get("processed", 0)
-            total_enriched += result.get("enriched", 0)
-            total_failed += result.get("failed", 0)
+            batch_result = await _enrich_batch_async(str(tenant.id), batch_size, task)
+            total_processed += batch_result.get("processed", 0)
+            total_enriched += batch_result.get("enriched", 0)
+            total_failed += batch_result.get("failed", 0)
         except Exception as exc:
             logger.error(
                 "enrich.tenant_error",
@@ -167,6 +169,8 @@ async def _enrich_single_async(
     finally:
         await email_finder.aclose()
 
+    return {"lead_id": lead_id, "status": "not_found"}
+
 
 async def _enrich_batch_async(
     tenant_id: str,
@@ -180,6 +184,7 @@ async def _enrich_batch_async(
 
     enriched_count = 0
     failed_count = 0
+    processed_count = 0
 
     try:
         async for db in get_worker_session(tid):
@@ -199,6 +204,7 @@ async def _enrich_batch_async(
                 logger.info("enrich.batch_empty", tenant_id=tenant_id)
                 return {"processed": 0, "enriched": 0, "failed": 0}
 
+            processed_count = len(leads)
             logger.info("enrich.batch_started", tenant_id=tenant_id, count=len(leads))
 
             for lead in leads:
@@ -224,7 +230,7 @@ async def _enrich_batch_async(
     logger.info(
         "enrich.batch_done",
         tenant_id=tenant_id,
-        processed=len(leads) if leads else 0,  # type: ignore[possibly-undefined]
+        processed=processed_count,
         enriched=enriched_count,
         failed=failed_count,
     )

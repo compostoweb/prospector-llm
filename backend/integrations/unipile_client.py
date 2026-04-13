@@ -36,7 +36,7 @@ _TIMEOUT = 30.0
 _PROFILE_CACHE_TTL = 86400  # 24h
 _PROFILE_CACHE_TTL_EMPTY = 3600  # 1h for unresolved names
 _PREVIEW_CACHE_TTL = 300  # 5min for message previews
-_CHAT_LIST_CACHE_TTL = 120  # 2min for full conversation list
+_CHAT_LIST_CACHE_TTL = 600  # 10min for full conversation list
 
 
 class _LoopBoundAsyncClient:
@@ -105,6 +105,7 @@ class ChatAttendee:
     profile_url: str | None = None
     profile_picture_url: str | None = None
     headline: str | None = None
+    company: str | None = None
     location: str | None = None
     email: str | None = None
     connections_count: int | None = None
@@ -236,6 +237,19 @@ class UnipileClient:
         )
         return SendResult(message_id=msg_id, success=True)
 
+    async def invalidate_inbox_cache(self, account_id: str, chat_id: str | None = None) -> None:
+        from core.redis_client import redis_client
+
+        if not account_id:
+            return
+
+        list_keys = await redis_client.keys(f"inbox:list:{account_id}:*")
+        if list_keys:
+            await redis_client.delete_many(*list_keys)
+
+        if chat_id:
+            await redis_client.delete(f"inbox:preview:{chat_id}")
+
     async def send_linkedin_dm_with_attachments(
         self,
         account_id: str,
@@ -352,6 +366,104 @@ class UnipileClient:
             message_id=msg_id,
         )
         return SendResult(message_id=msg_id, success=True)
+
+    # ── Webhooks ──────────────────────────────────────────────────────
+
+    async def list_webhooks(self, limit: int = 250) -> list[dict[str, Any]]:
+        """Lista os webhooks existentes na workspace Unipile."""
+        response = await self._client.get("/webhooks", params={"limit": limit})
+
+        if 400 <= response.status_code < 500:
+            body_text = response.text[:500]
+            logger.error(
+                "unipile.webhooks.list_client_error",
+                status=response.status_code,
+                response_body=body_text,
+            )
+            raise UnipileNonRetryableError(f"Unipile {response.status_code}: {body_text}")
+
+        response.raise_for_status()
+        data = response.json()
+        items = data.get("items", [])
+        if not isinstance(items, list):
+            logger.warning(
+                "unipile.webhooks.list_invalid_payload", payload_type=type(items).__name__
+            )
+            return []
+        return [item for item in items if isinstance(item, dict)]
+
+    async def ensure_messaging_webhook(
+        self,
+        request_url: str,
+        secret: str,
+        events: list[str],
+    ) -> dict[str, Any]:
+        """Garante que existe um webhook ativo para a URL informada."""
+        existing_webhooks = await self.list_webhooks()
+        for webhook in existing_webhooks:
+            if webhook.get("request_url") != request_url:
+                continue
+            if webhook.get("enabled") is False:
+                continue
+
+            webhook_id = webhook.get("id") or webhook.get("webhook_id")
+            logger.info(
+                "unipile.webhook.already_registered",
+                request_url=request_url,
+                webhook_id=webhook_id,
+            )
+            return {
+                "created": False,
+                "already_exists": True,
+                "webhook_id": str(webhook_id) if webhook_id else None,
+            }
+
+        payload = {
+            "name": "prospector-inbox-webhook",
+            "request_url": request_url,
+            "source": "messaging",
+            "format": "json",
+            "enabled": True,
+            "events": events,
+            "headers": [
+                {"key": "Content-Type", "value": "application/json"},
+                {"key": "Unipile-Auth", "value": secret},
+            ],
+        }
+        response = await self._client.post("/webhooks", json=payload)
+
+        if 400 <= response.status_code < 500:
+            body_text = response.text[:500]
+            logger.error(
+                "unipile.webhook.create_client_error",
+                status=response.status_code,
+                request_url=request_url,
+                response_body=body_text,
+            )
+            raise UnipileNonRetryableError(f"Unipile {response.status_code}: {body_text}")
+
+        response.raise_for_status()
+        data = response.json()
+        webhook_id = data.get("webhook_id") or data.get("id")
+        logger.info(
+            "unipile.webhook.registered",
+            request_url=request_url,
+            webhook_id=webhook_id,
+            event_count=len(events),
+        )
+        return {
+            "created": True,
+            "already_exists": False,
+            "webhook_id": str(webhook_id) if webhook_id else None,
+        }
+
+    async def get_webhook_by_url(self, request_url: str) -> dict[str, Any] | None:
+        """Retorna o primeiro webhook cadastrado para a URL informada."""
+        existing_webhooks = await self.list_webhooks()
+        for webhook in existing_webhooks:
+            if webhook.get("request_url") == request_url:
+                return webhook
+        return None
 
     # ── Perfil LinkedIn ───────────────────────────────────────────────
 
@@ -493,6 +605,9 @@ class UnipileClient:
                 "profile_picture_url": data.get("profile_picture_url"),
                 "public_identifier": public_id,
                 "headline": data.get("headline") or None,
+                "company": (data.get("experience") or [{}])[0].get("company_name")
+                if isinstance(data.get("experience"), list) and data.get("experience")
+                else None,
                 "location": data.get("location") or None,
                 "email": contact_email,
                 "connections_count": data.get("connections_count"),
@@ -534,6 +649,7 @@ class UnipileClient:
             profile_url=profile_url,
             profile_picture_url=profile.get("profile_picture_url"),
             headline=profile.get("headline"),
+            company=profile.get("company"),
             location=profile.get("location"),
             email=profile.get("email"),
             connections_count=profile.get("connections_count"),
@@ -915,16 +1031,11 @@ class UnipileClient:
 
     async def sync_account(self, account_id: str) -> bool:
         """Dispara resync da conta Unipile e invalida caches de inbox."""
-        from core.redis_client import redis_client
-
         try:
             response = await self._client.get(f"/accounts/{account_id}/sync")
             ok = response.status_code == 200
             if ok:
-                # Invalidate all inbox list caches to force fresh fetch
-                keys = await redis_client.keys(f"inbox:list:{account_id}:*")
-                if keys:
-                    await redis_client.delete_many(*keys)
+                await self.invalidate_inbox_cache(account_id)
                 logger.info("unipile.account.sync_started", account_id=account_id)
             else:
                 logger.warning(

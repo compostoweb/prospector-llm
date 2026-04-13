@@ -162,3 +162,9 @@ class Lead(Base, TenantMixin, TimestampMixin):
         back_populates="leads",
         lazy="selectin",
     )
+    emails: Mapped[list[object]] = relationship(  # type: ignore[name-defined]
+        "LeadEmail",
+        back_populates="lead",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )

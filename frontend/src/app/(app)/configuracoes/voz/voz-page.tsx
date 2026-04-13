@@ -29,6 +29,7 @@ import {
   Search,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { SettingsPageShell, SettingsPanel } from "@/components/settings/settings-shell"
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
 const VOICES_PER_PAGE = 5
@@ -162,16 +163,12 @@ export default function VozPage() {
   }
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-xl font-semibold text-(--text-primary)">Gerenciamento de Vozes</h1>
-        <p className="mt-1 text-sm text-(--text-secondary)">
-          Gerencie vozes TTS clonadas para uso em cadências com voice notes.
-        </p>
-      </div>
-
-      {/* Provider tabs */}
-      <div className="flex gap-2">
+    <SettingsPageShell
+      title="Vozes TTS"
+      description="Gerencie vozes disponíveis e crie novas clonagens sem desperdiçar área útil no desktop."
+      width="wide"
+    >
+      <div className="flex flex-wrap gap-2">
         {(providers.length > 0 ? providers : ["edge", "speechify"]).map((p) => (
           <button
             key={p}
@@ -193,218 +190,225 @@ export default function VozPage() {
         ))}
       </div>
 
-      {/* Vozes existentes */}
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-(--text-primary)">
-          Vozes disponíveis — {PROVIDER_LABELS[selectedProvider] ?? selectedProvider}
-        </h2>
-
-        {loadingVoices ? (
-          <div className="flex items-center gap-2 text-sm text-(--text-tertiary)">
-            <Loader2 className="h-4 w-4 animate-spin" /> Carregando vozes…
-          </div>
-        ) : providerVoices.length === 0 ? (
-          <p className="text-sm text-(--text-disabled)">Nenhuma voz encontrada.</p>
-        ) : (
-          <div className="space-y-3">
-            {/* Search + Language filter */}
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <div className="relative flex-1">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-(--text-tertiary)" />
-                <Input
-                  value={voiceSearch}
-                  onChange={(e) => handleSearchChange(e.target.value)}
-                  placeholder="Buscar por nome ou ID…"
-                  className="h-8 pl-8 text-xs"
-                />
-              </div>
-              <Select value={languageFilter} onValueChange={handleLanguageChange}>
-                <SelectTrigger className="h-8 w-full text-xs sm:w-44">
-                  <SelectValue placeholder="Idioma" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all" className="text-xs">
-                    Todos os idiomas
-                  </SelectItem>
-                  {languages.map((lang) => (
-                    <SelectItem key={lang} value={lang} className="text-xs">
-                      {lang}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_360px]">
+        <SettingsPanel
+          title={`Vozes disponíveis — ${PROVIDER_LABELS[selectedProvider] ?? selectedProvider}`}
+          description="Filtre por idioma, teste rapidamente e mantenha a lista de vozes mais útil no topo da tela."
+        >
+          {loadingVoices ? (
+            <div className="flex items-center gap-2 text-sm text-(--text-tertiary)">
+              <Loader2 className="h-4 w-4 animate-spin" /> Carregando vozes…
             </div>
+          ) : providerVoices.length === 0 ? (
+            <p className="text-sm text-(--text-disabled)">Nenhuma voz encontrada.</p>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="relative flex-1">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-(--text-tertiary)" />
+                  <Input
+                    value={voiceSearch}
+                    onChange={(e) => handleSearchChange(e.target.value)}
+                    placeholder="Buscar por nome ou ID…"
+                    className="h-8 pl-8 text-xs"
+                  />
+                </div>
+                <Select value={languageFilter} onValueChange={handleLanguageChange}>
+                  <SelectTrigger className="h-8 w-full text-xs sm:w-44">
+                    <SelectValue placeholder="Idioma" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all" className="text-xs">
+                      Todos os idiomas
+                    </SelectItem>
+                    {languages.map((lang) => (
+                      <SelectItem key={lang} value={lang} className="text-xs">
+                        {lang}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            {/* Counter */}
-            <p className="text-xs text-(--text-tertiary)">
-              {filteredVoices.length === providerVoices.length
-                ? `${providerVoices.length} vozes`
-                : `${filteredVoices.length} de ${providerVoices.length} vozes`}
-            </p>
+              <p className="text-xs text-(--text-tertiary)">
+                {filteredVoices.length === providerVoices.length
+                  ? `${providerVoices.length} vozes`
+                  : `${filteredVoices.length} de ${providerVoices.length} vozes`}
+              </p>
 
-            {/* Voice list */}
-            {filteredVoices.length === 0 ? (
-              <p className="text-sm text-(--text-disabled)">Nenhuma voz corresponde à busca.</p>
-            ) : (
-              <>
-                <div className="grid gap-2">
-                  {visibleVoices.map((v) => (
-                    <div
-                      key={v.id}
-                      className="flex items-center justify-between rounded-md border border-(--border-default) bg-(--bg-surface) px-4 py-2.5"
-                    >
-                      <div className="flex items-center gap-3 overflow-hidden">
-                        <Volume2 className="h-4 w-4 shrink-0 text-(--text-tertiary)" />
-                        <div className="min-w-0">
-                          <span className="text-sm font-medium text-(--text-primary) truncate block">
-                            {v.name}
-                          </span>
-                          <span className="text-[11px] text-(--text-disabled)">
-                            {v.language} · {v.is_cloned ? "clone" : "built-in"}
-                          </span>
+              {filteredVoices.length === 0 ? (
+                <p className="text-sm text-(--text-disabled)">Nenhuma voz corresponde à busca.</p>
+              ) : (
+                <>
+                  <div className="grid gap-2">
+                    {visibleVoices.map((v) => (
+                      <div
+                        key={v.id}
+                        className="flex items-center justify-between rounded-xl border border-(--border-default) bg-(--bg-surface) px-4 py-3"
+                      >
+                        <div className="flex items-center gap-3 overflow-hidden">
+                          <Volume2 className="h-4 w-4 shrink-0 text-(--text-tertiary)" />
+                          <div className="min-w-0">
+                            <span className="block truncate text-sm font-medium text-(--text-primary)">
+                              {v.name}
+                            </span>
+                            <span className="text-[11px] text-(--text-disabled)">
+                              {v.language} · {v.is_cloned ? "clone" : "built-in"}
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex shrink-0 gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleTest(v.provider, v.id)}
-                          disabled={testTTS.isPending}
-                          className="h-7 px-2"
-                        >
-                          <Play className="h-3.5 w-3.5" />
-                        </Button>
-                        {v.is_cloned && (
+                        <div className="flex shrink-0 gap-1">
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleDelete(v.provider, v.id)}
-                            disabled={deleteVoice.isPending}
-                            className="h-7 px-2 text-(--danger-fg) hover:text-(--danger-fg)"
+                            onClick={() => handleTest(v.provider, v.id)}
+                            disabled={testTTS.isPending}
+                            className="h-7 px-2"
                           >
-                            <Trash2 className="h-3.5 w-3.5" />
+                            <Play className="h-3.5 w-3.5" />
                           </Button>
-                        )}
+                          {v.is_cloned ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDelete(v.provider, v.id)}
+                              disabled={deleteVoice.isPending}
+                              className="h-7 px-2 text-(--danger-fg) hover:text-(--danger-fg)"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          ) : null}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
 
-                {hasMore && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setVisibleCount((c) => c + VOICES_PER_PAGE)}
-                    className="w-full"
-                  >
-                    Carregar mais ({filteredVoices.length - visibleCount} restantes)
-                  </Button>
-                )}
-              </>
-            )}
-          </div>
-        )}
-      </section>
-
-      {/* Upload de nova voz */}
-      <section className="space-y-4 rounded-md border border-(--border-default) bg-(--bg-overlay) p-4">
-        <div className="flex items-center gap-2">
-          <Upload className="h-4 w-4 text-(--text-tertiary)" />
-          <h2 className="text-sm font-semibold text-(--text-primary)">Clonar nova voz</h2>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label className="mb-1 block text-xs">Nome da voz</Label>
-            <Input
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="Ex: Minha voz"
-              className="h-8 text-xs"
-            />
-          </div>
-          <div>
-            <Label className="mb-1 block text-xs">Idioma</Label>
-            <Select value={newLanguage} onValueChange={setNewLanguage}>
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="pt-BR" className="text-xs">
-                  Português (BR)
-                </SelectItem>
-                <SelectItem value="en-US" className="text-xs">
-                  English (US)
-                </SelectItem>
-                <SelectItem value="es-ES" className="text-xs">
-                  Español
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        <div>
-          <Label htmlFor="voice-audio-upload" className="mb-1 block text-xs">
-            Áudio de referência (10-30s, MP3/WAV, até 5MB)
-          </Label>
-          <input
-            id="voice-audio-upload"
-            type="file"
-            accept="audio/*"
-            onChange={handleFileChange}
-            title="Selecione um arquivo de áudio para clonagem de voz"
-            className="block w-full text-xs text-(--text-secondary) file:mr-2 file:rounded file:border-0 file:bg-(--bg-surface) file:px-3 file:py-1.5 file:text-xs file:font-medium"
-          />
-        </div>
-
-        {selectedProvider === "speechify" && (
-          <label className="flex items-center gap-2 text-xs text-(--text-secondary)">
-            <input
-              type="checkbox"
-              checked={consent}
-              onChange={(e) => setConsent(e.target.checked)}
-              className="rounded border-(--border-default)"
-            />
-            Consinto com a clonagem de voz pela Speechify API
-          </label>
-        )}
-
-        {uploadError && (
-          <div className="flex items-center gap-2 text-xs text-(--danger-fg)">
-            <AlertCircle className="h-3.5 w-3.5" />
-            {uploadError}
-          </div>
-        )}
-
-        {uploadSuccess && (
-          <div className="flex items-center gap-2 text-xs text-(--success-fg)">
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            Voz criada com sucesso!
-          </div>
-        )}
-
-        <Button
-          onClick={handleUpload}
-          disabled={createVoice.isPending || !audioFile || !newName.trim()}
-          size="sm"
-        >
-          {createVoice.isPending ? (
-            <>
-              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-              Enviando…
-            </>
-          ) : (
-            <>
-              <Upload className="mr-1 h-3.5 w-3.5" />
-              Criar voz
-            </>
+                  {hasMore ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setVisibleCount((c) => c + VOICES_PER_PAGE)}
+                      className="w-full"
+                    >
+                      Carregar mais ({filteredVoices.length - visibleCount} restantes)
+                    </Button>
+                  ) : null}
+                </>
+              )}
+            </div>
           )}
-        </Button>
-      </section>
+        </SettingsPanel>
 
-      {/* Hidden audio player */}
+        <div className="space-y-4 lg:sticky lg:top-4 lg:self-start">
+          <SettingsPanel
+            title="Clonar nova voz"
+            description="Use um áudio curto e limpo para gerar uma voz reutilizável nas cadências."
+          >
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                <div>
+                  <Label className="mb-1 block text-xs">Nome da voz</Label>
+                  <Input
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="Ex: Minha voz"
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div>
+                  <Label className="mb-1 block text-xs">Idioma</Label>
+                  <Select value={newLanguage} onValueChange={setNewLanguage}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pt-BR" className="text-xs">
+                        Português (BR)
+                      </SelectItem>
+                      <SelectItem value="en-US" className="text-xs">
+                        English (US)
+                      </SelectItem>
+                      <SelectItem value="es-ES" className="text-xs">
+                        Español
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="voice-audio-upload" className="mb-1 block text-xs">
+                  Áudio de referência (10-30s, MP3/WAV, até 5MB)
+                </Label>
+                <input
+                  id="voice-audio-upload"
+                  type="file"
+                  accept="audio/*"
+                  onChange={handleFileChange}
+                  title="Selecione um arquivo de áudio para clonagem de voz"
+                  className="block w-full text-xs text-(--text-secondary) file:mr-2 file:rounded file:border-0 file:bg-(--bg-surface) file:px-3 file:py-1.5 file:text-xs file:font-medium"
+                />
+              </div>
+
+              {selectedProvider === "speechify" ? (
+                <label className="flex items-center gap-2 text-xs text-(--text-secondary)">
+                  <input
+                    type="checkbox"
+                    checked={consent}
+                    onChange={(e) => setConsent(e.target.checked)}
+                    className="rounded border-(--border-default) accent-(--accent)"
+                  />
+                  Consinto com a clonagem de voz pela Speechify API
+                </label>
+              ) : null}
+
+              {uploadError ? (
+                <div className="flex items-center gap-2 text-xs text-(--danger-fg)">
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  {uploadError}
+                </div>
+              ) : null}
+
+              {uploadSuccess ? (
+                <div className="flex items-center gap-2 text-xs text-(--success-fg)">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Voz criada com sucesso!
+                </div>
+              ) : null}
+
+              <Button
+                onClick={handleUpload}
+                disabled={createVoice.isPending || !audioFile || !newName.trim()}
+                size="sm"
+              >
+                {createVoice.isPending ? (
+                  <>
+                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                    Enviando…
+                  </>
+                ) : (
+                  <>
+                    <Upload className="mr-1 h-3.5 w-3.5" />
+                    Criar voz
+                  </>
+                )}
+              </Button>
+            </div>
+          </SettingsPanel>
+
+          <SettingsPanel
+            title="Boas práticas"
+            description="Clonagens melhores começam com um áudio de referência melhor."
+          >
+            <p className="text-sm leading-6 text-(--text-secondary)">
+              Prefira gravações limpas, sem ruído de fundo e com entonação próxima ao uso final.
+              Isso reduz retrabalho e economiza tempo ao testar várias vozes.
+            </p>
+          </SettingsPanel>
+        </div>
+      </div>
+
       <audio ref={audioRef} className="hidden" />
-    </div>
+    </SettingsPageShell>
   )
 }

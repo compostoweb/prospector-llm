@@ -11,11 +11,12 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from models.enums import LeadStatus
+from models.enums import EmailType, LeadStatus
 
 
 class ChatAttendeeSchema(BaseModel):
     """Participante de uma conversa."""
+
     id: str
     name: str
     profile_url: str | None = None
@@ -31,6 +32,7 @@ class ChatAttendeeSchema(BaseModel):
 
 class ConversationSchema(BaseModel):
     """Conversa na listagem do inbox."""
+
     chat_id: str
     attendees: list[ChatAttendeeSchema] = []
     last_message_text: str | None = None
@@ -46,12 +48,14 @@ class ConversationSchema(BaseModel):
 
 class ConversationListResponse(BaseModel):
     """Lista paginada de conversas."""
+
     items: list[ConversationSchema]
     cursor: str | None = None
 
 
 class ChatMessageSchema(BaseModel):
     """Uma mensagem dentro de um chat."""
+
     id: str
     sender_id: str
     sender_name: str
@@ -63,17 +67,20 @@ class ChatMessageSchema(BaseModel):
 
 class ChatMessagesResponse(BaseModel):
     """Lista paginada de mensagens de um chat."""
+
     items: list[ChatMessageSchema]
     cursor: str | None = None
 
 
 class SendMessageRequest(BaseModel):
     """Enviar mensagem texto em conversa existente."""
+
     text: str = Field(..., min_length=1, max_length=5000)
 
 
 class SuggestReplyRequest(BaseModel):
     """Solicitar sugestão de resposta via LLM."""
+
     tone: str = Field(
         default="formal",
         description="Tom: formal | casual | objetiva | consultiva",
@@ -82,12 +89,14 @@ class SuggestReplyRequest(BaseModel):
 
 class SuggestReplyResponse(BaseModel):
     """Sugestão de resposta gerada."""
+
     suggested_text: str
     tone: str
 
 
 class ConversationLeadResponse(BaseModel):
     """Dados do lead vinculado ou contato Unipile."""
+
     has_lead: bool = False
     lead_id: uuid.UUID | None = None
     name: str | None = None
@@ -96,6 +105,7 @@ class ConversationLeadResponse(BaseModel):
     linkedin_url: str | None = None
     email_corporate: str | None = None
     email_personal: str | None = None
+    emails: list[LeadEmailSummary] = []
     phone: str | None = None
     city: str | None = None
     segment: str | None = None
@@ -111,6 +121,7 @@ class ConversationLeadResponse(BaseModel):
     attendee_profile_picture_url: str | None = None
     attendee_id: str | None = None
     attendee_headline: str | None = None
+    attendee_company: str | None = None
     attendee_location: str | None = None
     attendee_email: str | None = None
     attendee_connections_count: int | None = None
@@ -121,6 +132,7 @@ class ConversationLeadResponse(BaseModel):
 
 class QuickCreateLeadRequest(BaseModel):
     """Criar lead rápido a partir de contato do inbox."""
+
     name: str = Field(..., min_length=1, max_length=300)
     linkedin_url: str | None = None
     linkedin_profile_id: str | None = None
@@ -130,13 +142,27 @@ class QuickCreateLeadRequest(BaseModel):
 
 class AddReactionRequest(BaseModel):
     """Adicionar/remover reação a uma mensagem."""
+
     emoji: str = Field(..., min_length=1, max_length=10)
+
+
+class LeadEmailSummary(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    email: str
+    email_type: EmailType
+    source: str | None = None
+    verified: bool = False
+    is_primary: bool = False
 
 
 # ── Atividade recente do lead ─────────────────────────────────────────
 
+
 class RecentActivityItem(BaseModel):
     """Uma interação recente com o lead."""
+
     id: uuid.UUID
     channel: str
     direction: str
@@ -147,13 +173,16 @@ class RecentActivityItem(BaseModel):
 
 class RecentActivityResponse(BaseModel):
     """Últimas interações do lead."""
+
     items: list[RecentActivityItem]
 
 
 # ── Histórico de cadências do lead ────────────────────────────────────
 
+
 class CadenceHistoryItem(BaseModel):
     """Cadência em que o lead participou/participa."""
+
     cadence_id: uuid.UUID
     cadence_name: str
     mode: str
@@ -165,13 +194,16 @@ class CadenceHistoryItem(BaseModel):
 
 class CadenceHistoryResponse(BaseModel):
     """Lista de cadências do lead."""
+
     items: list[CadenceHistoryItem]
 
 
 # ── Tags do lead ──────────────────────────────────────────────────────
 
+
 class LeadTagSchema(BaseModel):
     """Tag associada a um lead."""
+
     id: uuid.UUID
     name: str
     color: str
@@ -179,5 +211,6 @@ class LeadTagSchema(BaseModel):
 
 class AddTagRequest(BaseModel):
     """Adicionar tag a um lead."""
+
     name: str = Field(..., min_length=1, max_length=50)
     color: str = Field(default="#6366f1", max_length=7, pattern=r"^#[0-9a-fA-F]{6}$")

@@ -30,6 +30,7 @@ interface LeadEditFormState {
   website: string
   email_corporate: string
   email_personal: string
+  additional_emails: string
   phone: string
   segment: string
   city: string
@@ -46,6 +47,10 @@ function buildFormState(lead: Lead): LeadEditFormState {
     website: lead.website ?? "",
     email_corporate: lead.email_corporate ?? "",
     email_personal: lead.email_personal ?? "",
+    additional_emails: lead.emails
+      .map((email) => email.email)
+      .filter((email) => email !== lead.email_corporate && email !== lead.email_personal)
+      .join("\n"),
     phone: lead.phone ?? "",
     segment: lead.segment ?? "",
     city: lead.city ?? "",
@@ -93,6 +98,11 @@ export function LeadEditDialog({
         website: toNullable(form.website),
         email_corporate: toNullable(form.email_corporate),
         email_personal: toNullable(form.email_personal),
+        emails: buildLeadEmailPayloads(
+          toNullable(form.email_corporate),
+          toNullable(form.email_personal),
+          form.additional_emails,
+        ),
         phone: toNullable(form.phone),
         segment: toNullable(form.segment),
         city: toNullable(form.city),
@@ -203,6 +213,17 @@ export function LeadEditDialog({
               />
             </div>
 
+            <div className="space-y-1.5 md:col-span-2">
+              <Label htmlFor="lead-edit-additional-emails">Emails adicionais</Label>
+              <Textarea
+                id="lead-edit-additional-emails"
+                rows={3}
+                value={form.additional_emails}
+                onChange={(e) => setField("additional_emails", e.target.value)}
+                placeholder="Um email por linha"
+              />
+            </div>
+
             <div className="space-y-1.5">
               <Label htmlFor="lead-edit-phone">Telefone</Label>
               <Input
@@ -247,7 +268,9 @@ export function LeadEditDialog({
               Cancelar
             </Button>
             <Button type="submit" size="sm" disabled={updateLead.isPending || !form.name.trim()}>
-              {updateLead.isPending && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
+              {updateLead.isPending && (
+                <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+              )}
               Salvar alterações
             </Button>
           </DialogFooter>
@@ -255,4 +278,46 @@ export function LeadEditDialog({
       </DialogContent>
     </Dialog>
   )
+}
+
+function buildLeadEmailPayloads(
+  corporateEmail: string | null,
+  personalEmail: string | null,
+  additionalEmailsText: string,
+) {
+  const emails = new Map<
+    string,
+    {
+      email: string
+      email_type: "corporate" | "personal" | "unknown"
+      is_primary: boolean
+    }
+  >()
+
+  if (corporateEmail) {
+    emails.set(corporateEmail.toLowerCase(), {
+      email: corporateEmail,
+      email_type: "corporate",
+      is_primary: true,
+    })
+  }
+  if (personalEmail) {
+    emails.set(personalEmail.toLowerCase(), {
+      email: personalEmail,
+      email_type: "personal",
+      is_primary: true,
+    })
+  }
+
+  for (const rawLine of additionalEmailsText.split(/\r?\n/)) {
+    const email = rawLine.trim().toLowerCase()
+    if (!email || emails.has(email)) continue
+    emails.set(email, {
+      email,
+      email_type: "unknown",
+      is_primary: false,
+    })
+  }
+
+  return Array.from(emails.values())
 }

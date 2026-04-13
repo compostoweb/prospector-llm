@@ -81,10 +81,11 @@ async def get_stats(
 @router.get("/{task_id}", response_model=ManualTaskResponse)
 async def get_task(
     task_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> ManualTaskResponse:
     try:
-        task = await _service._get_task(task_id, db)
+        task = await _service._get_task(task_id, db, tenant_id=tenant_id)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tarefa não encontrada")
     return ManualTaskResponse.model_validate(task)
@@ -93,11 +94,12 @@ async def get_task(
 @router.post("/{task_id}/generate", response_model=ManualTaskResponse)
 async def generate_content(
     task_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
     registry: LLMRegistry = Depends(get_llm_registry),
 ) -> ManualTaskResponse:
     try:
-        task = await _service.generate_content(task_id, db, registry)
+        task = await _service.generate_content(task_id, tenant_id, db, registry)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return ManualTaskResponse.model_validate(task)
@@ -106,11 +108,12 @@ async def generate_content(
 @router.post("/{task_id}/regenerate", response_model=ManualTaskResponse)
 async def regenerate_content(
     task_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
     registry: LLMRegistry = Depends(get_llm_registry),
 ) -> ManualTaskResponse:
     try:
-        task = await _service.regenerate_content(task_id, db, registry)
+        task = await _service.regenerate_content(task_id, tenant_id, db, registry)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return ManualTaskResponse.model_validate(task)
@@ -120,10 +123,11 @@ async def regenerate_content(
 async def update_task(
     task_id: uuid.UUID,
     body: ManualTaskUpdateRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> ManualTaskResponse:
     try:
-        task = await _service.update_content(task_id, body.edited_text, db)
+        task = await _service.update_content(task_id, tenant_id, body.edited_text, db)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return ManualTaskResponse.model_validate(task)
@@ -132,12 +136,16 @@ async def update_task(
 @router.post("/{task_id}/send", response_model=ManualTaskResponse)
 async def send_task(
     task_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> ManualTaskResponse:
     try:
-        task = await _service.send_via_system(task_id, db)
+        task = await _service.send_via_system(task_id, tenant_id, db)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        error_message = str(e)
+        if "não encontrada" in error_message:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_message)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_message)
     return ManualTaskResponse.model_validate(task)
 
 
@@ -145,10 +153,11 @@ async def send_task(
 async def mark_done(
     task_id: uuid.UUID,
     body: ManualTaskDoneExternalRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> ManualTaskResponse:
     try:
-        task = await _service.mark_done_external(task_id, body.notes, db)
+        task = await _service.mark_done_external(task_id, tenant_id, body.notes, db)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return ManualTaskResponse.model_validate(task)
@@ -157,10 +166,11 @@ async def mark_done(
 @router.post("/{task_id}/skip", response_model=ManualTaskResponse)
 async def skip_task(
     task_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> ManualTaskResponse:
     try:
-        task = await _service.skip(task_id, db)
+        task = await _service.skip(task_id, tenant_id, db)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return ManualTaskResponse.model_validate(task)

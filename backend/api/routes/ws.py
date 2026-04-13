@@ -19,6 +19,7 @@ NOTA DE SEGURANÇA — Token no query param:
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -32,20 +33,51 @@ router = APIRouter()
 
 PING_INTERVAL = 30  # segundos
 
+_EVENT_TYPE_ALIASES = {
+    "new_message": "inbox.new_message",
+    "connection_accepted": "connection.accepted",
+}
+
 # Registry de conexões ativas — {tenant_id: set of websockets}
 _connections: dict[str, set[WebSocket]] = {}
 
 
 async def broadcast_event(tenant_id: str, event: dict[str, Any]) -> None:
-    """Envia evento para todos os WebSockets do tenant."""
+    """Envia evento normalizado para todos os WebSockets do tenant."""
     sockets = _connections.get(tenant_id, set())
     dead: set[WebSocket] = set()
+    payload = _normalize_event_payload(tenant_id, event)
     for ws in sockets:
         try:
-            await ws.send_json(event)
+            await ws.send_json(payload)
         except Exception:
             dead.add(ws)
     sockets -= dead
+
+
+def _normalize_event_payload(tenant_id: str, event: dict[str, Any]) -> dict[str, Any]:
+    """
+    Mantém compatibilidade com emissores legados e entrega o envelope esperado
+    pelo frontend: {type, data, tenant_id, timestamp}.
+    """
+    event_type = str(event.get("type") or "").strip()
+    normalized_type = _EVENT_TYPE_ALIASES.get(event_type, event_type)
+
+    if "data" in event and isinstance(event.get("data"), dict):
+        data = dict(event["data"])
+    else:
+        data = {
+            key: value
+            for key, value in event.items()
+            if key not in {"type", "tenant_id", "timestamp"}
+        }
+
+    return {
+        "type": normalized_type,
+        "data": data,
+        "tenant_id": tenant_id,
+        "timestamp": str(event.get("timestamp") or datetime.now(tz=UTC).isoformat()),
+    }
 
 
 @router.websocket("/ws/events")

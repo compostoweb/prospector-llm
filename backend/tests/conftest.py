@@ -36,7 +36,13 @@ import models.cadence  # noqa: F401  # pyright: ignore[reportUnusedImport]
 import models.cadence_step  # noqa: F401  # pyright: ignore[reportUnusedImport]
 import models.interaction  # noqa: F401  # pyright: ignore[reportUnusedImport]
 import models.lead  # noqa: F401  # pyright: ignore[reportUnusedImport]
-from api.dependencies import get_current_tenant_id, get_session
+import models.lead_email  # noqa: F401  # pyright: ignore[reportUnusedImport]
+from api.dependencies import (
+    get_current_tenant_id,
+    get_effective_tenant_id,
+    get_session,
+    get_session_flexible,
+)
 from api.main import app
 from core.config import settings
 from core.security import create_access_token
@@ -153,7 +159,9 @@ async def client(
         return tenant_id
 
     app.dependency_overrides[get_session] = _override_session
+    app.dependency_overrides[get_session_flexible] = _override_session
     app.dependency_overrides[get_current_tenant_id] = _override_tenant_id
+    app.dependency_overrides[get_effective_tenant_id] = _override_tenant_id
 
     async with AsyncClient(
         transport=ASGITransport(app=app),

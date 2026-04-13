@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from urllib.parse import urlparse
 
 import structlog
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
@@ -34,6 +35,7 @@ from models.cadence import Cadence
 from models.cadence_step import CadenceStep
 from models.enums import (
     Channel,
+    EmailType,
     InteractionDirection,
     LeadSource,
     LeadStatus,
@@ -55,6 +57,7 @@ from schemas.inbox import (
     ConversationLeadResponse,
     ConversationListResponse,
     ConversationSchema,
+    LeadEmailSummary,
     LeadTagSchema,
     QuickCreateLeadRequest,
     RecentActivityItem,
@@ -64,6 +67,12 @@ from schemas.inbox import (
     SuggestReplyResponse,
 )
 from services.conversation_assistant import ConversationAssistant
+from services.email_finder import _PERSONAL_DOMAINS
+from services.lead_management import (
+    build_lead_email_specs,
+    preferred_lead_email,
+    replace_lead_email_records,
+)
 from services.llm_config import resolve_tenant_llm_config
 
 logger = structlog.get_logger()
@@ -217,6 +226,7 @@ async def send_message(
         linkedin_profile_id=attendee_ids[0],
         message=body.text,
     )
+    await unipile_client.invalidate_inbox_cache(account_id, chat_id=chat_id)
 
     # Registra Interaction outbound se lead existe
     lead = await _find_lead_by_attendees(chat.attendees, tenant_id, db)
@@ -277,6 +287,7 @@ async def send_voice(
         linkedin_profile_id=attendee_ids[0],
         audio_url=audio_url,
     )
+    await unipile_client.invalidate_inbox_cache(account_id, chat_id=chat_id)
 
     # Registra Interaction outbound se lead existe
     lead = await _find_lead_by_attendees(chat.attendees, tenant_id, db)
@@ -425,6 +436,7 @@ async def get_conversation_lead(
     attendee_profile_picture_url = first_att.profile_picture_url if first_att else None
     attendee_id = first_att.id if first_att else None
     attendee_headline = first_att.headline if first_att else None
+    attendee_company = first_att.company if first_att else None
     attendee_location = first_att.location if first_att else None
     attendee_email = first_att.email if first_att else None
     attendee_connections_count = first_att.connections_count if first_att else None
@@ -441,6 +453,7 @@ async def get_conversation_lead(
             attendee_profile_picture_url=attendee_profile_picture_url,
             attendee_id=attendee_id,
             attendee_headline=attendee_headline,
+            attendee_company=attendee_company,
             attendee_location=attendee_location,
             attendee_email=attendee_email,
             attendee_connections_count=attendee_connections_count,
@@ -473,6 +486,7 @@ async def get_conversation_lead(
         linkedin_url=lead.linkedin_url,
         email_corporate=lead.email_corporate,
         email_personal=lead.email_personal,
+        emails=[LeadEmailSummary.model_validate(email) for email in lead.emails],
         phone=lead.phone,
         city=lead.city,
         segment=lead.segment,
@@ -486,6 +500,7 @@ async def get_conversation_lead(
         attendee_profile_picture_url=attendee_profile_picture_url,
         attendee_id=attendee_id,
         attendee_headline=attendee_headline,
+        attendee_company=attendee_company,
         attendee_location=attendee_location,
         attendee_email=attendee_email,
         attendee_connections_count=attendee_connections_count,
@@ -524,7 +539,46 @@ async def quick_create_lead(
         source=LeadSource.MANUAL,
         status=LeadStatus.RAW,
     )
+
+    first_att = chat.attendees[0] if chat and chat.attendees else None
+    if first_att is not None:
+        if not lead.company:
+            lead.company = first_att.company
+        if not lead.job_title:
+            lead.job_title = first_att.headline
+
+        primary_website = _pick_primary_website(first_att.websites)
+        if primary_website and not lead.website:
+            lead.website = primary_website
+
+        if primary_website and not lead.company_domain:
+            lead.company_domain = _extract_domain_from_website(primary_website)
+
+        if not lead.company and lead.company_domain:
+            lead.company = _derive_company_name_from_domain(lead.company_domain)
+
+        attendee_email = (first_att.email or "").strip().lower()
+        if attendee_email:
+            if _classify_attendee_email(attendee_email) is EmailType.CORPORATE:
+                lead.email_corporate = attendee_email
+                lead.email_corporate_source = "unipile"
+            else:
+                lead.email_personal = attendee_email
+                lead.email_personal_source = "unipile"
+
     db.add(lead)
+    await db.flush()
+    await replace_lead_email_records(
+        db,
+        lead=lead,
+        specs=build_lead_email_specs(
+            email_corporate=lead.email_corporate,
+            email_corporate_source=lead.email_corporate_source,
+            email_corporate_verified=lead.email_corporate_verified,
+            email_personal=lead.email_personal,
+            email_personal_source=lead.email_personal_source,
+        ),
+    )
     await db.commit()
     await db.refresh(lead)
 
@@ -534,8 +588,6 @@ async def quick_create_lead(
         chat_id=chat_id,
         tenant_id=str(tenant_id),
     )
-
-    first_att = chat.attendees[0] if chat and chat.attendees else None
     return ConversationLeadResponse(
         has_lead=True,
         lead_id=lead.id,
@@ -543,13 +595,52 @@ async def quick_create_lead(
         company=lead.company,
         job_title=lead.job_title,
         linkedin_url=lead.linkedin_url,
+        email_corporate=lead.email_corporate,
+        email_personal=lead.email_personal,
+        emails=[LeadEmailSummary.model_validate(email) for email in lead.emails],
         status=lead.status,
         pending_tasks_count=0,
         attendee_name=first_att.name if first_att else None,
         attendee_profile_url=first_att.profile_url if first_att else None,
         attendee_profile_picture_url=first_att.profile_picture_url if first_att else None,
         attendee_id=first_att.id if first_att else None,
+        attendee_headline=first_att.headline if first_att else None,
+        attendee_company=first_att.company if first_att else None,
+        attendee_email=first_att.email if first_att else None,
     )
+
+
+def _classify_attendee_email(email: str) -> EmailType:
+    domain = email.rsplit("@", 1)[-1].lower().strip()
+    if not domain:
+        return EmailType.UNKNOWN
+    if domain in _PERSONAL_DOMAINS:
+        return EmailType.PERSONAL
+    return EmailType.CORPORATE
+
+
+def _pick_primary_website(websites: list[str] | None) -> str | None:
+    if not websites:
+        return None
+    for website in websites:
+        normalized = website.strip()
+        if normalized:
+            return normalized
+    return None
+
+
+def _extract_domain_from_website(website: str) -> str | None:
+    hostname = (urlparse(website).hostname or "").strip().lower()
+    if hostname.startswith("www."):
+        hostname = hostname[4:]
+    return hostname or None
+
+
+def _derive_company_name_from_domain(domain: str) -> str | None:
+    base = domain.split(".", 1)[0].strip().replace("-", " ").replace("_", " ")
+    if not base:
+        return None
+    return " ".join(part.capitalize() for part in base.split())
 
 
 @router.post("/conversations/{chat_id}/send-crm")
@@ -567,7 +658,10 @@ async def send_to_crm(
             detail="Pipedrive não configurado",
         )
 
-    pipedrive = PipedriveClient(settings)
+    pipedrive = PipedriveClient(
+        token=settings.PIPEDRIVE_API_TOKEN,
+        domain=settings.PIPEDRIVE_DOMAIN,
+    )
 
     chat = await unipile_client.get_chat(chat_id)
     if not chat or not chat.attendees:
@@ -580,7 +674,7 @@ async def send_to_crm(
     lead = await _find_lead_by_attendees(chat.attendees, tenant_id, db)
 
     name = lead.name if lead else (chat.attendees[0].name or "Contato LinkedIn")
-    email = (lead.email_corporate or lead.email_personal) if lead else None
+    email = preferred_lead_email(lead)
 
     person_id = await pipedrive.find_or_create_person(
         name=name,

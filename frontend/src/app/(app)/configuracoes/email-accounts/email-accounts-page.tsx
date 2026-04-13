@@ -12,6 +12,7 @@ import {
   Zap,
   Pencil,
   RefreshCw,
+  AlertTriangle,
 } from "lucide-react"
 import {
   useEmailAccounts,
@@ -29,7 +30,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -40,6 +40,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
+import { SettingsCallout, SettingsPageShell, SettingsPanel } from "@/components/settings/settings-shell"
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -67,10 +68,10 @@ function AccountCard({
   onEdit: (account: EmailAccount) => void
 }) {
   return (
-    <div className="flex items-center justify-between rounded-lg border border-(--border-default) bg-(--bg-surface) p-4">
+    <div className="flex items-center justify-between rounded-xl border border-(--border-default) bg-(--bg-surface) px-3.5 py-3.5">
       <div className="flex min-w-0 items-center gap-3">
         <div
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs ${
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs ${
             account.is_active
               ? "bg-(--brand-subtle) text-(--brand)"
               : "bg-(--bg-overlay) text-(--text-tertiary)"
@@ -83,12 +84,12 @@ function AccountCard({
             {account.display_name}
           </p>
           <p className="truncate text-xs text-(--text-secondary)">{account.email_address}</p>
-          <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-(--bg-overlay) px-2 py-0.5 text-xs text-(--text-tertiary)">
+          <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-(--bg-overlay) px-2 py-0.5 text-[11px] text-(--text-tertiary)">
             {PROVIDER_LABELS[account.provider_type]}
           </span>
         </div>
       </div>
-      <div className="ml-4 flex shrink-0 items-center gap-3">
+      <div className="ml-4 flex shrink-0 items-center gap-2.5">
         {account.is_active ? (
           <CheckCircle2 size={15} className="text-(--success)" />
         ) : (
@@ -589,8 +590,12 @@ function UnipileModal({ open, onClose }: { open: boolean; onClose: () => void })
 // ── Página principal ──────────────────────────────────────────────────
 
 export default function EmailAccountsPage() {
-  const { data, isLoading } = useEmailAccounts()
-  const { data: oauthUrl } = useGoogleOAuthUrl()
+  const { data, isLoading, isError, error } = useEmailAccounts()
+  const {
+    data: oauthUrl,
+    isError: oauthError,
+    error: oauthErrorDetails,
+  } = useGoogleOAuthUrl()
   const { mutate: deleteAccount } = useDeleteEmailAccount()
   const { mutate: updateAccount } = useUpdateEmailAccount()
 
@@ -610,62 +615,84 @@ export default function EmailAccountsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-6">
-      <div>
-        <h1 className="text-xl font-semibold text-(--text-primary)">E-mail Accounts</h1>
-        <p className="mt-1 text-sm text-(--text-secondary)">
-          Conecte contas de e-mail para envio de cold emails. Cada cadência pode usar uma conta
-          diferente.
-        </p>
-      </div>
-
-      {/* Contas */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between pb-3">
-          <div>
-            <CardTitle className="text-base">Contas conectadas</CardTitle>
-            <CardDescription>{accounts.length} conta(s)</CardDescription>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setUnipileOpen(true)}>
-              <Zap size={13} className="mr-1" />
-              Unipile
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setSmtpOpen(true)}>
-              <Server size={13} className="mr-1" />
-              SMTP
-            </Button>
-            {oauthUrl ? (
-              <Button variant="outline" size="sm" asChild>
-                <a href={oauthUrl} target="_blank" rel="noreferrer">
-                  <Mail size={13} className="mr-1" />
-                  Gmail OAuth
-                  <ExternalLink size={11} className="ml-1" />
-                </a>
-              </Button>
-            ) : (
-              <Button variant="outline" size="sm" disabled>
+    <SettingsPageShell
+      title="Contas de E-mail"
+      description="Conecte remetentes para cold email e distribua melhor o espaço entre lista, ações e orientação operacional."
+      width="wide"
+      actions={
+        <>
+          <Button variant="outline" size="sm" onClick={() => setUnipileOpen(true)}>
+            <Zap size={13} className="mr-1" />
+            Unipile
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setSmtpOpen(true)}>
+            <Server size={13} className="mr-1" />
+            SMTP
+          </Button>
+          {oauthUrl ? (
+            <Button variant="outline" size="sm" asChild>
+              <a href={oauthUrl} target="_blank" rel="noreferrer">
                 <Mail size={13} className="mr-1" />
                 Gmail OAuth
-              </Button>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent>
+                <ExternalLink size={11} className="ml-1" />
+              </a>
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled
+              title={oauthError ? "Falha ao obter URL OAuth" : undefined}
+            >
+              <Mail size={13} className="mr-1" />
+              Gmail OAuth
+            </Button>
+          )}
+        </>
+      }
+    >
+      {isError || oauthError ? (
+        <SettingsCallout
+          icon={<AlertTriangle size={16} aria-hidden="true" />}
+          title="Nem todas as configurações de e-mail puderam ser carregadas"
+          className="border-(--warning-subtle) bg-(--warning-subtle) text-(--warning-subtle-fg)"
+        >
+          {isError ? (
+            <p>{error instanceof Error ? error.message : "Falha ao carregar contas de e-mail."}</p>
+          ) : null}
+          {oauthError ? (
+            <p>
+              Gmail OAuth: {oauthErrorDetails instanceof Error ? oauthErrorDetails.message : "falha ao obter URL de autorização."}
+            </p>
+          ) : null}
+          <p>Confirme se a API do backend e as credenciais do Google estão acessíveis no ambiente atual.</p>
+        </SettingsCallout>
+      ) : null}
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_320px]">
+        <SettingsPanel
+          title="Contas conectadas"
+          description="Ative, desative ou edite cada remetente sem precisar abrir outra área."
+          headerAside={
+            <span className="rounded-full bg-(--bg-overlay) px-2.5 py-1 text-xs font-medium text-(--text-secondary)">
+              {accounts.length} conta(s)
+            </span>
+          }
+        >
           {isLoading ? (
             <div className="flex h-20 items-center justify-center">
               <Loader2 size={18} className="animate-spin text-(--text-tertiary)" />
             </div>
           ) : accounts.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 py-8 text-(--text-tertiary)">
+            <div className="flex flex-col items-center gap-2 py-8 text-center text-(--text-tertiary)">
               <Mail size={28} />
               <p className="text-sm">Nenhuma conta conectada ainda.</p>
               <p className="text-xs">
-                Use os botões acima para conectar via SMTP, Gmail OAuth ou Unipile.
+                Use os botões do topo para conectar via SMTP, Gmail OAuth ou Unipile.
               </p>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="grid gap-2.5">
               {accounts.map((acc) => (
                 <AccountCard
                   key={acc.id}
@@ -677,42 +704,55 @@ export default function EmailAccountsPage() {
               ))}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </SettingsPanel>
 
-      {/* Orientações */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Qual método usar?</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm text-(--text-secondary)">
-          <div className="flex gap-2">
-            <Zap size={15} className="mt-0.5 shrink-0 text-(--brand)" />
-            <p>
-              <strong className="text-(--text-primary)">Unipile:</strong> Melhor opção se você já
-              usa Unipile para LinkedIn. Conecta a mesma conta Gmail sem configuração extra.
+        <div className="space-y-4 lg:sticky lg:top-4 lg:self-start">
+          <SettingsPanel
+            title="Qual método usar?"
+            description="Escolha o tipo de conexão com base no seu fluxo atual."
+          >
+            <div className="space-y-3 text-sm text-(--text-secondary)">
+              <div className="flex gap-2.5">
+                <Zap size={15} className="mt-0.5 shrink-0 text-(--brand)" />
+                <p>
+                  <strong className="text-(--text-primary)">Unipile:</strong> melhor opção se você
+                  já usa Unipile para LinkedIn e quer reaproveitar a conta Gmail sem configuração
+                  extra.
+                </p>
+              </div>
+              <div className="flex gap-2.5">
+                <Mail size={15} className="mt-0.5 shrink-0 text-(--brand)" />
+                <p>
+                  <strong className="text-(--text-primary)">Gmail OAuth:</strong> conecta direto com
+                  o Google e tende a ser a rota mais simples para múltiplas contas Gmail.
+                </p>
+              </div>
+              <div className="flex gap-2.5">
+                <Server size={15} className="mt-0.5 shrink-0 text-(--brand)" />
+                <p>
+                  <strong className="text-(--text-primary)">SMTP:</strong> cobre Outlook, Yahoo,
+                  Zoho, Proton e outros provedores que exigem host, porta e credenciais próprias.
+                </p>
+              </div>
+            </div>
+          </SettingsPanel>
+
+          <SettingsPanel
+            title="Operação"
+            description="Mantenha apenas contas ativas e com limite coerente para evitar gargalos de entrega."
+          >
+            <p className="text-sm leading-6 text-(--text-secondary)">
+              Cada cadência pode selecionar uma conta diferente. Ative apenas os remetentes que de
+              fato estão prontos para envio e use a edição da conta para revisar assinatura e limite
+              diário.
             </p>
-          </div>
-          <div className="flex gap-2">
-            <Mail size={15} className="mt-0.5 shrink-0 text-(--brand)" />
-            <p>
-              <strong className="text-(--text-primary)">Gmail OAuth:</strong> Conecta diretamente
-              via OAuth do Google, sem intermediários. Ideal para múltiplas contas Gmail.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Server size={15} className="mt-0.5 shrink-0 text-(--brand)" />
-            <p>
-              <strong className="text-(--text-primary)">SMTP:</strong> Para qualquer provedor de
-              e-mail (Outlook, Yahoo, Zoho, Proton, etc.). Insira os dados do servidor SMTP.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+          </SettingsPanel>
+        </div>
+      </div>
 
       <SMTPModal open={smtpOpen} onClose={() => setSmtpOpen(false)} />
       <UnipileModal open={unipileOpen} onClose={() => setUnipileOpen(false)} />
       <AccountSettingsModal account={editingAccount} onClose={() => setEditingAccount(null)} />
-    </div>
+    </SettingsPageShell>
   )
 }

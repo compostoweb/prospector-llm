@@ -6,7 +6,7 @@ import { ConversationList } from "@/components/inbox/conversation-list"
 import { ChatPanel } from "@/components/inbox/chat-panel"
 import { ContactSidebar } from "@/components/inbox/contact-sidebar"
 import { EmptyState } from "@/components/shared/empty-state"
-import { MessageSquare } from "lucide-react"
+import { MessageSquare, AlertTriangle } from "lucide-react"
 
 export default function InboxPage() {
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null)
@@ -24,7 +24,7 @@ export default function InboxPage() {
     }, 350)
   }, [])
 
-  const { data, isLoading } = useConversations({ filter, search: debouncedSearch })
+  const { data, isLoading, isError } = useConversations({ filter, search: debouncedSearch })
   const syncMutation = useSyncInbox()
 
   const conversations = data?.items ?? []
@@ -46,7 +46,15 @@ export default function InboxPage() {
       />
 
       {/* Col 2: Chat */}
-      {selectedChatId ? (
+      {isError ? (
+        <div className="flex flex-1 items-center justify-center border-r border-(--border-default) bg-(--bg-page)">
+          <EmptyState
+            icon={AlertTriangle}
+            title="Inbox indisponível"
+            description="Não foi possível carregar as conversas. Verifique se a API do backend está acessível."
+          />
+        </div>
+      ) : selectedChatId ? (
         <ChatPanel
           chatId={selectedChatId}
           onToggleContact={() => setShowContact((v) => !v)}

@@ -252,103 +252,124 @@ export function PostListView({ posts, sortBy, onSortChange }: PostListViewProps)
       <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) overflow-hidden shadow-sm">
         {/* Header */}
         <TooltipProvider delayDuration={300}>
-        <div
-          className={cn(
-            "grid gap-2 px-4 py-2.5 border-b border-(--border-default) bg-(--bg-overlay) text-xs font-medium text-(--text-tertiary) uppercase tracking-wide items-center",
-            gridCols,
-          )}
-        >
-          <Checkbox
-            checked={allSelected ? true : someSelected ? "indeterminate" : false}
-            onCheckedChange={toggleAll}
-            aria-label="Selecionar todos"
-            className="ml-0.5"
-          />
-          <span>Post</span>
-          {/* Filtro de Status */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className={`flex items-center gap-1 text-xs font-medium uppercase tracking-wide hover:text-(--text-primary) transition-colors ${
-                  statusFilter !== "all" ? "text-(--accent)" : "text-(--text-tertiary)"
-                }`}
-              >
-                Status
-                <Filter className="h-3 w-3" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-36">
-              {[
-                { value: "all", label: "Todos" },
-                { value: "draft", label: "Rascunho" },
-                { value: "approved", label: "Aprovado" },
-                { value: "scheduled", label: "Agendado" },
-                { value: "published", label: "Publicado" },
-                { value: "failed", label: "Falhou" },
-              ].map((opt) => (
-                <DropdownMenuItem
-                  key={opt.value}
-                  onSelect={() => setStatusFilter(opt.value)}
-                  className={statusFilter === opt.value ? "font-medium text-(--accent)" : ""}
+          <div
+            className={cn(
+              "grid gap-2 px-4 py-2.5 border-b border-(--border-default) bg-(--accent) text-xs font-medium text-(--text-invert) uppercase tracking-wide items-center",
+              gridCols,
+            )}
+          >
+            <Checkbox
+              checked={allSelected ? true : someSelected ? "indeterminate" : false}
+              onCheckedChange={toggleAll}
+              aria-label="Selecionar todos"
+              className="ml-0.5"
+            />
+            <span>Post</span>
+            {/* Filtro de Status */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={`flex items-center gap-1 text-xs font-medium uppercase tracking-wide hover:text-amber-300 transition-colors ${
+                    statusFilter !== "all" ? "text-(--accent)" : "text-(--text-invert)"
+                  }`}
                 >
-                  {opt.label}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          {/* Filtro de Pilar */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className={`flex items-center gap-1 text-xs font-medium uppercase tracking-wide hover:text-(--text-primary) transition-colors ${
-                  pillarFilter !== "all" ? "text-(--accent)" : "text-(--text-tertiary)"
-                }`}
-              >
-                Pilar
-                <Filter className="h-3 w-3" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-36">
-              {[
-                { value: "all", label: "Todos" },
-                { value: "authority", label: "Autoridade" },
-                { value: "case", label: "Caso" },
-                { value: "vision", label: "Visão" },
-              ].map((opt) => (
-                <DropdownMenuItem
-                  key={opt.value}
-                  onSelect={() => setPillarFilter(opt.value)}
-                  className={pillarFilter === opt.value ? "font-medium text-(--accent)" : ""}
+                  Status
+                  <Filter className="h-3 w-3" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-36">
+                {[
+                  { value: "all", label: "Todos" },
+                  { value: "draft", label: "Rascunho" },
+                  { value: "approved", label: "Aprovado" },
+                  { value: "scheduled", label: "Agendado" },
+                  { value: "published", label: "Publicado" },
+                  { value: "failed", label: "Falhou" },
+                ].map((opt) => (
+                  <DropdownMenuItem
+                    key={opt.value}
+                    onSelect={() => setStatusFilter(opt.value)}
+                    className={statusFilter === opt.value ? "font-medium text-(--accent)" : ""}
+                  >
+                    {opt.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {/* Filtro de Pilar */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={`flex items-center gap-1 text-xs font-medium uppercase tracking-wide hover:text-amber-300 transition-colors ${
+                    pillarFilter !== "all" ? "text-(--accent)" : "text-(--text-invert)"
+                  }`}
                 >
-                  {opt.label}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <SortHeader
-            label="Impr."
-            sortKey="impressions"
-            currentSort={sortBy}
-            sortDir={sortDir}
-            onSort={handleSortChange}
-            tooltip="Ordena por alcance total de impressões"
-          />
-          <SortHeader label="Likes" sortKey="likes" currentSort={sortBy} sortDir={sortDir} onSort={handleSortChange} tooltip="Ordena por número de curtidas" />
-          <SortHeader label="Com." sortKey="comments" currentSort={sortBy} sortDir={sortDir} onSort={handleSortChange} tooltip="Ordena por número de comentários" />
-          <SortHeader label="Salv." sortKey="saves" currentSort={sortBy} sortDir={sortDir} onSort={handleSortChange} tooltip="Ordena por número de salvamentos" />
-          <SortHeader
-            label="Eng."
-            sortKey="engagement"
-            currentSort={sortBy}
-            sortDir={sortDir}
-            onSort={handleSortChange}
-            tooltip="Ordena por taxa de engajamento (likes+com.+salv.) / impressões"
-          />
-          <span />
-          <span className="text-center">Ações</span>
-        </div>
+                  Pilar
+                  <Filter className="h-3 w-3" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-36">
+                {[
+                  { value: "all", label: "Todos" },
+                  { value: "authority", label: "Autoridade" },
+                  { value: "case", label: "Caso" },
+                  { value: "vision", label: "Visão" },
+                ].map((opt) => (
+                  <DropdownMenuItem
+                    key={opt.value}
+                    onSelect={() => setPillarFilter(opt.value)}
+                    className={pillarFilter === opt.value ? "font-medium text-(--accent)" : ""}
+                  >
+                    {opt.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <SortHeader
+              label="Impre."
+              sortKey="impressions"
+              currentSort={sortBy}
+              sortDir={sortDir}
+              onSort={handleSortChange}
+              tooltip="Ordena por alcance total de impressões"
+            />
+            <SortHeader
+              label="Likes"
+              sortKey="likes"
+              currentSort={sortBy}
+              sortDir={sortDir}
+              onSort={handleSortChange}
+              tooltip="Ordena por número de curtidas"
+            />
+            <SortHeader
+              label="Coment."
+              sortKey="comments"
+              currentSort={sortBy}
+              sortDir={sortDir}
+              onSort={handleSortChange}
+              tooltip="Ordena por número de comentários"
+            />
+            <SortHeader
+              label="Salvos"
+              sortKey="saves"
+              currentSort={sortBy}
+              sortDir={sortDir}
+              onSort={handleSortChange}
+              tooltip="Ordena por número de salvamentos"
+            />
+            <SortHeader
+              label="Engaj."
+              sortKey="engagement"
+              currentSort={sortBy}
+              sortDir={sortDir}
+              onSort={handleSortChange}
+              tooltip="Ordena por taxa de engajamento (likes+com.+salv.) / impressões"
+            />
+            <span />
+            <span className="text-center">Ações</span>
+          </div>
         </TooltipProvider>
 
         {/* Rows */}
@@ -406,13 +427,31 @@ export function PostListView({ posts, sortBy, onSortChange }: PostListViewProps)
 }
 
 const DAY_LABELS: Record<number, { label: string; color: string }> = {
-  1: { label: "Segunda", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300" },
-  2: { label: "Terça", color: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300" },
-  3: { label: "Quarta", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" },
-  4: { label: "Quinta", color: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" },
+  1: {
+    label: "Segunda",
+    color: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+  },
+  2: {
+    label: "Terça",
+    color: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300",
+  },
+  3: {
+    label: "Quarta",
+    color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
+  },
+  4: {
+    label: "Quinta",
+    color: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+  },
   5: { label: "Sexta", color: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300" },
-  6: { label: "Sábado", color: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400" },
-  0: { label: "Domingo", color: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400" },
+  6: {
+    label: "Sábado",
+    color: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
+  },
+  0: {
+    label: "Domingo",
+    color: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
+  },
 }
 
 function DayOfWeekBadge({ dateStr }: { dateStr: string }) {
@@ -421,7 +460,9 @@ function DayOfWeekBadge({ dateStr }: { dateStr: string }) {
   const info = DAY_LABELS[dow]
   if (!info) return null
   return (
-    <span className={`inline-flex items-center rounded px-1 py-0.5 text-[10px] font-semibold leading-none ${info.color}`}>
+    <span
+      className={`inline-flex items-center rounded px-1 py-0.5 text-[10px] font-semibold leading-none ${info.color}`}
+    >
       {info.label}
     </span>
   )
@@ -452,7 +493,7 @@ function SortHeader({
             onClick={() => onSort(sortKey)}
             className={cn(
               "flex items-center gap-0.5 cursor-pointer transition-colors",
-              active ? "text-(--accent)" : "hover:text-(--text-secondary)",
+              active ? "text-(--accent)" : "hover:text-amber-300",
             )}
           >
             {label}
@@ -580,7 +621,10 @@ function PostRow({
             className="text-sm font-medium text-(--text-primary) truncate text-left cursor-pointer hover:text-(--accent) transition-colors"
           >
             {post.notion_page_id && (
-              <NotionLogo className="h-3.5 w-3.5 shrink-0 inline-block mr-1.5 align-middle" aria-label="Importado do Notion" />
+              <NotionLogo
+                className="h-3.5 w-3.5 shrink-0 inline-block mr-1.5 align-middle"
+                aria-label="Importado do Notion"
+              />
             )}
             {post.title}
           </button>

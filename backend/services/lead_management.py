@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable
+from typing import Any, TypedDict
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -11,14 +12,21 @@ from sqlalchemy.orm import selectinload
 from models.cadence_step import CadenceStep
 from models.content_calculator_result import ContentCalculatorResult
 from models.content_lm_lead import ContentLMLead
-from models.enums import LeadSource, LeadStatus
+from models.enums import EmailType, LeadSource, LeadStatus
 from models.interaction import Interaction
 from models.lead import Lead
+from models.lead_email import LeadEmail
 from models.lead_list import LeadList, lead_list_members
 from models.lead_tag import LeadTag
 from models.manual_task import ManualTask
 from models.sandbox import SandboxStep
-from schemas.lead import LeadGeneratedPreviewItem, LeadListSummary, LeadResponse
+from schemas.lead import (
+    LeadEmailInput,
+    LeadEmailResponse,
+    LeadGeneratedPreviewItem,
+    LeadListSummary,
+    LeadResponse,
+)
 
 STATUS_RANK: dict[LeadStatus, int] = {
     LeadStatus.ARCHIVED: 0,
@@ -29,9 +37,21 @@ STATUS_RANK: dict[LeadStatus, int] = {
 }
 
 
+class LeadEmailSpec(TypedDict):
+    email: str
+    email_type: EmailType
+    source: str | None
+    verified: bool
+    is_primary: bool
+
+
 def infer_lead_origin(lead: Lead) -> tuple[str, str, str | None]:
     note_detail = _extract_origin_note(lead.notes)
-    sources = {lead.email_corporate_source, lead.email_personal_source}
+    sources = {
+        lead.email_corporate_source,
+        lead.email_personal_source,
+        *(email.source for email in lead.emails or []),
+    }
 
     if "lead_magnet" in sources or _note_mentions(lead.notes, "Origem inbound:"):
         return "lead_magnet", "Lead magnet do Content Hub", note_detail
@@ -59,7 +79,12 @@ def serialize_lead(lead: Lead) -> LeadResponse:
     base = LeadResponse.model_validate(lead).model_dump()
     origin_key, origin_label, origin_detail = infer_lead_origin(lead)
     lead_lists = lead.lists or []
+    lead_emails = sorted(
+        lead.emails or [],
+        key=lambda item: (not item.is_primary, item.email_type.value, item.email),
+    )
     base["lead_lists"] = [LeadListSummary(id=ll.id, name=ll.name) for ll in lead_lists]
+    base["emails"] = [LeadEmailResponse.model_validate(email) for email in lead_emails]
     base["origin_key"] = origin_key
     base["origin_label"] = origin_label
     base["origin_detail"] = origin_detail
@@ -74,7 +99,7 @@ async def get_lead_with_lists(
     result = await db.execute(
         select(Lead)
         .where(Lead.id == lead_id, Lead.tenant_id == tenant_id)
-        .options(selectinload(Lead.lists))  # type: ignore[arg-type]
+        .options(selectinload(Lead.lists), selectinload(Lead.emails))  # type: ignore[arg-type]
     )
     return result.scalar_one_or_none()
 
@@ -98,12 +123,147 @@ async def find_existing_lead(
         result = await db.execute(
             select(Lead)
             .where(getattr(Lead, field_name) == value, Lead.tenant_id == tenant_id)
-            .options(selectinload(Lead.lists))  # type: ignore[arg-type]
+            .options(selectinload(Lead.lists), selectinload(Lead.emails))  # type: ignore[arg-type]
             .limit(1)
         )
         lead = result.scalar_one_or_none()
         if lead is not None:
             return lead
+
+    email_values = [value.strip().lower() for _, value in lookups if value and "@" in value]
+    for email in dict.fromkeys(email_values):
+        result = await db.execute(
+            select(Lead)
+            .join(LeadEmail, LeadEmail.lead_id == Lead.id)
+            .where(
+                Lead.tenant_id == tenant_id,
+                LeadEmail.email == email,
+            )
+            .options(selectinload(Lead.lists), selectinload(Lead.emails))  # type: ignore[arg-type]
+            .limit(1)
+        )
+        lead = result.scalar_one_or_none()
+        if lead is not None:
+            return lead
+    return None
+
+
+def lead_email_specs_from_lead(lead: Lead) -> list[LeadEmailSpec]:
+    if lead.emails:
+        return [
+            {
+                "email": email.email,
+                "email_type": email.email_type,
+                "source": email.source,
+                "verified": email.verified,
+                "is_primary": email.is_primary,
+            }
+            for email in lead.emails
+        ]
+
+    return build_lead_email_specs(
+        email_corporate=lead.email_corporate,
+        email_corporate_source=lead.email_corporate_source,
+        email_corporate_verified=lead.email_corporate_verified,
+        email_personal=lead.email_personal,
+        email_personal_source=lead.email_personal_source,
+    )
+
+
+def additional_lead_email_specs(lead: Lead) -> list[LeadEmailSpec]:
+    return [spec for spec in lead_email_specs_from_lead(lead) if not spec["is_primary"]]
+
+
+def build_lead_email_specs(
+    *,
+    email_corporate: str | None = None,
+    email_corporate_source: str | None = None,
+    email_corporate_verified: bool = False,
+    email_personal: str | None = None,
+    email_personal_source: str | None = None,
+    extra_emails: Iterable[LeadEmailInput | LeadEmailSpec | LeadEmail] | None = None,
+) -> list[LeadEmailSpec]:
+    specs: list[LeadEmailSpec] = []
+
+    corporate_email = _normalize_email(email_corporate)
+    if corporate_email:
+        specs.append(
+            {
+                "email": corporate_email,
+                "email_type": EmailType.CORPORATE,
+                "source": email_corporate_source,
+                "verified": email_corporate_verified,
+                "is_primary": True,
+            }
+        )
+
+    personal_email = _normalize_email(email_personal)
+    if personal_email:
+        specs.append(
+            {
+                "email": personal_email,
+                "email_type": EmailType.PERSONAL,
+                "source": email_personal_source,
+                "verified": False,
+                "is_primary": True,
+            }
+        )
+
+    for item in extra_emails or []:
+        email = _normalize_email(_email_attr(item, "email"))
+        if not email:
+            continue
+        specs.append(
+            {
+                "email": email,
+                "email_type": _email_type_attr(item),
+                "source": _email_attr(item, "source"),
+                "verified": bool(_email_attr(item, "verified", False)),
+                "is_primary": bool(_email_attr(item, "is_primary", False)),
+            }
+        )
+
+    return _dedupe_email_specs(specs)
+
+
+async def replace_lead_email_records(
+    db: AsyncSession,
+    *,
+    lead: Lead,
+    specs: Iterable[LeadEmailSpec],
+) -> None:
+    normalized_specs = _dedupe_email_specs(list(specs))
+    _sync_primary_email_fields(lead, normalized_specs)
+
+    await db.execute(delete(LeadEmail).where(LeadEmail.lead_id == lead.id))
+
+    new_records: list[LeadEmail] = []
+    for spec in normalized_specs:
+        record = LeadEmail(
+            tenant_id=lead.tenant_id,
+            lead_id=lead.id,
+            email=spec["email"],
+            email_type=spec["email_type"],
+            source=spec["source"],
+            verified=spec["verified"],
+            is_primary=spec["is_primary"],
+        )
+        db.add(record)
+        new_records.append(record)
+
+    lead.emails = new_records
+
+
+def preferred_lead_email(lead: Lead | None) -> str | None:
+    if lead is None:
+        return None
+    if lead.email_corporate:
+        return lead.email_corporate
+    if lead.email_personal:
+        return lead.email_personal
+    for email in lead.emails or []:
+        if email.email:
+            return email.email
     return None
 
 
@@ -156,7 +316,7 @@ async def merge_leads(
     result = await db.execute(
         select(Lead)
         .where(Lead.tenant_id == tenant_id, Lead.id.in_(target_ids))
-        .options(selectinload(Lead.lists))  # type: ignore[arg-type]
+        .options(selectinload(Lead.lists), selectinload(Lead.emails))  # type: ignore[arg-type]
     )
     leads = result.scalars().all()
     lead_map = {lead.id: lead for lead in leads}
@@ -165,6 +325,8 @@ async def merge_leads(
 
     for secondary in secondary_leads:
         _merge_lead_fields(primary, secondary)
+
+    _merge_lead_email_records(primary, secondary_leads)
 
     await _merge_memberships(db, primary.id, secondary_leads)
     await _merge_tags(db, tenant_id, primary.id, secondary_ids)
@@ -384,6 +546,30 @@ def _merge_lead_fields(primary: Lead, secondary: Lead) -> None:
     primary.notes = _merge_notes(primary.notes, secondary.notes)
 
 
+def _merge_lead_email_records(primary: Lead, secondary_leads: list[Lead]) -> None:
+    existing = {email.email.casefold(): email for email in primary.emails or []}
+
+    for secondary in secondary_leads:
+        for email in secondary.emails or []:
+            key = email.email.casefold()
+            current = existing.get(key)
+            if current is None:
+                email.lead_id = primary.id
+                email.tenant_id = primary.tenant_id
+                existing[key] = email
+                continue
+
+            current.verified = current.verified or email.verified
+            if current.source in (None, "") and email.source:
+                current.source = email.source
+            if current.email_type == EmailType.UNKNOWN and email.email_type != EmailType.UNKNOWN:
+                current.email_type = email.email_type
+            if email.is_primary and email.email_type == current.email_type:
+                current.is_primary = True
+
+    _sync_primary_email_fields(primary, lead_email_specs_from_lead(primary))
+
+
 def _candidate_email_source(source: str) -> str:
     if source == "b2b_database":
         return "apify_b2b_database"
@@ -426,3 +612,98 @@ def _extract_origin_note(notes: str | None) -> str | None:
 
 def _note_mentions(notes: str | None, text: str) -> bool:
     return bool(notes and text.lower() in notes.lower())
+
+
+def _normalize_email(value: str | None) -> str | None:
+    normalized = (value or "").strip().lower()
+    return normalized or None
+
+
+def _email_attr(
+    item: LeadEmailInput | LeadEmailSpec | LeadEmail, field: str, default: Any = None
+) -> Any:
+    if isinstance(item, dict):
+        return item.get(field, default)
+    return getattr(item, field, default)
+
+
+def _email_type_attr(item: LeadEmailInput | LeadEmailSpec | LeadEmail) -> EmailType:
+    raw = _email_attr(item, "email_type", EmailType.UNKNOWN)
+    if isinstance(raw, EmailType):
+        return raw
+    try:
+        return EmailType(str(raw))
+    except ValueError:
+        return EmailType.UNKNOWN
+
+
+def _dedupe_email_specs(specs: list[LeadEmailSpec]) -> list[LeadEmailSpec]:
+    merged: dict[str, LeadEmailSpec] = {}
+
+    for spec in specs:
+        email = _normalize_email(spec.get("email"))
+        if not email:
+            continue
+        normalized_spec: LeadEmailSpec = {
+            "email": email,
+            "email_type": spec.get("email_type", EmailType.UNKNOWN),
+            "source": spec.get("source"),
+            "verified": bool(spec.get("verified", False)),
+            "is_primary": bool(spec.get("is_primary", False)),
+        }
+
+        current = merged.get(email)
+        if current is None:
+            merged[email] = normalized_spec
+            continue
+
+        current["verified"] = current["verified"] or normalized_spec["verified"]
+        current["is_primary"] = current["is_primary"] or normalized_spec["is_primary"]
+        if current["source"] in (None, "") and normalized_spec["source"]:
+            current["source"] = normalized_spec["source"]
+        if (
+            current["email_type"] == EmailType.UNKNOWN
+            and normalized_spec["email_type"] != EmailType.UNKNOWN
+        ):
+            current["email_type"] = normalized_spec["email_type"]
+        if normalized_spec["is_primary"] and normalized_spec["email_type"] != EmailType.UNKNOWN:
+            current["email_type"] = normalized_spec["email_type"]
+
+    deduped = list(merged.values())
+    for email_type in (EmailType.CORPORATE, EmailType.PERSONAL):
+        typed_specs = [spec for spec in deduped if spec["email_type"] == email_type]
+        primary_seen = False
+        for spec in typed_specs:
+            if spec["is_primary"] and not primary_seen:
+                primary_seen = True
+                continue
+            if spec["is_primary"] and primary_seen:
+                spec["is_primary"] = False
+        if not primary_seen and typed_specs:
+            typed_specs[0]["is_primary"] = True
+
+    return sorted(
+        deduped,
+        key=lambda spec: (not spec["is_primary"], spec["email_type"].value, spec["email"]),
+    )
+
+
+def _sync_primary_email_fields(lead: Lead, specs: list[LeadEmailSpec]) -> None:
+    corporate_primary = next(
+        (
+            spec
+            for spec in specs
+            if spec["email_type"] == EmailType.CORPORATE and spec["is_primary"]
+        ),
+        None,
+    )
+    personal_primary = next(
+        (spec for spec in specs if spec["email_type"] == EmailType.PERSONAL and spec["is_primary"]),
+        None,
+    )
+
+    lead.email_corporate = corporate_primary["email"] if corporate_primary else None
+    lead.email_corporate_source = corporate_primary["source"] if corporate_primary else None
+    lead.email_corporate_verified = corporate_primary["verified"] if corporate_primary else False
+    lead.email_personal = personal_primary["email"] if personal_primary else None
+    lead.email_personal_source = personal_primary["source"] if personal_primary else None

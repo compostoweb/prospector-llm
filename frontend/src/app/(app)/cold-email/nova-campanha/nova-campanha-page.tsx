@@ -16,6 +16,7 @@ import {
   Loader2,
   MailCheck,
   Calendar,
+  AlertTriangle,
 } from "lucide-react"
 import {
   useCreateCadence,
@@ -449,14 +450,45 @@ function StepAudiencia({
   usePersonalFallback: boolean
   setUsePersonalFallback(v: boolean): void
 }) {
-  const { data: lists } = useLeadLists()
+  const {
+    data: lists,
+    isLoading: listsLoading,
+    isError: listsError,
+    error: listsErrorDetails,
+  } = useLeadLists()
   const { data: listDetail } = useLeadList(leadListId)
-  const { data: emailAccountsData } = useEmailAccounts()
+  const {
+    data: emailAccountsData,
+    isLoading: emailAccountsLoading,
+    isError: emailAccountsError,
+    error: emailAccountsErrorDetails,
+  } = useEmailAccounts()
   const accounts = (emailAccountsData?.accounts ?? []).filter((a) => a.is_active)
   const selectedAccount = accounts.find((a) => a.id === emailAccountId)
+  const audienceLoadFailed = listsError || emailAccountsError
 
   return (
     <div className="max-w-lg space-y-8">
+      {audienceLoadFailed ? (
+        <div className="flex items-start gap-3 rounded-lg border border-(--warning-subtle) bg-(--warning-subtle) px-4 py-3 text-sm text-(--warning-subtle-fg)">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <div className="space-y-1">
+            <p className="font-medium">Não foi possível carregar toda a audiência da campanha.</p>
+            {listsError ? (
+              <p>
+                Listas: {listsErrorDetails instanceof Error ? listsErrorDetails.message : "erro ao consultar listas de leads."}
+              </p>
+            ) : null}
+            {emailAccountsError ? (
+              <p>
+                Contas de e-mail: {emailAccountsErrorDetails instanceof Error ? emailAccountsErrorDetails.message : "erro ao consultar contas de envio."}
+              </p>
+            ) : null}
+            <p>Confirme se a API do backend está acessível antes de criar a campanha.</p>
+          </div>
+        </div>
+      ) : null}
+
       <div className="space-y-2">
         <Label htmlFor="lead-list">Lista de leads</Label>
         <select
@@ -500,6 +532,10 @@ function StepAudiencia({
             Você poderá inscrever leads depois, direto pela página da cadência criada.
           </p>
         )}
+
+        {listsLoading ? (
+          <p className="text-xs text-(--text-tertiary)">Carregando listas de leads…</p>
+        ) : null}
       </div>
 
       <div className="space-y-2">
@@ -532,6 +568,16 @@ function StepAudiencia({
             </span>
           </div>
         )}
+
+        {emailAccountsLoading ? (
+          <p className="text-xs text-(--text-tertiary)">Carregando contas de e-mail…</p>
+        ) : null}
+
+        {!emailAccountsLoading && !emailAccountsError && accounts.length === 0 ? (
+          <p className="text-xs text-(--warning-fg, var(--warning-subtle-fg))">
+            Nenhuma conta ativa foi encontrada. A campanha dependerá da conta padrão do sistema, se ela estiver configurada no backend.
+          </p>
+        ) : null}
       </div>
 
       <div className="flex items-start gap-3 rounded-lg border border-(--border-default) bg-(--bg-surface) p-4">
@@ -933,6 +979,18 @@ export default function NovaCampanhaPage() {
         <h1 className="mt-1 text-2xl font-bold text-(--text-primary)">{currentWizardStep.label}</h1>
         <p className="mt-1 text-sm text-(--text-secondary)">{currentSubtitle}</p>
       </div>
+
+      {tenantLoadFailed ? (
+        <div className="flex items-start gap-3 rounded-lg border border-(--warning-subtle) bg-(--warning-subtle) px-4 py-3 text-sm text-(--warning-subtle-fg)">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <div className="space-y-1">
+            <p className="font-medium">Não foi possível carregar a configuração de IA do tenant.</p>
+            <p>
+              Você ainda pode revisar a campanha, mas a criação ficará bloqueada até a API responder ou a configuração ser ajustada manualmente.
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       {/* Stepper */}
       <nav aria-label="Etapas do wizard">

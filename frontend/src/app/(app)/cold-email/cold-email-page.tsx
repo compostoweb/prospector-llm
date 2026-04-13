@@ -19,6 +19,7 @@ import {
   ExternalLink,
   FlaskConical,
   ChevronDown,
+  AlertTriangle,
 } from "lucide-react"
 import {
   LineChart,
@@ -39,7 +40,14 @@ import {
 import { useCadences } from "@/lib/api/hooks/use-cadences"
 import { useTenant, useUpdateIntegrations } from "@/lib/api/hooks/use-tenant"
 import { LLMConfigForm, type LLMConfig } from "@/components/cadencias/llm-config-form"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { useSession } from "next-auth/react"
@@ -128,20 +136,20 @@ function ColdEmailAIModal({ open, onClose }: { open: boolean; onClose: () => voi
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-3xl p-5 sm:p-6">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles size={16} className="text-(--accent)" />
             IA — Cold Email
           </DialogTitle>
-          <p className="text-xs text-(--text-secondary)">
+          <DialogDescription className="text-sm leading-6">
             Modelo padrão usado ao criar novas campanhas de e-mail.
-          </p>
+          </DialogDescription>
         </DialogHeader>
-        <div className="py-2">
-          <LLMConfigForm value={llmConfig} onChange={setLlmConfig} />
+        <div className="py-1">
+          <LLMConfigForm value={llmConfig} onChange={setLlmConfig} variant="dialog" />
         </div>
-        <div className="flex justify-end gap-2 pt-2">
+        <DialogFooter className="pt-1">
           <button
             type="button"
             onClick={onClose}
@@ -153,12 +161,12 @@ function ColdEmailAIModal({ open, onClose }: { open: boolean; onClose: () => voi
             type="button"
             onClick={handleSave}
             disabled={updateIntegrations.isPending}
-            className="flex items-center gap-1.5 rounded-md bg-(--accent) px-4 py-2 text-sm font-medium text-(--accent-fg) hover:opacity-90 disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-md bg-(--accent) px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
           >
             {updateIntegrations.isPending ? <Loader2 size={14} className="animate-spin" /> : null}
             Salvar configuração
           </button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )
@@ -333,10 +341,19 @@ function ABResultsSection({
 export default function ColdEmailPage() {
   const [days, setDays] = useState<Days>(30)
   const [aiModalOpen, setAiModalOpen] = useState(false)
-  const { data: stats, isLoading: loadingStats } = useEmailStats(days)
-  const { data: analyticsData, isLoading: loadingCadences } = useEmailCadences(days)
-  const { data: allEmailCadences, isLoading: loadingAllCadences } = useCadences("email_only")
-  const { data: overTime } = useEmailOverTime(days)
+  const { data: stats, isLoading: loadingStats, isError: statsError } = useEmailStats(days)
+  const {
+    data: analyticsData,
+    isLoading: loadingCadences,
+    isError: analyticsError,
+  } = useEmailCadences(days)
+  const {
+    data: allEmailCadences,
+    isLoading: loadingAllCadences,
+    isError: allCadencesError,
+  } = useCadences("email_only")
+  const { data: overTime, isError: overTimeError } = useEmailOverTime(days)
+  const hasColdEmailError = statsError || analyticsError || allCadencesError || overTimeError
 
   // Merge: show all email_only cadences, with analytics when available
   const analyticsMap = new Map((analyticsData ?? []).map((c) => [c.cadence_id, c]))
@@ -394,6 +411,18 @@ export default function ColdEmailPage() {
       </div>
 
       <ColdEmailAIModal open={aiModalOpen} onClose={() => setAiModalOpen(false)} />
+
+      {hasColdEmailError ? (
+        <div className="flex items-start gap-3 rounded-lg border border-(--warning) bg-(--warning-subtle) px-4 py-3 text-sm text-(--warning-subtle-fg)">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <div>
+            <p className="font-medium">Não foi possível carregar toda a área de Cold Email.</p>
+            <p className="mt-1 text-(--text-secondary)">
+              Verifique se a API do backend está acessível antes de revisar métricas e campanhas.
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex gap-1 rounded-md border border-(--border-default) bg-(--bg-overlay) p-1 w-fit">
         {([7, 30, 90] as Days[]).map((d) => (

@@ -31,6 +31,7 @@ export interface Lead {
   email_corporate_verified: boolean
   email_personal: string | null
   email_personal_source: string | null
+  emails: LeadEmail[]
   phone: string | null
   enriched_at: string | null
   notes: string | null
@@ -41,6 +42,17 @@ export interface Lead {
   origin_key: string
   origin_label: string
   origin_detail: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface LeadEmail {
+  id: string
+  email: string
+  email_type: "corporate" | "personal" | "unknown"
+  source: string | null
+  verified: boolean
+  is_primary: boolean
   created_at: string
   updated_at: string
 }
@@ -83,6 +95,13 @@ export interface CreateLeadBody {
   phone?: string | null
   email_corporate?: string | null
   email_personal?: string | null
+  emails?: Array<{
+    email: string
+    email_type?: "corporate" | "personal" | "unknown"
+    source?: string | null
+    verified?: boolean
+    is_primary?: boolean
+  }>
   notes?: string | null
 }
 
@@ -179,8 +198,12 @@ export interface LeadListParams {
   page?: number
   page_size?: number
   status?: string
+  source?: string
   cadence_id?: string
+  list_id?: string
+  segment?: string
   search?: string
+  min_score?: number
   score_min?: number
   score_max?: number
 }
@@ -206,9 +229,13 @@ export function useLeads(params: LeadListParams = {}) {
       if (params.page) searchParams.set("page", String(params.page))
       if (params.page_size) searchParams.set("page_size", String(params.page_size))
       if (params.status) searchParams.set("status", params.status)
+      if (params.source) searchParams.set("source", params.source)
       if (params.cadence_id) searchParams.set("cadence_id", params.cadence_id)
+      if (params.list_id) searchParams.set("list_id", params.list_id)
+      if (params.segment) searchParams.set("segment", params.segment)
       if (params.search) searchParams.set("search", params.search)
-      if (params.score_min != null) searchParams.set("score_min", String(params.score_min))
+      const minScore = params.min_score ?? params.score_min
+      if (minScore != null) searchParams.set("min_score", String(minScore))
       if (params.score_max != null) searchParams.set("score_max", String(params.score_max))
 
       const url = `/leads?${searchParams.toString()}` as never
@@ -394,6 +421,24 @@ export function useEnrollLead() {
       void queryClient.invalidateQueries({
         queryKey: ["leads", vars.leadId, "steps"],
       })
+      void queryClient.invalidateQueries({ queryKey: ["leads"] })
+    },
+  })
+}
+
+export function useEnrichLead() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (leadId: string): Promise<{ status: string; lead_id: string }> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.POST(`/leads/${leadId}/enrich` as never)
+      if (error) throw new Error("Falha ao iniciar enriquecimento")
+      return data as { status: string; lead_id: string }
+    },
+    onSuccess: (_data, leadId) => {
+      void queryClient.invalidateQueries({ queryKey: ["leads", leadId] })
       void queryClient.invalidateQueries({ queryKey: ["leads"] })
     },
   })

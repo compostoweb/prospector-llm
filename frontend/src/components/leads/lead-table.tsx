@@ -1,13 +1,14 @@
 ﻿"use client"
 
 import Link from "next/link"
-import { Archive, Mail, Phone, Users } from "lucide-react"
-import { useArchiveLead, type Lead } from "@/lib/api/hooks/use-leads"
+import { Archive, Mail, Phone, Sparkles, Users } from "lucide-react"
+import { toast } from "sonner"
+import { useArchiveLead, useEnrichLead, type Lead } from "@/lib/api/hooks/use-leads"
 import { Button } from "@/components/ui/button"
 import { LeadEditDialog } from "@/components/leads/lead-edit-dialog"
 import { LeadDeleteDialog } from "@/components/leads/lead-delete-dialog"
 import { Checkbox } from "@/components/ui/checkbox"
-import { truncate } from "@/lib/utils"
+import { leadSourceLabel, truncate } from "@/lib/utils"
 import { LeadScore } from "@/components/leads/lead-score"
 import { EmptyState } from "@/components/shared/empty-state"
 
@@ -45,7 +46,19 @@ export function LeadTable({
   onLeadDeleted,
 }: LeadTableProps) {
   const archiveLead = useArchiveLead()
+  const enrichLead = useEnrichLead()
   const allSelected = leads.length > 0 && selectedLeadIds.length === leads.length
+
+  function handleEnrich(leadId: string) {
+    enrichLead.mutate(leadId, {
+      onSuccess: () => {
+        toast.success("Enriquecimento iniciado")
+      },
+      onError: (error) => {
+        toast.error(error instanceof Error ? error.message : "Falha ao iniciar enriquecimento")
+      },
+    })
+  }
 
   if (isLoading) {
     return (
@@ -71,38 +84,39 @@ export function LeadTable({
     <div className="overflow-x-auto rounded-lg border border-(--border-default) bg-(--bg-surface) shadow-(--shadow-sm)">
       <table className="w-full min-w-7xl text-sm">
         <thead>
-          <tr className="border-b border-(--border-default) bg-(--bg-overlay)">
+          <tr className="border-b border-(--accent) bg-(--accent)">
             <th className="px-4 py-3 text-left">
               <Checkbox
                 checked={allSelected}
                 onCheckedChange={(checked) => onToggleAll?.(checked === true)}
+                className="border-white/70 hover:border-amber-300"
               />
             </th>
-            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
+            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-invert)">
               Lead
             </th>
-            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
+            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-invert)">
               Empresa
             </th>
-            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
+            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-invert)">
               Contato
             </th>
-            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
+            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-invert)">
               Origem
             </th>
-            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
+            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-invert)">
               Listas
             </th>
-            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
+            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-invert)">
               Status
             </th>
-            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
+            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-invert)">
               Segmento
             </th>
-            <th className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
+            <th className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-(--text-invert)">
               Score
             </th>
-            <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-(--text-tertiary)">
+            <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-(--text-invert)">
               Ações
             </th>
           </tr>
@@ -114,6 +128,7 @@ export function LeadTable({
                 <Checkbox
                   checked={selectedLeadIds.includes(lead.id)}
                   onCheckedChange={(checked) => onToggleLead?.(lead.id, checked === true)}
+                  className="border-black/50 hover:border-amber-500"
                 />
               </td>
               <td className="px-4 py-3">
@@ -149,7 +164,7 @@ export function LeadTable({
               <td className="px-4 py-3">
                 <div className="space-y-1">
                   <span className="inline-flex rounded-(--radius-full) bg-(--bg-overlay) px-2 py-0.5 text-xs font-medium text-(--text-secondary)">
-                    {lead.origin_label}
+                    {lead.origin_label || leadSourceLabel(lead.source)}
                   </span>
                   {lead.origin_detail && (
                     <p className="max-w-44 text-[11px] text-(--text-tertiary)">
@@ -201,6 +216,21 @@ export function LeadTable({
               <td className="px-4 py-3">
                 <div className="flex items-center justify-end gap-2">
                   <LeadEditDialog lead={lead} iconOnly variant="ghost" />
+                  {lead.status !== "archived" && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 gap-1.5 text-(--text-secondary) hover:text-(--accent)"
+                      onClick={() => handleEnrich(lead.id)}
+                      disabled={enrichLead.isPending}
+                      aria-label="Enriquecer lead"
+                      title="Enriquecer lead"
+                    >
+                      <Sparkles size={14} aria-hidden="true" />
+                      <span>Enriquecer</span>
+                    </Button>
+                  )}
                   {lead.status !== "archived" && (
                     <Button
                       type="button"

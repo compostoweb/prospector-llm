@@ -25,6 +25,7 @@ export interface LLMConfig {
 interface LLMConfigFormProps {
   value: LLMConfig
   onChange: (config: LLMConfig) => void
+  variant?: "default" | "dialog"
 }
 
 const PROVIDER_OPTIONS: LLMConfig["llm_provider"][] = [
@@ -41,9 +42,10 @@ const PROVIDER_LABELS: Record<LLMConfig["llm_provider"], string> = {
   openrouter: "OpenRouter",
 }
 
-export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
+export function LLMConfigForm({ value, onChange, variant = "default" }: LLMConfigFormProps) {
   const { data, isLoading } = useLLMModels()
   const [open, setOpen] = useState(false)
+  const isDialog = variant === "dialog"
 
   const configuredProviders = new Set(
     PROVIDER_OPTIONS.filter((provider) => (data?.providers ?? ([] as string[])).includes(provider)),
@@ -61,17 +63,34 @@ export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
   }
 
   return (
-    <div className="space-y-4 rounded-md border border-(--border-default) bg-(--bg-overlay) p-4">
+    <div
+      className={cn(
+        "rounded-xl border border-(--border-default) bg-(--bg-overlay)",
+        isDialog ? "space-y-4 p-4 sm:p-5" : "space-y-5 p-5",
+      )}
+    >
       <p className="text-xs font-semibold uppercase tracking-wider text-(--text-tertiary)">
         Configuração LLM
       </p>
 
       {/* Provider + Modelo */}
-      <div className="grid grid-cols-2 gap-3">
+      <div
+        className={cn(
+          "grid gap-4",
+          isDialog ? "lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,1fr)]" : "xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,1fr)]",
+        )}
+      >
         {/* Provider */}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-(--text-secondary)">Provider</label>
-          <div className="flex gap-2">
+        <div className="space-y-2">
+          <label className="block text-xs font-medium text-(--text-secondary)">Provider</label>
+          <div
+            className={cn(
+              "grid gap-2",
+              isDialog
+                ? "grid-cols-2"
+                : "grid-cols-2 sm:grid-cols-4 xl:grid-cols-2 2xl:grid-cols-4",
+            )}
+          >
             {PROVIDER_OPTIONS.map((p) => (
               <button
                 key={p}
@@ -79,7 +98,8 @@ export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
                 onClick={() => update("llm_provider", p)}
                 disabled={configuredProviders.size > 0 && !configuredProviders.has(p)}
                 className={cn(
-                  "flex-1 rounded-md border py-2 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                  "min-h-10 rounded-md border px-3 py-2 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                  isDialog && "text-sm",
                   value.llm_provider === p
                     ? "border-(--accent) bg-(--accent) text-white"
                     : "border-(--border-default) bg-(--bg-surface) text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--bg-overlay)",
@@ -92,8 +112,8 @@ export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
         </div>
 
         {/* Modelo — Combobox com busca */}
-        <div>
-          <Label className="mb-1 block text-xs">Modelo</Label>
+        <div className="space-y-2">
+          <Label className="block text-xs">Modelo</Label>
           <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
               <button
@@ -101,8 +121,9 @@ export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
                 title="Selecionar modelo"
                 disabled={isLoading || currentProviderModels.length === 0}
                 className={cn(
-                  "flex h-8 w-full items-center justify-between rounded-md border border-(--border-default)",
-                  "bg-(--bg-surface) px-3 text-xs text-(--text-primary) transition-colors",
+                  "flex h-10 w-full items-center justify-between rounded-md border border-(--border-default)",
+                  "bg-(--bg-surface) px-3 text-left text-xs text-(--text-primary) transition-colors",
+                  isDialog && "text-sm",
                   "hover:bg-(--bg-overlay) disabled:cursor-not-allowed disabled:opacity-50",
                   "focus:outline-none focus:ring-2 focus:ring-(--accent)",
                 )}
@@ -115,7 +136,7 @@ export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
                 <ChevronsUpDown size={12} className="ml-1 shrink-0 text-(--text-disabled)" />
               </button>
             </PopoverTrigger>
-            <PopoverContent className="w-72 p-0">
+            <PopoverContent className={cn("p-0", isDialog ? "w-[min(36rem,calc(100vw-4rem))]" : "w-72")}>
               <Command>
                 <CommandInput placeholder="Buscar modelo…" />
                 <CommandList>
@@ -148,8 +169,8 @@ export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
       </div>
 
       {/* Temperature */}
-      <div>
-        <div className="mb-1 flex items-center justify-between">
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
           <Label className="text-xs">Temperature</Label>
           <span className="text-xs tabular-nums text-(--text-tertiary)">
             {value.llm_temperature.toFixed(1)}
@@ -165,15 +186,15 @@ export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
           onChange={(e) => update("llm_temperature", Number(e.target.value))}
           className="w-full accent-(--accent)"
         />
-        <div className="mt-0.5 flex justify-between text-[10px] text-(--text-disabled)">
+        <div className="flex justify-between text-[10px] text-(--text-disabled)">
           <span>Preciso</span>
           <span>Criativo</span>
         </div>
       </div>
 
       {/* Max tokens */}
-      <div>
-        <Label className="mb-1 block text-xs">Máx. tokens de saída</Label>
+      <div className="space-y-2">
+        <Label className="block text-xs">Máx. tokens de saída</Label>
         <Input
           type="number"
           min={64}
@@ -181,9 +202,9 @@ export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
           step={64}
           value={value.llm_max_tokens}
           onChange={(e) => update("llm_max_tokens", Number(e.target.value))}
-          className="h-8 text-xs"
+          className={cn("h-10 text-sm", isDialog && "text-base")}
         />
-        <p className="mt-1.5 text-[10px] text-(--text-disabled) leading-snug">
+        <p className="text-[10px] leading-snug text-(--text-disabled)">
           ≈{" "}
           <span className="font-medium text-(--text-tertiary)">
             {Math.round(value.llm_max_tokens * 0.75).toLocaleString("pt-BR")}

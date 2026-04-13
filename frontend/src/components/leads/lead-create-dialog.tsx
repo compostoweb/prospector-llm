@@ -22,6 +22,8 @@ const empty: CreateLeadBody = {
   company: null,
   website: null,
   email_corporate: null,
+  email_personal: null,
+  emails: [],
   phone: null,
   segment: null,
   city: null,
@@ -32,6 +34,7 @@ const empty: CreateLeadBody = {
 export function LeadCreateDialog() {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<CreateLeadBody>({ ...empty })
+  const [additionalEmails, setAdditionalEmails] = useState("")
   const [enrich, setEnrich] = useState(true)
   const [selectedListId, setSelectedListId] = useState<string>("")
   const { mutate, isPending } = useCreateLead()
@@ -46,13 +49,24 @@ export function LeadCreateDialog() {
     e.preventDefault()
     if (!form.name.trim()) return
     mutate(
-      { body: form, enrich },
+      {
+        body: {
+          ...form,
+          emails: buildLeadEmailPayloads(
+            form.email_corporate ?? null,
+            form.email_personal ?? null,
+            additionalEmails,
+          ),
+        },
+        enrich,
+      },
       {
         onSuccess: (lead) => {
           if (selectedListId) {
             addToList({ listId: selectedListId, leadIds: [lead.id] })
           }
           setForm({ ...empty })
+          setAdditionalEmails("")
           setSelectedListId("")
           setOpen(false)
         },
@@ -126,6 +140,15 @@ export function LeadCreateDialog() {
               />
             </div>
             <div className="space-y-1.5">
+              <Label htmlFor="lead-email-personal">Email pessoal</Label>
+              <Input
+                id="lead-email-personal"
+                type="email"
+                value={form.email_personal ?? ""}
+                onChange={(e) => set("email_personal", e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
               <Label htmlFor="lead-phone">Telefone</Label>
               <Input
                 id="lead-phone"
@@ -149,6 +172,18 @@ export function LeadCreateDialog() {
                 onChange={(e) => set("city", e.target.value)}
               />
             </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="lead-additional-emails">Emails adicionais</Label>
+            <textarea
+              id="lead-additional-emails"
+              className="flex w-full rounded-md border border-(--border) bg-transparent px-3 py-2 text-sm placeholder:text-(--text-tertiary) focus:outline-none focus:ring-1 focus:ring-(--ring)"
+              rows={3}
+              value={additionalEmails}
+              onChange={(e) => setAdditionalEmails(e.target.value)}
+              placeholder="Um email por linha"
+            />
           </div>
 
           <div className="space-y-1.5">
@@ -215,4 +250,53 @@ export function LeadCreateDialog() {
       </DialogContent>
     </Dialog>
   )
+}
+
+function buildLeadEmailPayloads(
+  corporateEmail: string | null,
+  personalEmail: string | null,
+  additionalEmailsText: string,
+) {
+  const emails = new Map<
+    string,
+    {
+      email: string
+      email_type: "corporate" | "personal" | "unknown"
+      is_primary: boolean
+    }
+  >()
+
+  if (corporateEmail) {
+    const normalized = corporateEmail.trim().toLowerCase()
+    if (normalized) {
+      emails.set(normalized, {
+        email: normalized,
+        email_type: "corporate",
+        is_primary: true,
+      })
+    }
+  }
+
+  if (personalEmail) {
+    const normalized = personalEmail.trim().toLowerCase()
+    if (normalized) {
+      emails.set(normalized, {
+        email: normalized,
+        email_type: "personal",
+        is_primary: true,
+      })
+    }
+  }
+
+  for (const rawLine of additionalEmailsText.split(/\r?\n/)) {
+    const normalized = rawLine.trim().toLowerCase()
+    if (!normalized || emails.has(normalized)) continue
+    emails.set(normalized, {
+      email: normalized,
+      email_type: "unknown",
+      is_primary: false,
+    })
+  }
+
+  return Array.from(emails.values())
 }

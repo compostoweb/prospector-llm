@@ -22,8 +22,10 @@ import {
   Download,
   Play,
   SmilePlus,
+  AlertTriangle,
 } from "lucide-react"
 import Image from "next/image"
+import { EmptyState } from "@/components/shared/empty-state"
 
 interface ChatPanelProps {
   chatId: string
@@ -32,7 +34,7 @@ interface ChatPanelProps {
 }
 
 export function ChatPanel({ chatId, onToggleContact, showContact }: ChatPanelProps) {
-  const { data, isLoading } = useChatMessages(chatId)
+  const { data, isLoading, isError } = useChatMessages(chatId)
   const { data: convData } = useConversations()
   const sendMessage = useSendMessage()
   const suggestReply = useSuggestReply()
@@ -42,7 +44,9 @@ export function ChatPanel({ chatId, onToggleContact, showContact }: ChatPanelPro
   const [inputText, setInputText] = useState("")
   const [reactionMsgId, setReactionMsgId] = useState<string | null>(null)
 
-  const messages = data?.items ?? []
+  const messages = [...(data?.items ?? [])].sort(
+    (left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime(),
+  )
 
   // Get attendee info for avatar
   const conversation = convData?.items?.find((c) => c.chat_id === chatId)
@@ -121,6 +125,15 @@ export function ChatPanel({ chatId, onToggleContact, showContact }: ChatPanelPro
         {isLoading ? (
           <div className="flex h-full items-center justify-center">
             <Loader2 size={24} className="animate-spin text-(--text-tertiary)" />
+          </div>
+        ) : isError ? (
+          <div className="flex h-full items-center justify-center">
+            <EmptyState
+              icon={AlertTriangle}
+              title="Mensagens indisponíveis"
+              description="Não foi possível carregar esta conversa. Verifique se a API do backend está acessível."
+              className="max-w-md"
+            />
           </div>
         ) : messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2">

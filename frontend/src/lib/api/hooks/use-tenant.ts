@@ -35,6 +35,42 @@ export interface TenantIntegration {
   created_at: string
 }
 
+export interface UnipileWebhookStatus {
+  url: string
+  docs_url: string
+  dashboard_url: string
+  expected_events: string[]
+  secret_configured: boolean
+  public_endpoint_healthy: boolean
+  public_endpoint_status_code: number | null
+  linkedin_account_configured: boolean
+  gmail_account_configured: boolean
+  api_registration_supported: boolean
+  api_registration_ready: boolean
+  api_registration_blockers: string[]
+  registered_in_unipile: boolean
+  registered_webhook_id: string | null
+  registered_webhook_enabled: boolean | null
+  registered_webhook_source: string | null
+  registered_webhook_events: string[]
+  registration_lookup_error: string | null
+  supports_signature_auth: boolean
+  supports_custom_header_auth: boolean
+  auth_headers: Array<"X-Unipile-Signature" | "Unipile-Auth">
+  ready: boolean
+}
+
+export interface UnipileWebhookRegistrationResult {
+  created: boolean
+  already_exists: boolean
+  webhook_id: string | null
+  request_url: string
+  source: "messaging"
+  auth_header: "Unipile-Auth"
+  events: string[]
+  message: string
+}
+
 export interface Tenant {
   id: string
   name: string
@@ -90,6 +126,41 @@ export const DEFAULT_COLD_EMAIL_LLM_CONFIG: TenantLLMConfig = {
   llm_model: "gpt-4o-mini",
   llm_temperature: 0.7,
   llm_max_tokens: 512,
+}
+
+function extractApiErrorMessage(error: unknown, fallback: string): string {
+  if (!error || typeof error !== "object") {
+    return fallback
+  }
+
+  const detail = (error as { detail?: unknown }).detail
+  if (typeof detail === "string" && detail.trim()) {
+    return detail
+  }
+
+  if (Array.isArray(detail)) {
+    return (
+      detail
+        .map((entry) => {
+          if (typeof entry === "string") {
+            return entry.trim()
+          }
+          if (
+            entry &&
+            typeof entry === "object" &&
+            "msg" in entry &&
+            typeof entry.msg === "string"
+          ) {
+            return entry.msg.trim()
+          }
+          return ""
+        })
+        .filter(Boolean)
+        .join(" ") || fallback
+    )
+  }
+
+  return fallback
 }
 
 function normalizeProvider(
@@ -154,6 +225,23 @@ export function useTenant() {
   })
 }
 
+/** Status operacional do webhook da Unipile para o tenant atual */
+export function useUnipileWebhookStatus() {
+  const { data: session } = useSession()
+
+  return useQuery({
+    queryKey: ["tenant", "me", "unipile-webhook"],
+    queryFn: async (): Promise<UnipileWebhookStatus> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.GET("/tenants/me/unipile/webhook" as never)
+      if (error) throw new Error("Falha ao carregar status do webhook da Unipile")
+      return data as UnipileWebhookStatus
+    },
+    staleTime: 60 * 1000,
+    enabled: !!session?.accessToken,
+  })
+}
+
 /** Atualiza configurações de integração do tenant (PUT /tenants/me/integrations) */
 export function useUpdateIntegrations() {
   const { data: session } = useSession()
@@ -170,6 +258,26 @@ export function useUpdateIntegrations() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["tenant", "me"] })
+    },
+  })
+}
+
+/** Registra o webhook da Unipile via API usando a configuração atual do backend */
+export function useRegisterUnipileWebhook() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (): Promise<UnipileWebhookRegistrationResult> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.POST("/tenants/me/unipile/webhook/register" as never)
+      if (error) {
+        throw new Error(extractApiErrorMessage(error, "Falha ao registrar webhook da Unipile"))
+      }
+      return data as UnipileWebhookRegistrationResult
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["tenant", "me", "unipile-webhook"] })
     },
   })
 }
