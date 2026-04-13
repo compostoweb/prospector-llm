@@ -847,7 +847,7 @@ export default function NovaCadenciaPage() {
       mode: PRESETS.find((p) => p.id === presetId)?.mode ?? "automatic",
       cadence_type: cadenceType,
       llm: {
-        provider: effectiveLlmConfig.llm_provider as "openai" | "gemini",
+        provider: effectiveLlmConfig.llm_provider,
         model: effectiveLlmConfig.llm_model,
         temperature: effectiveLlmConfig.llm_temperature,
         max_tokens: effectiveLlmConfig.llm_max_tokens,

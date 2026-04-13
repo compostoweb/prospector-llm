@@ -9,7 +9,7 @@ import { createBrowserClient } from "@/lib/api/client"
 export interface ModelInfo {
   id: string
   name: string
-  provider: "openai" | "gemini"
+  provider: "openai" | "gemini" | "anthropic" | "openrouter"
   context_window: number
   input_cost_per_mtok: number
   output_cost_per_mtok: number

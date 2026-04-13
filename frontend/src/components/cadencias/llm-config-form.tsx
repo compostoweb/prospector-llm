@@ -16,7 +16,7 @@ import { Check, ChevronsUpDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export interface LLMConfig {
-  llm_provider: "openai" | "gemini" | "anthropic"
+  llm_provider: "openai" | "gemini" | "anthropic" | "openrouter"
   llm_model: string
   llm_temperature: number
   llm_max_tokens: number
@@ -27,14 +27,26 @@ interface LLMConfigFormProps {
   onChange: (config: LLMConfig) => void
 }
 
-const PROVIDER_OPTIONS: LLMConfig["llm_provider"][] = ["openai", "gemini", "anthropic"]
+const PROVIDER_OPTIONS: LLMConfig["llm_provider"][] = [
+  "openai",
+  "gemini",
+  "anthropic",
+  "openrouter",
+]
+
+const PROVIDER_LABELS: Record<LLMConfig["llm_provider"], string> = {
+  openai: "OpenAI",
+  gemini: "Gemini",
+  anthropic: "Anthropic",
+  openrouter: "OpenRouter",
+}
 
 export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
   const { data, isLoading } = useLLMModels()
   const [open, setOpen] = useState(false)
 
   const configuredProviders = new Set(
-    PROVIDER_OPTIONS.filter((provider) => (data?.providers ?? [] as string[]).includes(provider)),
+    PROVIDER_OPTIONS.filter((provider) => (data?.providers ?? ([] as string[])).includes(provider)),
   )
   const currentProviderModels = data?.byProvider[value.llm_provider] ?? []
   const selectedModel = currentProviderModels.find((m) => m.id === value.llm_model)
@@ -73,7 +85,7 @@ export function LLMConfigForm({ value, onChange }: LLMConfigFormProps) {
                     : "border-(--border-default) bg-(--bg-surface) text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--bg-overlay)",
                 )}
               >
-                {p === "openai" ? "OpenAI" : p === "gemini" ? "Gemini" : "Anthropic"}
+                {PROVIDER_LABELS[p]}
               </button>
             ))}
           </div>

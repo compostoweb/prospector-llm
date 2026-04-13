@@ -12,7 +12,11 @@ import { toast } from "sonner"
 
 type Tab = "visao-geral" | "configuracao" | "passos"
 
-const TABS: { key: Tab; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }[] = [
+const TABS: {
+  key: Tab
+  label: string
+  icon: React.ComponentType<{ size?: number; className?: string }>
+}[] = [
   { key: "visao-geral", label: "Visão Geral", icon: BarChart2 },
   { key: "configuracao", label: "Configuração", icon: Settings2 },
   { key: "passos", label: "Passos", icon: ListTodo },
@@ -75,7 +79,14 @@ export default function CadenciaDetailPage() {
               {cadence.cadence_type === "email_only" ? "Só e-mail" : "Multicanal"}
             </span>
             <span className="rounded-full bg-(--bg-overlay) px-2.5 py-1 text-(--text-secondary)">
-              {cadence.llm_provider === "openai" ? "OpenAI" : "Gemini"} · {cadence.llm_model}
+              {cadence.llm_provider === "openai"
+                ? "OpenAI"
+                : cadence.llm_provider === "gemini"
+                  ? "Gemini"
+                  : cadence.llm_provider === "anthropic"
+                    ? "Anthropic"
+                    : "OpenRouter"}{" "}
+              · {cadence.llm_model}
             </span>
             <span className="rounded-full bg-(--bg-overlay) px-2.5 py-1 text-(--text-secondary)">
               {cadence.mode === "automatic" ? "Automática" : "Semi-manual"}
@@ -88,45 +99,43 @@ export default function CadenciaDetailPage() {
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-        <Link
-          href={`/cadencias/${cadence.id}/sandbox`}
-          className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-(--border-default) bg-(--bg-surface) px-4 py-2.5 text-sm font-medium text-(--text-primary) shadow-(--shadow-sm) transition-colors hover:border-(--accent) hover:text-(--accent)"
-        >
-          <FlaskConical size={15} aria-hidden="true" />
-          Abrir sandbox
-        </Link>
+          <Link
+            href={`/cadencias/${cadence.id}/sandbox`}
+            className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-(--border-default) bg-(--bg-surface) px-4 py-2.5 text-sm font-medium text-(--text-primary) shadow-(--shadow-sm) transition-colors hover:border-(--accent) hover:text-(--accent)"
+          >
+            <FlaskConical size={15} aria-hidden="true" />
+            Abrir sandbox
+          </Link>
 
-        <button
-          type="button"
-          disabled={toggleCadence.isPending}
-          onClick={() =>
-            toggleCadence.mutate(
-              { id: cadence.id, is_active: !cadence.is_active },
-              {
-                onSuccess: () =>
-                  toast.success(
-                    cadence.is_active ? "Cadência pausada" : "Cadência ativada",
-                  ),
-                onError: () => toast.error("Falha ao alterar status da cadência"),
-              },
-            )
-          }
-          className={cn(
-            "inline-flex shrink-0 items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium shadow-(--shadow-sm) transition-colors disabled:opacity-60",
-            cadence.is_active
-              ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-400 dark:hover:bg-amber-900/30"
-              : "border-green-300 bg-green-50 text-green-700 hover:bg-green-100 dark:border-green-700 dark:bg-green-900/20 dark:text-green-400 dark:hover:bg-green-900/30",
-          )}
-        >
-          {toggleCadence.isPending ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : cadence.is_active ? (
-            <Pause size={14} />
-          ) : (
-            <Play size={14} />
-          )}
-          {cadence.is_active ? "Pausar" : "Ativar"}
-        </button>
+          <button
+            type="button"
+            disabled={toggleCadence.isPending}
+            onClick={() =>
+              toggleCadence.mutate(
+                { id: cadence.id, is_active: !cadence.is_active },
+                {
+                  onSuccess: () =>
+                    toast.success(cadence.is_active ? "Cadência pausada" : "Cadência ativada"),
+                  onError: () => toast.error("Falha ao alterar status da cadência"),
+                },
+              )
+            }
+            className={cn(
+              "inline-flex shrink-0 items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium shadow-(--shadow-sm) transition-colors disabled:opacity-60",
+              cadence.is_active
+                ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-400 dark:hover:bg-amber-900/30"
+                : "border-green-300 bg-green-50 text-green-700 hover:bg-green-100 dark:border-green-700 dark:bg-green-900/20 dark:text-green-400 dark:hover:bg-green-900/30",
+            )}
+          >
+            {toggleCadence.isPending ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : cadence.is_active ? (
+              <Pause size={14} />
+            ) : (
+              <Play size={14} />
+            )}
+            {cadence.is_active ? "Pausar" : "Ativar"}
+          </button>
         </div>
       </div>
 

@@ -72,7 +72,7 @@ export interface UpdateIntegrationsBody {
 }
 
 export interface TenantLLMConfig {
-  llm_provider: "openai" | "gemini" | "anthropic"
+  llm_provider: "openai" | "gemini" | "anthropic" | "openrouter"
   llm_model: string
   llm_temperature: number
   llm_max_tokens: number
@@ -96,7 +96,12 @@ function normalizeProvider(
   provider: string | null | undefined,
   fallback: TenantLLMConfig["llm_provider"],
 ): TenantLLMConfig["llm_provider"] {
-  if (provider === "openai" || provider === "gemini" || provider === "anthropic") {
+  if (
+    provider === "openai" ||
+    provider === "gemini" ||
+    provider === "anthropic" ||
+    provider === "openrouter"
+  ) {
     return provider
   }
   return fallback

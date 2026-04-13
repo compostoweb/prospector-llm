@@ -257,7 +257,7 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
       mode,
       cadence_type: cadenceType,
       llm: {
-        provider: llmConfig.llm_provider as "openai" | "gemini",
+        provider: llmConfig.llm_provider,
         model: llmConfig.llm_model,
         temperature: llmConfig.llm_temperature,
         max_tokens: llmConfig.llm_max_tokens,

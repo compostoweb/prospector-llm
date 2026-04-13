@@ -851,7 +851,7 @@ export default function NovaCampanhaPage() {
       mode: "automatic",
       cadence_type: "email_only",
       llm: {
-        provider: effectiveLlmConfig.llm_provider as "openai" | "gemini",
+        provider: effectiveLlmConfig.llm_provider,
         model: effectiveLlmConfig.llm_model,
         temperature: effectiveLlmConfig.llm_temperature,
         max_tokens: effectiveLlmConfig.llm_max_tokens,

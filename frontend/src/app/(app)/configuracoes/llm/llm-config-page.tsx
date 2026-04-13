@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
 type Tab = "padrao" | "modelos" | "consumo" | "testar"
-type ModelFilter = "all" | "openai" | "gemini" | "anthropic"
+type ModelFilter = "all" | "openai" | "gemini" | "anthropic" | "openrouter"
 
 const DEFAULT_LLM = {
   llm_provider: "openai" as const,
@@ -72,7 +72,9 @@ export default function LLMConfigPage() {
     setSystemLLM({
       llm_provider: (integration.llm_default_provider ?? DEFAULT_LLM.llm_provider) as
         | "openai"
-        | "gemini",
+        | "gemini"
+        | "anthropic"
+        | "openrouter",
       llm_model: integration.llm_default_model ?? DEFAULT_LLM.llm_model,
       llm_temperature: integration.llm_default_temperature ?? DEFAULT_LLM.llm_temperature,
       llm_max_tokens: integration.llm_default_max_tokens ?? DEFAULT_LLM.llm_max_tokens,
@@ -80,7 +82,9 @@ export default function LLMConfigPage() {
     setColdEmailLLM({
       llm_provider: (integration.cold_email_llm_provider ?? DEFAULT_COLD_EMAIL_LLM.llm_provider) as
         | "openai"
-        | "gemini",
+        | "gemini"
+        | "anthropic"
+        | "openrouter",
       llm_model: integration.cold_email_llm_model ?? DEFAULT_COLD_EMAIL_LLM.llm_model,
       llm_temperature:
         integration.cold_email_llm_temperature ?? DEFAULT_COLD_EMAIL_LLM.llm_temperature,
@@ -208,7 +212,9 @@ export default function LLMConfigPage() {
                 ? "OpenAI"
                 : p.provider === "gemini"
                   ? "Gemini"
-                  : "Anthropic"}
+                  : p.provider === "anthropic"
+                    ? "Anthropic"
+                    : "OpenRouter"}
               {p.configured && <span className="opacity-60">· {p.models_count}</span>}
             </span>
           ))}
@@ -301,30 +307,34 @@ export default function LLMConfigPage() {
           <div className="flex items-center gap-2">
             <span className="text-xs text-(--text-secondary)">Filtrar:</span>
             <div className="flex gap-1 rounded-md border border-(--border-default) bg-(--bg-overlay) p-0.5">
-              {(["all", "openai", "gemini", "anthropic"] as ModelFilter[]).map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setModelFilter(f)}
-                  className={cn(
-                    "rounded px-2.5 py-1 text-xs font-medium transition-colors",
-                    modelFilter === f
-                      ? "bg-(--bg-surface) text-(--text-primary) shadow-sm"
-                      : "text-(--text-secondary) hover:text-(--text-primary)",
-                  )}
-                >
-                  {f === "all"
-                    ? "Todos"
-                    : f === "openai"
-                      ? "OpenAI"
-                      : f === "gemini"
-                        ? "Gemini"
-                        : "Anthropic"}
-                  <span className="ml-1.5 tabular-nums opacity-50">
-                    {f === "all" ? models.length : models.filter((m) => m.provider === f).length}
-                  </span>
-                </button>
-              ))}
+              {(["all", "openai", "gemini", "anthropic", "openrouter"] as ModelFilter[]).map(
+                (f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setModelFilter(f)}
+                    className={cn(
+                      "rounded px-2.5 py-1 text-xs font-medium transition-colors",
+                      modelFilter === f
+                        ? "bg-(--bg-surface) text-(--text-primary) shadow-sm"
+                        : "text-(--text-secondary) hover:text-(--text-primary)",
+                    )}
+                  >
+                    {f === "all"
+                      ? "Todos"
+                      : f === "openai"
+                        ? "OpenAI"
+                        : f === "gemini"
+                          ? "Gemini"
+                          : f === "anthropic"
+                            ? "Anthropic"
+                            : "OpenRouter"}
+                    <span className="ml-1.5 tabular-nums opacity-50">
+                      {f === "all" ? models.length : models.filter((m) => m.provider === f).length}
+                    </span>
+                  </button>
+                ),
+              )}
             </div>
           </div>
 

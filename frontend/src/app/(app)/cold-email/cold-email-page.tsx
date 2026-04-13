@@ -101,7 +101,7 @@ function ColdEmailAIModal({ open, onClose }: { open: boolean; onClose: () => voi
     if (integration) {
       setLlmConfig({
         llm_provider: (integration.cold_email_llm_provider ??
-          DEFAULT_COLD_EMAIL_LLM.llm_provider) as "openai" | "gemini",
+          DEFAULT_COLD_EMAIL_LLM.llm_provider) as LLMConfig["llm_provider"],
         llm_model: integration.cold_email_llm_model ?? DEFAULT_COLD_EMAIL_LLM.llm_model,
         llm_temperature:
           integration.cold_email_llm_temperature ?? DEFAULT_COLD_EMAIL_LLM.llm_temperature,

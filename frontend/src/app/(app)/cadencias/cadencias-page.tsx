@@ -258,7 +258,11 @@ export default function CadenciasPage() {
 
                   <div className="mt-4 grid grid-cols-3 divide-x divide-(--border-subtle)">
                     <Stat icon={Users} label="Total" value={metrics?.total_leads ?? 0} />
-                    <Stat icon={GitBranch} label="Em andamento" value={metrics?.leads_active ?? 0} />
+                    <Stat
+                      icon={GitBranch}
+                      label="Em andamento"
+                      value={metrics?.leads_active ?? 0}
+                    />
                     <Stat
                       icon={CheckCircle}
                       label="Convertidos"
@@ -268,8 +272,14 @@ export default function CadenciasPage() {
 
                   <div className="mt-4 flex items-center justify-between">
                     <p className="text-xs text-(--text-tertiary)">
-                      {cadence.llm_provider === "openai" ? "OpenAI" : "Gemini"} · {cadence.llm_model}{" "}
-                      · {cadence.steps_template?.length ?? 0} passo
+                      {cadence.llm_provider === "openai"
+                        ? "OpenAI"
+                        : cadence.llm_provider === "gemini"
+                          ? "Gemini"
+                          : cadence.llm_provider === "anthropic"
+                            ? "Anthropic"
+                            : "OpenRouter"}{" "}
+                      · {cadence.llm_model} · {cadence.steps_template?.length ?? 0} passo
                       {(cadence.steps_template?.length ?? 0) !== 1 ? "s" : ""}
                     </p>
                     <Link

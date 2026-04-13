@@ -80,7 +80,14 @@ export function CadenceListView({ items, isToggling = false, onToggle }: Cadence
                     </p>
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-(--text-tertiary)">
                       <span>
-                        {cadence.llm_provider === "openai" ? "OpenAI" : "Gemini"} · {cadence.llm_model}
+                        {cadence.llm_provider === "openai"
+                          ? "OpenAI"
+                          : cadence.llm_provider === "gemini"
+                            ? "Gemini"
+                            : cadence.llm_provider === "anthropic"
+                              ? "Anthropic"
+                              : "OpenRouter"}{" "}
+                        · {cadence.llm_model}
                       </span>
                       <span>•</span>
                       <span>
@@ -103,7 +110,11 @@ export function CadenceListView({ items, isToggling = false, onToggle }: Cadence
                       : "bg-(--accent-subtle) text-(--accent-subtle-fg)",
                   )}
                 >
-                  {typeIsEmail ? <Mail size={12} aria-hidden="true" /> : <Layers size={12} aria-hidden="true" />}
+                  {typeIsEmail ? (
+                    <Mail size={12} aria-hidden="true" />
+                  ) : (
+                    <Layers size={12} aria-hidden="true" />
+                  )}
                   {cadenceTypeLabel(cadence.cadence_type)}
                 </span>
               </div>

@@ -72,7 +72,7 @@ interface CadencePreset {
 }
 
 interface WizardLLMConfig {
-  llm_provider: "openai" | "gemini" | "anthropic"
+  llm_provider: "openai" | "gemini" | "anthropic" | "openrouter"
   llm_model: string
   llm_temperature: number
   llm_max_tokens: number

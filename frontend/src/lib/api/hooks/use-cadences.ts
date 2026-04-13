@@ -55,7 +55,7 @@ export interface Cadence {
   is_active: boolean
   mode: "automatic" | "semi_manual"
   cadence_type: "mixed" | "email_only"
-  llm_provider: "openai" | "gemini" | "anthropic"
+  llm_provider: "openai" | "gemini" | "anthropic" | "openrouter"
   llm_model: string
   llm_temperature: number
   llm_max_tokens: number
@@ -81,7 +81,7 @@ export interface CreateCadenceBody {
   mode?: "automatic" | "semi_manual"
   cadence_type?: "mixed" | "email_only"
   llm: {
-    provider: "openai" | "gemini" | "anthropic"
+    provider: "openai" | "gemini" | "anthropic" | "openrouter"
     model: string
     temperature: number
     max_tokens: number
