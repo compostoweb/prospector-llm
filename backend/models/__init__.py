@@ -31,6 +31,7 @@ from models.email_template import EmailTemplate  # noqa: F401
 from models.email_unsubscribe import EmailUnsubscribe  # noqa: F401
 from models.interaction import Interaction  # noqa: F401
 from models.lead import Lead  # noqa: F401
+from models.lead_email import LeadEmail  # noqa: F401
 from models.lead_list import LeadList  # noqa: F401
 from models.lead_tag import LeadTag  # noqa: F401
 from models.linkedin_account import LinkedInAccount  # noqa: F401
