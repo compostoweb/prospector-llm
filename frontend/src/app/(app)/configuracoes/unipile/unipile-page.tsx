@@ -222,7 +222,7 @@ export default function UnipolePage() {
               status={webhookStatus}
               onRegister={() => registerWebhook()}
               isRegistering={registerPending}
-              registerResult={registerResult}
+              {...(registerResult ? { registerResult } : {})}
               registerError={
                 registerErrorDetails instanceof Error ? registerErrorDetails.message : null
               }
