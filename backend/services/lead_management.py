@@ -59,15 +59,11 @@ def serialize_lead(lead: Lead) -> LeadResponse:
     base = LeadResponse.model_validate(lead).model_dump()
     origin_key, origin_label, origin_detail = infer_lead_origin(lead)
     lead_lists = lead.lists or []
-    return LeadResponse(
-        **base,
-        lead_lists=[
-            LeadListSummary(id=lead_list.id, name=lead_list.name) for lead_list in lead_lists
-        ],
-        origin_key=origin_key,
-        origin_label=origin_label,
-        origin_detail=origin_detail,
-    )
+    base["lead_lists"] = [LeadListSummary(id=ll.id, name=ll.name) for ll in lead_lists]
+    base["origin_key"] = origin_key
+    base["origin_label"] = origin_label
+    base["origin_detail"] = origin_detail
+    return LeadResponse(**base)
 
 
 async def get_lead_with_lists(
