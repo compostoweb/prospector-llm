@@ -31,6 +31,7 @@ from sqlalchemy import select
 
 from core.database import WorkerSessionLocal, get_worker_session
 from core.redis_client import redis_client
+from models.cadence import Cadence
 from models.cadence_step import CadenceStep
 from models.enums import Channel, LeadStatus, StepStatus
 from models.lead import Lead
@@ -78,12 +79,15 @@ async def _tick_async() -> dict:
                 now = datetime.now(tz=UTC)
 
                 # Busca steps pendentes e vencidos deste tenant
+                # Só despacha steps de cadências ativas
                 steps_result = await db.execute(
                     select(CadenceStep)
+                    .join(Cadence, CadenceStep.cadence_id == Cadence.id)
                     .where(
                         CadenceStep.tenant_id == tid,
                         CadenceStep.status == StepStatus.PENDING,
                         CadenceStep.scheduled_at <= now,
+                        Cadence.is_active.is_(True),
                     )
                     .order_by(CadenceStep.scheduled_at.asc())
                     .limit(200)

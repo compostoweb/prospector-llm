@@ -40,7 +40,7 @@ from core.redis_client import redis_client
 from integrations.context_fetcher import context_fetcher
 from integrations.llm import LLMRegistry
 from integrations.llm.base import LLMNonRetryableError
-from integrations.unipile_client import unipile_client
+from integrations.unipile_client import UnipileNonRetryableError, unipile_client
 from services.ai_composer import AIComposer
 from services.cadence_manager import (
     get_previous_template_channel,
@@ -162,6 +162,18 @@ async def _dispatch_inner(
             await _release_rate_limit_slot()
             logger.error("dispatch.missing_lead_or_cadence", step_id=step_id)
             return {"step_id": step_id, "status": "failed"}
+
+        # ── Cadência desativada — não despachar ──────────────────
+        if not cadence.is_active:
+            step.status = StepStatus.SKIPPED
+            await db.commit()
+            await _release_rate_limit_slot()
+            logger.info(
+                "dispatch.cadence_inactive",
+                step_id=step_id,
+                cadence_id=str(cadence.id),
+            )
+            return {"step_id": step_id, "status": "skipped"}
 
         # ── Resolve account_ids do tenant (fallback para settings globais) ──
         integ_result = await db.execute(
@@ -702,6 +714,18 @@ async def _dispatch_inner(
             # Erro permanente de LLM (billing, auth, config) — NÃO retentar
             logger.error(
                 "dispatch.permanent_llm_error",
+                step_id=step_id,
+                error=str(exc),
+            )
+            step.status = StepStatus.FAILED
+            await db.commit()
+            await _release_rate_limit_slot()
+            return {"step_id": step_id, "status": "failed", "error": str(exc)}
+
+        except UnipileNonRetryableError as exc:
+            # Erro 4xx da Unipile (conta inválida, payload errado) — NÃO retentar
+            logger.error(
+                "dispatch.permanent_unipile_error",
                 step_id=step_id,
                 error=str(exc),
             )

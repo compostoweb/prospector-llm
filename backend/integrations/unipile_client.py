@@ -74,6 +74,10 @@ class _LoopBoundAsyncClient:
             await client.aclose()
 
 
+class UnipileNonRetryableError(Exception):
+    """Erro permanente da Unipile (400, 401, 403) — NÃO deve ser retentado."""
+
+
 @dataclass
 class SendResult:
     """Resultado de um envio via Unipile."""
@@ -177,6 +181,17 @@ class UnipileClient:
             "message": message,
         }
         response = await self._client.post("/linkedin/invitations", json=payload)
+
+        if 400 <= response.status_code < 500:
+            body_text = response.text[:500]
+            logger.error(
+                "unipile.linkedin_connect.client_error",
+                status=response.status_code,
+                profile_id=linkedin_profile_id,
+                response_body=body_text,
+            )
+            raise UnipileNonRetryableError(f"Unipile {response.status_code}: {body_text}")
+
         response.raise_for_status()
         data = response.json()
         msg_id: str = data.get("id", "")
@@ -200,6 +215,17 @@ class UnipileClient:
             "text": message,
         }
         response = await self._client.post("/chats/messages", json=payload)
+
+        if 400 <= response.status_code < 500:
+            body_text = response.text[:500]
+            logger.error(
+                "unipile.linkedin_dm.client_error",
+                status=response.status_code,
+                profile_id=linkedin_profile_id,
+                response_body=body_text,
+            )
+            raise UnipileNonRetryableError(f"Unipile {response.status_code}: {body_text}")
+
         response.raise_for_status()
         data = response.json()
         msg_id: str = data.get("id", "")
@@ -263,6 +289,17 @@ class UnipileClient:
             "audio_url": audio_url,
         }
         response = await self._client.post("/chats/messages/audio", json=payload)
+
+        if 400 <= response.status_code < 500:
+            body_text = response.text[:500]
+            logger.error(
+                "unipile.linkedin_voice.client_error",
+                status=response.status_code,
+                profile_id=linkedin_profile_id,
+                response_body=body_text,
+            )
+            raise UnipileNonRetryableError(f"Unipile {response.status_code}: {body_text}")
+
         response.raise_for_status()
         data = response.json()
         msg_id: str = data.get("id", "")
@@ -294,6 +331,18 @@ class UnipileClient:
             payload["reply_to_message_id"] = reply_to_message_id
 
         response = await self._client.post("/emails", json=payload)
+
+        if 400 <= response.status_code < 500:
+            body_text = response.text[:500]
+            logger.error(
+                "unipile.email.client_error",
+                status=response.status_code,
+                to=to_email,
+                account_id=account_id,
+                response_body=body_text,
+            )
+            raise UnipileNonRetryableError(f"Unipile {response.status_code}: {body_text}")
+
         response.raise_for_status()
         data = response.json()
         msg_id: str = data.get("id", "")
