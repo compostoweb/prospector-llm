@@ -1,8 +1,23 @@
 "use client"
 
 import Link from "next/link"
-import { ExternalLink, FlaskConical, Layers, Mail, Power } from "lucide-react"
+import {
+  ExternalLink,
+  FlaskConical,
+  Layers,
+  Mail,
+  MoreHorizontal,
+  Power,
+  Trash2,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { cn, formatRelativeTime, truncate } from "@/lib/utils"
 import type { Cadence } from "@/lib/api/hooks/use-cadences"
 import type { CadenceOverview } from "@/lib/api/hooks/use-cadence-analytics"
@@ -15,7 +30,9 @@ interface CadenceListItem {
 interface CadenceListViewProps {
   items: CadenceListItem[]
   isToggling?: boolean
+  isDeleting?: boolean
   onToggle: (id: string, current: boolean) => void
+  onDelete: (cadence: Cadence) => void
 }
 
 function cadenceTypeLabel(type: Cadence["cadence_type"]): string {
@@ -26,23 +43,33 @@ function cadenceModeLabel(mode: Cadence["mode"]): string {
   return mode === "automatic" ? "Automático" : "Semi-manual"
 }
 
-export function CadenceListView({ items, isToggling = false, onToggle }: CadenceListViewProps) {
+export function CadenceListView({
+  items,
+  isToggling = false,
+  isDeleting = false,
+  onToggle,
+  onDelete,
+}: CadenceListViewProps) {
   const gridCols =
-    "grid-cols-[minmax(280px,1.9fr)_120px_120px_90px_110px_110px_170px] min-w-[1000px]"
+    "grid-cols-[minmax(300px,1.7fr)_100px_100px_90px_70px_80px_100px_90px_85px_95px_170px] min-w-[1380px]"
 
   return (
     <div className="overflow-x-auto rounded-lg border border-(--border-default) bg-(--bg-surface) shadow-(--shadow-sm)">
       <div
         className={cn(
-          "grid items-center gap-3 border-b border-(--border-default) bg-(--bg-overlay) px-4 py-3 text-[11px] font-medium uppercase tracking-wide text-(--text-tertiary)",
+          "grid items-center gap-3 border-b border-(--border-default) bg-(--accent) px-4 py-3 text-[11px] font-medium uppercase tracking-wide text-white",
           gridCols,
         )}
       >
         <span>Cadência</span>
         <span>Tipo</span>
         <span>Modo</span>
+        <span>Status</span>
         <span className="text-center">Leads</span>
         <span className="text-center">Ativos</span>
+        <span className="text-center">Finalizados</span>
+        <span className="text-center">Respostas</span>
+        <span className="text-center">Pausados</span>
         <span className="text-center">Convertidos</span>
         <span className="text-right">Ações</span>
       </div>
@@ -125,6 +152,19 @@ export function CadenceListView({ items, isToggling = false, onToggle }: Cadence
                 </span>
               </div>
 
+              <div>
+                <span
+                  className={cn(
+                    "inline-flex rounded-(--radius-full) px-2.5 py-1 text-xs font-medium",
+                    cadence.is_active
+                      ? "bg-(--success-subtle) text-(--success-subtle-fg)"
+                      : "bg-(--bg-overlay) text-(--text-secondary)",
+                  )}
+                >
+                  {cadence.is_active ? "Ativa" : "Pausada"}
+                </span>
+              </div>
+
               <div className="text-center text-sm font-semibold text-(--text-primary)">
                 {metrics?.total_leads ?? 0}
               </div>
@@ -134,38 +174,76 @@ export function CadenceListView({ items, isToggling = false, onToggle }: Cadence
               </div>
 
               <div className="text-center text-sm font-semibold text-(--text-primary)">
+                {metrics?.leads_finished ?? 0}
+              </div>
+
+              <div className="text-center text-sm font-semibold text-(--text-primary)">
+                {metrics?.replies ?? 0}
+              </div>
+
+              <div className="text-center text-sm font-semibold text-(--text-primary)">
+                {metrics?.leads_paused ?? 0}
+              </div>
+
+              <div className="text-center text-sm font-semibold text-(--text-primary)">
                 {metrics?.leads_converted ?? 0}
               </div>
 
-              <div className="flex items-center justify-end gap-2">
-                <Button asChild variant="ghost" size="sm" className="h-8 px-2 text-xs">
-                  <Link href={`/cadencias/${cadence.id}/sandbox`}>
-                    <FlaskConical size={13} aria-hidden="true" />
-                    Sandbox
-                  </Link>
-                </Button>
-                <Button asChild variant="outline" size="sm" className="h-8 px-2 text-xs">
-                  <Link href={`/cadencias/${cadence.id}`}>
-                    <ExternalLink size={13} aria-hidden="true" />
-                    Abrir
-                  </Link>
-                </Button>
+              <div className="flex items-center justify-end gap-2 whitespace-nowrap">
                 <Button
                   type="button"
-                  variant="ghost"
-                  size="icon"
+                  variant={cadence.is_active ? "outline" : "default"}
+                  size="sm"
                   onClick={() => onToggle(cadence.id, cadence.is_active)}
-                  aria-label={cadence.is_active ? "Pausar cadência" : "Ativar cadência"}
+                  aria-label={cadence.is_active ? "Desativar cadência" : "Ativar cadência"}
                   disabled={isToggling}
                   className={cn(
-                    "h-8 w-8",
+                    "h-8 px-2.5 text-xs",
                     cadence.is_active
-                      ? "text-(--success) hover:text-(--success)"
-                      : "text-(--text-tertiary)",
+                      ? "border-(--success) text-(--success) hover:bg-(--success-subtle) hover:text-(--success)"
+                      : "bg-(--accent) text-white hover:opacity-90",
                   )}
                 >
                   <Power size={14} aria-hidden="true" />
+                  {cadence.is_active ? "Desativar" : "Ativar"}
                 </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      aria-label="Mais ações da cadência"
+                    >
+                      <MoreHorizontal size={15} aria-hidden="true" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuItem asChild>
+                      <Link href={`/cadencias/${cadence.id}`}>
+                        <ExternalLink size={14} aria-hidden="true" />
+                        Abrir cadência
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link href={`/cadencias/${cadence.id}/sandbox`}>
+                        <FlaskConical size={14} aria-hidden="true" />
+                        Abrir sandbox
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => onDelete(cadence)}
+                      disabled={isDeleting}
+                      className="text-(--danger) focus:text-(--danger)"
+                    >
+                      <Trash2 size={14} aria-hidden="true" />
+                      Excluir cadência
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
           )

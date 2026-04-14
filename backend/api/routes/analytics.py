@@ -19,7 +19,7 @@ from uuid import UUID
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import case, func, literal_column, select
+from sqlalchemy import and_, case, func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible
@@ -28,10 +28,13 @@ from models.cadence_step import CadenceStep
 from models.enums import Channel, InteractionDirection, LeadStatus, StepStatus
 from models.interaction import Interaction
 from models.lead import Lead
+from models.lead_email import LeadEmail
 
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
+
+_EMAIL_ONLY_CADENCE_TYPE = "email_only"
 
 
 # ── Schemas ───────────────────────────────────────────────────────────
@@ -99,6 +102,9 @@ class CadenceOverviewItem(BaseModel):
     total_leads: int = 0
     leads_active: int = 0
     leads_converted: int = 0
+    leads_finished: int = 0
+    replies: int = 0
+    leads_paused: int = 0
 
 
 class CadenceAnalyticsChannelItem(BaseModel):
@@ -579,29 +585,82 @@ async def get_cadences_overview(
     if not cadence_ids:
         return []
 
-    overview_q = await db.execute(
+    lead_progress_sq = (
         select(
-            CadenceStep.cadence_id,
-            func.count(func.distinct(CadenceStep.lead_id)).label("total_leads"),
-            func.count(
-                func.distinct(case((Lead.status == LeadStatus.IN_CADENCE, CadenceStep.lead_id)))
-            ).label("leads_active"),
-            func.count(
-                func.distinct(case((Lead.status == LeadStatus.CONVERTED, CadenceStep.lead_id)))
-            ).label("leads_converted"),
+            CadenceStep.cadence_id.label("cadence_id"),
+            CadenceStep.lead_id.label("lead_id"),
+            func.max(
+                case(
+                    (CadenceStep.status == StepStatus.REPLIED, 1),
+                    else_=0,
+                )
+            ).label("has_reply"),
+            func.max(
+                case(
+                    (CadenceStep.status.in_([StepStatus.PENDING, StepStatus.DISPATCHING]), 1),
+                    else_=0,
+                )
+            ).label("has_pending"),
+            func.sum(
+                case(
+                    (CadenceStep.status == StepStatus.REPLIED, 1),
+                    else_=0,
+                )
+            ).label("reply_count"),
         )
-        .join(Lead, Lead.id == CadenceStep.lead_id)
         .where(
             CadenceStep.tenant_id == tenant_id,
             CadenceStep.cadence_id.in_(cadence_ids),
         )
-        .group_by(CadenceStep.cadence_id)
+        .group_by(CadenceStep.cadence_id, CadenceStep.lead_id)
+        .subquery()
+    )
+
+    overview_q = await db.execute(
+        select(
+            lead_progress_sq.c.cadence_id,
+            func.count(lead_progress_sq.c.lead_id).label("total_leads"),
+            func.count(
+                case(
+                    (
+                        and_(
+                            Lead.status == LeadStatus.IN_CADENCE,
+                            lead_progress_sq.c.has_pending == 1,
+                            lead_progress_sq.c.has_reply == 0,
+                        ),
+                        1,
+                    )
+                )
+            ).label("leads_active"),
+            func.count(case((Lead.status == LeadStatus.CONVERTED, 1))).label("leads_converted"),
+            func.count(
+                case(
+                    (
+                        and_(
+                            lead_progress_sq.c.has_pending == 0,
+                            lead_progress_sq.c.has_reply == 0,
+                        ),
+                        1,
+                    )
+                )
+            ).label("leads_finished"),
+            func.coalesce(func.sum(lead_progress_sq.c.reply_count), 0).label("replies"),
+            func.count(case((lead_progress_sq.c.has_reply == 1, 1))).label("leads_paused"),
+        )
+        .join(Lead, Lead.id == lead_progress_sq.c.lead_id)
+        .where(
+            Lead.tenant_id == tenant_id,
+        )
+        .group_by(lead_progress_sq.c.cadence_id)
     )
     metrics_map = {
         row.cadence_id: {
             "total_leads": row.total_leads or 0,
             "leads_active": row.leads_active or 0,
             "leads_converted": row.leads_converted or 0,
+            "leads_finished": row.leads_finished or 0,
+            "replies": row.replies or 0,
+            "leads_paused": row.leads_paused or 0,
         }
         for row in overview_q.all()
     }
@@ -613,6 +672,9 @@ async def get_cadences_overview(
             total_leads=metrics_map.get(cadence_id, {}).get("total_leads", 0),
             leads_active=metrics_map.get(cadence_id, {}).get("leads_active", 0),
             leads_converted=metrics_map.get(cadence_id, {}).get("leads_converted", 0),
+            leads_finished=metrics_map.get(cadence_id, {}).get("leads_finished", 0),
+            replies=metrics_map.get(cadence_id, {}).get("replies", 0),
+            leads_paused=metrics_map.get(cadence_id, {}).get("leads_paused", 0),
         )
         for cadence_id in cadence_ids
     ]
@@ -881,54 +943,90 @@ async def get_email_stats(
 
     since = _utc_days_ago(days)
 
-    # Enviados (outbound EMAIL)
+    # Enviados (outbound EMAIL) apenas de cadências email_only
     sent_q = await db.execute(
-        select(func.count(Interaction.id)).where(
+        select(func.count(func.distinct(Interaction.id)))
+        .join(CadenceStep, CadenceStep.lead_id == Interaction.lead_id)
+        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
+        .where(
             Interaction.tenant_id == tenant_id,
             Interaction.channel == Channel.EMAIL,
             Interaction.direction == InteractionDirection.OUTBOUND,
             Interaction.created_at >= since,
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.channel == Channel.EMAIL,
+            CadenceStep.sent_at >= since,
+            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
     )
     sent = sent_q.scalar() or 0
 
-    # Abertos
+    # Abertos apenas de cadências email_only
     opened_q = await db.execute(
-        select(func.count(Interaction.id)).where(
+        select(func.count(func.distinct(Interaction.id)))
+        .join(CadenceStep, CadenceStep.lead_id == Interaction.lead_id)
+        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
+        .where(
             Interaction.tenant_id == tenant_id,
             Interaction.channel == Channel.EMAIL,
             Interaction.direction == InteractionDirection.OUTBOUND,
             Interaction.opened.is_(True),
             Interaction.opened_at >= since,
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.channel == Channel.EMAIL,
+            CadenceStep.sent_at >= since,
+            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
     )
     opened = opened_q.scalar() or 0
 
-    # Respondidos (inbound EMAIL)
+    # Respondidos (inbound EMAIL) apenas de cadências email_only
     replied_q = await db.execute(
-        select(func.count(Interaction.id)).where(
+        select(func.count(func.distinct(Interaction.id)))
+        .join(CadenceStep, CadenceStep.lead_id == Interaction.lead_id)
+        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
+        .where(
             Interaction.tenant_id == tenant_id,
             Interaction.channel == Channel.EMAIL,
             Interaction.direction == InteractionDirection.INBOUND,
             Interaction.created_at >= since,
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.channel == Channel.EMAIL,
+            CadenceStep.sent_at >= since,
+            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
     )
     replied = replied_q.scalar() or 0
 
-    # Descadastros no período
+    # Descadastros associados a leads em cadências email_only
     unsub_q = await db.execute(
-        select(func.count(EmailUnsubscribe.id)).where(
+        select(func.count(func.distinct(EmailUnsubscribe.id)))
+        .join(LeadEmail, func.lower(LeadEmail.email) == func.lower(EmailUnsubscribe.email))
+        .join(Lead, Lead.id == LeadEmail.lead_id)
+        .join(CadenceStep, CadenceStep.lead_id == Lead.id)
+        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
+        .where(
             EmailUnsubscribe.tenant_id == tenant_id,
             EmailUnsubscribe.unsubscribed_at >= since,
+            LeadEmail.tenant_id == tenant_id,
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.channel == Channel.EMAIL,
+            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
     )
     unsubscribed = unsub_q.scalar() or 0
 
-    # Bounces detectados no período
+    # Bounces detectados no período para leads em cadências email_only
     bounced_q = await db.execute(
-        select(func.count(Lead.id)).where(
+        select(func.count(func.distinct(Lead.id)))
+        .join(CadenceStep, CadenceStep.lead_id == Lead.id)
+        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
+        .where(
             Lead.tenant_id == tenant_id,
             Lead.email_bounced_at >= since,
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.channel == Channel.EMAIL,
+            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
     )
     bounced = bounced_q.scalar() or 0
@@ -961,17 +1059,19 @@ async def get_email_cadences_stats(
     """Performance por cadência: enviados, abertos, taxa de abertura e resposta."""
     since = _utc_days_ago(days)
 
-    # Steps EMAIL enviados por cadência
+    # Steps EMAIL enviados por cadência email_only
     steps_q = await db.execute(
         select(
             CadenceStep.cadence_id,
             func.count(CadenceStep.id).label("sent"),
         )
+        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
             CadenceStep.tenant_id == tenant_id,
             CadenceStep.channel == Channel.EMAIL,
             CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED]),
             CadenceStep.sent_at >= since,
+            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
         .group_by(CadenceStep.cadence_id)
         .order_by(func.count(CadenceStep.id).desc())
@@ -991,9 +1091,10 @@ async def get_email_cadences_stats(
     opened_q = await db.execute(
         select(
             CadenceStep.cadence_id,
-            func.count(Interaction.id).label("opened"),
+            func.count(func.distinct(Interaction.id)).label("opened"),
         )
         .join(Interaction, Interaction.lead_id == CadenceStep.lead_id)
+        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
             CadenceStep.cadence_id.in_(cadence_ids),
             CadenceStep.tenant_id == tenant_id,
@@ -1002,6 +1103,7 @@ async def get_email_cadences_stats(
             Interaction.direction == InteractionDirection.OUTBOUND,
             Interaction.opened.is_(True),
             Interaction.opened_at >= since,
+            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
         .group_by(CadenceStep.cadence_id)
     )
@@ -1011,9 +1113,10 @@ async def get_email_cadences_stats(
     replied_q = await db.execute(
         select(
             CadenceStep.cadence_id,
-            func.count(Interaction.id).label("replied"),
+            func.count(func.distinct(Interaction.id)).label("replied"),
         )
         .join(Interaction, Interaction.lead_id == CadenceStep.lead_id)
+        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
             CadenceStep.cadence_id.in_(cadence_ids),
             CadenceStep.tenant_id == tenant_id,
@@ -1021,6 +1124,7 @@ async def get_email_cadences_stats(
             Interaction.channel == Channel.EMAIL,
             Interaction.direction == InteractionDirection.INBOUND,
             Interaction.created_at >= since,
+            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
         .group_by(CadenceStep.cadence_id)
     )
@@ -1030,15 +1134,17 @@ async def get_email_cadences_stats(
     bounced_q = await db.execute(
         select(
             CadenceStep.cadence_id,
-            func.count(Lead.id).label("bounced"),
+            func.count(func.distinct(Lead.id)).label("bounced"),
         )
         .join(Lead, Lead.id == CadenceStep.lead_id)
+        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
             CadenceStep.cadence_id.in_(cadence_ids),
             CadenceStep.tenant_id == tenant_id,
             CadenceStep.channel == Channel.EMAIL,
             Lead.email_bounced_at.is_not(None),
             Lead.email_bounced_at >= since,
+            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
         .group_by(CadenceStep.cadence_id)
     )
@@ -1079,17 +1185,23 @@ async def get_email_over_time(
     opened_day_expr = func.date_trunc(literal_column("'day'"), Interaction.opened_at)
     replied_day_expr = func.date_trunc(literal_column("'day'"), Interaction.created_at)
 
-    # Enviados por dia
+    # Enviados por dia apenas de cadências email_only
     sent_q = await db.execute(
         select(
             sent_day_expr.label("day"),
-            func.count(Interaction.id).label("cnt"),
+            func.count(func.distinct(Interaction.id)).label("cnt"),
         )
+        .join(CadenceStep, CadenceStep.lead_id == Interaction.lead_id)
+        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
             Interaction.tenant_id == tenant_id,
             Interaction.channel == Channel.EMAIL,
             Interaction.direction == InteractionDirection.OUTBOUND,
             Interaction.created_at >= since,
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.channel == Channel.EMAIL,
+            CadenceStep.sent_at >= since,
+            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
         .group_by(sent_day_expr)
     )
@@ -1097,17 +1209,23 @@ async def get_email_over_time(
     for row in sent_q.all():
         sent_map[row.day.strftime("%Y-%m-%d")] = row.cnt
 
-    # Abertos por dia
+    # Abertos por dia apenas de cadências email_only
     opened_q = await db.execute(
         select(
             opened_day_expr.label("day"),
-            func.count(Interaction.id).label("cnt"),
+            func.count(func.distinct(Interaction.id)).label("cnt"),
         )
+        .join(CadenceStep, CadenceStep.lead_id == Interaction.lead_id)
+        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
             Interaction.tenant_id == tenant_id,
             Interaction.channel == Channel.EMAIL,
             Interaction.opened.is_(True),
             Interaction.opened_at >= since,
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.channel == Channel.EMAIL,
+            CadenceStep.sent_at >= since,
+            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
         .group_by(opened_day_expr)
     )
@@ -1115,17 +1233,23 @@ async def get_email_over_time(
     for row in opened_q.all():
         opened_map[row.day.strftime("%Y-%m-%d")] = row.cnt
 
-    # Respondidos por dia (inbound)
+    # Respondidos por dia (inbound) apenas de cadências email_only
     replied_q = await db.execute(
         select(
             replied_day_expr.label("day"),
-            func.count(Interaction.id).label("cnt"),
+            func.count(func.distinct(Interaction.id)).label("cnt"),
         )
+        .join(CadenceStep, CadenceStep.lead_id == Interaction.lead_id)
+        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
             Interaction.tenant_id == tenant_id,
             Interaction.channel == Channel.EMAIL,
             Interaction.direction == InteractionDirection.INBOUND,
             Interaction.created_at >= since,
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.channel == Channel.EMAIL,
+            CadenceStep.sent_at >= since,
+            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
         .group_by(replied_day_expr)
     )
@@ -1165,6 +1289,7 @@ async def get_email_ab_results(
             CadenceStep.subject_used,
             func.count(CadenceStep.id).label("sent"),
         )
+        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
             CadenceStep.tenant_id == tenant_id,
             CadenceStep.cadence_id == cadence_id,
@@ -1173,6 +1298,7 @@ async def get_email_ab_results(
             CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED]),
             CadenceStep.subject_used.is_not(None),
             CadenceStep.sent_at >= since,
+            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
         .group_by(CadenceStep.subject_used)
         .order_by(func.count(CadenceStep.id).desc())
@@ -1185,9 +1311,10 @@ async def get_email_ab_results(
     opened_q = await db.execute(
         select(
             CadenceStep.subject_used,
-            func.count(Interaction.id).label("opened"),
+            func.count(func.distinct(Interaction.id)).label("opened"),
         )
         .join(Interaction, Interaction.lead_id == CadenceStep.lead_id)
+        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
             CadenceStep.tenant_id == tenant_id,
             CadenceStep.cadence_id == cadence_id,
@@ -1199,6 +1326,7 @@ async def get_email_ab_results(
             Interaction.direction == InteractionDirection.OUTBOUND,
             Interaction.opened.is_(True),
             Interaction.opened_at >= since,
+            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
         .group_by(CadenceStep.subject_used)
     )

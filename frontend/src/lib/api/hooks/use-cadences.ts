@@ -234,10 +234,60 @@ export function useDeleteCadence() {
     mutationFn: async (id: string) => {
       const client = createBrowserClient(session?.accessToken)
       const { error } = await client.DELETE(`/cadences/${id}` as never)
-      if (error) throw new Error("Falha ao excluir cadência")
+      if (error) throw new Error(extractApiErrorMessage(error, "Falha ao excluir cadência"))
+      return id
     },
-    onSuccess: () => {
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: ["cadences"] })
+      await queryClient.cancelQueries({ queryKey: ["analytics", "cadences", "overview"] })
+
+      const previousCadenceQueries = queryClient.getQueriesData({ queryKey: ["cadences"] })
+      const previousOverview = queryClient.getQueryData(["analytics", "cadences", "overview"])
+
+      queryClient.setQueriesData({ queryKey: ["cadences"] }, (old: unknown) => {
+        if (!Array.isArray(old)) {
+          return old
+        }
+        return old.filter(
+          (item) =>
+            typeof item === "object" &&
+            item !== null &&
+            "id" in item &&
+            (item as { id: string }).id !== id,
+        )
+      })
+
+      queryClient.setQueryData(["analytics", "cadences", "overview"], (old: unknown) => {
+        if (!Array.isArray(old)) {
+          return old
+        }
+        return old.filter(
+          (item) =>
+            typeof item === "object" &&
+            item !== null &&
+            "cadence_id" in item &&
+            (item as { cadence_id: string }).cadence_id !== id,
+        )
+      })
+
+      return { previousCadenceQueries, previousOverview }
+    },
+    onError: (_error, _id, context) => {
+      if (context?.previousCadenceQueries) {
+        for (const [queryKey, data] of context.previousCadenceQueries) {
+          queryClient.setQueryData(queryKey, data)
+        }
+      }
+      if (context?.previousOverview !== undefined) {
+        queryClient.setQueryData(["analytics", "cadences", "overview"], context.previousOverview)
+      }
+    },
+    onSuccess: (id) => {
+      queryClient.removeQueries({ queryKey: ["cadences", id] })
+    },
+    onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["cadences"] })
+      void queryClient.invalidateQueries({ queryKey: ["analytics", "cadences", "overview"] })
     },
   })
 }

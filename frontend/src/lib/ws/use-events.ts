@@ -35,6 +35,7 @@ const INVALIDATION_MAP: Partial<Record<WSEventType, string[][]>> = {
   "lead.replied": [
     ["leads"],
     ["dashboard", "stats"],
+    ["analytics", "cadences", "overview"],
     ["analytics", "recent-replies"],
     ["analytics", "intents"],
     ["analytics", "channels"],
@@ -46,11 +47,17 @@ const INVALIDATION_MAP: Partial<Record<WSEventType, string[][]>> = {
     ["leads"],
     ["cadences"],
     ["dashboard", "stats"],
+    ["analytics", "cadences", "overview"],
     ["analytics", "channels"],
     ["analytics", "email"],
   ],
-  "step.failed": [["leads"], ["cadences"]],
-  "cadence.finished": [["cadences"], ["analytics", "funnel"], ["analytics", "performance"]],
+  "step.failed": [["leads"], ["cadences"], ["analytics", "cadences", "overview"]],
+  "cadence.finished": [
+    ["cadences"],
+    ["analytics", "cadences", "overview"],
+    ["analytics", "funnel"],
+    ["analytics", "performance"],
+  ],
   "connection.accepted": [["leads"], ["manual-tasks"], ["dashboard", "stats"]],
   "inbox.new_message": [
     ["inbox", "conversations"],

@@ -194,7 +194,7 @@ async def update_cadence(
     return CadenceResponse.model_validate(cadence)
 
 
-# ── Desativação ───────────────────────────────────────────────────────
+# ── Exclusão ──────────────────────────────────────────────────────────
 
 
 @router.delete("/{cadence_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
@@ -204,9 +204,9 @@ async def deactivate_cadence(
     db: AsyncSession = Depends(get_session_flexible),
 ) -> None:
     cadence = await _get_cadence_or_404(cadence_id, tenant_id, db)
-    cadence.is_active = False
+    await db.delete(cadence)
     await db.commit()
-    logger.info("cadence.deactivated", cadence_id=str(cadence_id))
+    logger.info("cadence.deleted", cadence_id=str(cadence_id))
 
 
 # ── Helper ────────────────────────────────────────────────────────────

@@ -117,6 +117,9 @@ async def test_get_cadences_overview_returns_real_metrics() -> None:
                     total_leads=2,
                     leads_active=1,
                     leads_converted=1,
+                    leads_finished=1,
+                    replies=3,
+                    leads_paused=1,
                 )
             ]
         ),
@@ -131,9 +134,15 @@ async def test_get_cadences_overview_returns_real_metrics() -> None:
     assert by_id[str(cadence_id)].total_leads == 2
     assert by_id[str(cadence_id)].leads_active == 1
     assert by_id[str(cadence_id)].leads_converted == 1
+    assert by_id[str(cadence_id)].leads_finished == 1
+    assert by_id[str(cadence_id)].replies == 3
+    assert by_id[str(cadence_id)].leads_paused == 1
     assert by_id[str(empty_cadence_id)].total_leads == 0
     assert by_id[str(empty_cadence_id)].leads_active == 0
     assert by_id[str(empty_cadence_id)].leads_converted == 0
+    assert by_id[str(empty_cadence_id)].leads_finished == 0
+    assert by_id[str(empty_cadence_id)].replies == 0
+    assert by_id[str(empty_cadence_id)].leads_paused == 0
 
 
 async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
@@ -298,6 +307,82 @@ async def test_get_email_ab_results_maps_open_rates_and_uses_days_filter(
 
     assert _statement_contains_param(session.statements[0], marker_since)
     assert _statement_contains_param(session.statements[1], marker_since)
+    assert _statement_contains_param(session.statements[0], "email_only")
+    assert _statement_contains_param(session.statements[1], "email_only")
+
+
+async def test_get_email_stats_filters_to_email_only_cadences(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker_since = datetime(2026, 3, 25, tzinfo=UTC)
+    monkeypatch.setattr(analytics_routes, "_utc_days_ago", lambda days: marker_since)
+
+    session = FakeAsyncSession(
+        FakeResult(scalar_value=5),
+        FakeResult(scalar_value=2),
+        FakeResult(scalar_value=3),
+        FakeResult(scalar_value=1),
+        FakeResult(scalar_value=1),
+    )
+
+    result = await analytics_routes.get_email_stats(
+        days=7,
+        db=cast(AsyncSession, session),
+        tenant_id=uuid.uuid4(),
+    )
+
+    assert result.sent == 5
+    assert result.opened == 2
+    assert result.replied == 3
+    assert result.unsubscribed == 1
+    assert result.bounced == 1
+    assert result.open_rate == 40.0
+    assert result.reply_rate == 60.0
+
+    for statement in session.statements:
+        assert _statement_contains_param(statement, marker_since)
+        assert _statement_contains_param(statement, "email_only")
+
+
+async def test_get_email_cadences_stats_filters_to_email_only_cadences(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker_since = datetime(2026, 3, 25, tzinfo=UTC)
+    monkeypatch.setattr(analytics_routes, "_utc_days_ago", lambda days: marker_since)
+
+    cadence_id = uuid.uuid4()
+    session = FakeAsyncSession(
+        FakeResult(all_values=[SimpleNamespace(cadence_id=cadence_id, sent=5)]),
+        FakeResult(all_values=[SimpleNamespace(id=cadence_id, name="Cold Email Puro")]),
+        FakeResult(all_values=[SimpleNamespace(cadence_id=cadence_id, opened=2)]),
+        FakeResult(all_values=[SimpleNamespace(cadence_id=cadence_id, replied=3)]),
+        FakeResult(all_values=[SimpleNamespace(cadence_id=cadence_id, bounced=1)]),
+    )
+
+    result = await analytics_routes.get_email_cadences_stats(
+        days=7,
+        db=cast(AsyncSession, session),
+        tenant_id=uuid.uuid4(),
+    )
+
+    assert result == [
+        analytics_routes.EmailCadenceItem(
+            cadence_id=str(cadence_id),
+            cadence_name="Cold Email Puro",
+            sent=5,
+            opened=2,
+            replied=3,
+            bounced=1,
+            open_rate=40.0,
+            reply_rate=60.0,
+        )
+    ]
+
+    assert _statement_contains_param(session.statements[0], marker_since)
+    assert _statement_contains_param(session.statements[0], "email_only")
+    assert _statement_contains_param(session.statements[2], "email_only")
+    assert _statement_contains_param(session.statements[3], "email_only")
+    assert _statement_contains_param(session.statements[4], "email_only")
 
 
 async def test_get_email_over_time_maps_daily_series_and_inlines_day_bucket(
@@ -339,6 +424,9 @@ async def test_get_email_over_time_maps_daily_series_and_inlines_day_bucket(
     assert _statement_contains_param(session.statements[0], marker_since)
     assert _statement_contains_param(session.statements[1], marker_since)
     assert _statement_contains_param(session.statements[2], marker_since)
+    assert _statement_contains_param(session.statements[0], "email_only")
+    assert _statement_contains_param(session.statements[1], "email_only")
+    assert _statement_contains_param(session.statements[2], "email_only")
     assert _statement_param_count(session.statements[0], "day") == 0
     assert _statement_param_count(session.statements[1], "day") == 0
     assert _statement_param_count(session.statements[2], "day") == 0

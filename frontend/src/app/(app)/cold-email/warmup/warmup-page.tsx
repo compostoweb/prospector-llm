@@ -321,7 +321,7 @@ export default function WarmupPage() {
   const completed = campaigns?.filter((c) => c.status === "completed") ?? []
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-6">
+    <div className="mx-auto w-full max-w-6xl space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-(--text-primary)">Warmup de E-mail</h1>
@@ -336,7 +336,7 @@ export default function WarmupPage() {
       </div>
 
       {/* Resumo */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid gap-4 md:grid-cols-3">
         <div className="flex items-center gap-3 rounded-lg border border-(--border-default) bg-(--bg-surface) p-4">
           <Flame size={20} className="text-(--brand)" />
           <div>

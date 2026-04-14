@@ -48,6 +48,9 @@ export interface CadenceOverview {
   total_leads: number
   leads_active: number
   leads_converted: number
+  leads_finished: number
+  replies: number
+  leads_paused: number
 }
 
 export interface CadenceABResult {

@@ -213,7 +213,6 @@ async def test_deactivate_cadence(client: AsyncClient):
     resp = await client.delete(f"/cadences/{created['id']}")
     assert resp.status_code == 204
 
-    # Verifica que a cadência foi desativada, não apagada
+    # Verifica que a cadência foi removida
     get_resp = await client.get(f"/cadences/{created['id']}")
-    assert get_resp.status_code == 200
-    assert get_resp.json()["is_active"] is False
+    assert get_resp.status_code == 404

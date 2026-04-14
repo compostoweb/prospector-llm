@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import Link from "next/link"
 import {
   Mail,
@@ -10,8 +10,6 @@ import {
   UserMinus,
   AlertCircle,
   Plus,
-  FileText,
-  Flame,
   Sparkles,
   Loader2,
   Pause,
@@ -37,6 +35,7 @@ import {
   useEmailOverTime,
   useEmailABResults,
 } from "@/lib/api/hooks/use-email-analytics"
+import type { EmailOverTimeItem } from "@/lib/api/hooks/use-email-analytics"
 import { useCadences } from "@/lib/api/hooks/use-cadences"
 import { useTenant, useUpdateIntegrations } from "@/lib/api/hooks/use-tenant"
 import { LLMConfigForm, type LLMConfig } from "@/components/cadencias/llm-config-form"
@@ -55,6 +54,56 @@ import { createBrowserClient } from "@/lib/api/client"
 import { useQueryClient } from "@tanstack/react-query"
 
 type Days = 7 | 30 | 90
+
+const coldEmailAxisDateFormatter = new Intl.DateTimeFormat("pt-BR", {
+  day: "2-digit",
+  month: "2-digit",
+})
+
+const coldEmailTooltipDateFormatter = new Intl.DateTimeFormat("pt-BR", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+})
+
+function formatColdEmailDate(value: string, mode: "axis" | "tooltip" = "axis"): string {
+  const parsed = new Date(`${value}T00:00:00`)
+
+  if (Number.isNaN(parsed.getTime())) {
+    return value
+  }
+
+  return mode === "tooltip"
+    ? coldEmailTooltipDateFormatter.format(parsed)
+    : coldEmailAxisDateFormatter.format(parsed)
+}
+
+function buildColdEmailChartData(
+  selectedDays: Days,
+  data: EmailOverTimeItem[] | undefined,
+): EmailOverTimeItem[] {
+  const byDate = new Map((data ?? []).map((item) => [item.date, item]))
+  const timeline: EmailOverTimeItem[] = []
+  const today = new Date()
+
+  today.setUTCHours(0, 0, 0, 0)
+
+  for (let offset = selectedDays - 1; offset >= 0; offset -= 1) {
+    const current = new Date(today)
+    current.setUTCDate(today.getUTCDate() - offset)
+    const dateKey = current.toISOString().slice(0, 10)
+    const existing = byDate.get(dateKey)
+
+    timeline.push({
+      date: dateKey,
+      sent: existing?.sent ?? 0,
+      opened: existing?.opened ?? 0,
+      replied: existing?.replied ?? 0,
+    })
+  }
+
+  return timeline
+}
 
 const DEFAULT_COLD_EMAIL_LLM = {
   llm_provider: "openai" as const,
@@ -172,9 +221,33 @@ function ColdEmailAIModal({ open, onClose }: { open: boolean; onClose: () => voi
   )
 }
 
-// ── Botão inline pause / activate ────────────────────────────────────
+// ── Status e ações inline ────────────────────────────────────────────
 
-function CadenceToggleButton({ cadenceId, isActive }: { cadenceId: string; isActive: boolean }) {
+function CadenceStatusBadge({ isActive }: { isActive: boolean }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
+        isActive
+          ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+          : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
+      )}
+    >
+      {isActive ? <Play size={9} /> : <Pause size={9} />}
+      {isActive ? "Ativa" : "Pausada"}
+    </span>
+  )
+}
+
+function CadenceToggleButton({
+  cadenceId,
+  isActive,
+  iconOnly = false,
+}: {
+  cadenceId: string
+  isActive: boolean
+  iconOnly?: boolean
+}) {
   const { data: session } = useSession()
   const queryClient = useQueryClient()
   const [loading, setLoading] = useState(false)
@@ -204,11 +277,15 @@ function CadenceToggleButton({ cadenceId, isActive }: { cadenceId: string; isAct
       disabled={loading}
       title={active ? "Pausar campanha" : "Ativar campanha"}
       className={cn(
-        "flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors disabled:opacity-50",
-        active
-          ? "bg-green-100 text-green-700 hover:opacity-75 dark:bg-green-900/30 dark:text-green-400"
-          : "bg-yellow-100 text-yellow-700 hover:opacity-75 dark:bg-yellow-900/30 dark:text-yellow-400",
+        iconOnly
+          ? "inline-flex h-7 w-7 items-center justify-center rounded-md border border-(--border-default) text-(--text-secondary) transition-colors hover:bg-(--bg-overlay) disabled:opacity-50"
+          : "flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors disabled:opacity-50",
+        !iconOnly &&
+          (active
+            ? "bg-green-100 text-green-700 hover:opacity-75 dark:bg-green-900/30 dark:text-green-400"
+            : "bg-yellow-100 text-yellow-700 hover:opacity-75 dark:bg-yellow-900/30 dark:text-yellow-400"),
       )}
+      aria-label={active ? "Pausar campanha" : "Ativar campanha"}
     >
       {loading ? (
         <Loader2 size={9} className="animate-spin" />
@@ -217,7 +294,7 @@ function CadenceToggleButton({ cadenceId, isActive }: { cadenceId: string; isAct
       ) : (
         <Play size={9} />
       )}
-      {active ? "Ativa" : "Pausada"}
+      {!iconOnly ? (active ? "Ativa" : "Pausada") : null}
     </button>
   )
 }
@@ -354,6 +431,7 @@ export default function ColdEmailPage() {
   } = useCadences("email_only")
   const { data: overTime, isError: overTimeError } = useEmailOverTime(days)
   const hasColdEmailError = statsError || analyticsError || allCadencesError || overTimeError
+  const chartData = useMemo(() => buildColdEmailChartData(days, overTime), [days, overTime])
 
   // Merge: show all email_only cadences, with analytics when available
   const analyticsMap = new Map((analyticsData ?? []).map((c) => [c.cadence_id, c]))
@@ -378,20 +456,6 @@ export default function ColdEmailPage() {
           <p className="text-sm text-(--text-secondary)">Cadências de prospecção por e-mail</p>
         </div>
         <div className="flex gap-2">
-          <Link
-            href="/cold-email/warmup"
-            className="flex items-center gap-1.5 rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-sm font-medium text-(--text-primary) transition-colors hover:bg-(--bg-overlay)"
-          >
-            <Flame size={14} aria-hidden="true" />
-            Warmup
-          </Link>
-          <Link
-            href="/cold-email/templates"
-            className="flex items-center gap-1.5 rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-sm font-medium text-(--text-primary) transition-colors hover:bg-(--bg-overlay)"
-          >
-            <FileText size={14} aria-hidden="true" />
-            Templates
-          </Link>
           <button
             type="button"
             onClick={() => setAiModalOpen(true)}
@@ -482,62 +546,63 @@ export default function ColdEmailPage() {
       )}
 
       {/* Gráfico ao longo do tempo */}
-      {overTime && overTime.length > 0 && (
-        <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-4">
-          <h2 className="mb-4 text-sm font-semibold text-(--text-primary)">
-            Evolução nos últimos {days} dias
-          </h2>
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={overTime} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" />
-              <XAxis
-                dataKey="date"
-                tick={{ fontSize: 10, fill: "var(--text-tertiary)" }}
-                tickLine={false}
-                axisLine={false}
-              />
-              <YAxis
-                tick={{ fontSize: 10, fill: "var(--text-tertiary)" }}
-                tickLine={false}
-                axisLine={false}
-              />
-              <Tooltip
-                contentStyle={{
-                  background: "var(--bg-surface)",
-                  border: "1px solid var(--border-default)",
-                  borderRadius: "var(--radius-md)",
-                  fontSize: 12,
-                }}
-              />
-              <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Line
-                type="monotone"
-                dataKey="sent"
-                name="Enviados"
-                stroke="var(--accent)"
-                strokeWidth={2}
-                dot={false}
-              />
-              <Line
-                type="monotone"
-                dataKey="opened"
-                name="Abertos"
-                stroke="var(--success)"
-                strokeWidth={2}
-                dot={false}
-              />
-              <Line
-                type="monotone"
-                dataKey="replied"
-                name="Respondidos"
-                stroke="var(--info)"
-                strokeWidth={2}
-                dot={false}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      )}
+      <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-4">
+        <h2 className="mb-4 text-sm font-semibold text-(--text-primary)">
+          Evolução nos últimos {days} dias
+        </h2>
+        <ResponsiveContainer width="100%" height={220}>
+          <LineChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" />
+            <XAxis
+              dataKey="date"
+              tickFormatter={(value: string) => formatColdEmailDate(value, "axis")}
+              tick={{ fontSize: 10, fill: "var(--text-tertiary)" }}
+              tickLine={false}
+              axisLine={false}
+            />
+            <YAxis
+              tick={{ fontSize: 10, fill: "var(--text-tertiary)" }}
+              tickLine={false}
+              axisLine={false}
+              allowDecimals={false}
+            />
+            <Tooltip
+              labelFormatter={(value) => formatColdEmailDate(String(value), "tooltip")}
+              contentStyle={{
+                background: "var(--bg-surface)",
+                border: "1px solid var(--border-default)",
+                borderRadius: "var(--radius-md)",
+                fontSize: 12,
+              }}
+            />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            <Line
+              type="monotone"
+              dataKey="sent"
+              name="Enviados"
+              stroke="var(--accent)"
+              strokeWidth={2}
+              dot={false}
+            />
+            <Line
+              type="monotone"
+              dataKey="opened"
+              name="Abertos"
+              stroke="var(--success)"
+              strokeWidth={2}
+              dot={false}
+            />
+            <Line
+              type="monotone"
+              dataKey="replied"
+              name="Respondidos"
+              stroke="var(--info)"
+              strokeWidth={2}
+              dot={false}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
 
       {/* Tabela de cadências */}
       <div className="rounded-lg border border-(--border-default) bg-(--bg-surface)">
@@ -558,7 +623,16 @@ export default function ColdEmailPage() {
           </div>
         ) : mergedCadences.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full table-fixed text-sm">
+              <colgroup>
+                <col className="w-[30%]" />
+                <col className="w-[10%]" />
+                <col className="w-[14%]" />
+                <col className="w-[14%]" />
+                <col className="w-[10%]" />
+                <col className="w-[12%]" />
+                <col className="w-[10%]" />
+              </colgroup>
               <thead>
                 <tr className="border-b border-(--border-subtle) text-left text-xs text-(--text-tertiary)">
                   <th className="px-4 py-2">Cadência</th>
@@ -567,7 +641,7 @@ export default function ColdEmailPage() {
                   <th className="px-4 py-2 text-right">T. Resposta</th>
                   <th className="px-4 py-2 text-right">Bounce</th>
                   <th className="px-4 py-2 text-center">Status</th>
-                  <th className="px-4 py-2" />
+                  <th className="px-4 py-2 text-right">Ações</th>
                 </tr>
               </thead>
               <tbody>
@@ -611,17 +685,24 @@ export default function ColdEmailPage() {
                         {c.bounced > 0 ? c.bounced : "—"}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-center">
-                      <CadenceToggleButton cadenceId={c.cadence_id} isActive={c.is_active} />
+                    <td className="px-4 py-2.5 text-center align-middle whitespace-nowrap">
+                      <CadenceStatusBadge isActive={c.is_active} />
                     </td>
-                    <td className="px-4 py-2.5">
-                      <Link
-                        href={`/cadencias/${c.cadence_id}`}
-                        title="Ver cadência"
-                        className="flex justify-end text-(--text-tertiary) hover:text-(--text-primary)"
-                      >
-                        <ExternalLink size={13} />
-                      </Link>
+                    <td className="px-4 py-2.5 align-middle">
+                      <div className="flex items-center justify-end gap-2">
+                        <CadenceToggleButton
+                          cadenceId={c.cadence_id}
+                          isActive={c.is_active}
+                          iconOnly
+                        />
+                        <Link
+                          href={`/cadencias/${c.cadence_id}`}
+                          title="Ver cadência"
+                          className="flex justify-end text-(--text-tertiary) hover:text-(--text-primary)"
+                        >
+                          <ExternalLink size={13} />
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))}
