@@ -28,6 +28,8 @@ from models.lead import Lead
 from models.manual_task import ManualTask
 from models.tenant import TenantIntegration
 from services.ai_composer import AIComposer
+from services.email_account_service import resolve_outbound_email_account
+from services.email_footer import inject_tracking
 
 logger = structlog.get_logger()
 
@@ -62,8 +64,7 @@ class ManualTaskService:
             )
         )
         existing_keys = {
-            (task.channel, task.step_number)
-            for task in existing_result.scalars().all()
+            (task.channel, task.step_number) for task in existing_result.scalars().all()
         }
 
         for default_step_number, item in enumerate(template, start=1):
@@ -120,6 +121,7 @@ class ManualTaskService:
 
         # Busca contexto do site
         from integrations.context_fetcher import context_fetcher
+
         context: dict[str, str] = {}
         if lead.website:
             context["website"] = await context_fetcher.fetch_from_website(lead.website)
@@ -266,13 +268,22 @@ class ManualTaskService:
                 if email_account is None:
                     raise ValueError("Conta de e-mail da cadência não encontrada")
 
+                email_send_account = await resolve_outbound_email_account(db, email_account)
+
                 email_registry = EmailRegistry(settings=settings)
+                body_html = inject_tracking(
+                    body_html=text,
+                    interaction_id=uuid.uuid4(),
+                    tenant_id=tenant_id,
+                    email=email,
+                    signature_html=email_send_account.email_signature,
+                )
                 result = await email_registry.send(
-                    account=email_account,
+                    account=email_send_account,
                     to_email=email,
                     subject=subject,
-                    body_html=text,
-                    from_name=email_account.from_name or email_account.display_name,
+                    body_html=body_html,
+                    from_name=email_send_account.from_name or email_send_account.display_name,
                 )
             else:
                 account_id = (
@@ -419,18 +430,12 @@ class ManualTaskService:
         """Estatísticas de tarefas."""
         base = select(func.count()).where(ManualTask.tenant_id == tenant_id)
 
-        pending = await db.execute(
-            base.where(ManualTask.status == ManualTaskStatus.PENDING)
-        )
+        pending = await db.execute(base.where(ManualTask.status == ManualTaskStatus.PENDING))
         generated = await db.execute(
             base.where(ManualTask.status == ManualTaskStatus.CONTENT_GENERATED)
         )
-        sent = await db.execute(
-            base.where(ManualTask.status == ManualTaskStatus.SENT)
-        )
-        done_ext = await db.execute(
-            base.where(ManualTask.status == ManualTaskStatus.DONE_EXTERNAL)
-        )
+        sent = await db.execute(base.where(ManualTask.status == ManualTaskStatus.SENT))
+        done_ext = await db.execute(base.where(ManualTask.status == ManualTaskStatus.DONE_EXTERNAL))
 
         return {
             "pending": pending.scalar() or 0,
@@ -481,7 +486,11 @@ class ManualTaskService:
 
             tts_registry = TTSRegistry(settings=settings, redis=redis_client)
             provider_name = cadence.tts_provider or settings.VOICE_PROVIDER
-            voice_id = cadence.tts_voice_id or settings.SPEECHIFY_VOICE_ID or settings.EDGE_TTS_DEFAULT_VOICE
+            voice_id = (
+                cadence.tts_voice_id
+                or settings.SPEECHIFY_VOICE_ID
+                or settings.EDGE_TTS_DEFAULT_VOICE
+            )
             available = tts_registry.available_providers()
             if not available:
                 return None

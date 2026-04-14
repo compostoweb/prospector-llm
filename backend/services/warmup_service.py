@@ -17,14 +17,15 @@ from __future__ import annotations
 
 import random
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.warmup import WarmupCampaign, WarmupLog, WarmupSeedPool
 from models.enums import WarmupStatus
+from models.warmup import WarmupCampaign, WarmupLog, WarmupSeedPool
+from services.email_account_service import resolve_outbound_email_account
 
 logger = structlog.get_logger()
 
@@ -77,7 +78,9 @@ def calculate_daily_volume(campaign: WarmupCampaign) -> int:
     if campaign.current_day >= campaign.ramp_days:
         return campaign.daily_volume_target
 
-    slope = (campaign.daily_volume_target - campaign.daily_volume_start) / max(campaign.ramp_days, 1)
+    slope = (campaign.daily_volume_target - campaign.daily_volume_start) / max(
+        campaign.ramp_days, 1
+    )
     volume = campaign.daily_volume_start + int(slope * campaign.current_day)
     return max(volume, campaign.daily_volume_start)
 
@@ -119,9 +122,9 @@ async def run_daily_warmup(
     Calcula o volume do dia, seleciona sementes e envia os e-mails.
     Retorna um resumo do que foi enviado.
     """
-    from models.email_account import EmailAccount  # noqa: PLC0415
-    from integrations.email import EmailRegistry  # noqa: PLC0415
     from core.config import settings  # noqa: PLC0415
+    from integrations.email import EmailRegistry  # noqa: PLC0415
+    from models.email_account import EmailAccount  # noqa: PLC0415
 
     # Carrega campanha
     camp_result = await db.execute(
@@ -151,6 +154,8 @@ async def run_daily_warmup(
         )
         return {"sent": 0, "error": "email_account_not_found"}
 
+    email_send_account = await resolve_outbound_email_account(db, email_account)
+
     # Volume do dia
     volume = calculate_daily_volume(campaign)
     seeds = await pick_seed_partners(volume, db)
@@ -167,7 +172,7 @@ async def run_daily_warmup(
         subject, body_html = _warmup_email_content()
         try:
             result = await registry.send(
-                account=email_account,
+                account=email_send_account,
                 to_email=seed.email,
                 subject=subject,
                 body_html=body_html,
@@ -183,7 +188,7 @@ async def run_daily_warmup(
             errors += 1
             continue
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         log = WarmupLog(
             id=uuid.uuid4(),
             tenant_id=tenant_id,

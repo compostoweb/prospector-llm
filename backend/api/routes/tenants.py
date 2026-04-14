@@ -78,12 +78,18 @@ _UNIPILE_WEBHOOK_SOURCES: tuple[UnipileWebhookSourceConfig, ...] = (
         events=("new_relation",),
     ),
     UnipileWebhookSourceConfig(
-        source="mailing",
+        source="email",
         label="Emails inbound",
         events=("mail_received",),
         request_events=("mail_received",),
     ),
 )
+
+_UNIPILE_SOURCE_ALIASES: dict[str, tuple[str, ...]] = {
+    "messaging": ("messaging",),
+    "users": ("users",),
+    "email": ("email", "mailing"),
+}
 
 
 # ── Helper: session sem RLS (para criação de tenant) ─────────────────
@@ -469,7 +475,7 @@ def _get_expected_unipile_sources(
     if linkedin_account_configured or not (linkedin_account_configured or gmail_account_configured):
         expected.extend(["messaging", "users"])
     if gmail_account_configured or not (linkedin_account_configured or gmail_account_configured):
-        expected.append("mailing")
+        expected.append("email")
 
     return expected
 
@@ -599,7 +605,10 @@ def _select_webhook_for_source(
     registered_webhooks: list[dict[str, Any]],
     source: str,
 ) -> dict[str, Any] | None:
-    source_matches = [webhook for webhook in registered_webhooks if webhook.get("source") == source]
+    accepted_sources = _UNIPILE_SOURCE_ALIASES.get(source, (source,))
+    source_matches = [
+        webhook for webhook in registered_webhooks if webhook.get("source") in accepted_sources
+    ]
     for webhook in source_matches:
         if webhook.get("enabled") is not False:
             return webhook

@@ -16,16 +16,48 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import html
 import json
+import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import structlog
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
+from models.email_account import EmailAccount
+from models.enums import EmailProviderType
 
 logger = structlog.get_logger()
+
+
+def _extract_display_name_from_signature(signature: str | None) -> str | None:
+    if not signature:
+        return None
+
+    strong_match = re.search(
+        r"<strong[^>]*>(.*?)</strong>", signature, flags=re.IGNORECASE | re.DOTALL
+    )
+    if strong_match:
+        candidate = re.sub(r"<[^>]+>", "", strong_match.group(1))
+        candidate = html.unescape(candidate).strip()
+        if candidate:
+            return candidate
+
+    text = re.sub(r"<[^>]+>", "\n", signature)
+    text = html.unescape(text)
+    for line in (item.strip() for item in text.splitlines()):
+        if not line:
+            continue
+        if ":" in line:
+            continue
+        if len(line.split()) >= 2:
+            return line
+
+    return None
 
 
 # ── Fernet — criptografia de campos sensíveis ─────────────────────────
@@ -39,7 +71,7 @@ def _get_fernet():
     if not key:
         raise RuntimeError(
             "EMAIL_ACCOUNT_ENCRYPTION_KEY não configurada no .env. "
-            "Gere uma com: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+            'Gere uma com: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
         )
     return Fernet(key.encode() if isinstance(key, str) else key)
 
@@ -130,11 +162,9 @@ def _build_oauth_state(tenant_id: uuid.UUID) -> str:
     """
     payload = {
         "tid": str(tenant_id),
-        "exp": int((datetime.now(timezone.utc) + timedelta(minutes=15)).timestamp()),
+        "exp": int((datetime.now(UTC) + timedelta(minutes=15)).timestamp()),
     }
-    payload_b64 = base64.urlsafe_b64encode(
-        json.dumps(payload).encode()
-    ).decode()
+    payload_b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
 
     sig = hmac.new(
         (settings.SECRET_KEY + ":oauth-email-state").encode(),
@@ -166,7 +196,7 @@ def _verify_oauth_state(state: str) -> dict | None:
 
     payload = json.loads(base64.urlsafe_b64decode(payload_b64 + "=="))
 
-    if payload.get("exp", 0) < int(datetime.now(timezone.utc).timestamp()):
+    if payload.get("exp", 0) < int(datetime.now(UTC).timestamp()):
         return None  # expirado
 
     return payload
@@ -259,10 +289,12 @@ async def exchange_google_code(
     return refresh_token, email_address
 
 
-async def fetch_gmail_signature(encrypted_refresh_token: str) -> tuple[str | None, str]:
+async def fetch_gmail_signature_details(
+    encrypted_refresh_token: str,
+) -> tuple[str | None, str, str | None]:
     """
     Busca a assinatura padrão do Gmail via API usando o refresh_token.
-    Retorna (signature_html, send_as_email).
+    Retorna (signature_html, send_as_email, display_name).
     """
     if not settings.GOOGLE_CLIENT_ID_EMAIL or not settings.GOOGLE_CLIENT_SECRET_EMAIL:
         raise RuntimeError("Google OAuth não configurado (credenciais ausentes)")
@@ -306,6 +338,88 @@ async def fetch_gmail_signature(encrypted_refresh_token: str) -> tuple[str | Non
 
     signature = default_alias.get("signature") or None  # pode ser "" → None
     send_as_email = default_alias.get("sendAsEmail", "")
+    display_name = default_alias.get("displayName") or _extract_display_name_from_signature(
+        signature
+    )
 
     logger.info("email_account.gmail_signature_fetched", send_as=send_as_email)
+    return signature, send_as_email, display_name
+
+
+async def fetch_gmail_signature(encrypted_refresh_token: str) -> tuple[str | None, str]:
+    signature, send_as_email, _display_name = await fetch_gmail_signature_details(
+        encrypted_refresh_token
+    )
     return signature, send_as_email
+
+
+async def resolve_outbound_email_account(
+    db: AsyncSession,
+    account: EmailAccount,
+) -> EmailAccount:
+    """
+    Resolve a conta efetiva de envio.
+
+    A Unipile persiste o remetente Gmail com display_name igual ao endereço de e-mail,
+    ignorando overrides de From enviados pelo app. Quando existir uma conta Google OAuth
+    ativa para o mesmo endereço, preferimos esse transporte só para o outbound, mantendo
+    a conta original para o restante do fluxo.
+    """
+    if account.provider_type != EmailProviderType.UNIPILE_GMAIL:
+        return account
+
+    result = await db.execute(
+        select(EmailAccount).where(
+            EmailAccount.tenant_id == account.tenant_id,
+            EmailAccount.email_address == account.email_address,
+            EmailAccount.provider_type == EmailProviderType.GOOGLE_OAUTH,
+            EmailAccount.is_active.is_(True),
+            EmailAccount.google_refresh_token.is_not(None),
+        )
+    )
+    resolved = result.scalar_one_or_none()
+    if resolved is None:
+        return account
+
+    logger.info(
+        "email_account.outbound_transport_overridden",
+        source_account_id=str(account.id),
+        resolved_account_id=str(resolved.id),
+        email=account.email_address,
+        source_provider=account.provider_type,
+        resolved_provider=resolved.provider_type,
+    )
+    return resolved
+
+
+async def build_email_account_response(
+    db: AsyncSession,
+    account: EmailAccount,
+):
+    from schemas.email_account import EmailAccountResponse  # noqa: PLC0415
+
+    effective_account = await resolve_outbound_email_account(db, account)
+    return EmailAccountResponse(
+        id=account.id,
+        tenant_id=account.tenant_id,
+        display_name=account.display_name,
+        email_address=account.email_address,
+        from_name=account.from_name,
+        provider_type=account.provider_type,
+        effective_provider_type=effective_account.provider_type,
+        outbound_uses_fallback=effective_account.id != account.id,
+        unipile_account_id=account.unipile_account_id,
+        smtp_host=account.smtp_host,
+        smtp_port=account.smtp_port,
+        smtp_username=account.smtp_username,
+        smtp_use_tls=account.smtp_use_tls,
+        imap_host=account.imap_host,
+        imap_port=account.imap_port,
+        imap_use_ssl=account.imap_use_ssl,
+        daily_send_limit=account.daily_send_limit,
+        is_active=account.is_active,
+        is_warmup_enabled=account.is_warmup_enabled,
+        email_signature=account.email_signature,
+        created_at=account.created_at,
+        updated_at=account.updated_at,
+    )

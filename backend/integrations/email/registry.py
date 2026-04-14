@@ -37,6 +37,7 @@ class EmailRegistry:
 
         if provider_type == EmailProviderType.UNIPILE_GMAIL:
             from integrations.email.unipile_provider import UnipileEmailProvider  # noqa: PLC0415
+
             return UnipileEmailProvider(account_id=account.unipile_account_id or "")
 
         if provider_type == EmailProviderType.GOOGLE_OAUTH:

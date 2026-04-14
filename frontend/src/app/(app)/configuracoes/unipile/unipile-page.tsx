@@ -253,8 +253,7 @@ function WebhookStatusPanel({
       (sourceStatus) =>
         sourceStatus.registered &&
         sourceStatus.enabled !== false &&
-        sourceStatus.missing_events.length === 0 &&
-        sourceStatus.extra_events.length === 0,
+        sourceStatus.missing_events.length === 0,
     )
 
   return (
@@ -618,8 +617,7 @@ function summarizeSourceAlignment(statuses: UnipileWebhookStatus["expected_sourc
       (sourceStatus) =>
         !sourceStatus.registered ||
         sourceStatus.enabled === false ||
-        sourceStatus.missing_events.length > 0 ||
-        sourceStatus.extra_events.length > 0,
+        sourceStatus.missing_events.length > 0,
     )
     .map((sourceStatus) => {
       if (!sourceStatus.registered) {
@@ -630,9 +628,6 @@ function summarizeSourceAlignment(statuses: UnipileWebhookStatus["expected_sourc
       }
       if (sourceStatus.missing_events.length > 0) {
         return `${sourceStatus.label}: faltando ${sourceStatus.missing_events.join(", ")}`
-      }
-      if (sourceStatus.extra_events.length > 0) {
-        return `${sourceStatus.label}: extras ${sourceStatus.extra_events.join(", ")}`
       }
       return `${sourceStatus.label}: revisar`
     })
@@ -648,6 +643,8 @@ function formatSourceLabel(source: string | null) {
       return "users"
     case "mailing":
       return "mailing"
+    case "email":
+      return "email"
     case "account_status":
       return "account_status"
     default:

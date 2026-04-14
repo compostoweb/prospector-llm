@@ -35,6 +35,7 @@ from sqlalchemy.sql.elements import BinaryExpression, BooleanClauseList
 
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
+from models.email_account import EmailAccount
 from models.email_template import EmailTemplate
 from models.enums import Channel, LeadStatus, StepStatus
 from models.interaction import Interaction
@@ -509,6 +510,126 @@ async def test_dispatch_email_manual_template_body_is_used(
     assert call_kwargs["subject"].startswith("Uma ideia para")
     assert "Olá João" in call_kwargs["body_html"]
     assert "Acme Corp" in call_kwargs["body_html"]
+
+
+async def test_dispatch_email_account_uses_from_name_and_signature(
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    tenant,
+) -> None:
+    from workers.dispatch import _dispatch_async
+
+    lead = _make_lead(tenant_id, email_corporate="joao@acme.com")
+    cadence = _make_cadence(tenant_id)
+    cadence.email_account_id = uuid.uuid4()
+    step = _make_step(tenant_id, lead.id, cadence.id, channel=Channel.EMAIL)
+    step.composed_subject = "Assunto teste"
+    step.composed_text = "Corpo do email aqui."
+    email_account = EmailAccount(
+        id=cadence.email_account_id,
+        tenant_id=tenant_id,
+        display_name="Conta Principal",
+        from_name="Adriano Valadao",
+        email_address="adriano@compostoweb.com.br",
+        provider_type="google_oauth",
+        google_refresh_token="encrypted-token",
+        email_signature="<p>Assinatura importada</p>",
+    )
+    db.add_all([lead, cadence, step, email_account])
+    await db.flush()
+
+    send_mock = AsyncMock(return_value=_send_result("email_account_msg_1"))
+
+    with (
+        patch("workers.dispatch.get_worker_session", new=_mock_worker_session(db)),
+        patch("workers.dispatch.context_fetcher") as mock_ctx,
+        patch("workers.dispatch.AIComposer") as mock_composer_cls,
+        patch("workers.dispatch.LLMRegistry"),
+        patch("workers.dispatch.redis_client", new=_mock_redis()),
+        patch("integrations.email.registry.EmailRegistry.send", new=send_mock),
+    ):
+        mock_ctx.fetch_from_website = AsyncMock(return_value=None)
+        mock_ctx.search_company = AsyncMock(return_value=None)
+
+        composer_instance = MagicMock()
+        composer_instance.compose_email = AsyncMock(return_value=("Assunto IA", "Body IA"))
+        mock_composer_cls.return_value = composer_instance
+
+        task_mock = _make_task_mock()
+        result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
+
+    assert result["status"] == "sent"
+    call_kwargs = send_mock.await_args.kwargs
+    assert call_kwargs["from_name"] == "Adriano Valadao"
+    assert "Assinatura importada" in call_kwargs["body_html"]
+    assert "/track/open/" in call_kwargs["body_html"]
+    assert "lista de prospecção" not in call_kwargs["body_html"]
+    assert "/track/unsubscribe/" not in call_kwargs["body_html"]
+
+
+async def test_dispatch_unipile_email_account_prefers_google_oauth_twin_for_send(
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    tenant,
+) -> None:
+    from workers.dispatch import _dispatch_async
+
+    lead = _make_lead(tenant_id, email_corporate="joao@acme.com")
+    cadence = _make_cadence(tenant_id)
+    cadence.email_account_id = uuid.uuid4()
+    step = _make_step(tenant_id, lead.id, cadence.id, channel=Channel.EMAIL)
+    step.composed_subject = "Assunto teste"
+    step.composed_text = "Corpo do email aqui."
+
+    unipile_account = EmailAccount(
+        id=cadence.email_account_id,
+        tenant_id=tenant_id,
+        display_name="Gmail via Unipile",
+        from_name="Adriano Valadao",
+        email_address="adriano@compostoweb.com.br",
+        provider_type="unipile_gmail",
+        unipile_account_id="uni_123",
+        email_signature="<p>Assinatura Unipile</p>",
+    )
+    google_account = EmailAccount(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        display_name="Gmail OAuth",
+        from_name="Adriano Valadão",
+        email_address="adriano@compostoweb.com.br",
+        provider_type="google_oauth",
+        google_refresh_token="encrypted-token",
+        email_signature="<p>Assinatura OAuth</p>",
+    )
+    db.add_all([lead, cadence, step, unipile_account, google_account])
+    await db.flush()
+
+    send_mock = AsyncMock(return_value=_send_result("email_account_msg_2"))
+
+    with (
+        patch("workers.dispatch.get_worker_session", new=_mock_worker_session(db)),
+        patch("workers.dispatch.context_fetcher") as mock_ctx,
+        patch("workers.dispatch.AIComposer") as mock_composer_cls,
+        patch("workers.dispatch.LLMRegistry"),
+        patch("workers.dispatch.redis_client", new=_mock_redis()),
+        patch("integrations.email.registry.EmailRegistry.send", new=send_mock),
+    ):
+        mock_ctx.fetch_from_website = AsyncMock(return_value=None)
+        mock_ctx.search_company = AsyncMock(return_value=None)
+
+        composer_instance = MagicMock()
+        composer_instance.compose_email = AsyncMock(return_value=("Assunto IA", "Body IA"))
+        mock_composer_cls.return_value = composer_instance
+
+        task_mock = _make_task_mock()
+        result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
+
+    assert result["status"] == "sent"
+    assert send_mock.await_count == 1
+    call_kwargs = send_mock.await_args_list[0].kwargs
+    assert call_kwargs["account"].id == google_account.id
+    assert call_kwargs["from_name"] == "Adriano Valadão"
+    assert "Assinatura OAuth" in call_kwargs["body_html"]
 
 
 async def test_dispatch_email_saved_template_and_subject_variants(

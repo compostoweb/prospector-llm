@@ -37,7 +37,7 @@ Arquivo: `api/webhooks/unipile.py`
 |---|---|---|
 | `messaging` | `message_received` | Classifica intent, salva Interaction inbound, notifica, broadcast WS |
 | `users` | `new_relation` | Marca lead como `connected`, cria ManualTasks se cadência semi-manual |
-| `mailing` | `mail_received` | Processa resposta inbound de email via Gmail |
+| `email` | `mail_received` | Processa resposta inbound de email via Gmail |
 | `account_status` | `ok`, `reconnected`, `sync_success`, etc. | Log informativo e observabilidade da conta |
 | qualquer outro | qualquer outro | Ignorado silenciosamente (retorna 200) |
 
@@ -53,13 +53,13 @@ No painel da Unipile (https://dashboard.unipile.com), configurar:
 - **Sources/Eventos esperados pelo sistema**:
      - `messaging` → `message_received`
      - `users` → `new_relation`
-     - `mailing` → `mail_received` quando houver conta Gmail conectada
+     - `email` → `mail_received` quando houver conta Gmail conectada
 
 Eventos de `account_status` como `ok`, `reconnected` e `sync_success` podem existir na sua workspace e aparecer no painel, mas são tratados como observabilidade da conexão, não como gatilhos principais de inbox ou cadência.
 
 Também é possível registrar o webhook direto pela tela
 `/configuracoes/unipile` usando o botão **Registrar via API da Unipile**.
-Nesse caso, o backend cria os webhooks necessários por source (`messaging`, `users` e `mailing` quando aplicável) com headers:
+Nesse caso, o backend cria os webhooks necessários por source (`messaging`, `users` e `email` quando aplicável) com headers:
 
 - `Content-Type: application/json`
 - `Unipile-Auth: <UNIPILE_WEBHOOK_SECRET>`
@@ -191,7 +191,7 @@ frescos só quando realmente necessário.
 - [ ] Configurar webhook URL no painel Unipile para `https://api.prospector.compostoweb.com.br/webhooks/unipile`
 - [ ] Garantir o source `messaging` com evento `message_received`
 - [ ] Garantir o source `users` com evento `new_relation`
-- [ ] Garantir o source `mailing` com evento `mail_received` se houver Gmail conectado
+- [ ] Garantir o source `email` com evento `mail_received` se houver Gmail conectado
 - [ ] Definir `UNIPILE_WEBHOOK_SECRET` em `backend/.env.prod`
 - [ ] Garantir que a porta/domínio está acessível externamente (HTTPS obrigatório)
 - [ ] Testar com `curl -X POST https://api.prospector.compostoweb.com.br/webhooks/unipile` (deve retornar 401)

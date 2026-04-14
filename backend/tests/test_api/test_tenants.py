@@ -148,6 +148,13 @@ async def test_get_unipile_webhook_status_reports_ready_state(
                 "source": "users",
                 "events": ["new_relation"],
             },
+            {
+                "id": "wh_existing_789",
+                "request_url": request_url,
+                "enabled": True,
+                "source": "email",
+                "events": ["mail_received", "mail_moved"],
+            },
         ]
 
     monkeypatch.setattr("api.routes.tenants._probe_unipile_webhook_endpoint", _fake_probe)
@@ -164,7 +171,10 @@ async def test_get_unipile_webhook_status_reports_ready_state(
 
     update_resp = await client.put(
         "/tenants/me/integrations",
-        json={"unipile_linkedin_account_id": "li_acc_abc123"},
+        json={
+            "unipile_linkedin_account_id": "li_acc_abc123",
+            "unipile_gmail_account_id": "gm_acc_abc123",
+        },
     )
     assert update_resp.status_code == 200
 
@@ -176,7 +186,7 @@ async def test_get_unipile_webhook_status_reports_ready_state(
     assert body["public_endpoint_healthy"] is True
     assert body["public_endpoint_status_code"] == 401
     assert body["linkedin_account_configured"] is True
-    assert body["gmail_account_configured"] is False
+    assert body["gmail_account_configured"] is True
     assert body["api_registration_supported"] is True
     assert body["api_registration_ready"] is True
     assert body["api_registration_blockers"] == []
@@ -194,12 +204,18 @@ async def test_get_unipile_webhook_status_reports_ready_state(
             "enabled": True,
             "events": ["new_relation"],
         },
+        {
+            "webhook_id": "wh_existing_789",
+            "source": "email",
+            "enabled": True,
+            "events": ["mail_received", "mail_moved"],
+        },
     ]
     assert body["registration_lookup_error"] is None
     assert body["supports_signature_auth"] is True
     assert body["supports_custom_header_auth"] is True
     assert body["auth_headers"] == ["X-Unipile-Signature", "Unipile-Auth"]
-    assert body["expected_events"] == ["message_received", "new_relation"]
+    assert body["expected_events"] == ["message_received", "new_relation", "mail_received"]
     assert body["expected_sources"] == [
         {
             "source": "messaging",
@@ -222,6 +238,17 @@ async def test_get_unipile_webhook_status_reports_ready_state(
             "registered_events": ["new_relation"],
             "missing_events": [],
             "extra_events": [],
+        },
+        {
+            "source": "email",
+            "label": "Emails inbound",
+            "expected_events": ["mail_received"],
+            "registered": True,
+            "webhook_id": "wh_existing_789",
+            "enabled": True,
+            "registered_events": ["mail_received", "mail_moved"],
+            "missing_events": [],
+            "extra_events": ["mail_moved"],
         },
     ]
     assert body["ready"] is True
@@ -260,7 +287,10 @@ async def test_register_unipile_webhook_returns_created_result(
     monkeypatch.setattr(app_settings, "UNIPILE_ACCOUNT_ID_GMAIL", None)
     update_resp = await client.put(
         "/tenants/me/integrations",
-        json={"unipile_linkedin_account_id": "li_acc_abc123"},
+        json={
+            "unipile_linkedin_account_id": "li_acc_abc123",
+            "unipile_gmail_account_id": "gm_acc_abc123",
+        },
     )
     assert update_resp.status_code == 200
     monkeypatch.setattr(
@@ -274,6 +304,7 @@ async def test_register_unipile_webhook_returns_created_result(
     assert register_calls == [
         ("messaging", ["message_received"]),
         ("users", None),
+        ("email", ["mail_received"]),
     ]
     assert body == {
         "created": True,
@@ -294,6 +325,13 @@ async def test_register_unipile_webhook_returns_created_result(
                 "created": False,
                 "already_exists": True,
                 "webhook_id": "wh_users",
+            },
+            {
+                "source": "email",
+                "events": ["mail_received"],
+                "created": False,
+                "already_exists": False,
+                "webhook_id": "wh_email",
             },
         ],
         "message": "Webhooks registrados com sucesso na Unipile.",

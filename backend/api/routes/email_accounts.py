@@ -35,20 +35,20 @@ from schemas.email_account import (
     EmailAccountListResponse,
     EmailAccountResponse,
     EmailAccountSMTPCreateRequest,
+    EmailAccountStatusResponse,
     EmailAccountUnipileCreateRequest,
     EmailAccountUpdateRequest,
-    EmailAccountStatusResponse,
     GmailSignatureResponse,
     GoogleOAuthUrlResponse,
     SMTPTestRequest,
     SMTPTestResponse,
 )
 from services.email_account_service import (
+    build_email_account_response,
     build_google_auth_url,
-    decrypt_credential,
     encrypt_credential,
     exchange_google_code,
-    fetch_gmail_signature,
+    fetch_gmail_signature_details,
     get_tenant_id_from_oauth_state,
     test_smtp_connection,
 )
@@ -58,6 +58,7 @@ logger = structlog.get_logger()
 
 
 # ── Listagem ──────────────────────────────────────────────────────────
+
 
 @router.get("", response_model=EmailAccountListResponse)
 async def list_email_accounts(
@@ -71,13 +72,15 @@ async def list_email_accounts(
         .order_by(EmailAccount.created_at)
     )
     accounts = result.scalars().all()
+    response_accounts = [await build_email_account_response(db, account) for account in accounts]
     return EmailAccountListResponse(
-        accounts=[EmailAccountResponse.model_validate(a) for a in accounts],
+        accounts=response_accounts,
         total=len(accounts),
     )
 
 
 # ── Conectar via Unipile ──────────────────────────────────────────────
+
 
 @router.post(
     "/unipile",
@@ -108,10 +111,11 @@ async def create_unipile_account(
         account_id=str(account.id),
         tenant_id=str(tenant_id),
     )
-    return EmailAccountResponse.model_validate(account)
+    return await build_email_account_response(db, account)
 
 
 # ── Teste de SMTP ─────────────────────────────────────────────────────
+
 
 @router.post("/smtp/test", response_model=SMTPTestResponse)
 async def test_smtp(
@@ -130,6 +134,7 @@ async def test_smtp(
 
 
 # ── Conectar via SMTP ─────────────────────────────────────────────────
+
 
 @router.post(
     "/smtp",
@@ -186,10 +191,11 @@ async def create_smtp_account(
         account_id=str(account.id),
         tenant_id=str(tenant_id),
     )
-    return EmailAccountResponse.model_validate(account)
+    return await build_email_account_response(db, account)
 
 
 # ── OAuth Google — iniciar ────────────────────────────────────────────
+
 
 @router.get("/google/authorize", response_model=GoogleOAuthUrlResponse)
 async def google_authorize(
@@ -210,6 +216,7 @@ async def google_authorize(
 
 
 # ── OAuth Google — callback ───────────────────────────────────────────
+
 
 @router.get("/google/callback")
 async def google_callback(
@@ -273,11 +280,13 @@ async def google_callback(
     )
 
     from core.config import settings as _settings  # noqa: PLC0415
+
     redirect_url = f"{_settings.FRONTEND_URL}/configuracoes/email-accounts?connected=1"
     return RedirectResponse(url=redirect_url)
 
 
 # ── Detalhe ───────────────────────────────────────────────────────────
+
 
 @router.get("/{account_id}", response_model=EmailAccountResponse)
 async def get_email_account(
@@ -286,10 +295,11 @@ async def get_email_account(
     db: AsyncSession = Depends(get_session_flexible),
 ) -> EmailAccountResponse:
     account = await _get_or_404(account_id, tenant_id, db)
-    return EmailAccountResponse.model_validate(account)
+    return await build_email_account_response(db, account)
 
 
 # ── Editar ────────────────────────────────────────────────────────────
+
 
 @router.patch("/{account_id}", response_model=EmailAccountResponse)
 async def update_email_account(
@@ -311,10 +321,11 @@ async def update_email_account(
 
     await db.flush()
     await db.refresh(account)
-    return EmailAccountResponse.model_validate(account)
+    return await build_email_account_response(db, account)
 
 
 # ── Remover ───────────────────────────────────────────────────────────
+
 
 @router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_email_account(
@@ -332,6 +343,7 @@ async def delete_email_account(
 
 
 # ── Status (ping) ─────────────────────────────────────────────────────
+
 
 @router.get("/{account_id}/status", response_model=EmailAccountStatusResponse)
 async def get_account_status(
@@ -364,6 +376,7 @@ async def get_account_status(
 
 # ── Assinatura Gmail ──────────────────────────────────────────────────
 
+
 @router.get("/{account_id}/gmail-signature", response_model=GmailSignatureResponse)
 async def get_gmail_signature(
     account_id: uuid.UUID,
@@ -390,7 +403,9 @@ async def get_gmail_signature(
         )
 
     try:
-        signature, send_as_email = await fetch_gmail_signature(account.google_refresh_token)
+        signature, send_as_email, display_name = await fetch_gmail_signature_details(
+            account.google_refresh_token
+        )
     except PermissionError as exc:
         logger.warning(
             "email_account.gmail_signature_scope_error",
@@ -413,12 +428,19 @@ async def get_gmail_signature(
 
     if save and signature is not None:
         account.email_signature = signature
+        if display_name:
+            account.from_name = display_name
         await db.flush()
 
-    return GmailSignatureResponse(signature=signature, send_as_email=send_as_email)
+    return GmailSignatureResponse(
+        signature=signature,
+        send_as_email=send_as_email,
+        display_name=display_name,
+    )
 
 
 # ── Helper ────────────────────────────────────────────────────────────
+
 
 async def _get_or_404(
     account_id: uuid.UUID,

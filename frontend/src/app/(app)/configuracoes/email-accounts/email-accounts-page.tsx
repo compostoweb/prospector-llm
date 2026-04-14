@@ -40,7 +40,11 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
-import { SettingsCallout, SettingsPageShell, SettingsPanel } from "@/components/settings/settings-shell"
+import {
+  SettingsCallout,
+  SettingsPageShell,
+  SettingsPanel,
+} from "@/components/settings/settings-shell"
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -84,9 +88,16 @@ function AccountCard({
             {account.display_name}
           </p>
           <p className="truncate text-xs text-(--text-secondary)">{account.email_address}</p>
-          <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-(--bg-overlay) px-2 py-0.5 text-[11px] text-(--text-tertiary)">
-            {PROVIDER_LABELS[account.provider_type]}
-          </span>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            <span className="inline-flex items-center gap-1 rounded-full bg-(--bg-overlay) px-2 py-0.5 text-[11px] text-(--text-tertiary)">
+              {PROVIDER_LABELS[account.provider_type]}
+            </span>
+            {account.outbound_uses_fallback ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-(--info-subtle) px-2 py-0.5 text-[11px] text-(--info-subtle-fg)">
+                envia via {PROVIDER_LABELS[account.effective_provider_type]}
+              </span>
+            ) : null}
+          </div>
         </div>
       </div>
       <div className="ml-4 flex shrink-0 items-center gap-2.5">
@@ -591,11 +602,7 @@ function UnipileModal({ open, onClose }: { open: boolean; onClose: () => void })
 
 export default function EmailAccountsPage() {
   const { data, isLoading, isError, error } = useEmailAccounts()
-  const {
-    data: oauthUrl,
-    isError: oauthError,
-    error: oauthErrorDetails,
-  } = useGoogleOAuthUrl()
+  const { data: oauthUrl, isError: oauthError, error: oauthErrorDetails } = useGoogleOAuthUrl()
   const { mutate: deleteAccount } = useDeleteEmailAccount()
   const { mutate: updateAccount } = useUpdateEmailAccount()
 
@@ -662,10 +669,16 @@ export default function EmailAccountsPage() {
           ) : null}
           {oauthError ? (
             <p>
-              Gmail OAuth: {oauthErrorDetails instanceof Error ? oauthErrorDetails.message : "falha ao obter URL de autorização."}
+              Gmail OAuth:{" "}
+              {oauthErrorDetails instanceof Error
+                ? oauthErrorDetails.message
+                : "falha ao obter URL de autorização."}
             </p>
           ) : null}
-          <p>Confirme se a API do backend e as credenciais do Google estão acessíveis no ambiente atual.</p>
+          <p>
+            Confirme se a API do backend e as credenciais do Google estão acessíveis no ambiente
+            atual.
+          </p>
         </SettingsCallout>
       ) : null}
 
@@ -745,6 +758,10 @@ export default function EmailAccountsPage() {
               Cada cadência pode selecionar uma conta diferente. Ative apenas os remetentes que de
               fato estão prontos para envio e use a edição da conta para revisar assinatura e limite
               diário.
+            </p>
+            <p className="mt-3 text-sm leading-6 text-(--text-secondary)">
+              Quando uma conta Unipile tiver uma conta Gmail OAuth ativa com o mesmo endereço, o
+              sistema envia pelo OAuth para preservar nome do remetente e assinatura.
             </p>
           </SettingsPanel>
         </div>

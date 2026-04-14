@@ -11,8 +11,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
-
 # ── Criação: Unipile ──────────────────────────────────────────────────
+
 
 class EmailAccountUnipileCreateRequest(BaseModel):
     """Conectar conta Gmail via Unipile (account_id já configurado lá)."""
@@ -27,6 +27,7 @@ class EmailAccountUnipileCreateRequest(BaseModel):
 
 
 # ── Criação: SMTP ─────────────────────────────────────────────────────
+
 
 class EmailAccountSMTPCreateRequest(BaseModel):
     """Conectar conta via SMTP genérico."""
@@ -67,6 +68,7 @@ class SMTPTestResponse(BaseModel):
 
 # ── Update parcial ────────────────────────────────────────────────────
 
+
 class EmailAccountUpdateRequest(BaseModel):
     """Campos editáveis de uma conta já conectada."""
 
@@ -88,6 +90,7 @@ class EmailAccountUpdateRequest(BaseModel):
 
 # ── Response ──────────────────────────────────────────────────────────
 
+
 class EmailAccountResponse(BaseModel):
     """Resposta da API com dados públicos (sem tokens/senhas)."""
 
@@ -97,6 +100,8 @@ class EmailAccountResponse(BaseModel):
     email_address: str
     from_name: str | None
     provider_type: str
+    effective_provider_type: str
+    outbound_uses_fallback: bool = False
     unipile_account_id: str | None
     smtp_host: str | None
     smtp_port: int | None
@@ -112,8 +117,6 @@ class EmailAccountResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    model_config = {"from_attributes": True}
-
 
 class EmailAccountListResponse(BaseModel):
     accounts: list[EmailAccountResponse]
@@ -122,11 +125,14 @@ class EmailAccountListResponse(BaseModel):
 
 class GmailSignatureResponse(BaseModel):
     """Assinatura retornada da API do Gmail."""
+
     signature: str | None
     send_as_email: str
+    display_name: str | None = None
 
 
 # ── OAuth (Google) ────────────────────────────────────────────────────
+
 
 class GoogleOAuthUrlResponse(BaseModel):
     """URL para iniciar o fluxo OAuth do Google."""
@@ -145,6 +151,7 @@ class GoogleOAuthCallbackRequest(BaseModel):
 
 
 # ── Status ────────────────────────────────────────────────────────────
+
 
 class EmailAccountStatusResponse(BaseModel):
     """Resultado de um ping ao provider da conta."""

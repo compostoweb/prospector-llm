@@ -13,6 +13,8 @@ export interface EmailAccount {
   email_address: string
   from_name: string | null
   provider_type: "unipile_gmail" | "google_oauth" | "smtp"
+  effective_provider_type: "unipile_gmail" | "google_oauth" | "smtp"
+  outbound_uses_fallback: boolean
   unipile_account_id: string | null
   smtp_host: string | null
   smtp_port: number | null

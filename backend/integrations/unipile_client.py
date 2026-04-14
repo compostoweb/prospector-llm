@@ -472,6 +472,26 @@ class UnipileClient:
             webhook for webhook in existing_webhooks if webhook.get("request_url") == request_url
         ]
 
+    async def get_account_status(self, account_id: str) -> dict[str, Any] | None:
+        """Busca os detalhes de uma conta Unipile pelo account_id."""
+        response = await self._client.get(f"/accounts/{account_id}")
+
+        if response.status_code == 404:
+            return None
+        if 400 <= response.status_code < 500:
+            body_text = response.text[:500]
+            logger.error(
+                "unipile.account_status.client_error",
+                account_id=account_id,
+                status=response.status_code,
+                response_body=body_text,
+            )
+            raise UnipileNonRetryableError(f"Unipile {response.status_code}: {body_text}")
+
+        response.raise_for_status()
+        data = response.json()
+        return data if isinstance(data, dict) else None
+
     # ── Perfil LinkedIn ───────────────────────────────────────────────
 
     async def get_linkedin_profile(

@@ -47,6 +47,7 @@ from services.cadence_manager import (
     get_template_step_config,
     get_total_template_steps,
 )
+from services.email_account_service import resolve_outbound_email_account
 from services.email_event_service import build_outbound_email_delivery_observation
 from services.message_template_renderer import (
     render_message_template,
@@ -248,6 +249,8 @@ async def _dispatch_inner(
             content_audio_url: str | None = None
             # Interaction pré-criada pelo canal EMAIL (necessário antes do envio para o pixel)
             email_interaction: Interaction | None = None
+            email_account = None
+            email_send_account = None
             email_provider_type: str | None = None
             email_delivery_observation = None
             result: _DispatchResult
@@ -474,44 +477,16 @@ async def _dispatch_inner(
                 # Persiste subject para analytics de open-rate
                 step.subject_used = subject
 
-                # Pré-cria Interaction antes do envio para ter o ID para o pixel de rastreamento
-                now_pre = datetime.now(tz=UTC)
-                email_interaction = Interaction(
-                    id=uuid.uuid4(),
-                    tenant_id=tid,
-                    lead_id=lead.id,
-                    channel=Channel.EMAIL,
-                    direction=InteractionDirection.OUTBOUND,
-                    content_text=message_text,
-                    created_at=now_pre,
-                )
-                db.add(email_interaction)
-                await db.flush()  # garante email_interaction.id sem commit
-
-                # Injeta pixel de abertura e rodapé de descadastro
-                tracked_html = inject_tracking(
-                    body_html=message_text,
-                    interaction_id=email_interaction.id,
-                    tenant_id=tid,
-                    email=email_to,
-                )
-
-                # Usa EmailRegistry se a cadência tem email_account_id configurado
                 if getattr(cadence, "email_account_id", None):
                     from sqlalchemy import select as _sel  # noqa: PLC0415
 
-                    from core.config import settings as _cfg  # noqa: PLC0415
-                    from integrations.email import (
-                        EmailRegistry,  # noqa: PLC0415
-                        EmailSendResult,  # noqa: PLC0415
-                    )
                     from models.email_account import EmailAccount  # noqa: PLC0415
 
                     _acc_result = await db.execute(
                         _sel(EmailAccount).where(EmailAccount.id == cadence.email_account_id)
                     )
-                    _email_account = _acc_result.scalar_one_or_none()
-                    if _email_account is None:
+                    email_account = _acc_result.scalar_one_or_none()
+                    if email_account is None:
                         logger.warning(
                             "dispatch.email_account_not_found",
                             cadence_id=str(cadence.id),
@@ -526,15 +501,53 @@ async def _dispatch_inner(
                             "reason": "email_account_not_found",
                         }
 
+                # Pré-cria Interaction antes do envio para ter o ID para o pixel de rastreamento
+                now_pre = datetime.now(tz=UTC)
+                email_interaction = Interaction(
+                    id=uuid.uuid4(),
+                    tenant_id=tid,
+                    lead_id=lead.id,
+                    channel=Channel.EMAIL,
+                    direction=InteractionDirection.OUTBOUND,
+                    content_text=message_text,
+                    created_at=now_pre,
+                )
+                db.add(email_interaction)
+                await db.flush()  # garante email_interaction.id sem commit
+
+                if email_account is not None:
+                    email_send_account = await resolve_outbound_email_account(db, email_account)
+
+                # Injeta pixel de abertura e rodapé de descadastro
+                tracked_html = inject_tracking(
+                    body_html=message_text,
+                    interaction_id=email_interaction.id,
+                    tenant_id=tid,
+                    email=email_to,
+                    signature_html=getattr(
+                        email_send_account or email_account, "email_signature", None
+                    ),
+                )
+
+                # Usa EmailRegistry se a cadência tem email_account_id configurado
+                if email_account is not None:
+                    from core.config import settings as _cfg  # noqa: PLC0415
+                    from integrations.email import (
+                        EmailRegistry,  # noqa: PLC0415
+                        EmailSendResult,  # noqa: PLC0415
+                    )
+
                     _registry = EmailRegistry(settings=_cfg)
-                    email_provider_type = str(_email_account.provider_type)
+                    account_for_send = email_send_account or email_account
+                    email_provider_type = str(account_for_send.provider_type)
                     _send_result = cast(
                         EmailSendResult,
                         await _registry.send(
-                            account=_email_account,
+                            account=account_for_send,
                             to_email=email_to,
                             subject=subject,
                             body_html=tracked_html,
+                            from_name=account_for_send.from_name or account_for_send.display_name,
                         ),
                     )
                     result = _DispatchResult(
