@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
 
+import httpx
 import pytest
 
-from integrations.unipile_client import UnipileClient
+from integrations.unipile_client import _OWN_PROFILE_TIMEOUT, UnipileClient
 
 
 @pytest.mark.asyncio
@@ -45,3 +47,34 @@ async def test_send_email_uses_identifier_and_provider_id(monkeypatch: pytest.Mo
     }
     assert result.success is True
     assert result.message_id == "provider_123"
+
+
+@pytest.mark.asyncio
+async def test_get_own_profile_uses_shorter_request_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = UnipileClient()
+    captured: dict[str, object] = {}
+
+    class _Response:
+        status_code = 200
+
+        def json(self) -> dict[str, str]:
+            return {"provider_id": "provider_123", "public_identifier": "adriano"}
+
+    async def _fake_get(path: str, **kwargs: object) -> _Response:  # type: ignore[override]
+        captured["path"] = path
+        captured["kwargs"] = kwargs
+        return _Response()
+
+    monkeypatch.setattr(client, "_client", SimpleNamespace(get=_fake_get))
+
+    result = await client.get_own_profile("acc_123")
+
+    assert result == {"provider_id": "provider_123", "public_identifier": "adriano"}
+    assert captured["path"] == "/users/me"
+    assert captured["kwargs"] == {
+        "params": {"account_id": "acc_123"},
+        "timeout": _OWN_PROFILE_TIMEOUT,
+    }
+    assert isinstance(cast(dict[str, object], captured["kwargs"])["timeout"], httpx.Timeout)

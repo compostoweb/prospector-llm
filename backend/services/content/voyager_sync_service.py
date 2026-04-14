@@ -17,6 +17,7 @@ Invocado por:
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -25,12 +26,17 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.redis_client import redis_client
 from integrations.unipile_client import UnipileClient
 from models.content_linkedin_account import ContentLinkedInAccount
 from models.content_post import ContentPost
 from models.linkedin_account import LinkedInAccount
 
 logger = structlog.get_logger()
+
+_OWN_PROFILE_CACHE_TTL = 86400
+_OWN_PROFILE_MAX_ATTEMPTS = 2
+_OWN_POSTS_MAX_ATTEMPTS = 2
 
 
 @dataclass
@@ -106,9 +112,8 @@ async def sync_voyager_for_tenant(
     # 2. Resolve identificadores possiveis do perfil
     profile: dict[str, Any] | None = None
     profile_error: Exception | None = None
-    candidates: list[tuple[str, str]] = []
-
-    _append_identifier_candidate(candidates, "linkedin_username", li_account.linkedin_username)
+    provider_candidates: list[tuple[str, str]] = []
+    fallback_candidates: list[tuple[str, str]] = []
 
     # 3. Busca posts com metricas via Unipile
     posts_raw: list[dict] | None = None
@@ -119,10 +124,18 @@ async def sync_voyager_for_tenant(
 
     try:
         async with UnipileClient() as client:
-            for source, candidate in candidates:
+            cached_identifiers = await _get_cached_own_profile_identifiers(account_id)
+            _append_identifier_candidate(
+                provider_candidates,
+                "cached_provider_id",
+                cached_identifiers.get("provider_id"),
+            )
+
+            for source, candidate in provider_candidates:
                 try:
                     attempted_candidates.add(candidate)
-                    posts_raw = await client.get_own_posts_with_metrics(
+                    posts_raw = await _fetch_own_posts_with_retry(
+                        client=client,
                         account_id=account_id,
                         identifier=candidate,
                         limit=limit,
@@ -142,7 +155,7 @@ async def sync_voyager_for_tenant(
 
             if identifier is None:
                 try:
-                    profile = await client.get_own_profile(account_id)
+                    profile = await _fetch_own_profile_with_retry(client, account_id)
                 except Exception as exc:
                     profile_error = exc
                     logger.warning(
@@ -151,18 +164,46 @@ async def sync_voyager_for_tenant(
                         error=str(exc),
                     )
                 else:
+                    await _cache_own_profile_identifiers(account_id, profile)
                     _append_identifier_candidate(
-                        candidates, "provider_id", profile.get("provider_id")
-                    )
-                    _append_identifier_candidate(
-                        candidates,
-                        "public_identifier",
-                        profile.get("public_identifier"),
+                        provider_candidates,
+                        "provider_id",
+                        profile.get("provider_id"),
                     )
 
-                for source, candidate in candidates:
+                for source, candidate in provider_candidates:
                     if candidate in attempted_candidates:
                         continue
+                    try:
+                        attempted_candidates.add(candidate)
+                        posts_raw = await _fetch_own_posts_with_retry(
+                            client=client,
+                            account_id=account_id,
+                            identifier=candidate,
+                            limit=limit,
+                        )
+                        identifier = candidate
+                        identifier_source = source
+                        break
+                    except Exception as exc:
+                        attempt_errors.append(f"{source}={candidate}: {exc}")
+                        logger.warning(
+                            "unipile_sync.identifier_attempt_failed",
+                            tenant_id=tenant_id,
+                            source=source,
+                            identifier=candidate,
+                            error=str(exc),
+                        )
+
+            if identifier is None and not provider_candidates:
+                _append_identifier_candidate(
+                    fallback_candidates,
+                    "linkedin_username",
+                    li_account.linkedin_username,
+                )
+
+            if identifier is None:
+                for source, candidate in fallback_candidates:
                     try:
                         attempted_candidates.add(candidate)
                         posts_raw = await client.get_own_posts_with_metrics(
@@ -191,10 +232,10 @@ async def sync_voyager_for_tenant(
         result.error = (
             "Nao foi possivel identificar o perfil LinkedIn na Unipile. "
             "Configure o linkedin_username da conta ou verifique a conexao com a Unipile."
-            if not candidates
+            if not provider_candidates and not fallback_candidates
             else "Erro ao buscar posts na Unipile."
         )
-        if not candidates and profile_error is not None:
+        if not provider_candidates and not fallback_candidates and profile_error is not None:
             result.error = f"{result.error} Erro original: {profile_error}"
         if attempt_errors:
             result.error = f"{result.error} Tentativas: {' | '.join(attempt_errors)}"
@@ -229,6 +270,21 @@ async def sync_voyager_for_tenant(
 
     # 4. Upsert posts no banco
     now = datetime.now(UTC)
+    post_urns = [str(raw.get("social_id") or raw.get("id") or "").strip() for raw in posts_raw]
+    normalized_post_urns = [post_urn for post_urn in post_urns if post_urn]
+    existing_posts_by_urn: dict[str, ContentPost] = {}
+
+    if normalized_post_urns:
+        existing_posts_stmt = select(ContentPost).where(
+            ContentPost.tenant_id == tenant_id,  # type: ignore[arg-type]
+            ContentPost.linkedin_post_urn.in_(normalized_post_urns),
+        )
+        existing_posts_result = await db.execute(existing_posts_stmt)
+        existing_posts_by_urn = {
+            str(post.linkedin_post_urn): post
+            for post in existing_posts_result.scalars().all()
+            if post.linkedin_post_urn
+        }
 
     for raw in posts_raw:
         # Identificador unico do post: social_id ou id do Unipile
@@ -261,13 +317,7 @@ async def sync_voyager_for_tenant(
             except (ValueError, TypeError):
                 pass
 
-        # Busca post existente pelo URN do LinkedIn
-        existing_stmt = select(ContentPost).where(
-            ContentPost.tenant_id == tenant_id,  # type: ignore[arg-type]
-            ContentPost.linkedin_post_urn == post_urn,
-        )
-        existing_row = await db.execute(existing_stmt)
-        existing: ContentPost | None = existing_row.scalar_one_or_none()
+        existing = existing_posts_by_urn.get(post_urn)
 
         if existing:
             # Atualiza apenas metricas (nao sobrescreve titulo/body manualmente editados)
@@ -342,6 +392,62 @@ async def _update_sync_timestamp(
         await db.flush()
 
 
+async def _fetch_own_profile_with_retry(client: UnipileClient, account_id: str) -> dict[str, Any]:
+    last_error: Exception | None = None
+    for attempt in range(1, _OWN_PROFILE_MAX_ATTEMPTS + 1):
+        try:
+            return await client.get_own_profile(account_id)
+        except Exception as exc:
+            last_error = exc
+            if attempt >= _OWN_PROFILE_MAX_ATTEMPTS:
+                break
+            logger.warning(
+                "unipile_sync.profile_retry",
+                account_id=account_id,
+                attempt=attempt,
+                error=str(exc),
+            )
+
+    assert last_error is not None
+    raise last_error
+
+
+async def _fetch_own_posts_with_retry(
+    *,
+    client: UnipileClient,
+    account_id: str,
+    identifier: str,
+    limit: int,
+) -> list[dict]:
+    last_error: Exception | None = None
+    for attempt in range(1, _OWN_POSTS_MAX_ATTEMPTS + 1):
+        try:
+            return await client.get_own_posts_with_metrics(
+                account_id=account_id,
+                identifier=identifier,
+                limit=limit,
+            )
+        except Exception as exc:
+            last_error = exc
+            if attempt >= _OWN_POSTS_MAX_ATTEMPTS or not _is_connection_error(exc):
+                break
+            logger.warning(
+                "unipile_sync.posts_retry",
+                account_id=account_id,
+                identifier=identifier,
+                attempt=attempt,
+                error=str(exc),
+            )
+
+    assert last_error is not None
+    raise last_error
+
+
+def _is_connection_error(exc: Exception) -> bool:
+    message = str(exc)
+    return "Falha de conexao com Unipile" in message or "ReadTimeout" in message
+
+
 def _append_identifier_candidate(
     candidates: list[tuple[str, str]],
     source: str,
@@ -353,3 +459,61 @@ def _append_identifier_candidate(
     if any(existing == normalized for _, existing in candidates):
         return
     candidates.append((source, normalized))
+
+
+async def _get_cached_own_profile_identifiers(account_id: str) -> dict[str, str]:
+    cache_key = f"unipile:own_profile:{account_id}"
+    try:
+        cached = await redis_client.get(cache_key)
+    except Exception as exc:
+        logger.debug(
+            "unipile_sync.profile_cache_read_failed",
+            account_id=account_id,
+            error=str(exc),
+        )
+        return {}
+
+    if not cached:
+        return {}
+
+    try:
+        payload = json.loads(cached)
+    except (TypeError, ValueError) as exc:
+        logger.debug(
+            "unipile_sync.profile_cache_invalid",
+            account_id=account_id,
+            error=str(exc),
+        )
+        return {}
+
+    if not isinstance(payload, dict):
+        return {}
+
+    return {
+        "provider_id": str(payload.get("provider_id") or "").strip(),
+        "public_identifier": str(payload.get("public_identifier") or "").strip(),
+    }
+
+
+async def _cache_own_profile_identifiers(account_id: str, profile: dict[str, Any]) -> None:
+    provider_id = str(profile.get("provider_id") or "").strip()
+    public_identifier = str(profile.get("public_identifier") or "").strip()
+    if not provider_id and not public_identifier:
+        return
+
+    cache_key = f"unipile:own_profile:{account_id}"
+    payload = json.dumps(
+        {
+            "provider_id": provider_id,
+            "public_identifier": public_identifier,
+        }
+    )
+
+    try:
+        await redis_client.set(cache_key, payload, ex=_OWN_PROFILE_CACHE_TTL)
+    except Exception as exc:
+        logger.debug(
+            "unipile_sync.profile_cache_write_failed",
+            account_id=account_id,
+            error=str(exc),
+        )

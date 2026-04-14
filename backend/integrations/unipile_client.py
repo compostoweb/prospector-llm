@@ -33,6 +33,7 @@ logger = structlog.get_logger()
 
 _BASE_URL = settings.UNIPILE_BASE_URL
 _TIMEOUT = 30.0
+_OWN_PROFILE_TIMEOUT = httpx.Timeout(8.0, connect=8.0, read=8.0, write=8.0, pool=8.0)
 _PROFILE_CACHE_TTL = 86400  # 24h
 _PROFILE_CACHE_TTL_EMPTY = 3600  # 1h for unresolved names
 _PREVIEW_CACHE_TTL = 300  # 5min for message previews
@@ -1135,6 +1136,7 @@ class UnipileClient:
             response = await self._client.get(
                 "/users/me",
                 params={"account_id": account_id},
+                timeout=_OWN_PROFILE_TIMEOUT,
             )
         except Exception as exc:
             logger.error(
