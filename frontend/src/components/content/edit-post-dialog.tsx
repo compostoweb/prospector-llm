@@ -49,6 +49,16 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -62,7 +72,13 @@ import {
 } from "@/components/ui/select"
 
 const DAY_NAMES: Record<number, string> = {
-  0: "Domingo", 1: "Segunda", 2: "Terça", 3: "Quarta", 4: "Quinta", 5: "Sexta", 6: "Sábado",
+  0: "Domingo",
+  1: "Segunda",
+  2: "Terça",
+  3: "Quarta",
+  4: "Quinta",
+  5: "Sexta",
+  6: "Sábado",
 }
 const DAY_COLORS: Record<number, string> = {
   0: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
@@ -112,6 +128,7 @@ export function EditPostDialog({
   const [syncWarning, setSyncWarning] = useState<string | null>(null)
   const [improveOpen, setImproveOpen] = useState(false)
   const [instruction, setInstruction] = useState("")
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false)
 
   // Imagem
   const [imageOpen, setImageOpen] = useState(false)
@@ -327,11 +344,56 @@ export function EditPostDialog({
   const charCount = body.length
   const isOverLimit = charCount > 3000
   const isTooShort = charCount > 0 && charCount < 900
+  const initialPublishDate = post?.publish_date
+    ? format(toZonedTime(post.publish_date, "America/Sao_Paulo"), "yyyy-MM-dd'T'HH:mm")
+    : ""
+  const initialWeekNumber = post?.week_number ? String(post.week_number) : ""
+  const hasUnsavedChanges =
+    !syncWarning &&
+    !!post &&
+    (title !== post.title ||
+      body !== post.body ||
+      pillar !== post.pillar ||
+      hookType !== (post.hook_type ?? "none") ||
+      hashtags !== (post.hashtags ?? "") ||
+      publishDate !== initialPublishDate ||
+      weekNumber !== initialWeekNumber ||
+      instruction.trim().length > 0 ||
+      customPrompt.trim().length > 0 ||
+      imageDeleted ||
+      localVideoDeleted ||
+      localImage !== null ||
+      localUploadedImage !== null ||
+      localVideoUrl !== null)
+
+  function requestClose() {
+    if (!hasUnsavedChanges) {
+      setSyncWarning(null)
+      onOpenChange(false)
+      return
+    }
+    setShowCloseConfirm(true)
+  }
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen) => (nextOpen ? onOpenChange(true) : requestClose())}
+      >
+        <DialogContent
+          className="max-w-2xl max-h-[90vh] overflow-y-auto"
+          onInteractOutside={(event) => {
+            if (!hasUnsavedChanges) return
+            event.preventDefault()
+            setShowCloseConfirm(true)
+          }}
+          onEscapeKeyDown={(event) => {
+            if (!hasUnsavedChanges) return
+            event.preventDefault()
+            setShowCloseConfirm(true)
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Editar post</DialogTitle>
           </DialogHeader>
@@ -499,7 +561,9 @@ export function EditPostDialog({
                 <div className="flex items-center gap-2">
                   <Label htmlFor="edit-publish-date">Data de publicação</Label>
                   {publishDate && (
-                    <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-semibold leading-none ${DAY_COLORS[new Date(publishDate).getDay()]}`}>
+                    <span
+                      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-semibold leading-none ${DAY_COLORS[new Date(publishDate).getDay()]}`}
+                    >
                       {DAY_NAMES[new Date(publishDate).getDay()]}
                     </span>
                   )}
@@ -1093,14 +1157,7 @@ export function EditPostDialog({
 
               {/* Save / Cancel */}
               <div className="flex items-center justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setSyncWarning(null)
-                    onOpenChange(false)
-                  }}
-                >
+                <Button type="button" variant="outline" onClick={requestClose}>
                   {syncWarning ? "Fechar" : "Cancelar"}
                 </Button>
                 {!syncWarning && (
@@ -1113,6 +1170,31 @@ export function EditPostDialog({
           </form>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={showCloseConfirm} onOpenChange={setShowCloseConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Fechar sem salvar?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Existem alterações não salvas neste post. Se fechar agora, suas edições serão
+              descartadas.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Continuar editando</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-(--danger) text-white hover:opacity-90 focus-visible:ring-(--danger)"
+              onClick={() => {
+                setShowCloseConfirm(false)
+                setSyncWarning(null)
+                onOpenChange(false)
+              }}
+            >
+              Fechar sem salvar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* ── Lightbox de imagem ── */}
       <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
