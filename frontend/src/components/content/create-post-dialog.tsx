@@ -183,8 +183,8 @@ export function CreatePostDialog({
           <DialogTitle>Novo post</DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <div className="grid gap-1.5">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4 ">
+          <div className="grid gap-1.5 pt-2">
             <Label htmlFor="title">Título interno</Label>
             <Input
               id="title"
@@ -438,7 +438,7 @@ export function CreatePostDialog({
               />
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="week_number">Semana</Label>
+              <Label htmlFor="week_number">Semana do mês</Label>
               <Input
                 id="week_number"
                 type="number"

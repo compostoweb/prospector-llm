@@ -41,6 +41,8 @@ import { useSession } from "next-auth/react"
 import { useQueryClient } from "@tanstack/react-query"
 import { contentKeys } from "@/lib/api/hooks/use-content"
 
+const UNMAPPED_NOTION_COLUMN = "__unmapped__"
+
 export default function ConfiguracoesPage() {
   const { data: settings, isLoading } = useContentSettings()
   const update = useUpdateContentSettings()
@@ -554,9 +556,12 @@ export default function ConfiguracoesPage() {
                         {required && <span className="text-(--danger) ml-0.5">*</span>}
                       </Label>
                       <Select
-                        value={mappingForm[key] ?? ""}
+                        value={mappingForm[key] ?? (required ? "" : UNMAPPED_NOTION_COLUMN)}
                         onValueChange={(val) => {
-                          setMappingForm((prev) => ({ ...prev, [key]: val || undefined }))
+                          setMappingForm((prev) => ({
+                            ...prev,
+                            [key]: val === UNMAPPED_NOTION_COLUMN ? undefined : val,
+                          }))
                           setMappingDirty(true)
                         }}
                       >
@@ -565,7 +570,7 @@ export default function ConfiguracoesPage() {
                         </SelectTrigger>
                         <SelectContent>
                           {!required && (
-                            <SelectItem value="">
+                            <SelectItem value={UNMAPPED_NOTION_COLUMN}>
                               <span className="text-(--text-tertiary)">— não mapeado —</span>
                             </SelectItem>
                           )}
