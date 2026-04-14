@@ -39,7 +39,7 @@ from core.database import get_worker_session
 from core.redis_client import redis_client
 from integrations.context_fetcher import context_fetcher
 from integrations.llm import LLMRegistry
-from integrations.llm.base import LLMNonRetryableError
+from integrations.llm.base import LLMNonRetryableError, close_async_resource
 from integrations.unipile_client import UnipileNonRetryableError, unipile_client
 from services.ai_composer import AIComposer
 from services.cadence_manager import (
@@ -193,6 +193,7 @@ async def _dispatch_inner(
             or ""
         )
 
+        registry: LLMRegistry | None = None
         try:
             # ── Contexto do website (cache 24h, assíncrono) ───────────
             context: dict = {}
@@ -788,6 +789,9 @@ async def _dispatch_inner(
                     error=str(exc),
                 )
                 return {"step_id": step_id, "status": "pending", "error": str(exc)}
+        finally:
+            if registry is not None:
+                await close_async_resource(registry)
 
     return {"step_id": step_id, "status": "error", "error": "no_session"}
 

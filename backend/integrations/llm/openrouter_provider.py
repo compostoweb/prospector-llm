@@ -16,7 +16,13 @@ from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
-from integrations.llm.base import LLMMessage, LLMProvider, LLMResponse, ModelInfo
+from integrations.llm.base import (
+    LLMMessage,
+    LLMProvider,
+    LLMResponse,
+    ModelInfo,
+    close_async_resource,
+)
 
 logger = structlog.get_logger()
 
@@ -183,6 +189,10 @@ class OpenRouterProvider(LLMProvider):
         models.sort(key=lambda m: (m.price_input_per_mtok > 0, m.price_input_per_mtok, m.id))
         logger.info("openrouter.models.listed", count=len(models))
         return models
+
+    async def aclose(self) -> None:
+        await close_async_resource(self._raw_http)
+        await close_async_resource(self._client)
 
 
 def _safe_float(value: str | float | int | None) -> float:

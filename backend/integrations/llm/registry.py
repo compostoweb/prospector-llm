@@ -218,6 +218,17 @@ class LLMRegistry:
     def available_providers(self) -> list[str]:
         return list(self._providers.keys())
 
+    async def aclose(self) -> None:
+        for provider_name, provider in self._providers.items():
+            try:
+                await provider.aclose()
+            except Exception as exc:
+                logger.warning(
+                    "llm.registry.provider_close_failed",
+                    provider=provider_name,
+                    error=str(exc),
+                )
+
     # ------------------------------------------------------------------
     # Geração de imagem
     # ------------------------------------------------------------------

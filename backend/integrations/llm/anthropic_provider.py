@@ -24,7 +24,13 @@ from anthropic import AsyncAnthropic
 from anthropic.types import Message, TextBlock
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
-from integrations.llm.base import LLMMessage, LLMProvider, LLMResponse, ModelInfo
+from integrations.llm.base import (
+    LLMMessage,
+    LLMProvider,
+    LLMResponse,
+    ModelInfo,
+    close_async_resource,
+)
 
 logger = structlog.get_logger()
 
@@ -219,3 +225,6 @@ class AnthropicProvider(LLMProvider):
         models.sort(key=lambda m: m.id, reverse=True)
         logger.info("anthropic.models.listed", count=len(models))
         return models
+
+    async def aclose(self) -> None:
+        await close_async_resource(self._client)

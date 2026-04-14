@@ -21,7 +21,13 @@ from google import genai
 from google.genai import types
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
-from integrations.llm.base import LLMMessage, LLMProvider, LLMResponse, ModelInfo
+from integrations.llm.base import (
+    LLMMessage,
+    LLMProvider,
+    LLMResponse,
+    ModelInfo,
+    close_async_resource,
+)
 
 logger = structlog.get_logger()
 
@@ -250,3 +256,7 @@ class GeminiProvider(LLMProvider):
 
         logger.info("gemini.image_generated", size_bytes=len(image_bytes))
         return image_bytes
+
+    async def aclose(self) -> None:
+        await close_async_resource(getattr(self._client, "aio", None))
+        await close_async_resource(self._client)

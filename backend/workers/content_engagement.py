@@ -843,6 +843,12 @@ async def _run_scan_async(
 
         await db.commit()
 
+    await scanner.aclose()
+
+    from integrations.llm.base import close_async_resource  # noqa: PLC0415
+
+    await close_async_resource(registry)
+
     await _record_event(
         "comments_generated",
         {"comments_generated": comments_generated},

@@ -216,20 +216,25 @@ async def _handle_native_message(
             return
 
         registry = LLMRegistry(settings=settings, redis=redis_client)
-        result = await process_inbound_reply(
-            db=db,
-            registry=registry,
-            tenant_id=tid,
-            lead=lead,
-            channel=Channel.LINKEDIN_DM,
-            reply_text=message.text or "",
-            external_message_id=message.id,
-        )
-        logger.info(
-            "linkedin_poll.message_processed",
-            lead_id=str(lead.id),
-            intent=result.intent.value,
-            tenant_id=tenant_id,
-        )
+        try:
+            result = await process_inbound_reply(
+                db=db,
+                registry=registry,
+                tenant_id=tid,
+                lead=lead,
+                channel=Channel.LINKEDIN_DM,
+                reply_text=message.text or "",
+                external_message_id=message.id,
+            )
+            logger.info(
+                "linkedin_poll.message_processed",
+                lead_id=str(lead.id),
+                intent=result.intent.value,
+                tenant_id=tenant_id,
+            )
+        finally:
+            from integrations.llm.base import close_async_resource
+
+            await close_async_resource(registry)
 
     await engine.dispose()

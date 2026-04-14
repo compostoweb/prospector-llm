@@ -6,6 +6,7 @@ Cada provedor implementa esta interface — o restante do sistema
 nunca importa OpenAI ou Gemini diretamente, só usa LLMProvider.
 """
 
+import inspect
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -86,3 +87,23 @@ class LLMProvider(ABC):
 
     @abstractmethod
     async def list_models(self) -> list[ModelInfo]: ...
+
+    async def aclose(self) -> None:
+        """Fecha recursos assíncronos do provider quando existirem."""
+        return None
+
+
+async def close_async_resource(resource: object | None) -> None:
+    """Fecha um recurso que exponha close/aclose síncrono ou assíncrono."""
+    if resource is None:
+        return
+
+    for method_name in ("aclose", "close"):
+        method = getattr(resource, method_name, None)
+        if not callable(method):
+            continue
+
+        result = method()
+        if inspect.isawaitable(result):
+            await result
+        return

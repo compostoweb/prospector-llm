@@ -638,15 +638,20 @@ async def _process_email_reply(
             return
 
         registry = LLMRegistry(settings=settings, redis=redis_client)
-        result = await process_inbound_reply(
-            db=db,
-            registry=registry,
-            tenant_id=tenant_id,
-            lead=lead,
-            channel=Channel.EMAIL,
-            reply_text=body,
-            external_message_id=message_id,
-        )
+        try:
+            result = await process_inbound_reply(
+                db=db,
+                registry=registry,
+                tenant_id=tenant_id,
+                lead=lead,
+                channel=Channel.EMAIL,
+                reply_text=body,
+                external_message_id=message_id,
+            )
+        finally:
+            from integrations.llm.base import close_async_resource
+
+            await close_async_resource(registry)
 
         logger.info(
             "email_inbox_poll.reply_processed",
