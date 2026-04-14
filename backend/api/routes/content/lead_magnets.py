@@ -14,11 +14,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible
+from core.config import settings
+from models.content_landing_page import ContentLandingPage
 from models.content_lead_magnet import ContentLeadMagnet
 from models.content_lm_lead import ContentLMLead
 from models.content_lm_post import ContentLMPost
 from models.content_post import ContentPost
 from schemas.content_inbound import (
+    ContentLandingPageResponse,
     ContentLeadMagnetCreate,
     ContentLeadMagnetResponse,
     ContentLeadMagnetStatusUpdate,
@@ -316,3 +319,69 @@ async def get_metrics(
     await _get_lead_magnet_or_404(lead_magnet_id, tenant_id, db)
     metrics = await get_lead_magnet_metrics(db, tenant_id=tenant_id, lead_magnet_id=lead_magnet_id)
     return LeadMagnetMetricsResponse(**metrics)
+
+
+class _ExampleLeadMagnetResponse(ContentLeadMagnetResponse):
+    landing_page: ContentLandingPageResponse
+    public_url: str
+
+
+@router.post(
+    "/create-example",
+    response_model=_ExampleLeadMagnetResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Cria um lead magnet de exemplo (calculadora ROI) com LP publicada",
+)
+async def create_example_lead_magnet(
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> _ExampleLeadMagnetResponse:
+    short_id = str(uuid.uuid4())[:8]
+
+    lead_magnet = ContentLeadMagnet(
+        tenant_id=tenant_id,
+        type="calculator",
+        title="Calculadora de ROI de Automação de Processos",
+        description=(
+            "Descubra em minutos quanto sua empresa perde com processos manuais "
+            "e qual é o ROI esperado com automação."
+        ),
+        status="active",
+        cta_text="Receber diagnóstico gratuito",
+    )
+    db.add(lead_magnet)
+    await db.flush()  # garante o ID antes de criar a LP
+
+    slug = f"calculadora-roi-{short_id}"
+    landing_page = ContentLandingPage(
+        tenant_id=tenant_id,
+        lead_magnet_id=lead_magnet.id,
+        slug=slug,
+        title="Quanto sua empresa perde por mês com processos manuais?",
+        subtitle="Simule em 2 minutos e receba um diagnóstico personalizado com o ROI estimado da automação.",
+        benefits=[
+            "Cálculo baseado no seu segmento e porte",
+            "Diagnóstico enviado por e-mail em PDF",
+            "Estimativa de payback e ROI realista",
+            "Sem compromisso — 100% gratuito",
+        ],
+        social_proof_count=0,
+        published=True,
+    )
+    db.add(landing_page)
+    await db.commit()
+    await db.refresh(lead_magnet)
+    await db.refresh(landing_page)
+
+    public_url = f"{settings.CONTENT_PUBLIC_BASE_URL}/lm/{slug}"
+    logger.info(
+        "content.lead_magnet.example_created",
+        lead_magnet_id=str(lead_magnet.id),
+        slug=slug,
+        tenant_id=str(tenant_id),
+    )
+    return _ExampleLeadMagnetResponse(
+        **ContentLeadMagnetResponse.model_validate(lead_magnet).model_dump(),
+        landing_page=ContentLandingPageResponse.model_validate(landing_page),
+        public_url=public_url,
+    )

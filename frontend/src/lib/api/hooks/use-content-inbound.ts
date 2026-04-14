@@ -295,3 +295,89 @@ export function useLinkLeadMagnetPost() {
     },
   })
 }
+
+// ---------------------------------------------------------------------------
+// SendPulse integration test hooks
+// ---------------------------------------------------------------------------
+
+export interface SendPulseConnectionResult {
+  status: "ok" | "error"
+  message: string
+  lists: Array<{ id: string | number; name: string; all_email_qty: number }> | null
+}
+
+export function useTestSendPulseConnection() {
+  const { data: session } = useSession()
+
+  return useMutation({
+    mutationFn: async () => {
+      const response = await fetch(
+        `${env.NEXT_PUBLIC_API_URL}/api/content/sendpulse/test-connection`,
+        {
+          method: "POST",
+          headers: buildAuthHeaders(session?.accessToken),
+        },
+      )
+      return parseApiResponse<SendPulseConnectionResult>(response)
+    },
+  })
+}
+
+export interface TestWebhookInput {
+  event_type: "subscribe" | "open" | "click" | "unsubscribe" | "sequence_completed"
+  email: string
+  list_id?: string
+  link_url?: string
+}
+
+export interface TestWebhookResult {
+  status: "ok" | "ignored"
+  lm_lead_updated: boolean
+  event_stored: boolean
+  event_id: string | null
+  message: string
+}
+
+export function useTestSendPulseWebhook() {
+  const { data: session } = useSession()
+
+  return useMutation({
+    mutationFn: async (body: TestWebhookInput) => {
+      const response = await fetch(
+        `${env.NEXT_PUBLIC_API_URL}/api/content/sendpulse/test-webhook`,
+        {
+          method: "POST",
+          headers: buildAuthHeaders(session?.accessToken, true),
+          body: JSON.stringify(body),
+        },
+      )
+      return parseApiResponse<TestWebhookResult>(response)
+    },
+  })
+}
+
+export interface ExampleLeadMagnetResult extends ContentLeadMagnet {
+  landing_page: ContentLandingPage
+  public_url: string
+}
+
+export function useCreateExampleLeadMagnet() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async () => {
+      const response = await fetch(
+        `${env.NEXT_PUBLIC_API_URL}/api/content/lead-magnets/create-example`,
+        {
+          method: "POST",
+          headers: buildAuthHeaders(session?.accessToken),
+        },
+      )
+      return parseApiResponse<ExampleLeadMagnetResult>(response)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: contentInboundKeys.leadMagnets() })
+    },
+  })
+}

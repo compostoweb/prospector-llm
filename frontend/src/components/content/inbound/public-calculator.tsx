@@ -129,7 +129,8 @@ const CALCULATOR_PROMISES: Array<{
   {
     icon: FileText,
     title: "PDF pronto para compartilhar",
-    description: "Ao final, você pode receber o diagnóstico por e-mail com custo atual, payback e faixa de investimento.",
+    description:
+      "Ao final, você pode receber o diagnóstico por e-mail com custo atual, payback e faixa de investimento.",
   },
 ]
 
@@ -698,8 +699,8 @@ export default function PublicCalculator({ leadMagnetId }: Props) {
                         </p>
                         <p className="mt-1 text-sm leading-6 text-(--text-secondary)">
                           Envie seus dados para receber o PDF desta simulação por e-mail, registrar
-                          o diagnóstico e abrir uma conversa comercial com contexto completo para uma
-                          empresa de {selectedSegmentLabel.toLowerCase()}.
+                          o diagnóstico e abrir uma conversa comercial com contexto completo para
+                          uma empresa de {selectedSegmentLabel.toLowerCase()}.
                         </p>
                       </div>
 
@@ -732,6 +733,7 @@ export default function PublicCalculator({ leadMagnetId }: Props) {
                             }))
                           }
                           placeholder="Empresa"
+                          required
                         />
                         <Input
                           value={captureForm.role || ""}
@@ -739,6 +741,7 @@ export default function PublicCalculator({ leadMagnetId }: Props) {
                             setCaptureForm((current) => ({ ...current, role: event.target.value }))
                           }
                           placeholder="Cargo"
+                          required
                         />
                       </div>
                       <Input
@@ -752,6 +755,7 @@ export default function PublicCalculator({ leadMagnetId }: Props) {
                         placeholder="Seu WhatsApp"
                         inputMode="numeric"
                         maxLength={15}
+                        required
                       />
 
                       <Button
@@ -759,7 +763,9 @@ export default function PublicCalculator({ leadMagnetId }: Props) {
                         className="justify-between"
                         disabled={convertMutation.isPending}
                       >
-                        {convertMutation.isPending ? "Enviando PDF..." : "Receber PDF do diagnóstico"}
+                        {convertMutation.isPending
+                          ? "Enviando PDF..."
+                          : "Receber PDF do diagnóstico"}
                         <ArrowRight className="h-4 w-4" />
                       </Button>
                     </form>

@@ -228,6 +228,7 @@ export default function LandingPublicPage({ page }: Props) {
                         setForm((current) => ({ ...current, company: event.target.value }))
                       }
                       placeholder="Empresa"
+                      required
                     />
                     <Input
                       value={form.role || ""}
@@ -235,6 +236,7 @@ export default function LandingPublicPage({ page }: Props) {
                         setForm((current) => ({ ...current, role: event.target.value }))
                       }
                       placeholder="Cargo"
+                      required
                     />
                   </div>
                   <Input
@@ -243,6 +245,7 @@ export default function LandingPublicPage({ page }: Props) {
                       setForm((current) => ({ ...current, phone: event.target.value }))
                     }
                     placeholder="WhatsApp ou telefone"
+                    required
                   />
                   <Input
                     value={form.linkedin_profile_url || ""}

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import {
+  Activity,
   ArrowRight,
   BarChart3,
   Copy,
@@ -13,6 +14,9 @@ import {
   Save,
   Sparkles,
   UserPlus,
+  Wand2,
+  Wifi,
+  Zap,
 } from "lucide-react"
 import { toast } from "sonner"
 import { env } from "@/env"
@@ -42,12 +46,18 @@ import {
   useContentLeadMagnets,
   useConvertLeadMagnetLead,
   useCreateContentLeadMagnet,
+  useCreateExampleLeadMagnet,
   useLandingPage,
   useLeadMagnetLeads,
   useLeadMagnetMetrics,
+  useTestSendPulseConnection,
+  useTestSendPulseWebhook,
   useUpdateContentLeadMagnet,
   useUpdateLeadMagnetStatus,
   useUpsertLandingPage,
+  type SendPulseConnectionResult,
+  type TestWebhookInput,
+  type TestWebhookResult,
 } from "@/lib/api/hooks/use-content-inbound"
 import type {
   ContentLandingPageUpsertInput,
@@ -71,14 +81,32 @@ const STATUS_OPTIONS: Array<{ value: LeadMagnetStatus; label: string }> = [
   { value: "archived", label: "Arquivado" },
 ]
 
+const EVENT_TYPE_OPTIONS: Array<{ value: TestWebhookInput["event_type"]; label: string }> = [
+  { value: "subscribe", label: "subscribe" },
+  { value: "open", label: "open" },
+  { value: "click", label: "click" },
+  { value: "unsubscribe", label: "unsubscribe" },
+  { value: "sequence_completed", label: "sequence_completed" },
+]
+
 export default function InboundHubPage() {
   const leadMagnetsQuery = useContentLeadMagnets()
   const createLeadMagnet = useCreateContentLeadMagnet()
+  const createExampleLM = useCreateExampleLeadMagnet()
   const updateLeadMagnet = useUpdateContentLeadMagnet()
   const updateLeadMagnetStatus = useUpdateLeadMagnetStatus()
   const upsertLandingPage = useUpsertLandingPage()
   const convertLead = useConvertLeadMagnetLead()
+  const testConnection = useTestSendPulseConnection()
+  const testWebhook = useTestSendPulseWebhook()
   const [selectedLeadMagnetId, setSelectedLeadMagnetId] = useState<string | null>(null)
+  const [connectionResult, setConnectionResult] = useState<SendPulseConnectionResult | null>(null)
+  const [webhookTestResult, setWebhookTestResult] = useState<TestWebhookResult | null>(null)
+  const [webhookTestForm, setWebhookTestForm] = useState<TestWebhookInput>({
+    event_type: "open",
+    email: "",
+    list_id: "",
+  })
   const [leadMagnetForm, setLeadMagnetForm] = useState<ContentLeadMagnetUpdateInput>({})
   const [landingPageForm, setLandingPageForm] = useState<ContentLandingPageUpsertInput>({
     slug: "",
@@ -190,6 +218,52 @@ export default function InboundHubPage() {
       }).toString()}`
     : "/content/gerar"
 
+  async function handleCreateExample() {
+    try {
+      const result = await createExampleLM.mutateAsync()
+      setSelectedLeadMagnetId(result.id)
+      toast.success(
+        <span>
+          LP de exemplo criada!{" "}
+          <a href={result.public_url} target="_blank" rel="noreferrer" className="underline">
+            Abrir
+          </a>
+        </span>,
+      )
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao criar LP de exemplo")
+    }
+  }
+
+  async function handleTestConnection() {
+    setConnectionResult(null)
+    try {
+      const result = await testConnection.mutateAsync()
+      setConnectionResult(result)
+      if (result.status === "ok") {
+        toast.success(result.message)
+      } else {
+        toast.error(result.message)
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao testar conexão SendPulse")
+    }
+  }
+
+  async function handleTestWebhook() {
+    setWebhookTestResult(null)
+    try {
+      const result = await testWebhook.mutateAsync({
+        ...webhookTestForm,
+        list_id: webhookTestForm.list_id?.trim() || undefined,
+      })
+      setWebhookTestResult(result)
+      toast.success(result.message)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao simular webhook")
+    }
+  }
+
   async function handleSaveLeadMagnet() {
     if (!selectedLeadMagnetId) {
       return
@@ -288,6 +362,14 @@ export default function InboundHubPage() {
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => void handleCreateExample()}
+            disabled={createExampleLM.isPending}
+          >
+            <Wand2 className="h-4 w-4" />
+            {createExampleLM.isPending ? "Criando..." : "Criar LP de exemplo"}
+          </Button>
           <Button asChild variant="outline">
             <a href="/lm/calculadora" target="_blank" rel="noreferrer">
               <Gauge className="h-4 w-4" />
@@ -845,6 +927,142 @@ export default function InboundHubPage() {
           </div>
         )}
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="h-5 w-5 text-(--accent)" />
+            Integração SendPulse
+          </CardTitle>
+          <CardDescription>
+            Teste as credenciais e simule eventos de webhook sem precisar de uma requisição externa.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-(--text-primary)">Testar credenciais</p>
+            <Button
+              variant="outline"
+              onClick={() => void handleTestConnection()}
+              disabled={testConnection.isPending}
+            >
+              <Wifi className="h-4 w-4" />
+              {testConnection.isPending ? "Verificando..." : "Testar conexão SendPulse"}
+            </Button>
+            {connectionResult && (
+              <div
+                className={cn(
+                  "rounded-2xl border p-4 text-sm",
+                  connectionResult.status === "ok"
+                    ? "border-(--success)/30 bg-(--success-subtle) text-(--success-subtle-fg)"
+                    : "border-(--danger)/30 bg-(--danger-subtle) text-(--danger-subtle-fg)",
+                )}
+              >
+                <p className="font-medium">{connectionResult.message}</p>
+                {connectionResult.lists && connectionResult.lists.length > 0 && (
+                  <ul className="mt-2 space-y-1 text-xs">
+                    {connectionResult.lists.slice(0, 6).map((list) => (
+                      <li key={list.id}>
+                        {list.name} — {list.all_email_qty} contatos
+                        <span className="ml-2 font-mono opacity-60">(ID: {list.id})</span>
+                      </li>
+                    ))}
+                    {connectionResult.lists.length > 6 && (
+                      <li className="opacity-60">
+                        ...e mais {connectionResult.lists.length - 6} lista(s)
+                      </li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-(--text-primary)">Simular evento de webhook</p>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Field label="Tipo de evento">
+                <Select
+                  value={webhookTestForm.event_type}
+                  onValueChange={(value) =>
+                    setWebhookTestForm((current) => ({
+                      ...current,
+                      event_type: value as TestWebhookInput["event_type"],
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {EVENT_TYPE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="E-mail do lead">
+                <Input
+                  type="email"
+                  value={webhookTestForm.email}
+                  onChange={(event) =>
+                    setWebhookTestForm((current) => ({
+                      ...current,
+                      email: event.target.value,
+                    }))
+                  }
+                  placeholder="lead@exemplo.com.br"
+                />
+              </Field>
+              <Field label="ID da lista (opcional)">
+                <Input
+                  value={webhookTestForm.list_id ?? ""}
+                  onChange={(event) =>
+                    setWebhookTestForm((current) => ({
+                      ...current,
+                      list_id: event.target.value,
+                    }))
+                  }
+                  placeholder="addressbook_id"
+                />
+              </Field>
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => void handleTestWebhook()}
+              disabled={testWebhook.isPending || !webhookTestForm.email.trim()}
+            >
+              <Zap className="h-4 w-4" />
+              {testWebhook.isPending ? "Simulando..." : "Disparar webhook de teste"}
+            </Button>
+            {webhookTestResult && (
+              <div
+                className={cn(
+                  "rounded-2xl border p-4 text-sm",
+                  webhookTestResult.status === "ok"
+                    ? "border-(--success)/30 bg-(--success-subtle) text-(--success-subtle-fg)"
+                    : "border-(--border-default) bg-(--bg-overlay) text-(--text-secondary)",
+                )}
+              >
+                <p className="font-medium">{webhookTestResult.message}</p>
+                <p className="mt-1 text-xs">
+                  Lead atualizado:{" "}
+                  <strong>{webhookTestResult.lm_lead_updated ? "sim" : "não"}</strong>
+                  {" · "}Evento gravado:{" "}
+                  <strong>{webhookTestResult.event_stored ? "sim" : "não"}</strong>
+                  {webhookTestResult.event_id && (
+                    <>
+                      {" · "}ID: <span className="font-mono">{webhookTestResult.event_id}</span>
+                    </>
+                  )}
+                </p>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }

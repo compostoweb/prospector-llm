@@ -20,6 +20,7 @@ from api.routes.content import (
     notion_import,
     posts,
     references,
+    sendpulse_test,
     settings,
     themes,
 )
@@ -38,3 +39,4 @@ router.include_router(landing_pages.router)
 router.include_router(calculator.router)
 router.include_router(notion_import.router)
 router.include_router(engagement.router)
+router.include_router(sendpulse_test.router)

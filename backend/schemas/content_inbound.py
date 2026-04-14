@@ -240,9 +240,9 @@ class LandingPagePublicResponse(BaseModel):
 class LandingPagePublicCaptureRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=150)
     email: str = Field(..., min_length=5, max_length=255)
-    company: str | None = Field(default=None, max_length=150)
-    role: str | None = Field(default=None, max_length=150)
-    phone: str | None = Field(default=None, max_length=30)
+    company: str = Field(..., min_length=1, max_length=150)
+    role: str = Field(..., min_length=1, max_length=150)
+    phone: str = Field(..., min_length=1, max_length=30)
     linkedin_profile_url: str | None = Field(default=None, max_length=500)
     session_id: str | None = Field(default=None, max_length=100)
 
@@ -299,9 +299,9 @@ class CalculatorConvertRequest(BaseModel):
     result_id: uuid.UUID
     name: str = Field(..., min_length=2, max_length=150)
     email: str = Field(..., min_length=5, max_length=255)
-    company: str | None = Field(default=None, max_length=150)
-    role: str | None = Field(default=None, max_length=150)
-    phone: str | None = Field(default=None, max_length=30)
+    company: str = Field(..., min_length=1, max_length=150)
+    role: str = Field(..., min_length=1, max_length=150)
+    phone: str = Field(..., min_length=1, max_length=30)
     create_prospect: bool = True
 
     @field_validator("email")

@@ -156,3 +156,18 @@ class SendPulseClient:
         data = response.json()
         logger.info("sendpulse.subscriber_synced", list_id=list_id, email=email)
         return data
+
+    async def list_addressbooks(self) -> list[dict[str, Any]]:
+        """Retorna todas as listas (addressbooks) da conta SendPulse."""
+        headers = await self._get_auth_headers()
+        response = await self._client.get("/addressbooks", headers=headers)
+        if response.status_code == httpx.codes.UNAUTHORIZED and not self.uses_static_token:
+            await self._redis.delete(self._TOKEN_CACHE_KEY)
+            headers = await self._get_auth_headers(force_refresh=True)
+            response = await self._client.get("/addressbooks", headers=headers)
+        if response.is_error:
+            raise SendPulseClientError(
+                f"Falha ao listar addressbooks: {response.text[:300]}",
+                status_code=response.status_code,
+            )
+        return response.json()
