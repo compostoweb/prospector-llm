@@ -10,6 +10,7 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -163,6 +164,52 @@ async def update_lead_magnet(
     return ContentLeadMagnetResponse.model_validate(lead_magnet)
 
 
+@router.delete("/{lead_magnet_id}")
+async def delete_lead_magnet(
+    lead_magnet_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> Response:
+    """
+    Remove o lead magnet e limpa todos os arquivos associados no S3 (PDF + imagens da LP).
+    """
+    from integrations.s3_client import S3Client
+
+    lead_magnet = await _get_lead_magnet_or_404(lead_magnet_id, tenant_id, db)
+    s3 = S3Client()
+    tid = str(tenant_id)
+    lid = str(lead_magnet_id)
+
+    # Remove o PDF (se existir)
+    if lead_magnet.file_url:
+        # Suporta URL mascarada (/files/lm-pdfs/...) e URL MinIO direta
+        proxy_prefix = f"{settings.API_PUBLIC_URL}/files/"
+        minio_prefix = f"{settings.S3_ENDPOINT_URL}/{settings.S3_BUCKET}/"
+        raw = lead_magnet.file_url
+        if raw.startswith(proxy_prefix):
+            pdf_key = raw[len(proxy_prefix):]
+        elif raw.startswith(minio_prefix):
+            pdf_key = raw[len(minio_prefix):]
+        else:
+            pdf_key = raw.split(f"/{settings.S3_BUCKET}/", 1)[-1]
+        try:
+            s3.delete_object(pdf_key)
+        except Exception as exc:
+            logger.warning("content.lead_magnet.pdf_delete_error", key=pdf_key, error=str(exc))
+
+    # Remove todas as imagens da landing page deste LM
+    try:
+        s3.delete_objects_by_prefix(f"lm-images/{tid}/{lid}-")
+    except Exception as exc:
+        logger.warning("content.lead_magnet.images_delete_error", prefix=f"lm-images/{tid}/{lid}-", error=str(exc))
+
+    # Remove o registro do banco (cascades removem LP, leads, posts vinculados)
+    await db.delete(lead_magnet)
+    await db.commit()
+    logger.info("content.lead_magnet.deleted", lead_magnet_id=lid, tenant_id=tid)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.patch("/{lead_magnet_id}/status", response_model=ContentLeadMagnetResponse)
 async def update_lead_magnet_status(
     lead_magnet_id: uuid.UUID,
@@ -207,7 +254,7 @@ async def upload_lead_magnet_pdf(
     s3_key = f"lm-pdfs/{tenant_id}/{lead_magnet_id}.pdf"
     s3 = S3Client()
     s3.upload_bytes(pdf_bytes, s3_key, "application/pdf")
-    lead_magnet.file_url = s3.get_public_url(s3_key)
+    lead_magnet.file_url = s3.get_masked_url(s3_key)
     await db.commit()
     await db.refresh(lead_magnet)
     logger.info(
@@ -217,6 +264,41 @@ async def upload_lead_magnet_pdf(
         s3_key=s3_key,
     )
     return ContentLeadMagnetResponse.model_validate(lead_magnet)
+
+
+@router.get("/{lead_magnet_id}/pdf-preview-url")
+async def get_pdf_preview_url(
+    lead_magnet_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> dict[str, str]:
+    """Gera URL pré-assinada (5 min) para preview seguro do PDF no frontend."""
+    from integrations.s3_client import S3Client
+
+    lead_magnet = await _get_lead_magnet_or_404(lead_magnet_id, tenant_id, db)
+    if not lead_magnet.file_url:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Este lead magnet não tem arquivo."
+        )
+
+    s3 = S3Client()
+    file_url: str = lead_magnet.file_url
+
+    # URLs com formato mascarado já apontam para o proxy — retorna diretamente
+    proxy_base = f"{settings.API_PUBLIC_URL}/files/"
+    if file_url.startswith(proxy_base):
+        return {"url": file_url}
+
+    # URLs antigas (MinIO direto) — extrai a chave e converte para proxy URL
+    minio_prefix = f"{settings.S3_ENDPOINT_URL}/{settings.S3_BUCKET}/"
+    if file_url.startswith(minio_prefix):
+        key = file_url[len(minio_prefix):]
+        return {"url": s3.get_masked_url(key)}
+
+    # Fallback: gera presigned caso o formato seja desconhecido
+    key_fallback = file_url.split(f"/{settings.S3_BUCKET}/", 1)[-1]
+    presigned = s3.generate_presigned_url(key_fallback, expiry_seconds=300)
+    return {"url": presigned}
 
 
 @router.get("/{lead_magnet_id}/posts", response_model=list[ContentLMPostResponse])

@@ -119,6 +119,30 @@ export function useUpdateContentLeadMagnet() {
   })
 }
 
+export function useDeleteLeadMagnet() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (leadMagnetId: string) => {
+      const response = await fetch(
+        `${env.NEXT_PUBLIC_API_URL}/api/content/lead-magnets/${leadMagnetId}`,
+        {
+          method: "DELETE",
+          headers: buildAuthHeaders(session?.accessToken),
+        },
+      )
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { detail?: string }
+        throw new Error(data.detail ?? "Erro ao excluir lead magnet")
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: contentInboundKeys.leadMagnets() })
+    },
+  })
+}
+
 export function useUpdateLeadMagnetStatus() {
   const { data: session } = useSession()
   const queryClient = useQueryClient()
@@ -406,6 +430,75 @@ export function useUploadLeadMagnetPdf() {
         (old: ContentLeadMagnet[] | undefined) =>
           old?.map((lm) => (lm.id === updated.id ? updated : lm)) ?? [updated],
       )
+    },
+  })
+}
+
+export function useUploadLandingPageImage() {
+  const { data: session } = useSession()
+
+  return useMutation({
+    mutationFn: async ({
+      leadMagnetId,
+      file,
+      imageField,
+    }: {
+      leadMagnetId: string
+      file: File
+      imageField: "hero" | "author"
+    }) => {
+      const formData = new FormData()
+      formData.append("file", file)
+      const response = await fetch(
+        `${env.NEXT_PUBLIC_API_URL}/api/content/landing-pages/${leadMagnetId}/upload-lp-image?image_field=${imageField}`,
+        {
+          method: "POST",
+          headers: buildAuthHeaders(session?.accessToken),
+          body: formData,
+        },
+      )
+      return parseApiResponse<{ url: string }>(response)
+    },
+  })
+}
+
+export function useImproveLandingPageField() {
+  const { data: session } = useSession()
+
+  return useMutation({
+    mutationFn: async (body: {
+      field: "title" | "subtitle" | "benefits" | "meta_title" | "meta_description"
+      current_value: string
+      lead_magnet_title: string
+      lead_magnet_type: string
+      context?: string
+    }) => {
+      const response = await fetch(
+        `${env.NEXT_PUBLIC_API_URL}/api/content/landing-pages/ai/improve-field`,
+        {
+          method: "POST",
+          headers: buildAuthHeaders(session?.accessToken, true),
+          body: JSON.stringify(body),
+        },
+      )
+      return parseApiResponse<{ improved: string }>(response)
+    },
+  })
+}
+
+export function useLeadMagnetPdfPreviewUrl() {
+  const { data: session } = useSession()
+
+  return useMutation({
+    mutationFn: async (leadMagnetId: string) => {
+      const response = await fetch(
+        `${env.NEXT_PUBLIC_API_URL}/api/content/lead-magnets/${leadMagnetId}/pdf-preview-url`,
+        {
+          method: "GET",
+          headers: buildAuthHeaders(session?.accessToken),
+        },
+      )
+      return parseApiResponse<{ url: string }>(response)
     },
   })
 }

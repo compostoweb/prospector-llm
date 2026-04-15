@@ -130,6 +130,13 @@ export default function LandingPublicPage({ page }: Props) {
     return (
       <div className="min-h-screen bg-(--bg-page) text-(--text-primary)">
         <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-8 px-6 py-16 text-center lg:py-24">
+          {/* Logo */}
+          <img
+            src={`${env.NEXT_PUBLIC_API_URL}/assets/branding/compostoweb-logo-primary-transparent.webp`}
+            alt="Composto Web"
+            className="h-auto w-36 object-contain"
+          />
+
           <div className="flex flex-wrap justify-center gap-2">
             <Badge variant="default" className="px-3 py-1 text-[11px] uppercase tracking-[0.18em]">
               Content Hub Inbound
@@ -215,6 +222,13 @@ export default function LandingPublicPage({ page }: Props) {
     return (
       <div className="min-h-screen bg-(--bg-page) bg-[radial-gradient(circle_at_top_left,color-mix(in_srgb,var(--accent)_18%,transparent),transparent_34%),linear-gradient(180deg,var(--bg-page)_0%,var(--bg-surface)_100%)] text-(--text-primary)">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10 lg:px-8 lg:py-14">
+          {/* Logo */}
+          <img
+            src={`${env.NEXT_PUBLIC_API_URL}/assets/branding/compostoweb-logo-primary-transparent.webp`}
+            alt="Composto Web"
+            className="h-auto w-36 object-contain"
+          />
+
           <div className="flex flex-wrap items-center gap-3">
             <Badge variant="default" className="px-3 py-1 text-[11px] uppercase tracking-[0.18em]">
               Sequencia de emails
@@ -323,6 +337,13 @@ export default function LandingPublicPage({ page }: Props) {
   return (
     <div className="min-h-screen bg-(--bg-page) bg-[radial-gradient(circle_at_top_left,color-mix(in_srgb,var(--accent)_18%,transparent),transparent_34%),linear-gradient(180deg,var(--bg-page)_0%,var(--bg-surface)_100%)] text-(--text-primary)">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10 lg:px-8 lg:py-14">
+        {" "}
+        {/* Logo */}
+        <img
+          src={`${env.NEXT_PUBLIC_API_URL}/assets/branding/compostoweb-logo-primary-transparent.webp`}
+          alt="Composto Web"
+          className="h-auto w-36 object-contain"
+        />
         <div className="flex flex-wrap items-center gap-3">
           <Badge variant="default" className="px-3 py-1 text-[11px] uppercase tracking-[0.18em]">
             Content Hub Inbound
@@ -332,7 +353,6 @@ export default function LandingPublicPage({ page }: Props) {
             <Badge variant="success">{page.social_proof_count}+ empresas interessadas</Badge>
           )}
         </div>
-
         <div className="grid gap-8 lg:grid-cols-[1.15fr_0.85fr] lg:items-start">
           <section className="flex flex-col gap-6">
             <div className="rounded-[28px] border border-(--border-default) bg-(--bg-surface)/90 p-7 shadow-(--shadow-lg) backdrop-blur">

@@ -47,6 +47,7 @@ from api.routes import tenants as tenants_router
 from api.routes import tts as tts_router
 from api.routes import warmup as warmup_router
 from api.routes import ws as ws_router
+from api.routes import files as files_router
 from api.routes.content import router as content_router
 from api.webhooks import sendpulse as sendpulse_webhook
 from api.webhooks import unipile as unipile_webhook
@@ -186,6 +187,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_db()
     await _seed_superuser()
     await _seed_default_tenant()
+
+    # Garante que os prefixos de arquivos públicos estejam com policy pública no MinIO
+    from integrations.s3_client import s3_client as _s3
+    if _s3:
+        try:
+            _s3.set_public_read_prefixes(["lm-pdfs/", "lm-images/"])
+        except Exception as _exc:
+            logger.warning("s3.public_policy_failed", error=str(_exc))
+
     logger.info("api.startup", env=settings.ENV, debug=settings.DEBUG)
 
     yield
@@ -264,6 +274,7 @@ app.include_router(email_accounts_router.router)
 app.include_router(linkedin_accounts_router.router)
 app.include_router(warmup_router.router)
 app.include_router(content_router, prefix="/api")
+app.include_router(files_router.router)
 app.include_router(unipile_webhook.router)
 app.include_router(sendpulse_webhook.router)
 

@@ -122,6 +122,83 @@ class S3Client:
         """Retorna a URL pública para um objeto."""
         return f"{self._endpoint}/{self._bucket}/{key}"
 
+    def get_masked_url(self, key: str) -> str:
+        """
+        Retorna URL mascarada via proxy do backend.
+        Ex: {API_PUBLIC_URL}/files/lm-pdfs/{tenant_id}/{filename}
+        """
+        return f"{settings.API_PUBLIC_URL}/files/{key}"
+
+    def set_public_read_prefixes(self, prefixes: list[str]) -> None:
+        """
+        Configura leitura pública (sem autenticação) para os prefixos especificados.
+        Mescla com a policy existente para não sobrescrever outras regras.
+        """
+        import json
+
+        new_stmts = [
+            {
+                "Sid": f"PublicRead_{prefix.rstrip('/').replace('/', '_')}",
+                "Effect": "Allow",
+                "Principal": {"AWS": "*"},
+                "Action": ["s3:GetObject"],
+                "Resource": [f"arn:aws:s3:::{self._bucket}/{prefix}*"],
+            }
+            for prefix in prefixes
+        ]
+        new_sids = {s["Sid"] for s in new_stmts}
+
+        try:
+            existing_policy = json.loads(
+                self._client.get_bucket_policy(Bucket=self._bucket)["Policy"]
+            )
+            # Remove stmts que serão substituídos
+            existing_stmts = [
+                s for s in existing_policy.get("Statement", [])
+                if s.get("Sid") not in new_sids
+            ]
+            policy: dict = {
+                "Version": "2012-10-17",
+                "Statement": existing_stmts + new_stmts,
+            }
+        except ClientError:
+            # NoSuchBucketPolicy — cria do zero
+            policy = {"Version": "2012-10-17", "Statement": new_stmts}
+
+        self._client.put_bucket_policy(Bucket=self._bucket, Policy=json.dumps(policy))
+        logger.info("s3.public_policy_set", prefixes=prefixes)
+
+    def generate_presigned_url(self, key: str, expiry_seconds: int = 300) -> str:
+        """
+        Gera uma URL pré-assinada temporária para download direto de um objeto privado.
+        Válida por `expiry_seconds` segundos (padrão: 5 minutos).
+        """
+        return self._client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self._bucket, "Key": key},
+            ExpiresIn=expiry_seconds,
+        )
+
+    def delete_objects_by_prefix(self, prefix: str) -> int:
+        """
+        Remove todos os objetos cujo key começa com `prefix`.
+        Retorna a quantidade de objetos deletados.
+        """
+        deleted = 0
+        paginator = self._client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix):
+            objects = page.get("Contents", [])
+            if not objects:
+                continue
+            self._client.delete_objects(
+                Bucket=self._bucket,
+                Delete={"Objects": [{"Key": obj["Key"]} for obj in objects]},
+            )
+            deleted += len(objects)
+        if deleted:
+            logger.info("s3.prefix_deleted", prefix=prefix, count=deleted)
+        return deleted
+
     def head_object(self, key: str) -> dict | None:
         """Verifica se um objeto existe. Retorna metadados ou None."""
         try:

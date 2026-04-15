@@ -8,16 +8,21 @@ import {
   Copy,
   ExternalLink,
   FileDown,
+  FileSearch,
   Gauge,
+  ImageIcon,
+  Loader2,
   Mail,
   Plus,
   Save,
   Settings,
   Sparkles,
+  Trash2,
   Upload,
   UserPlus,
   Wand2,
   Wifi,
+  X,
   Zap,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -50,6 +55,7 @@ import {
   useConvertLeadMagnetLead,
   useCreateContentLeadMagnet,
   useCreateExampleLeadMagnet,
+  useDeleteLeadMagnet,
   useLandingPage,
   useLeadMagnetLeads,
   useLeadMagnetMetrics,
@@ -57,6 +63,9 @@ import {
   useTestSendPulseWebhook,
   useUpdateContentLeadMagnet,
   useUpdateLeadMagnetStatus,
+  useImproveLandingPageField,
+  useLeadMagnetPdfPreviewUrl,
+  useUploadLandingPageImage,
   useUploadLeadMagnetPdf,
   useUpsertLandingPage,
   type SendPulseConnectionResult,
@@ -103,6 +112,9 @@ export default function InboundHubPage() {
   const upsertLandingPage = useUpsertLandingPage()
   const convertLead = useConvertLeadMagnetLead()
   const uploadPdf = useUploadLeadMagnetPdf()
+  const deleteLeadMagnet = useDeleteLeadMagnet()
+  const improveField = useImproveLandingPageField()
+  const pdfPreviewUrlMutation = useLeadMagnetPdfPreviewUrl()
   const testConnection = useTestSendPulseConnection()
   const testWebhook = useTestSendPulseWebhook()
   const pdfInputRef = useRef<HTMLInputElement>(null)
@@ -129,6 +141,9 @@ export default function InboundHubPage() {
     meta_description: "",
     published: false,
   })
+  const [activeAiField, setActiveAiField] = useState<string | null>(null)
+  const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false)
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null)
 
   const leadMagnets = useMemo(() => leadMagnetsQuery.data ?? [], [leadMagnetsQuery.data])
   const selectedLeadMagnet = leadMagnets.find((item) => item.id === selectedLeadMagnetId) ?? null
@@ -142,9 +157,10 @@ export default function InboundHubPage() {
       return
     }
 
+    // Se o item selecionado foi deletado, limpa a seleção
     const selectionStillExists = leadMagnets.some((item) => item.id === selectedLeadMagnetId)
-    if (!selectedLeadMagnetId || !selectionStillExists) {
-      setSelectedLeadMagnetId(leadMagnets[0]?.id ?? null)
+    if (selectedLeadMagnetId && !selectionStillExists) {
+      setSelectedLeadMagnetId(null)
     }
   }, [leadMagnets, selectedLeadMagnetId])
 
@@ -371,6 +387,62 @@ export default function InboundHubPage() {
     }
   }
 
+  async function handleImproveField(
+    field: "title" | "subtitle" | "benefits" | "meta_title" | "meta_description",
+  ) {
+    if (!selectedLeadMagnet) {
+      return
+    }
+
+    const currentValueMap: Record<string, string> = {
+      title: landingPageForm.title ?? "",
+      subtitle: landingPageForm.subtitle ?? "",
+      benefits: (landingPageForm.benefits ?? []).join("\n"),
+      meta_title: landingPageForm.meta_title ?? "",
+      meta_description: landingPageForm.meta_description ?? "",
+    }
+
+    setActiveAiField(field)
+    try {
+      const result = await improveField.mutateAsync({
+        field,
+        current_value: currentValueMap[field] ?? "",
+        lead_magnet_title: selectedLeadMagnet.title,
+        lead_magnet_type: selectedLeadMagnet.type,
+      })
+      if (field === "benefits") {
+        setLandingPageForm((current) => ({
+          ...current,
+          benefits: result.improved.split("\n").filter(Boolean),
+        }))
+      } else {
+        setLandingPageForm((current) => ({ ...current, [field]: result.improved }))
+      }
+      toast.success("Campo atualizado pela IA")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao melhorar com IA")
+    } finally {
+      setActiveAiField(null)
+    }
+  }
+
+  async function handleDeleteLeadMagnet() {
+    if (!selectedLeadMagnetId) return
+    const name = selectedLeadMagnet?.title ?? "este lead magnet"
+    if (
+      !window.confirm(`Excluir "${name}"? O PDF e as imagens serão removidos do armazenamento.`)
+    ) {
+      return
+    }
+    try {
+      await deleteLeadMagnet.mutateAsync(selectedLeadMagnetId)
+      setSelectedLeadMagnetId(null)
+      toast.success("Lead magnet excluído com sucesso")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao excluir lead magnet")
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {/* ─── Cabeçalho ─── */}
@@ -474,7 +546,27 @@ export default function InboundHubPage() {
                 Abrir LP
               </a>
             </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:bg-destructive/10"
+              onClick={() => void handleDeleteLeadMagnet()}
+              disabled={deleteLeadMagnet.isPending}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
           </div>
+        )}
+        {selectedLeadMagnet && !publicUrl && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:bg-destructive/10"
+            onClick={() => void handleDeleteLeadMagnet()}
+            disabled={deleteLeadMagnet.isPending}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
         )}
       </div>
 
@@ -726,17 +818,43 @@ export default function InboundHubPage() {
                       </Button>
                     </div>
                     {selectedLeadMagnet.file_url && (
-                      <p className="mt-1 truncate text-xs text-(--text-secondary)">
-                        Atual:{" "}
-                        <a
-                          href={selectedLeadMagnet.file_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="underline"
+                      <div className="mt-1 flex min-w-0 items-center gap-2">
+                        <p className="min-w-0 flex-1 truncate text-xs text-(--text-secondary)">
+                          Atual:{" "}
+                          <a
+                            href={selectedLeadMagnet.file_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="underline"
+                          >
+                            {selectedLeadMagnet.file_url}
+                          </a>
+                        </p>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 shrink-0 px-2 text-xs"
+                          disabled={pdfPreviewUrlMutation.isPending}
+                          onClick={async () => {
+                            try {
+                              const result = await pdfPreviewUrlMutation.mutateAsync(
+                                selectedLeadMagnet.id,
+                              )
+                              setPdfPreviewUrl(result.url)
+                              setPdfPreviewOpen(true)
+                            } catch {
+                              toast.error("Não foi possível gerar o preview")
+                            }
+                          }}
                         >
-                          {selectedLeadMagnet.file_url}
-                        </a>
-                      </p>
+                          {pdfPreviewUrlMutation.isPending ? (
+                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          ) : (
+                            <FileSearch className="mr-1 h-3 w-3" />
+                          )}
+                          Preview
+                        </Button>
+                      </div>
                     )}
                   </Field>
 
@@ -799,7 +917,26 @@ export default function InboundHubPage() {
                         }
                       />
                     </Field>
-                    <Field label="Título da página">
+                    <Field
+                      label="Título da página"
+                      action={
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-3 gap-1 px-2 text-xs text-(--accent)"
+                          title="Melhorar com IA"
+                          disabled={activeAiField === "title"}
+                          onClick={() => void handleImproveField("title")}
+                        >
+                          {activeAiField === "title" ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Wand2 className="h-3 w-3" />
+                          )}
+                          Melhorar com IA
+                        </Button>
+                      }
+                    >
                       <Input
                         value={landingPageForm.title}
                         onChange={(event) =>
@@ -812,7 +949,25 @@ export default function InboundHubPage() {
                     </Field>
                   </div>
 
-                  <Field label="Subtítulo">
+                  <Field
+                    label="Subtítulo"
+                    action={
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 gap-1 px-2 text-xs text-(--accent)"
+                        disabled={activeAiField === "subtitle"}
+                        onClick={() => void handleImproveField("subtitle")}
+                      >
+                        {activeAiField === "subtitle" ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Wand2 className="h-3 w-3" />
+                        )}
+                        Melhorar com IA
+                      </Button>
+                    }
+                  >
                     <Textarea
                       value={landingPageForm.subtitle ?? ""}
                       onChange={(event) =>
@@ -825,7 +980,25 @@ export default function InboundHubPage() {
                     />
                   </Field>
 
-                  <Field label="Benefícios (1 por linha)">
+                  <Field
+                    label="Benefícios (1 por linha)"
+                    action={
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 gap-1 px-2 text-xs text-(--accent)"
+                        disabled={activeAiField === "benefits"}
+                        onClick={() => void handleImproveField("benefits")}
+                      >
+                        {activeAiField === "benefits" ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Wand2 className="h-3 w-3" />
+                        )}
+                        Melhorar com IA
+                      </Button>
+                    }
+                  >
                     <Textarea
                       value={(landingPageForm.benefits ?? []).join("\n")}
                       onChange={(event) =>
@@ -839,32 +1012,53 @@ export default function InboundHubPage() {
                   </Field>
 
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="Hero image URL">
-                      <Input
-                        value={landingPageForm.hero_image_url ?? ""}
-                        onChange={(event) =>
-                          setLandingPageForm((current) => ({
-                            ...current,
-                            hero_image_url: event.target.value,
-                          }))
-                        }
-                      />
-                    </Field>
-                    <Field label="Foto autor URL">
-                      <Input
-                        value={landingPageForm.author_photo_url ?? ""}
-                        onChange={(event) =>
-                          setLandingPageForm((current) => ({
-                            ...current,
-                            author_photo_url: event.target.value,
-                          }))
-                        }
-                      />
-                    </Field>
+                    <ImageUploadField
+                      label="Hero image"
+                      value={landingPageForm.hero_image_url ?? ""}
+                      fieldName="hero"
+                      leadMagnetId={selectedLeadMagnetId ?? ""}
+                      onChange={(url) =>
+                        setLandingPageForm((current) => ({
+                          ...current,
+                          hero_image_url: url,
+                        }))
+                      }
+                    />
+                    <ImageUploadField
+                      label="Foto do autor"
+                      value={landingPageForm.author_photo_url ?? ""}
+                      fieldName="author"
+                      leadMagnetId={selectedLeadMagnetId ?? ""}
+                      onChange={(url) =>
+                        setLandingPageForm((current) => ({
+                          ...current,
+                          author_photo_url: url,
+                        }))
+                      }
+                    />
                   </div>
 
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="Meta title">
+                    <Field
+                      label="Meta title"
+                      action={
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-3 gap-1 px-2 text-xs text-(--accent)"
+                          title="Gerar com IA"
+                          disabled={activeAiField === "meta_title"}
+                          onClick={() => void handleImproveField("meta_title")}
+                        >
+                          {activeAiField === "meta_title" ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Sparkles className="h-3 w-3" />
+                          )}
+                          Gerar com IA
+                        </Button>
+                      }
+                    >
                       <Input
                         value={landingPageForm.meta_title ?? ""}
                         onChange={(event) =>
@@ -903,7 +1097,25 @@ export default function InboundHubPage() {
                     />
                   </Field>
 
-                  <Field label="Meta description">
+                  <Field
+                    label="Meta description"
+                    action={
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 gap-1 px-2 text-xs text-(--accent)"
+                        disabled={activeAiField === "meta_description"}
+                        onClick={() => void handleImproveField("meta_description")}
+                      >
+                        {activeAiField === "meta_description" ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-3 w-3" />
+                        )}
+                        Gerar com IA
+                      </Button>
+                    }
+                  >
                     <Textarea
                       value={landingPageForm.meta_description ?? ""}
                       onChange={(event) =>
@@ -916,22 +1128,60 @@ export default function InboundHubPage() {
                     />
                   </Field>
 
-                  <div className="flex items-center justify-between rounded-2xl border border-(--border-subtle) bg-(--bg-overlay) px-4 py-3">
-                    <div>
-                      <p className="text-sm font-medium text-(--text-primary)">
-                        Publicar landing page
-                      </p>
-                      <p className="text-xs text-(--text-tertiary)">
-                        A rota pública só responde quando a LP estiver publicada.
-                      </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setLandingPageForm((current) => ({
+                        ...current,
+                        published: !current.published,
+                      }))
+                    }
+                    className={cn(
+                      "flex w-full cursor-pointer items-center justify-between rounded-2xl border px-4 py-3 text-left transition-colors",
+                      landingPageForm.published
+                        ? "border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/40"
+                        : "border-(--border-subtle) bg-(--bg-overlay) hover:bg-(--bg-subtle)",
+                    )}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={cn(
+                          "flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold",
+                          landingPageForm.published
+                            ? "bg-green-500 text-white"
+                            : "bg-(--bg-muted) text-(--text-tertiary)",
+                        )}
+                      >
+                        {landingPageForm.published ? "ON" : "OFF"}
+                      </div>
+                      <div>
+                        <p
+                          className={cn(
+                            "text-sm font-semibold",
+                            landingPageForm.published
+                              ? "text-green-700 dark:text-green-300"
+                              : "text-(--text-primary)",
+                          )}
+                        >
+                          {landingPageForm.published
+                            ? "Landing page publicada"
+                            : "Landing page não publicada"}
+                        </p>
+                        <p className="text-xs text-(--text-tertiary)">
+                          {landingPageForm.published
+                            ? "Visitantes podem acessar e converter."
+                            : "A rota pública não responde enquanto desativada."}
+                        </p>
+                      </div>
                     </div>
                     <Switch
                       checked={Boolean(landingPageForm.published)}
                       onCheckedChange={(checked) =>
                         setLandingPageForm((current) => ({ ...current, published: checked }))
                       }
+                      onClick={(e) => e.stopPropagation()}
                     />
-                  </div>
+                  </button>
 
                   <div className="flex flex-wrap gap-2">
                     <Button
@@ -1061,151 +1311,432 @@ export default function InboundHubPage() {
 
           {/* ─────────────── ABA: CONFIGURAÇÕES (INTEGRAÇÕES) ─────────────── */}
           <TabsContent value="integracoes">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Activity className="h-5 w-5 text-(--accent)" />
-                  Integração SendPulse
-                </CardTitle>
-                <CardDescription>
-                  Teste as credenciais e simule eventos de webhook sem precisar de uma requisição
-                  externa.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="space-y-3">
-                  <p className="text-sm font-medium text-(--text-primary)">Testar credenciais</p>
-                  <Button
-                    variant="outline"
-                    onClick={() => void handleTestConnection()}
-                    disabled={testConnection.isPending}
-                  >
-                    <Wifi className="h-4 w-4" />
-                    {testConnection.isPending ? "Verificando..." : "Testar conexão SendPulse"}
-                  </Button>
-                  {connectionResult && (
-                    <div
-                      className={cn(
-                        "rounded-2xl border p-4 text-sm",
-                        connectionResult.status === "ok"
-                          ? "border-(--success)/30 bg-(--success-subtle) text-(--success-subtle-fg)"
-                          : "border-(--danger)/30 bg-(--danger-subtle) text-(--danger-subtle-fg)",
-                      )}
-                    >
-                      <p className="font-medium">{connectionResult.message}</p>
-                      {connectionResult.lists && connectionResult.lists.length > 0 && (
-                        <ul className="mt-2 space-y-1 text-xs">
-                          {connectionResult.lists.slice(0, 6).map((list) => (
-                            <li key={list.id}>
-                              {list.name} — {list.all_email_qty} contatos
-                              <span className="ml-2 font-mono opacity-60">(ID: {list.id})</span>
-                            </li>
-                          ))}
-                          {connectionResult.lists.length > 6 && (
-                            <li className="opacity-60">
-                              ...e mais {connectionResult.lists.length - 6} lista(s)
-                            </li>
-                          )}
-                        </ul>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-3">
-                  <p className="text-sm font-medium text-(--text-primary)">
-                    Simular evento de webhook
-                  </p>
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <Field label="Tipo de evento">
-                      <Select
-                        value={webhookTestForm.event_type}
-                        onValueChange={(value) =>
-                          setWebhookTestForm((current) => ({
-                            ...current,
-                            event_type: value as TestWebhookInput["event_type"],
-                          }))
-                        }
+            <div className="flex flex-col gap-6">
+              {/* Card: Instruções de webhook */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Zap className="h-5 w-5 text-(--accent)" />
+                    Configurar webhook no SendPulse
+                  </CardTitle>
+                  <CardDescription>
+                    Configure o SendPulse para notificar o sistema toda vez que um evento ocorrer na
+                    sua lista de e-mails.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  {/* URL do webhook */}
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-(--text-primary)">URL do webhook</p>
+                    <div className="flex items-center gap-2 rounded-lg border border-(--border-default) bg-(--bg-overlay) px-3 py-2">
+                      <code className="flex-1 truncate text-xs text-(--text-secondary)">
+                        {env.NEXT_PUBLIC_API_URL}/api/webhooks/sendpulse
+                      </code>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0"
+                        title="Copiar URL"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(
+                            `${env.NEXT_PUBLIC_API_URL}/api/webhooks/sendpulse`,
+                          )
+                          toast.success("URL copiada")
+                        }}
                       >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {EVENT_TYPE_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <Field label="E-mail do lead">
-                      <Input
-                        type="email"
-                        value={webhookTestForm.email}
-                        onChange={(event) =>
-                          setWebhookTestForm((current) => ({
-                            ...current,
-                            email: event.target.value,
-                          }))
-                        }
-                        placeholder="lead@exemplo.com.br"
-                      />
-                    </Field>
-                    <Field label="ID da lista (opcional)">
-                      <Input
-                        value={webhookTestForm.list_id ?? ""}
-                        onChange={(event) =>
-                          setWebhookTestForm((current) => ({
-                            ...current,
-                            list_id: event.target.value,
-                          }))
-                        }
-                        placeholder="addressbook_id"
-                      />
-                    </Field>
-                  </div>
-                  <Button
-                    variant="outline"
-                    onClick={() => void handleTestWebhook()}
-                    disabled={testWebhook.isPending || !webhookTestForm.email.trim()}
-                  >
-                    <Zap className="h-4 w-4" />
-                    {testWebhook.isPending ? "Simulando..." : "Disparar webhook de teste"}
-                  </Button>
-                  {webhookTestResult && (
-                    <div
-                      className={cn(
-                        "rounded-2xl border p-4 text-sm",
-                        webhookTestResult.status === "ok"
-                          ? "border-(--success)/30 bg-(--success-subtle) text-(--success-subtle-fg)"
-                          : "border-(--border-default) bg-(--bg-overlay) text-(--text-secondary)",
-                      )}
-                    >
-                      <p className="font-medium">{webhookTestResult.message}</p>
-                      <p className="mt-1 text-xs">
-                        Lead atualizado:{" "}
-                        <strong>{webhookTestResult.lm_lead_updated ? "sim" : "não"}</strong>
-                        {" · "}Evento gravado:{" "}
-                        <strong>{webhookTestResult.event_stored ? "sim" : "não"}</strong>
-                        {webhookTestResult.event_id && (
-                          <>
-                            {" · "}ID:{" "}
-                            <span className="font-mono">{webhookTestResult.event_id}</span>
-                          </>
-                        )}
-                      </p>
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
                     </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+                  </div>
+
+                  {/* Passo a passo */}
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-(--text-primary)">Como configurar</p>
+                    <ol className="space-y-2 text-sm text-(--text-secondary)">
+                      <li className="flex gap-2">
+                        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-(--accent-subtle) text-[10px] font-semibold text-(--accent-subtle-fg)">
+                          1
+                        </span>
+                        <span>
+                          No SendPulse, vá em <strong>Email</strong> →{" "}
+                          <strong>Mailing Lists</strong> e abra as configurações da lista desejada.
+                        </span>
+                      </li>
+                      <li className="flex gap-2">
+                        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-(--accent-subtle) text-[10px] font-semibold text-(--accent-subtle-fg)">
+                          2
+                        </span>
+                        <span>
+                          Na aba <strong>Webhooks</strong>, clique em <strong>Add URI</strong> e
+                          cole a URL acima.
+                        </span>
+                      </li>
+                      <li className="flex gap-2">
+                        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-(--accent-subtle) text-[10px] font-semibold text-(--accent-subtle-fg)">
+                          3
+                        </span>
+                        <span>Ative os eventos desejados (veja tabela abaixo) e salve.</span>
+                      </li>
+                      <li className="flex gap-2">
+                        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-(--accent-subtle) text-[10px] font-semibold text-(--accent-subtle-fg)">
+                          4
+                        </span>
+                        <span>
+                          No painel do sistema, configure a variável{" "}
+                          <code className="rounded bg-(--bg-overlay) px-1 py-0.5 text-xs">
+                            SENDPULSE_WEBHOOK_SECRET
+                          </code>{" "}
+                          com o mesmo valor definido no campo <strong>Secret</strong> do SendPulse.
+                        </span>
+                      </li>
+                    </ol>
+                  </div>
+
+                  {/* Tabela de eventos */}
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-(--text-primary)">Eventos suportados</p>
+                    <div className="overflow-hidden rounded-lg border border-(--border-default) bg-(--bg-surface)">
+                      <table className="min-w-full divide-y divide-(--border-subtle) text-sm">
+                        <thead>
+                          <tr className="bg-(--bg-overlay)">
+                            <th className="px-4 py-2.5 text-left text-xs font-semibold text-(--text-tertiary)">
+                              Evento SendPulse
+                            </th>
+                            <th className="px-4 py-2.5 text-left text-xs font-semibold text-(--text-tertiary)">
+                              Alias aceito
+                            </th>
+                            <th className="px-4 py-2.5 text-left text-xs font-semibold text-(--text-tertiary)">
+                              O que acontece no sistema
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-(--border-subtle)">
+                          {[
+                            {
+                              event: "subscribe",
+                              alias: "email_subscribed",
+                              action:
+                                "Marca lead como inscrito na sequência (sequence_status = active)",
+                            },
+                            {
+                              event: "open",
+                              alias: "email_opened",
+                              action: "Registra abertura de e-mail; atualiza last_email_opened_at",
+                            },
+                            {
+                              event: "click",
+                              alias: "email_clicked",
+                              action: "Registra clique em link; atualiza last_email_clicked_at",
+                            },
+                            {
+                              event: "unsubscribe",
+                              alias: "email_unsubscribed",
+                              action: "Marca sequence_status = unsubscribed no lead",
+                            },
+                            {
+                              event: "sequence_completed",
+                              alias: "—",
+                              action: "Marca sequence_status = completed; pode disparar follow-up",
+                            },
+                          ].map((row) => (
+                            <tr key={row.event} className="hover:bg-(--bg-overlay)">
+                              <td className="px-4 py-2.5">
+                                <code className="rounded bg-(--bg-overlay) px-1.5 py-0.5 text-xs font-medium">
+                                  {row.event}
+                                </code>
+                              </td>
+                              <td className="px-4 py-2.5 text-xs text-(--text-secondary)">
+                                {row.alias}
+                              </td>
+                              <td className="px-4 py-2.5 text-xs text-(--text-secondary)">
+                                {row.action}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Card original: Testes */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Activity className="h-5 w-5 text-(--accent)" />
+                    Integração SendPulse
+                  </CardTitle>
+                  <CardDescription>
+                    Teste as credenciais e simule eventos de webhook sem precisar de uma requisição
+                    externa.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium text-(--text-primary)">Testar credenciais</p>
+                    <Button
+                      variant="outline"
+                      onClick={() => void handleTestConnection()}
+                      disabled={testConnection.isPending}
+                    >
+                      <Wifi className="h-4 w-4" />
+                      {testConnection.isPending ? "Verificando..." : "Testar conexão SendPulse"}
+                    </Button>
+                    {connectionResult && (
+                      <div
+                        className={cn(
+                          "rounded-2xl border p-4 text-sm",
+                          connectionResult.status === "ok"
+                            ? "border-(--success)/30 bg-(--success-subtle) text-(--success-subtle-fg)"
+                            : "border-(--danger)/30 bg-(--danger-subtle) text-(--danger-subtle-fg)",
+                        )}
+                      >
+                        <p className="font-medium">{connectionResult.message}</p>
+                        {connectionResult.lists && connectionResult.lists.length > 0 && (
+                          <ul className="mt-2 space-y-1 text-xs">
+                            {connectionResult.lists.slice(0, 6).map((list) => (
+                              <li key={list.id}>
+                                {list.name} — {list.all_email_qty} contatos
+                                <span className="ml-2 font-mono opacity-60">(ID: {list.id})</span>
+                              </li>
+                            ))}
+                            {connectionResult.lists.length > 6 && (
+                              <li className="opacity-60">
+                                ...e mais {connectionResult.lists.length - 6} lista(s)
+                              </li>
+                            )}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium text-(--text-primary)">
+                      Simular evento de webhook
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <Field label="Tipo de evento">
+                        <Select
+                          value={webhookTestForm.event_type}
+                          onValueChange={(value) =>
+                            setWebhookTestForm((current) => ({
+                              ...current,
+                              event_type: value as TestWebhookInput["event_type"],
+                            }))
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {EVENT_TYPE_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                      <Field label="E-mail do lead">
+                        <Input
+                          type="email"
+                          value={webhookTestForm.email}
+                          onChange={(event) =>
+                            setWebhookTestForm((current) => ({
+                              ...current,
+                              email: event.target.value,
+                            }))
+                          }
+                          placeholder="lead@exemplo.com.br"
+                        />
+                      </Field>
+                      <Field label="ID da lista (opcional)">
+                        <Input
+                          value={webhookTestForm.list_id ?? ""}
+                          onChange={(event) =>
+                            setWebhookTestForm((current) => ({
+                              ...current,
+                              list_id: event.target.value,
+                            }))
+                          }
+                          placeholder="addressbook_id"
+                        />
+                      </Field>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={() => void handleTestWebhook()}
+                      disabled={testWebhook.isPending || !webhookTestForm.email.trim()}
+                    >
+                      <Zap className="h-4 w-4" />
+                      {testWebhook.isPending ? "Simulando..." : "Disparar webhook de teste"}
+                    </Button>
+                    {webhookTestResult && (
+                      <div
+                        className={cn(
+                          "rounded-2xl border p-4 text-sm",
+                          webhookTestResult.status === "ok"
+                            ? "border-(--success)/30 bg-(--success-subtle) text-(--success-subtle-fg)"
+                            : "border-(--border-default) bg-(--bg-overlay) text-(--text-secondary)",
+                        )}
+                      >
+                        <p className="font-medium">{webhookTestResult.message}</p>
+                        <p className="mt-1 text-xs">
+                          Lead atualizado:{" "}
+                          <strong>{webhookTestResult.lm_lead_updated ? "sim" : "não"}</strong>
+                          {" · "}Evento gravado:{" "}
+                          <strong>{webhookTestResult.event_stored ? "sim" : "não"}</strong>
+                          {webhookTestResult.event_id && (
+                            <>
+                              {" · "}ID:{" "}
+                              <span className="font-mono">{webhookTestResult.event_id}</span>
+                            </>
+                          )}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
         </Tabs>
       )}
+
+      {/* PDF Preview Dialog */}
+      <Dialog
+        open={pdfPreviewOpen}
+        onOpenChange={(open) => {
+          setPdfPreviewOpen(open)
+          if (!open) setPdfPreviewUrl(null)
+        }}
+      >
+        <DialogContent className="flex h-[85vh] max-w-5xl flex-col p-0">
+          <DialogHeader className="shrink-0 px-6 pt-6 pb-3">
+            <DialogTitle>Preview do PDF</DialogTitle>
+            <DialogDescription className="truncate">
+              {selectedLeadMagnet?.file_url ?? ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 px-6 pb-6">
+            {pdfPreviewUrl ? (
+              <iframe
+                src={pdfPreviewUrl}
+                className="h-full w-full rounded-lg border border-(--border-default)"
+                title="Preview do PDF"
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-(--text-secondary)">
+                Carregando...
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
+
+// ── Componente auxiliar: upload de imagem (hero/autor) ────────────────────────
+
+interface ImageUploadFieldProps {
+  label: string
+  value: string
+  fieldName: "hero" | "author"
+  leadMagnetId: string
+  onChange: (url: string) => void
+}
+
+function ImageUploadField({
+  label,
+  value,
+  fieldName,
+  leadMagnetId,
+  onChange,
+}: ImageUploadFieldProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const uploadImage = useUploadLandingPageImage()
+
+  async function handleFileChange(file: File) {
+    if (!leadMagnetId) return
+    try {
+      const result = await uploadImage.mutateAsync({ leadMagnetId, file, imageField: fieldName })
+      onChange(result.url)
+      toast.success("Imagem enviada")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao enviar imagem")
+    }
+  }
+
+  return (
+    <Field label={label}>
+      <div className="flex items-start gap-3">
+        {/* Thumbnail / placeholder */}
+        <div
+          className="flex h-16 w-16 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-xl border border-(--border-default) bg-(--bg-overlay) hover:opacity-80"
+          onClick={() => inputRef.current?.click()}
+        >
+          {value ? (
+            <img src={value} alt={label} className="h-full w-full object-cover" />
+          ) : (
+            <ImageIcon className="h-6 w-6 text-(--text-tertiary)" />
+          )}
+        </div>
+
+        <div className="flex flex-1 flex-col gap-1.5">
+          <Input
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder="https://..."
+            className="text-xs"
+          />
+          <div className="flex gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              disabled={uploadImage.isPending}
+              onClick={() => inputRef.current?.click()}
+            >
+              {uploadImage.isPending ? (
+                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+              ) : (
+                <Upload className="mr-1 h-3 w-3" />
+              )}
+              Selecionar
+            </Button>
+            {value && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs text-(--danger)"
+                onClick={() => onChange("")}
+              >
+                <X className="mr-1 h-3 w-3" />
+                Limpar
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        aria-label={`Selecionar imagem para ${label}`}
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          if (file) void handleFileChange(file)
+          event.target.value = ""
+        }}
+      />
+    </Field>
+  )
+}
+
 interface CreateLeadMagnetDialogProps {
   isPending: boolean
   onCreate: (payload: ContentLeadMagnetCreateInput) => Promise<void>
@@ -1417,12 +1948,16 @@ function QuickLinkCard({
 interface FieldProps {
   label: string
   children: React.ReactNode
+  action?: React.ReactNode
 }
 
-function Field({ label, children }: FieldProps) {
+function Field({ label, children, action }: FieldProps) {
   return (
     <div className="grid gap-2">
-      <Label>{label}</Label>
+      <div className="flex items-center justify-between gap-2">
+        <Label>{label}</Label>
+        {action}
+      </div>
       {children}
     </div>
   )

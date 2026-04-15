@@ -324,3 +324,22 @@ class CalculatorMetricsResponse(BaseModel):
     total_captured_contacts: int
     total_converted_to_lead: int
     conversion_rate: float | None
+
+
+# ── Landing Page — IA e Upload ────────────────────────────────────────
+
+
+class LPImageUploadResponse(BaseModel):
+    url: str
+
+
+class LPImproveFieldRequest(BaseModel):
+    field: Literal["title", "subtitle", "benefits", "meta_title", "meta_description"]
+    current_value: str
+    lead_magnet_title: str
+    lead_magnet_type: str
+    context: str | None = None
+
+
+class LPImproveFieldResponse(BaseModel):
+    improved: str

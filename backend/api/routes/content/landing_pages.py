@@ -7,14 +7,15 @@ Configuração interna e captura pública de landing pages de lead magnets.
 from __future__ import annotations
 
 import uuid
-from typing import cast
+from typing import Literal, cast
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.dependencies import get_effective_tenant_id, get_session_flexible, get_session_no_auth
+from api.dependencies import get_effective_tenant_id, get_llm_registry, get_session_flexible, get_session_no_auth
+from integrations.llm import LLMMessage, LLMRegistry
 from models.content_landing_page import ContentLandingPage
 from models.content_lead_magnet import ContentLeadMagnet
 from schemas.content_inbound import (
@@ -25,6 +26,9 @@ from schemas.content_inbound import (
     LandingPagePublicResponse,
     LeadMagnetType,
     LMSendPulseSyncStatus,
+    LPImageUploadResponse,
+    LPImproveFieldRequest,
+    LPImproveFieldResponse,
 )
 from services.content.lead_magnet_service import (
     build_public_landing_page_url,
@@ -33,6 +37,7 @@ from services.content.lead_magnet_service import (
     update_landing_page_submission_stats,
     upsert_lm_capture,
 )
+from services.llm_config import resolve_tenant_llm_config
 
 logger = structlog.get_logger()
 
@@ -188,6 +193,111 @@ async def get_public_landing_page(
         meta_description=landing_page.meta_description,
         public_url=build_public_landing_page_url(landing_page.slug),
     )
+
+
+@router.post("/{lead_magnet_id}/upload-lp-image", response_model=LPImageUploadResponse)
+async def upload_lp_image(
+    lead_magnet_id: uuid.UUID,
+    file: UploadFile = File(...),
+    image_field: Literal["hero", "author"] = Query(default="hero"),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> LPImageUploadResponse:
+    await _get_lead_magnet_or_404(db, tenant_id=tenant_id, lead_magnet_id=lead_magnet_id)
+
+    allowed_mime = {"image/jpeg", "image/png", "image/webp"}
+    if file.content_type not in allowed_mime:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Formato inválido. Use JPEG, PNG ou WebP.",
+        )
+
+    image_bytes = await file.read()
+    if len(image_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Imagem muito grande. Máximo 10 MB.",
+        )
+
+    ext_map = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+    ext = ext_map[cast(str, file.content_type)]
+    s3_key = f"lm-images/{tenant_id}/{lead_magnet_id}-{image_field}.{ext}"
+
+    from integrations.s3_client import S3Client
+
+    s3 = S3Client()
+    s3.upload_bytes(image_bytes, s3_key, cast(str, file.content_type))
+    url = s3.get_masked_url(s3_key)
+
+    logger.info(
+        "content.landing_page.image_uploaded",
+        lead_magnet_id=str(lead_magnet_id),
+        image_field=image_field,
+        tenant_id=str(tenant_id),
+    )
+    return LPImageUploadResponse(url=url)
+
+
+_LP_FIELD_PROMPTS: dict[str, str] = {
+    "title": (
+        "Você é copywriter B2B. Melhore o título de landing page abaixo para o lead magnet "
+        "'{lm_title}' (tipo: {lm_type}). Seja direto, resultado-orientado, 8 a 15 palavras. "
+        "Retorne APENAS o título melhorado, sem aspas.\n\nTítulo atual: {current_value}"
+    ),
+    "subtitle": (
+        "Você é copywriter B2B. Melhore este subtítulo de landing page. 1 a 2 frases práticas "
+        "e convincentes. Retorne APENAS o subtítulo, sem aspas.\n\nSubtítulo atual: {current_value}"
+    ),
+    "benefits": (
+        "Você é copywriter B2B. Melhore estes benefícios de landing page para '{lm_title}'. "
+        "Retorne 1 benefício por linha, sem marcadores, sem numeração, sem linhas em branco. "
+        "Benefícios atuais:\n{current_value}"
+    ),
+    "meta_title": (
+        "Você é especialista em SEO. Gere um meta title de até 60 caracteres para a landing page "
+        "do lead magnet '{lm_title}'. Retorne APENAS o meta title, sem aspas."
+    ),
+    "meta_description": (
+        "Você é especialista em SEO. Gere uma meta description de até 155 caracteres com CTA "
+        "para a landing page do lead magnet '{lm_title}'. Retorne APENAS a meta description."
+    ),
+}
+
+
+@router.post("/ai/improve-field", response_model=LPImproveFieldResponse)
+async def improve_lp_field(
+    body: LPImproveFieldRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+    registry: LLMRegistry = Depends(get_llm_registry),
+) -> LPImproveFieldResponse:
+    llm_config = await resolve_tenant_llm_config(db, tenant_id, scope="system")
+
+    prompt_template = _LP_FIELD_PROMPTS[body.field]
+    prompt = prompt_template.format(
+        lm_title=body.lead_magnet_title,
+        lm_type=body.lead_magnet_type,
+        current_value=body.current_value,
+    )
+    if body.context:
+        prompt += f"\n\nContexto adicional: {body.context}"
+
+    messages = [LLMMessage(role="user", content=prompt)]
+    response = await registry.complete(
+        messages=messages,
+        provider=llm_config.provider,
+        model=llm_config.model,
+        temperature=0.7,
+        max_tokens=512,
+    )
+
+    improved = response.content.strip()
+    logger.info(
+        "content.landing_page.ai_improved",
+        field=body.field,
+        tenant_id=str(tenant_id),
+    )
+    return LPImproveFieldResponse(improved=improved)
 
 
 @router.post("/public/{slug}/capture", response_model=LandingPagePublicCaptureResponse)
