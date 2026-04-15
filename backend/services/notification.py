@@ -74,6 +74,8 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from models.content_calculator_result import ContentCalculatorResult
+    from models.content_lead_magnet import ContentLeadMagnet
+    from models.content_lm_lead import ContentLMLead
     from models.lead import Lead
 
 logger = structlog.get_logger()
@@ -576,6 +578,172 @@ def build_calculator_diagnosis_email_payload(
         "attachments": attachments,
         "reply_to": reply_to,
     }
+
+
+async def send_lead_magnet_delivery_email(
+    *,
+    lm_lead: ContentLMLead,
+    lead_magnet: ContentLeadMagnet,
+) -> bool:
+    """Envia email de entrega ao lead após captura na LP (exceto calculadora)."""
+    if lead_magnet.type == "calculator":
+        return False
+
+    resend = _get_resend()
+    if not resend:
+        return False
+
+    recipient_email = (lm_lead.email or "").strip().lower()
+    if not recipient_email:
+        logger.warning(
+            "notification.lm_delivery_missing_email",
+            lm_lead_id=str(lm_lead.id),
+        )
+        return False
+
+    contact_name = (lm_lead.name or "").strip() or "Olá"
+    title = html.escape(lead_magnet.title or "Material")
+    reply_to = settings.CONTENT_CALCULATOR_REPLY_TO_EMAIL.strip() or None
+
+    if lead_magnet.type == "pdf":
+        subject = f"Seu material está pronto — {lead_magnet.title}"
+        tag_label = "Material disponível"
+        headline = "Seu material está pronto para download"
+        body_text = (
+            f"{html.escape(contact_name)}, o material que você solicitou está disponível. "
+            "Acesse pelo link abaixo para fazer o download."
+        )
+        cta_label = lead_magnet.cta_text or "Baixar material"
+        cta_href = html.escape(lead_magnet.file_url or "#")
+        note = "O link abre o arquivo diretamente no seu navegador."
+    elif lead_magnet.type == "link":
+        subject = f"Acesse: {lead_magnet.title}"
+        tag_label = "Acesso liberado"
+        headline = "Seu acesso está liberado"
+        body_text = (
+            f"{html.escape(contact_name)}, o link que você pediu está pronto. "
+            "Clique abaixo para acessar."
+        )
+        cta_label = lead_magnet.cta_text or "Acessar agora"
+        cta_href = html.escape(lead_magnet.file_url or "#")
+        note = "O link é pessoal e pode ser usado a qualquer momento."
+    else:  # email_sequence
+        subject = f"Você entrou na sequência — {lead_magnet.title}"
+        tag_label = "Sequência ativada"
+        headline = "Você entrou na sequência de emails"
+        body_text = (
+            f"{html.escape(contact_name)}, seu cadastro foi confirmado. "
+            "Nos próximos dias você vai receber os emails da sequência com o material prometido."
+        )
+        cta_label = None
+        cta_href = None
+        note = "Caso não receba em até 24h, verifique sua caixa de spam."
+
+    logo_markup = (
+        f'<div style="font-size: 22px; line-height: 1; color: {COMPOSTO_WEB_PRIMARY}; '
+        'font-weight: 800; letter-spacing: 0.03em;">COMPOSTO WEB</div>'
+    )
+    logo_bytes = load_composto_web_logo_primary_white_bg_bytes()
+    if logo_bytes:
+        if settings.COMPOSTO_WEB_LOGO_EMAIL_URL:
+            logo_src: str = settings.COMPOSTO_WEB_LOGO_EMAIL_URL
+        else:
+            _api_url = settings.API_PUBLIC_URL.rstrip("/")
+            _is_local = "localhost" in _api_url or "127.0.0.1" in _api_url
+            if _is_local:
+                logo_src = f"data:image/webp;base64,{base64.b64encode(logo_bytes).decode('ascii')}"
+            else:
+                logo_src = f"{_api_url}/assets/branding/compostoweb-logo-primary-transparent.webp"
+        logo_markup = (
+            f'<img src="{logo_src}" alt="Composto Web" width="220" '
+            'style="display: block; width: 220px; max-width: 100%; height: auto;" />'
+        )
+
+    cta_block = ""
+    if cta_label and cta_href:
+        cta_block = (
+            f'<div style="margin-top: 28px;">'
+            f'<a href="{cta_href}" '
+            f'style="display: inline-block; padding: 14px 28px; border-radius: 999px; '
+            f"background: {COMPOSTO_WEB_ACCENT}; color: {COMPOSTO_WEB_WHITE}; "
+            f"font-size: 15px; font-weight: 700; text-decoration: none; "
+            f'letter-spacing: 0.01em;">'
+            f"{html.escape(cta_label)}</a></div>"
+        )
+
+    html_body = f"""
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse; background: {COMPOSTO_WEB_SURFACE}; margin: 0; font-family: Arial, sans-serif;">
+      <tr>
+        <td align="center" style="padding: 28px 16px;">
+          <table role="presentation" width="760" cellpadding="0" cellspacing="0" style="width: 100%; max-width: 760px; border-collapse: separate; border-spacing: 0; background: {COMPOSTO_WEB_WHITE}; border: 1px solid #d9dfeb; border-radius: 26px; overflow: hidden;">
+            <tr>
+              <td style="padding: 0; background: {COMPOSTO_WEB_WHITE};">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse;">
+                  <tr>
+                    <td style="padding: 0; height: 6px; background: {COMPOSTO_WEB_ACCENT};"></td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 30px 38px 10px;">
+                      {logo_markup}
+                      <div style="display: inline-block; margin-top: 18px; padding: 8px 14px; border-radius: 999px; background: {COMPOSTO_WEB_SURFACE}; color: {COMPOSTO_WEB_SECONDARY}; font-size: 11px; line-height: 1; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">{tag_label}</div>
+                      <h1 style="margin: 20px 0 12px; font-size: 30px; line-height: 1.15; color: {COMPOSTO_WEB_PRIMARY};">{headline}</h1>
+                      <p style="margin: 0 0 8px; font-size: 15px; line-height: 1.65; color: {COMPOSTO_WEB_TEXT};">{body_text}</p>
+                      <p style="margin: 8px 0 0; font-size: 14px; line-height: 1.6; color: {COMPOSTO_WEB_SECONDARY};">Material: <strong>{title}</strong></p>
+                      {cta_block}
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 4px 38px 28px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse: separate; border: 1px solid #d9dfeb; border-radius: 20px; background: {COMPOSTO_WEB_SURFACE};">
+                  <tr>
+                    <td style="padding: 20px 24px;">
+                      <p style="margin: 0; font-size: 13px; line-height: 1.6; color: {COMPOSTO_WEB_SECONDARY};">{html.escape(note)}</p>
+                    </td>
+                  </tr>
+                </table>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse; border-top: 1px solid #d9dfeb; margin-top: 20px;">
+                  <tr>
+                    <td style="padding-top: 16px; font-size: 12px; line-height: 1.6; color: {COMPOSTO_WEB_SECONDARY};">Enviado pela equipe da Composto Web.</td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+    """
+
+    payload: dict[str, object] = {
+        "from": settings.CONTENT_CALCULATOR_NOTIFY_FROM_EMAIL or settings.RESEND_FROM_EMAIL,
+        "to": [recipient_email],
+        "subject": subject,
+        "html": html_body,
+    }
+    if reply_to:
+        payload["reply_to"] = reply_to
+
+    try:
+        resend.Emails.send(payload)
+        logger.info(
+            "notification.lm_delivery_sent",
+            lm_lead_id=str(lm_lead.id),
+            lead_magnet_id=str(lead_magnet.id),
+            lm_type=lead_magnet.type,
+            to=recipient_email,
+        )
+        return True
+    except Exception as exc:
+        logger.error(
+            "notification.lm_delivery_failed",
+            lm_lead_id=str(lm_lead.id),
+            lead_magnet_id=str(lead_magnet.id),
+            error=str(exc),
+        )
+        return False
 
 
 async def send_reply_notification(

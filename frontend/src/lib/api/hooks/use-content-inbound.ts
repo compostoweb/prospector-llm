@@ -381,3 +381,31 @@ export function useCreateExampleLeadMagnet() {
     },
   })
 }
+
+export function useUploadLeadMagnetPdf() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ leadMagnetId, file }: { leadMagnetId: string; file: File }) => {
+      const formData = new FormData()
+      formData.append("file", file)
+      const response = await fetch(
+        `${env.NEXT_PUBLIC_API_URL}/api/content/lead-magnets/${leadMagnetId}/upload-pdf`,
+        {
+          method: "POST",
+          headers: buildAuthHeaders(session?.accessToken),
+          body: formData,
+        },
+      )
+      return parseApiResponse<ContentLeadMagnet>(response)
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData(
+        contentInboundKeys.leadMagnets(),
+        (old: ContentLeadMagnet[] | undefined) =>
+          old?.map((lm) => (lm.id === updated.id ? updated : lm)) ?? [updated],
+      )
+    },
+  })
+}

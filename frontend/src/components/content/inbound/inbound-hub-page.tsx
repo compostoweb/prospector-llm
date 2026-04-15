@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   Activity,
   ArrowRight,
@@ -12,7 +12,9 @@ import {
   Mail,
   Plus,
   Save,
+  Settings,
   Sparkles,
+  Upload,
   UserPlus,
   Wand2,
   Wifi,
@@ -41,6 +43,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import {
   useContentLeadMagnets,
@@ -54,6 +57,7 @@ import {
   useTestSendPulseWebhook,
   useUpdateContentLeadMagnet,
   useUpdateLeadMagnetStatus,
+  useUploadLeadMagnetPdf,
   useUpsertLandingPage,
   type SendPulseConnectionResult,
   type TestWebhookInput,
@@ -72,6 +76,7 @@ const TYPE_OPTIONS: Array<{ value: LeadMagnetType; label: string }> = [
   { value: "pdf", label: "PDF" },
   { value: "calculator", label: "Calculadora" },
   { value: "email_sequence", label: "Sequencia de e-mail" },
+  { value: "link", label: "Link externo" },
 ]
 
 const STATUS_OPTIONS: Array<{ value: LeadMagnetStatus; label: string }> = [
@@ -97,9 +102,12 @@ export default function InboundHubPage() {
   const updateLeadMagnetStatus = useUpdateLeadMagnetStatus()
   const upsertLandingPage = useUpsertLandingPage()
   const convertLead = useConvertLeadMagnetLead()
+  const uploadPdf = useUploadLeadMagnetPdf()
   const testConnection = useTestSendPulseConnection()
   const testWebhook = useTestSendPulseWebhook()
+  const pdfInputRef = useRef<HTMLInputElement>(null)
   const [selectedLeadMagnetId, setSelectedLeadMagnetId] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState("metricas")
   const [connectionResult, setConnectionResult] = useState<SendPulseConnectionResult | null>(null)
   const [webhookTestResult, setWebhookTestResult] = useState<TestWebhookResult | null>(null)
   const [webhookTestForm, setWebhookTestForm] = useState<TestWebhookInput>({
@@ -350,30 +358,43 @@ export default function InboundHubPage() {
     }
   }
 
+  async function handleUploadPdf(file: File) {
+    if (!selectedLeadMagnetId) {
+      return
+    }
+
+    try {
+      await uploadPdf.mutateAsync({ leadMagnetId: selectedLeadMagnetId, file })
+      toast.success("PDF enviado com sucesso")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao enviar PDF")
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      {/* ─── Cabeçalho ─── */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold text-(--text-primary)">Inbound e Lead Magnets</h2>
-          <p className="mt-1 max-w-3xl text-sm leading-6 text-(--text-secondary)">
-            Gerencie materiais, landing pages publicas, capturas e launches no LinkedIn sem misturar
-            esse fluxo com a prospeccao outbound.
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-(--text-secondary)">
+            Gerencie materiais, landing pages e capturas sem misturar com o outbound.
           </p>
         </div>
-
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
+            size="sm"
             onClick={() => void handleCreateExample()}
             disabled={createExampleLM.isPending}
           >
             <Wand2 className="h-4 w-4" />
             {createExampleLM.isPending ? "Criando..." : "Criar LP de exemplo"}
           </Button>
-          <Button asChild variant="outline">
+          <Button asChild variant="outline" size="sm">
             <a href="/lm/calculadora" target="_blank" rel="noreferrer">
               <Gauge className="h-4 w-4" />
-              Ver calculadora publica
+              Ver calculadora
             </a>
           </Button>
           <CreateLeadMagnetDialog
@@ -386,80 +407,202 @@ export default function InboundHubPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      {/* ─── Cards de resumo ─── */}
+      <div className="grid gap-4 sm:grid-cols-3">
         <SummaryCard icon={FileDown} label="Lead magnets" value={String(totals.totalLeadMagnets)} />
         <SummaryCard icon={Sparkles} label="Ativos" value={String(totals.activeCount)} />
         <SummaryCard icon={UserPlus} label="Capturados" value={String(totals.totalCaptured)} />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[320px_1fr]">
-        <Card className="h-fit">
-          <CardHeader>
-            <CardTitle>Biblioteca inbound</CardTitle>
-            <CardDescription>
-              Selecione um lead magnet para editar configuracao, LP e capturas.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {leadMagnetsQuery.isLoading && (
-              <p className="text-sm text-(--text-secondary)">Carregando lead magnets...</p>
-            )}
+      {/* ─── Seletor de lead magnet ─── */}
+      <div className="flex flex-col gap-3 rounded-2xl border border-(--border-default) bg-(--bg-surface) p-4 sm:flex-row sm:items-center">
+        <div className="flex-1">
+          {leadMagnetsQuery.isLoading ? (
+            <p className="text-sm text-(--text-secondary)">Carregando lead magnets...</p>
+          ) : leadMagnets.length === 0 ? (
+            <p className="text-sm text-(--text-secondary)">
+              Nenhum lead magnet criado. Clique em{" "}
+              <span className="font-medium text-(--text-primary)">Novo lead magnet</span> para
+              começar.
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-medium text-(--text-tertiary)">Selecionado:</span>
+              <Select
+                value={selectedLeadMagnetId ?? ""}
+                onValueChange={(value) => {
+                  setSelectedLeadMagnetId(value)
+                  setActiveTab("metricas")
+                }}
+              >
+                <SelectTrigger className="h-9 w-full max-w-[600px] text-sm">
+                  <SelectValue placeholder="Escolher lead magnet..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {leadMagnets.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      <span className="flex items-center gap-2">
+                        <span>{item.title}</span>
+                        <span className="text-xs text-(--text-tertiary)">
+                          · {typeLabel(item.type)} · {item.total_leads_captured} leads
+                        </span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedLeadMagnet && (
+                <Badge variant={statusVariant(selectedLeadMagnet.status)}>
+                  {statusLabel(selectedLeadMagnet.status)}
+                </Badge>
+              )}
+              {selectedLeadMagnet && (
+                <Badge variant="outline">{typeLabel(selectedLeadMagnet.type)}</Badge>
+              )}
+            </div>
+          )}
+        </div>
+        {selectedLeadMagnet && publicUrl && (
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => void handleCopyPublicUrl()}>
+              <Copy className="h-4 w-4" />
+              Copiar link
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <a href={publicUrl} target="_blank" rel="noreferrer">
+                <ExternalLink className="h-4 w-4" />
+                Abrir LP
+              </a>
+            </Button>
+          </div>
+        )}
+      </div>
 
-            {!leadMagnetsQuery.isLoading && leadMagnets.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-(--border-default) bg-(--bg-overlay) p-4 text-sm text-(--text-secondary)">
-                Nenhum lead magnet criado ainda.
-              </div>
-            )}
-
-            {leadMagnets.map((item) => {
-              const isActive = item.id === selectedLeadMagnetId
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setSelectedLeadMagnetId(item.id)}
-                  className={cn(
-                    "w-full rounded-2xl border p-4 text-left transition-colors",
-                    isActive
-                      ? "border-(--accent) bg-(--accent-subtle)"
-                      : "border-(--border-default) bg-(--bg-surface) hover:bg-(--bg-overlay)",
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium text-(--text-primary)">{item.title}</p>
-                      <p className="mt-1 text-xs leading-5 text-(--text-tertiary)">
-                        {item.description || "Sem descricao ainda"}
-                      </p>
-                    </div>
-                    <Badge variant={statusVariant(item.status)}>{statusLabel(item.status)}</Badge>
-                  </div>
-
-                  <div className="mt-3 flex items-center gap-2 text-xs text-(--text-tertiary)">
-                    <Badge variant="outline">{typeLabel(item.type)}</Badge>
-                    <span>{item.total_leads_captured} leads</span>
-                    {item.conversion_rate != null && (
-                      <span>{item.conversion_rate.toFixed(1)}% conv.</span>
-                    )}
-                  </div>
-                </button>
-              )
-            })}
+      {/* ─── Painel principal ─── */}
+      {!selectedLeadMagnet ? (
+        <Card>
+          <CardContent className="flex min-h-60 items-center justify-center text-sm text-(--text-secondary)">
+            {leadMagnets.length === 0
+              ? "Crie seu primeiro lead magnet para começar."
+              : "Selecione um lead magnet acima para continuar."}
           </CardContent>
         </Card>
+      ) : (
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList>
+            <TabsTrigger value="metricas">
+              <BarChart3 className="h-4 w-4" />
+              Métricas
+            </TabsTrigger>
+            <TabsTrigger value="configuracao">
+              <Settings className="h-4 w-4" />
+              Configuração
+            </TabsTrigger>
+            <TabsTrigger value="leads">
+              <UserPlus className="h-4 w-4" />
+              Leads
+            </TabsTrigger>
+            <TabsTrigger value="integracoes">
+              <Activity className="h-4 w-4" />
+              Integrações
+            </TabsTrigger>
+          </TabsList>
 
-        {!selectedLeadMagnet ? (
-          <Card>
-            <CardContent className="flex min-h-80 items-center justify-center text-sm text-(--text-secondary)">
-              Selecione ou crie um lead magnet para continuar.
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="flex flex-col gap-6">
+          {/* ─────────────── ABA: MÉTRICAS ─────────────── */}
+          <TabsContent value="metricas">
+            <div className="flex flex-col gap-6">
+              {!metricsQuery.data ? (
+                <Card>
+                  <CardContent className="p-6 text-sm text-(--text-secondary)">
+                    Carregando métricas...
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Métricas do funil</CardTitle>
+                    <CardDescription>
+                      Visibilidade de captura, nutrição e qualificação.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      <MetricCard
+                        label="Capturados"
+                        value={String(metricsQuery.data.total_leads_captured)}
+                      />
+                      <MetricCard
+                        label="Sincronizados"
+                        value={String(metricsQuery.data.total_synced_to_sendpulse)}
+                      />
+                      <MetricCard
+                        label="Views LP"
+                        value={String(metricsQuery.data.landing_page_views)}
+                      />
+                      <MetricCard
+                        label="Submissões LP"
+                        value={String(metricsQuery.data.landing_page_submissions)}
+                      />
+                      <MetricCard label="Opens" value={String(metricsQuery.data.total_opens)} />
+                      <MetricCard label="Clicks" value={String(metricsQuery.data.total_clicks)} />
+                      <MetricCard
+                        label="Seq. concluída"
+                        value={String(metricsQuery.data.total_sequence_completed)}
+                      />
+                      <MetricCard
+                        label="Conv. qualificada"
+                        value={
+                          metricsQuery.data.qualified_conversion_rate != null
+                            ? `${metricsQuery.data.qualified_conversion_rate.toFixed(1)}%`
+                            : "-"
+                        }
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Fluxos disponíveis</CardTitle>
+                  <CardDescription>
+                    Atalhos para lançar, distribuir e medir o ativo.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4 md:grid-cols-3">
+                  <QuickLinkCard
+                    icon={Sparkles}
+                    title="Launch post com IA"
+                    description="Abre o gerador no modo lead magnet launch para criar o post nativo de divulgação."
+                    href={launchHref}
+                    cta="Abrir gerador"
+                  />
+                  <QuickLinkCard
+                    icon={Mail}
+                    title="LP pública"
+                    description="Use a landing page para captura e envio automático para a lista do SendPulse."
+                    href={publicUrl || "#"}
+                    cta={publicUrl ? "Abrir LP" : "Configure a LP"}
+                    disabled={!publicUrl}
+                  />
+                  <QuickLinkCard
+                    icon={BarChart3}
+                    title="Calculadora pública"
+                    description="Fluxo alternativo para diagnóstico de ROI e qualificação antes do handoff comercial."
+                    href={calculatorUrl || "/lm/calculadora"}
+                    cta="Abrir calculadora"
+                  />
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          {/* ─────────────── ABA: CONFIGURAÇÃO ─────────────── */}
+          <TabsContent value="configuracao">
             <div className="grid gap-6 lg:grid-cols-2">
               <Card>
                 <CardHeader>
-                  <CardTitle>Configuracao do lead magnet</CardTitle>
+                  <CardTitle>Configuração do lead magnet</CardTitle>
                   <CardDescription>
                     Arquivo, CTA, lista do SendPulse e tipo do ativo.
                   </CardDescription>
@@ -510,16 +653,19 @@ export default function InboundHubPage() {
                     </Field>
                   </div>
 
-                  <Field label="Titulo">
+                  <Field label="Título">
                     <Input
                       value={leadMagnetForm.title ?? ""}
                       onChange={(event) =>
-                        setLeadMagnetForm((current) => ({ ...current, title: event.target.value }))
+                        setLeadMagnetForm((current) => ({
+                          ...current,
+                          title: event.target.value,
+                        }))
                       }
                     />
                   </Field>
 
-                  <Field label="Descricao">
+                  <Field label="Descrição">
                     <Textarea
                       value={leadMagnetForm.description ?? ""}
                       onChange={(event) =>
@@ -545,17 +691,53 @@ export default function InboundHubPage() {
                     />
                   </Field>
 
-                  <Field label="URL do arquivo">
-                    <Input
-                      value={leadMagnetForm.file_url ?? ""}
-                      onChange={(event) =>
-                        setLeadMagnetForm((current) => ({
-                          ...current,
-                          file_url: event.target.value,
-                        }))
-                      }
-                      placeholder="https://..."
-                    />
+                  <Field label="URL do arquivo / Link externo">
+                    <div className="flex gap-2">
+                      <Input
+                        value={leadMagnetForm.file_url ?? ""}
+                        onChange={(event) =>
+                          setLeadMagnetForm((current) => ({
+                            ...current,
+                            file_url: event.target.value,
+                          }))
+                        }
+                        placeholder="https://..."
+                      />
+                      <input
+                        ref={pdfInputRef}
+                        type="file"
+                        accept="application/pdf"
+                        aria-label="Selecionar PDF para upload"
+                        className="hidden"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0]
+                          if (file) void handleUploadPdf(file)
+                          event.target.value = ""
+                        }}
+                      />
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        title="Enviar PDF para MinIO"
+                        disabled={uploadPdf.isPending}
+                        onClick={() => pdfInputRef.current?.click()}
+                      >
+                        <Upload className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    {selectedLeadMagnet.file_url && (
+                      <p className="mt-1 truncate text-xs text-(--text-secondary)">
+                        Atual:{" "}
+                        <a
+                          href={selectedLeadMagnet.file_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline"
+                        >
+                          {selectedLeadMagnet.file_url}
+                        </a>
+                      </p>
+                    )}
                   </Field>
 
                   <Field label="ID da lista no SendPulse">
@@ -577,7 +759,7 @@ export default function InboundHubPage() {
                       disabled={updateLeadMagnet.isPending}
                     >
                       <Save className="h-4 w-4" />
-                      Salvar configuracao
+                      Salvar configuração
                     </Button>
                     <Button asChild variant="outline">
                       <a href={launchHref}>
@@ -599,9 +781,9 @@ export default function InboundHubPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Landing page publica</CardTitle>
+                  <CardTitle>Landing page pública</CardTitle>
                   <CardDescription>
-                    Slug, copy, prova social e publicacao do material.
+                    Slug, copy, prova social e publicação do material.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -617,7 +799,7 @@ export default function InboundHubPage() {
                         }
                       />
                     </Field>
-                    <Field label="Titulo da pagina">
+                    <Field label="Título da página">
                       <Input
                         value={landingPageForm.title}
                         onChange={(event) =>
@@ -630,7 +812,7 @@ export default function InboundHubPage() {
                     </Field>
                   </div>
 
-                  <Field label="Subtitulo">
+                  <Field label="Subtítulo">
                     <Textarea
                       value={landingPageForm.subtitle ?? ""}
                       onChange={(event) =>
@@ -643,16 +825,13 @@ export default function InboundHubPage() {
                     />
                   </Field>
 
-                  <Field label="Beneficios (1 por linha)">
+                  <Field label="Benefícios (1 por linha)">
                     <Textarea
                       value={(landingPageForm.benefits ?? []).join("\n")}
                       onChange={(event) =>
                         setLandingPageForm((current) => ({
                           ...current,
-                          benefits: event.target.value
-                            .split("\n")
-                            .map((item) => item.trim())
-                            .filter(Boolean),
+                          benefits: event.target.value.split("\n"),
                         }))
                       }
                       rows={4}
@@ -743,7 +922,7 @@ export default function InboundHubPage() {
                         Publicar landing page
                       </p>
                       <p className="text-xs text-(--text-tertiary)">
-                        A rota publica so responde quando a LP estiver publicada.
+                        A rota pública só responde quando a LP estiver publicada.
                       </p>
                     </div>
                     <Switch
@@ -768,13 +947,13 @@ export default function InboundHubPage() {
                       disabled={!publicUrl}
                     >
                       <Copy className="h-4 w-4" />
-                      Copiar link publico
+                      Copiar link público
                     </Button>
                     {publicUrl && (
                       <Button asChild variant="outline">
                         <a href={publicUrl} target="_blank" rel="noreferrer">
                           <ExternalLink className="h-4 w-4" />
-                          Abrir pagina
+                          Abrir página
                         </a>
                       </Button>
                     )}
@@ -782,291 +961,251 @@ export default function InboundHubPage() {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
 
-            <div className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Metricas do funil</CardTitle>
-                  <CardDescription>
-                    Visibilidade de captura, nutricao e qualificacao.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {!metricsQuery.data ? (
-                    <p className="text-sm text-(--text-secondary)">Carregando metricas...</p>
-                  ) : (
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <MetricCard
-                        label="Capturados"
-                        value={String(metricsQuery.data.total_leads_captured)}
-                      />
-                      <MetricCard
-                        label="Sincronizados"
-                        value={String(metricsQuery.data.total_synced_to_sendpulse)}
-                      />
-                      <MetricCard
-                        label="Views LP"
-                        value={String(metricsQuery.data.landing_page_views)}
-                      />
-                      <MetricCard
-                        label="Submissoes LP"
-                        value={String(metricsQuery.data.landing_page_submissions)}
-                      />
-                      <MetricCard label="Opens" value={String(metricsQuery.data.total_opens)} />
-                      <MetricCard label="Clicks" value={String(metricsQuery.data.total_clicks)} />
-                      <MetricCard
-                        label="Concluida sequencia"
-                        value={String(metricsQuery.data.total_sequence_completed)}
-                      />
-                      <MetricCard
-                        label="Conv. qualificada"
-                        value={
-                          metricsQuery.data.qualified_conversion_rate != null
-                            ? `${metricsQuery.data.qualified_conversion_rate.toFixed(1)}%`
-                            : "-"
-                        }
-                      />
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Leads capturados</CardTitle>
-                  <CardDescription>
-                    Contatos vindos da LP, calculadora, comments e direct.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {(leadsQuery.data ?? []).length === 0 && (
-                    <div className="rounded-2xl border border-dashed border-(--border-default) bg-(--bg-overlay) p-4 text-sm text-(--text-secondary)">
-                      Nenhuma captura registrada ainda para este lead magnet.
-                    </div>
-                  )}
-
-                  {(leadsQuery.data ?? []).map((lead) => (
-                    <div
-                      key={lead.id}
-                      className="flex flex-col gap-3 rounded-2xl border border-(--border-default) bg-(--bg-overlay) p-4"
-                    >
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm font-medium text-(--text-primary)">{lead.name}</p>
-                            <Badge variant="outline">{originLabel(lead.origin)}</Badge>
-                            <Badge variant={syncVariant(lead.sendpulse_sync_status)}>
-                              {lead.sendpulse_sync_status}
-                            </Badge>
-                          </div>
-                          <p className="mt-1 text-sm text-(--text-secondary)">{lead.email}</p>
-                          <p className="mt-1 text-xs text-(--text-tertiary)">
-                            {lead.company || "Sem empresa"}
-                            {lead.role ? ` • ${lead.role}` : ""}
-                            {` • ${formatRelativeTime(lead.created_at)}`}
-                          </p>
-                        </div>
-
-                        {!lead.converted_to_lead && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => void handleConvertLead(lead.id)}
-                            disabled={convertLead.isPending}
-                          >
-                            <UserPlus className="h-4 w-4" />
-                            Converter
-                          </Button>
-                        )}
-                      </div>
-
-                      <div className="flex flex-wrap gap-2 text-xs text-(--text-tertiary)">
-                        <span>Sequencia: {lead.sequence_status}</span>
-                        {lead.converted_via_email && <span>Convertido por e-mail</span>}
-                        {lead.converted_to_lead && <span>Virou lead no Prospector</span>}
-                        {lead.sendpulse_last_error && (
-                          <span>Erro: {lead.sendpulse_last_error}</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-            </div>
-
+          {/* ─────────────── ABA: LEADS ─────────────── */}
+          <TabsContent value="leads">
             <Card>
               <CardHeader>
-                <CardTitle>Fluxos disponiveis</CardTitle>
-                <CardDescription>Atalhos para lancar, distribuir e medir o ativo.</CardDescription>
+                <CardTitle>Leads capturados</CardTitle>
+                <CardDescription>
+                  Contatos vindos da LP, calculadora, comments e direct.
+                </CardDescription>
               </CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-3">
-                <QuickLinkCard
-                  icon={Sparkles}
-                  title="Launch post com IA"
-                  description="Abre o gerador no modo lead magnet launch para criar o post nativo de divulgacao."
-                  href={launchHref}
-                  cta="Abrir gerador"
-                />
-                <QuickLinkCard
-                  icon={Mail}
-                  title="LP publica"
-                  description="Use a landing page para captura e envio automatico para a lista do SendPulse."
-                  href={publicUrl || "#"}
-                  cta={publicUrl ? "Abrir LP" : "Configure a LP"}
-                  disabled={!publicUrl}
-                />
-                <QuickLinkCard
-                  icon={BarChart3}
-                  title="Calculadora publica"
-                  description="Fluxo alternativo para diagnostico de ROI e qualificacao antes do handoff comercial."
-                  href={calculatorUrl || "/lm/calculadora"}
-                  cta="Abrir calculadora"
-                />
+              <CardContent>
+                {(leadsQuery.data ?? []).length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-(--border-default) bg-(--bg-overlay) p-6 text-center text-sm text-(--text-secondary)">
+                    Nenhuma captura registrada ainda para este lead magnet.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-lg border border-(--border-default) bg-(--bg-surface) shadow-(--shadow-sm)">
+                    <table className="min-w-full divide-y divide-(--border-subtle)">
+                      <thead>
+                        <tr className="border-b border-(--accent) bg-(--accent)">
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-(--text-invert)">
+                            Nome / E-mail
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-(--text-invert)">
+                            Empresa / Cargo
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-(--text-invert)">
+                            Origem
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-(--text-invert)">
+                            SP / Seq.
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-(--text-invert)">
+                            Captado
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-(--text-invert)">
+                            Ações
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-(--border-subtle) bg-(--bg-surface)">
+                        {(leadsQuery.data ?? []).map((lead) => (
+                          <tr key={lead.id} className="hover:bg-(--bg-overlay) transition-colors">
+                            <td className="px-4 py-3">
+                              <p className="text-sm font-medium text-(--text-primary)">
+                                {lead.name}
+                              </p>
+                              <p className="text-xs text-(--text-secondary)">{lead.email}</p>
+                              {lead.phone && (
+                                <p className="text-xs text-(--text-tertiary)">{lead.phone}</p>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              <p className="text-sm text-(--text-primary)">{lead.company || "—"}</p>
+                              <p className="text-xs text-(--text-tertiary)">{lead.role || "—"}</p>
+                            </td>
+                            <td className="px-4 py-3">
+                              <Badge variant="outline">{originLabel(lead.origin)}</Badge>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex flex-col gap-1">
+                                <Badge variant={syncVariant(lead.sendpulse_sync_status)}>
+                                  {lead.sendpulse_sync_status}
+                                </Badge>
+                                <span className="text-xs text-(--text-tertiary)">
+                                  {lead.sequence_status}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-(--text-tertiary)">
+                              {formatRelativeTime(lead.created_at)}
+                            </td>
+                            <td className="px-4 py-3">
+                              {!lead.converted_to_lead ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => void handleConvertLead(lead.id)}
+                                  disabled={convertLead.isPending}
+                                >
+                                  <UserPlus className="h-4 w-4" />
+                                  Converter
+                                </Button>
+                              ) : (
+                                <span className="text-xs text-(--success)">Convertido</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </CardContent>
             </Card>
-          </div>
-        )}
-      </div>
+          </TabsContent>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Activity className="h-5 w-5 text-(--accent)" />
-            Integração SendPulse
-          </CardTitle>
-          <CardDescription>
-            Teste as credenciais e simule eventos de webhook sem precisar de uma requisição externa.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="space-y-3">
-            <p className="text-sm font-medium text-(--text-primary)">Testar credenciais</p>
-            <Button
-              variant="outline"
-              onClick={() => void handleTestConnection()}
-              disabled={testConnection.isPending}
-            >
-              <Wifi className="h-4 w-4" />
-              {testConnection.isPending ? "Verificando..." : "Testar conexão SendPulse"}
-            </Button>
-            {connectionResult && (
-              <div
-                className={cn(
-                  "rounded-2xl border p-4 text-sm",
-                  connectionResult.status === "ok"
-                    ? "border-(--success)/30 bg-(--success-subtle) text-(--success-subtle-fg)"
-                    : "border-(--danger)/30 bg-(--danger-subtle) text-(--danger-subtle-fg)",
-                )}
-              >
-                <p className="font-medium">{connectionResult.message}</p>
-                {connectionResult.lists && connectionResult.lists.length > 0 && (
-                  <ul className="mt-2 space-y-1 text-xs">
-                    {connectionResult.lists.slice(0, 6).map((list) => (
-                      <li key={list.id}>
-                        {list.name} — {list.all_email_qty} contatos
-                        <span className="ml-2 font-mono opacity-60">(ID: {list.id})</span>
-                      </li>
-                    ))}
-                    {connectionResult.lists.length > 6 && (
-                      <li className="opacity-60">
-                        ...e mais {connectionResult.lists.length - 6} lista(s)
-                      </li>
-                    )}
-                  </ul>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-3">
-            <p className="text-sm font-medium text-(--text-primary)">Simular evento de webhook</p>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Field label="Tipo de evento">
-                <Select
-                  value={webhookTestForm.event_type}
-                  onValueChange={(value) =>
-                    setWebhookTestForm((current) => ({
-                      ...current,
-                      event_type: value as TestWebhookInput["event_type"],
-                    }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {EVENT_TYPE_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="E-mail do lead">
-                <Input
-                  type="email"
-                  value={webhookTestForm.email}
-                  onChange={(event) =>
-                    setWebhookTestForm((current) => ({
-                      ...current,
-                      email: event.target.value,
-                    }))
-                  }
-                  placeholder="lead@exemplo.com.br"
-                />
-              </Field>
-              <Field label="ID da lista (opcional)">
-                <Input
-                  value={webhookTestForm.list_id ?? ""}
-                  onChange={(event) =>
-                    setWebhookTestForm((current) => ({
-                      ...current,
-                      list_id: event.target.value,
-                    }))
-                  }
-                  placeholder="addressbook_id"
-                />
-              </Field>
-            </div>
-            <Button
-              variant="outline"
-              onClick={() => void handleTestWebhook()}
-              disabled={testWebhook.isPending || !webhookTestForm.email.trim()}
-            >
-              <Zap className="h-4 w-4" />
-              {testWebhook.isPending ? "Simulando..." : "Disparar webhook de teste"}
-            </Button>
-            {webhookTestResult && (
-              <div
-                className={cn(
-                  "rounded-2xl border p-4 text-sm",
-                  webhookTestResult.status === "ok"
-                    ? "border-(--success)/30 bg-(--success-subtle) text-(--success-subtle-fg)"
-                    : "border-(--border-default) bg-(--bg-overlay) text-(--text-secondary)",
-                )}
-              >
-                <p className="font-medium">{webhookTestResult.message}</p>
-                <p className="mt-1 text-xs">
-                  Lead atualizado:{" "}
-                  <strong>{webhookTestResult.lm_lead_updated ? "sim" : "não"}</strong>
-                  {" · "}Evento gravado:{" "}
-                  <strong>{webhookTestResult.event_stored ? "sim" : "não"}</strong>
-                  {webhookTestResult.event_id && (
-                    <>
-                      {" · "}ID: <span className="font-mono">{webhookTestResult.event_id}</span>
-                    </>
+          {/* ─────────────── ABA: CONFIGURAÇÕES (INTEGRAÇÕES) ─────────────── */}
+          <TabsContent value="integracoes">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Activity className="h-5 w-5 text-(--accent)" />
+                  Integração SendPulse
+                </CardTitle>
+                <CardDescription>
+                  Teste as credenciais e simule eventos de webhook sem precisar de uma requisição
+                  externa.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-3">
+                  <p className="text-sm font-medium text-(--text-primary)">Testar credenciais</p>
+                  <Button
+                    variant="outline"
+                    onClick={() => void handleTestConnection()}
+                    disabled={testConnection.isPending}
+                  >
+                    <Wifi className="h-4 w-4" />
+                    {testConnection.isPending ? "Verificando..." : "Testar conexão SendPulse"}
+                  </Button>
+                  {connectionResult && (
+                    <div
+                      className={cn(
+                        "rounded-2xl border p-4 text-sm",
+                        connectionResult.status === "ok"
+                          ? "border-(--success)/30 bg-(--success-subtle) text-(--success-subtle-fg)"
+                          : "border-(--danger)/30 bg-(--danger-subtle) text-(--danger-subtle-fg)",
+                      )}
+                    >
+                      <p className="font-medium">{connectionResult.message}</p>
+                      {connectionResult.lists && connectionResult.lists.length > 0 && (
+                        <ul className="mt-2 space-y-1 text-xs">
+                          {connectionResult.lists.slice(0, 6).map((list) => (
+                            <li key={list.id}>
+                              {list.name} — {list.all_email_qty} contatos
+                              <span className="ml-2 font-mono opacity-60">(ID: {list.id})</span>
+                            </li>
+                          ))}
+                          {connectionResult.lists.length > 6 && (
+                            <li className="opacity-60">
+                              ...e mais {connectionResult.lists.length - 6} lista(s)
+                            </li>
+                          )}
+                        </ul>
+                      )}
+                    </div>
                   )}
-                </p>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+                </div>
+
+                <div className="space-y-3">
+                  <p className="text-sm font-medium text-(--text-primary)">
+                    Simular evento de webhook
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <Field label="Tipo de evento">
+                      <Select
+                        value={webhookTestForm.event_type}
+                        onValueChange={(value) =>
+                          setWebhookTestForm((current) => ({
+                            ...current,
+                            event_type: value as TestWebhookInput["event_type"],
+                          }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {EVENT_TYPE_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field label="E-mail do lead">
+                      <Input
+                        type="email"
+                        value={webhookTestForm.email}
+                        onChange={(event) =>
+                          setWebhookTestForm((current) => ({
+                            ...current,
+                            email: event.target.value,
+                          }))
+                        }
+                        placeholder="lead@exemplo.com.br"
+                      />
+                    </Field>
+                    <Field label="ID da lista (opcional)">
+                      <Input
+                        value={webhookTestForm.list_id ?? ""}
+                        onChange={(event) =>
+                          setWebhookTestForm((current) => ({
+                            ...current,
+                            list_id: event.target.value,
+                          }))
+                        }
+                        placeholder="addressbook_id"
+                      />
+                    </Field>
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => void handleTestWebhook()}
+                    disabled={testWebhook.isPending || !webhookTestForm.email.trim()}
+                  >
+                    <Zap className="h-4 w-4" />
+                    {testWebhook.isPending ? "Simulando..." : "Disparar webhook de teste"}
+                  </Button>
+                  {webhookTestResult && (
+                    <div
+                      className={cn(
+                        "rounded-2xl border p-4 text-sm",
+                        webhookTestResult.status === "ok"
+                          ? "border-(--success)/30 bg-(--success-subtle) text-(--success-subtle-fg)"
+                          : "border-(--border-default) bg-(--bg-overlay) text-(--text-secondary)",
+                      )}
+                    >
+                      <p className="font-medium">{webhookTestResult.message}</p>
+                      <p className="mt-1 text-xs">
+                        Lead atualizado:{" "}
+                        <strong>{webhookTestResult.lm_lead_updated ? "sim" : "não"}</strong>
+                        {" · "}Evento gravado:{" "}
+                        <strong>{webhookTestResult.event_stored ? "sim" : "não"}</strong>
+                        {webhookTestResult.event_id && (
+                          <>
+                            {" · "}ID:{" "}
+                            <span className="font-mono">{webhookTestResult.event_id}</span>
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      )}
     </div>
   )
 }
-
 interface CreateLeadMagnetDialogProps {
   isPending: boolean
   onCreate: (payload: ContentLeadMagnetCreateInput) => Promise<void>

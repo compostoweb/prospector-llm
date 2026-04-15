@@ -1,4 +1,4 @@
-export type LeadMagnetType = "pdf" | "calculator" | "email_sequence"
+export type LeadMagnetType = "pdf" | "calculator" | "email_sequence" | "link"
 export type LeadMagnetStatus = "draft" | "active" | "paused" | "archived"
 export type LMDistributionType = "comment" | "dm" | "link_bio"
 export type LMLeadOrigin =

@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,6 +41,8 @@ from services.content.lead_magnet_service import (
 )
 
 logger = structlog.get_logger()
+
+_MAX_PDF_SIZE = 50 * 1024 * 1024  # 50 MB
 
 router = APIRouter(prefix="/lead-magnets", tags=["Content Hub — Lead Magnets"])
 
@@ -177,6 +179,42 @@ async def update_lead_magnet_status(
         lead_magnet_id=str(lead_magnet_id),
         tenant_id=str(tenant_id),
         status=body.status,
+    )
+    return ContentLeadMagnetResponse.model_validate(lead_magnet)
+
+
+@router.post("/{lead_magnet_id}/upload-pdf", response_model=ContentLeadMagnetResponse)
+async def upload_lead_magnet_pdf(
+    lead_magnet_id: uuid.UUID,
+    file: UploadFile = File(...),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> ContentLeadMagnetResponse:
+    from integrations.s3_client import S3Client
+
+    if file.content_type != "application/pdf":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Apenas arquivos PDF são aceitos.",
+        )
+    lead_magnet = await _get_lead_magnet_or_404(lead_magnet_id, tenant_id, db)
+    pdf_bytes = await file.read()
+    if len(pdf_bytes) > _MAX_PDF_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Arquivo excede o limite de 50 MB.",
+        )
+    s3_key = f"lm-pdfs/{tenant_id}/{lead_magnet_id}.pdf"
+    s3 = S3Client()
+    s3.upload_bytes(pdf_bytes, s3_key, "application/pdf")
+    lead_magnet.file_url = s3.get_public_url(s3_key)
+    await db.commit()
+    await db.refresh(lead_magnet)
+    logger.info(
+        "content.lead_magnet.pdf_uploaded",
+        lead_magnet_id=str(lead_magnet_id),
+        tenant_id=str(tenant_id),
+        s3_key=s3_key,
     )
     return ContentLeadMagnetResponse.model_validate(lead_magnet)
 

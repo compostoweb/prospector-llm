@@ -225,6 +225,11 @@ async def capture_public_lead(
     if should_sync:
         await queue_sendpulse_sync(lm_lead)
 
+    if lead_magnet.type != "calculator":
+        from services.notification import send_lead_magnet_delivery_email
+
+        await send_lead_magnet_delivery_email(lm_lead=lm_lead, lead_magnet=lead_magnet)
+
     logger.info(
         "content.landing_page.captured",
         slug=slug,

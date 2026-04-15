@@ -12,7 +12,7 @@ from typing import Literal, TypeAlias
 
 from pydantic import BaseModel, Field, field_validator
 
-LeadMagnetType: TypeAlias = Literal["pdf", "calculator", "email_sequence"]
+LeadMagnetType: TypeAlias = Literal["pdf", "calculator", "email_sequence", "link"]
 LeadMagnetStatus: TypeAlias = Literal["draft", "active", "paused", "archived"]
 LMPostType: TypeAlias = Literal["launch", "relaunch", "reminder"]
 LMDistributionType: TypeAlias = Literal["comment", "dm", "link_bio"]
