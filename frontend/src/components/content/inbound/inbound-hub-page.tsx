@@ -65,6 +65,7 @@ import {
   useUpdateLeadMagnetStatus,
   useImproveLandingPageField,
   useLeadMagnetPdfPreviewUrl,
+  useLeadMagnetEmailPreview,
   useUploadLandingPageImage,
   useUploadLeadMagnetPdf,
   useUpsertLandingPage,
@@ -83,7 +84,7 @@ import { cn, formatRelativeTime, slugify } from "@/lib/utils"
 
 const TYPE_OPTIONS: Array<{ value: LeadMagnetType; label: string }> = [
   { value: "pdf", label: "PDF" },
-  { value: "calculator", label: "Calculadora" },
+  { value: "calculator", label: "Ferramenta" },
   { value: "email_sequence", label: "Sequencia de e-mail" },
   { value: "link", label: "Link externo" },
 ]
@@ -115,6 +116,7 @@ export default function InboundHubPage() {
   const deleteLeadMagnet = useDeleteLeadMagnet()
   const improveField = useImproveLandingPageField()
   const pdfPreviewUrlMutation = useLeadMagnetPdfPreviewUrl()
+  const emailPreviewMutation = useLeadMagnetEmailPreview()
   const testConnection = useTestSendPulseConnection()
   const testWebhook = useTestSendPulseWebhook()
   const pdfInputRef = useRef<HTMLInputElement>(null)
@@ -139,11 +141,32 @@ export default function InboundHubPage() {
     author_photo_url: "",
     meta_title: "",
     meta_description: "",
+    publisher_name: "",
+    badge_text: "",
+    features: [
+      {
+        title: "Diagnóstico prático",
+        description:
+          "O material mostra os principais gargalos e como priorizar o que automatizar primeiro.",
+      },
+      {
+        title: "Aplicação imediata",
+        description:
+          "Sem teoria solta. O foco está em processo, ganho operacional e decisão executiva.",
+      },
+    ],
+    expected_result:
+      "Menos improviso na operação e mais critério para decidir onde automatizar, terceirizar ou redesenhar.",
     published: false,
   })
   const [activeAiField, setActiveAiField] = useState<string | null>(null)
   const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false)
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null)
+  const [emailPreviewOpen, setEmailPreviewOpen] = useState(false)
+  const [emailPreviewData, setEmailPreviewData] = useState<{
+    html: string
+    subject: string
+  } | null>(null)
 
   const leadMagnets = useMemo(() => leadMagnetsQuery.data ?? [], [leadMagnetsQuery.data])
   const selectedLeadMagnet = leadMagnets.find((item) => item.id === selectedLeadMagnetId) ?? null
@@ -176,6 +199,10 @@ export default function InboundHubPage() {
       description: selectedLeadMagnet.description,
       file_url: selectedLeadMagnet.file_url,
       cta_text: selectedLeadMagnet.cta_text,
+      email_subject: selectedLeadMagnet.email_subject,
+      email_headline: selectedLeadMagnet.email_headline,
+      email_body_text: selectedLeadMagnet.email_body_text,
+      email_cta_label: selectedLeadMagnet.email_cta_label,
       sendpulse_list_id: selectedLeadMagnet.sendpulse_list_id,
     })
   }, [selectedLeadMagnet])
@@ -198,6 +225,13 @@ export default function InboundHubPage() {
         author_photo_url: landingPage.author_photo_url,
         meta_title: landingPage.meta_title,
         meta_description: landingPage.meta_description,
+        publisher_name: landingPage.publisher_name,
+        badge_text: landingPage.badge_text,
+        features: landingPage.features ?? [
+          { title: "", description: "" },
+          { title: "", description: "" },
+        ],
+        expected_result: landingPage.expected_result,
         published: landingPage.published,
       })
       return
@@ -214,6 +248,22 @@ export default function InboundHubPage() {
       author_photo_url: "",
       meta_title: selectedLeadMagnet.title,
       meta_description: selectedLeadMagnet.description,
+      publisher_name: "",
+      badge_text: "",
+      features: [
+        {
+          title: "Diagnóstico prático",
+          description:
+            "O material mostra os principais gargalos e como priorizar o que automatizar primeiro.",
+        },
+        {
+          title: "Aplicação imediata",
+          description:
+            "Sem teoria solta. O foco está em processo, ganho operacional e decisão executiva.",
+        },
+      ],
+      expected_result:
+        "Menos improviso na operação e mais critério para decidir onde automatizar, terceirizar ou redesenhar.",
       published: false,
     })
   }, [landingPageQuery.data, selectedLeadMagnet])
@@ -302,6 +352,10 @@ export default function InboundHubPage() {
           description: normalizeNullableText(leadMagnetForm.description),
           file_url: normalizeNullableText(leadMagnetForm.file_url),
           cta_text: normalizeNullableText(leadMagnetForm.cta_text),
+          email_subject: normalizeNullableText(leadMagnetForm.email_subject),
+          email_headline: normalizeNullableText(leadMagnetForm.email_headline),
+          email_body_text: normalizeNullableText(leadMagnetForm.email_body_text),
+          email_cta_label: normalizeNullableText(leadMagnetForm.email_cta_label),
           sendpulse_list_id: normalizeNullableText(leadMagnetForm.sendpulse_list_id),
         },
       })
@@ -343,6 +397,16 @@ export default function InboundHubPage() {
           author_photo_url: normalizeNullableText(landingPageForm.author_photo_url),
           meta_title: normalizeNullableText(landingPageForm.meta_title),
           meta_description: normalizeNullableText(landingPageForm.meta_description),
+          publisher_name: normalizeNullableText(landingPageForm.publisher_name),
+          badge_text: normalizeNullableText(landingPageForm.badge_text),
+          features:
+            (landingPageForm.features ?? []).filter((f) => f.title.trim() || f.description.trim())
+              .length > 0
+              ? (landingPageForm.features ?? []).filter(
+                  (f) => f.title.trim() || f.description.trim(),
+                )
+              : null,
+          expected_result: normalizeNullableText(landingPageForm.expected_result),
           published: Boolean(landingPageForm.published),
           social_proof_count: Number(landingPageForm.social_proof_count || 0),
         },
@@ -388,7 +452,18 @@ export default function InboundHubPage() {
   }
 
   async function handleImproveField(
-    field: "title" | "subtitle" | "benefits" | "meta_title" | "meta_description",
+    field:
+      | "title"
+      | "subtitle"
+      | "benefits"
+      | "meta_title"
+      | "meta_description"
+      | "features"
+      | "expected_result"
+      | "badge_text"
+      | "email_subject"
+      | "email_headline"
+      | "email_body_text",
   ) {
     if (!selectedLeadMagnet) {
       return
@@ -400,6 +475,12 @@ export default function InboundHubPage() {
       benefits: (landingPageForm.benefits ?? []).join("\n"),
       meta_title: landingPageForm.meta_title ?? "",
       meta_description: landingPageForm.meta_description ?? "",
+      features: JSON.stringify(landingPageForm.features ?? []),
+      expected_result: landingPageForm.expected_result ?? "",
+      badge_text: landingPageForm.badge_text ?? "",
+      email_subject: leadMagnetForm.email_subject ?? "",
+      email_headline: leadMagnetForm.email_headline ?? "",
+      email_body_text: leadMagnetForm.email_body_text ?? "",
     }
 
     setActiveAiField(field)
@@ -415,6 +496,18 @@ export default function InboundHubPage() {
           ...current,
           benefits: result.improved.split("\n").filter(Boolean),
         }))
+      } else if (field === "features") {
+        try {
+          const parsed = JSON.parse(result.improved) as Array<{
+            title: string
+            description: string
+          }>
+          setLandingPageForm((current) => ({ ...current, features: parsed }))
+        } catch {
+          toast.error("IA retornou formato inválido para os cards")
+        }
+      } else if (["email_subject", "email_headline", "email_body_text"].includes(field)) {
+        setLeadMagnetForm((current) => ({ ...current, [field]: result.improved }))
       } else {
         setLandingPageForm((current) => ({ ...current, [field]: result.improved }))
       }
@@ -466,7 +559,7 @@ export default function InboundHubPage() {
           <Button asChild variant="outline" size="sm">
             <a href="/lm/calculadora" target="_blank" rel="noreferrer">
               <Gauge className="h-4 w-4" />
-              Ver calculadora
+              Ver ferramenta
             </a>
           </Button>
           <CreateLeadMagnetDialog
@@ -598,6 +691,12 @@ export default function InboundHubPage() {
               <Activity className="h-4 w-4" />
               Integrações
             </TabsTrigger>
+            {selectedLeadMagnet?.type !== "calculator" && (
+              <TabsTrigger value="email">
+                <Mail className="h-4 w-4" />
+                E-mail
+              </TabsTrigger>
+            )}
           </TabsList>
 
           {/* ─────────────── ABA: MÉTRICAS ─────────────── */}
@@ -679,10 +778,10 @@ export default function InboundHubPage() {
                   />
                   <QuickLinkCard
                     icon={BarChart3}
-                    title="Calculadora pública"
+                    title="Ferramenta pública"
                     description="Fluxo alternativo para diagnóstico de ROI e qualificação antes do handoff comercial."
                     href={calculatorUrl || "/lm/calculadora"}
-                    cta="Abrir calculadora"
+                    cta="Abrir ferramenta"
                   />
                 </CardContent>
               </Card>
@@ -889,8 +988,36 @@ export default function InboundHubPage() {
                       <Button asChild variant="outline">
                         <a href={calculatorUrl} target="_blank" rel="noreferrer">
                           <ExternalLink className="h-4 w-4" />
-                          Abrir calculadora
+                          Abrir ferramenta
                         </a>
+                      </Button>
+                    )}
+                    {selectedLeadMagnet.type !== "calculator" && (
+                      <Button
+                        variant="outline"
+                        disabled={emailPreviewMutation.isPending}
+                        onClick={async () => {
+                          try {
+                            const data = await emailPreviewMutation.mutateAsync(
+                              selectedLeadMagnet.id,
+                            )
+                            setEmailPreviewData(data)
+                            setEmailPreviewOpen(true)
+                          } catch (err) {
+                            toast.error(
+                              err instanceof Error
+                                ? err.message
+                                : "Erro ao carregar preview do e-mail",
+                            )
+                          }
+                        }}
+                      >
+                        {emailPreviewMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Mail className="h-4 w-4" />
+                        )}
+                        {emailPreviewMutation.isPending ? "Carregando..." : "Preview do e-mail"}
                       </Button>
                     )}
                   </div>
@@ -1091,6 +1218,170 @@ export default function InboundHubPage() {
                         setLandingPageForm((current) => ({
                           ...current,
                           author_bio: event.target.value,
+                        }))
+                      }
+                      rows={3}
+                    />
+                  </Field>
+
+                  <Field label="Quem assina (ex: Composto Web)">
+                    <Input
+                      value={landingPageForm.publisher_name ?? ""}
+                      onChange={(event) =>
+                        setLandingPageForm((current) => ({
+                          ...current,
+                          publisher_name: event.target.value,
+                        }))
+                      }
+                    />
+                  </Field>
+
+                  <Field
+                    label="Texto do badge (acima do título)"
+                    action={
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 gap-1 px-2 text-xs text-(--accent)"
+                        disabled={activeAiField === "badge_text"}
+                        onClick={() => void handleImproveField("badge_text")}
+                      >
+                        {activeAiField === "badge_text" ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-3 w-3" />
+                        )}
+                        Gerar com IA
+                      </Button>
+                    }
+                  >
+                    <Input
+                      placeholder="ex: Material para times B2B de operações enxutas"
+                      value={landingPageForm.badge_text ?? ""}
+                      onChange={(event) =>
+                        setLandingPageForm((current) => ({
+                          ...current,
+                          badge_text: event.target.value,
+                        }))
+                      }
+                    />
+                  </Field>
+
+                  <Field
+                    label="Cards de destaque (O que você encontra aqui)"
+                    action={
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 gap-1 px-2 text-xs text-(--accent)"
+                        disabled={activeAiField === "features"}
+                        onClick={() => void handleImproveField("features")}
+                      >
+                        {activeAiField === "features" ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-3 w-3" />
+                        )}
+                        Gerar com IA
+                      </Button>
+                    }
+                  >
+                    <div className="space-y-2">
+                      {(landingPageForm.features ?? []).map((feature, index) => (
+                        <div
+                          key={index}
+                          className="space-y-2 rounded-xl border border-(--border-subtle) p-3"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-medium text-(--text-tertiary)">
+                              Card {index + 1}
+                            </p>
+                            {(landingPageForm.features ?? []).length > 1 && (
+                              <button
+                                type="button"
+                                title="Remover card"
+                                onClick={() =>
+                                  setLandingPageForm((current) => ({
+                                    ...current,
+                                    features: (current.features ?? []).filter(
+                                      (_, i) => i !== index,
+                                    ),
+                                  }))
+                                }
+                                className="rounded p-1 text-(--text-tertiary) hover:bg-(--bg-overlay) hover:text-(--danger)"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                          <Input
+                            placeholder={`Título`}
+                            value={feature.title}
+                            onChange={(event) =>
+                              setLandingPageForm((current) => ({
+                                ...current,
+                                features: (current.features ?? []).map((f, i) =>
+                                  i === index ? { ...f, title: event.target.value } : f,
+                                ),
+                              }))
+                            }
+                          />
+                          <Textarea
+                            placeholder={`Descrição`}
+                            value={feature.description}
+                            onChange={(event) =>
+                              setLandingPageForm((current) => ({
+                                ...current,
+                                features: (current.features ?? []).map((f, i) =>
+                                  i === index ? { ...f, description: event.target.value } : f,
+                                ),
+                              }))
+                            }
+                            rows={2}
+                          />
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setLandingPageForm((current) => ({
+                            ...current,
+                            features: [...(current.features ?? []), { title: "", description: "" }],
+                          }))
+                        }
+                        className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-(--border-default) py-2 text-xs text-(--text-tertiary) hover:bg-(--bg-overlay)"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Adicionar card
+                      </button>
+                    </div>
+                  </Field>
+
+                  <Field
+                    label="Resultado esperado"
+                    action={
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 gap-1 px-2 text-xs text-(--accent)"
+                        disabled={activeAiField === "expected_result"}
+                        onClick={() => void handleImproveField("expected_result")}
+                      >
+                        {activeAiField === "expected_result" ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-3 w-3" />
+                        )}
+                        Gerar com IA
+                      </Button>
+                    }
+                  >
+                    <Textarea
+                      value={landingPageForm.expected_result ?? ""}
+                      onChange={(event) =>
+                        setLandingPageForm((current) => ({
+                          ...current,
+                          expected_result: event.target.value,
                         }))
                       }
                       rows={3}
@@ -1307,6 +1598,205 @@ export default function InboundHubPage() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* ─────────────── ABA: E-MAIL ─────────────── */}
+          <TabsContent value="email">
+            <div className="flex flex-col gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Personalização do e-mail de entrega</CardTitle>
+                  <CardDescription>
+                    Customize o assunto do e-mail enviado ao lead após a captura na LP.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <Field
+                    label="Assunto do e-mail"
+                    action={
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-3 gap-1 px-2 text-xs text-(--accent)"
+                        title="Gerar com IA"
+                        disabled={activeAiField === "email_subject"}
+                        onClick={() => void handleImproveField("email_subject")}
+                      >
+                        {activeAiField === "email_subject" ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Wand2 className="h-3 w-3" />
+                        )}
+                        Gerar com IA
+                      </Button>
+                    }
+                  >
+                    <Input
+                      value={leadMagnetForm.email_subject ?? ""}
+                      placeholder={
+                        selectedLeadMagnet?.type === "pdf"
+                          ? `Seu material está pronto — ${selectedLeadMagnet.title}`
+                          : selectedLeadMagnet?.type === "link"
+                            ? `Acesse: ${selectedLeadMagnet?.title ?? ""}`
+                            : `Você entrou na sequência — ${selectedLeadMagnet?.title ?? ""}`
+                      }
+                      maxLength={255}
+                      onChange={(event) =>
+                        setLeadMagnetForm((current) => ({
+                          ...current,
+                          email_subject: event.target.value,
+                        }))
+                      }
+                    />
+                    <p className="text-xs text-(--text-tertiary)">
+                      Deixe vazio para usar o assunto padrão gerado automaticamente.
+                    </p>
+                  </Field>
+                  <Field
+                    label="Headline do e-mail"
+                    action={
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-3 gap-1 px-2 text-xs text-(--accent)"
+                        title="Gerar com IA"
+                        disabled={activeAiField === "email_headline"}
+                        onClick={() => void handleImproveField("email_headline")}
+                      >
+                        {activeAiField === "email_headline" ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Wand2 className="h-3 w-3" />
+                        )}
+                        Gerar com IA
+                      </Button>
+                    }
+                  >
+                    <Input
+                      value={leadMagnetForm.email_headline ?? ""}
+                      placeholder={
+                        selectedLeadMagnet?.type === "pdf"
+                          ? "Seu material está pronto para download"
+                          : selectedLeadMagnet?.type === "link"
+                            ? "Seu acesso está liberado"
+                            : "Você entrou na sequência de emails"
+                      }
+                      maxLength={255}
+                      onChange={(event) =>
+                        setLeadMagnetForm((current) => ({
+                          ...current,
+                          email_headline: event.target.value,
+                        }))
+                      }
+                    />
+                    <p className="text-xs text-(--text-tertiary)">
+                      Deixe vazio para usar o título padrão gerado automaticamente.
+                    </p>
+                  </Field>
+                  <Field
+                    label="Corpo do e-mail"
+                    action={
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-3 gap-1 px-2 text-xs text-(--accent)"
+                        title="Gerar com IA"
+                        disabled={activeAiField === "email_body_text"}
+                        onClick={() => void handleImproveField("email_body_text")}
+                      >
+                        {activeAiField === "email_body_text" ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Wand2 className="h-3 w-3" />
+                        )}
+                        Gerar com IA
+                      </Button>
+                    }
+                  >
+                    <div className="flex items-start gap-2 rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-sm shadow-sm transition-colors focus-within:border-(--accent) focus-within:ring-2 focus-within:ring-(--accent) focus-within:ring-offset-0">
+                      <span className="mt-0.5 shrink-0 text-(--text-tertiary)">{"{nome},"}</span>
+                      <textarea
+                        className="no-focus-ring min-h-[64px] w-full flex-1 resize-none border-0 bg-transparent p-0 text-sm text-(--text-primary) outline-none placeholder:text-(--text-tertiary)"
+                        value={leadMagnetForm.email_body_text ?? ""}
+                        placeholder={
+                          selectedLeadMagnet?.type === "pdf"
+                            ? "o material que você solicitou está disponível. Acesse pelo link abaixo para fazer o download."
+                            : selectedLeadMagnet?.type === "link"
+                              ? "o link que você pediu está pronto. Clique abaixo para acessar."
+                              : "seu cadastro foi confirmado. Nos próximos dias você vai receber os emails da sequência."
+                        }
+                        maxLength={500}
+                        onChange={(event) =>
+                          setLeadMagnetForm((current) => ({
+                            ...current,
+                            email_body_text: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                    <p className="text-xs text-(--text-tertiary)">
+                      O prefixo <strong>{"{nome},"}</strong> é inserido automaticamente no início.
+                      Deixe vazio para usar o texto padrão.
+                    </p>
+                  </Field>
+                  {selectedLeadMagnet?.type !== "email_sequence" && (
+                    <Field label="Texto do botão">
+                      <Input
+                        value={leadMagnetForm.email_cta_label ?? ""}
+                        placeholder={
+                          selectedLeadMagnet?.type === "pdf" ? "Baixar material" : "Acessar agora"
+                        }
+                        maxLength={100}
+                        onChange={(event) =>
+                          setLeadMagnetForm((current) => ({
+                            ...current,
+                            email_cta_label: event.target.value,
+                          }))
+                        }
+                      />
+                      <p className="text-xs text-(--text-tertiary)">
+                        Deixe vazio para usar o texto padrão do botão.
+                      </p>
+                    </Field>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      onClick={() => void handleSaveLeadMagnet()}
+                      disabled={updateLeadMagnet.isPending}
+                    >
+                      <Save className="h-4 w-4" />
+                      Salvar
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={emailPreviewMutation.isPending}
+                      onClick={async () => {
+                        try {
+                          const data = await emailPreviewMutation.mutateAsync(
+                            selectedLeadMagnet?.id ?? "",
+                          )
+                          setEmailPreviewData(data)
+                          setEmailPreviewOpen(true)
+                        } catch (err) {
+                          toast.error(
+                            err instanceof Error
+                              ? err.message
+                              : "Erro ao carregar preview do e-mail",
+                          )
+                        }
+                      }}
+                    >
+                      {emailPreviewMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Mail className="h-4 w-4" />
+                      )}
+                      {emailPreviewMutation.isPending ? "Carregando..." : "Ver preview"}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
 
           {/* ─────────────── ABA: CONFIGURAÇÕES (INTEGRAÇÕES) ─────────────── */}
@@ -1604,6 +2094,49 @@ export default function InboundHubPage() {
           </TabsContent>
         </Tabs>
       )}
+
+      {/* Email Preview Dialog */}
+      <Dialog
+        open={emailPreviewOpen}
+        onOpenChange={(open) => {
+          setEmailPreviewOpen(open)
+          if (!open) setEmailPreviewData(null)
+        }}
+      >
+        <DialogContent className="flex h-[85vh] max-w-3xl flex-col p-0">
+          <DialogHeader className="shrink-0 px-6 pt-6 pb-3">
+            <DialogTitle>Preview do e-mail de entrega</DialogTitle>
+            <DialogDescription className="truncate text-xs">
+              Assunto: {emailPreviewData?.subject ?? ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="shrink-0 px-6 pb-2">
+            <div className="flex flex-wrap gap-2 text-xs text-(--text-tertiary)">
+              <span className="rounded-full bg-(--bg-overlay) px-2 py-0.5">Nome: João Silva</span>
+              <span className="rounded-full bg-(--bg-overlay) px-2 py-0.5">
+                Email: joao@empresa.com
+              </span>
+              <span className="rounded-full bg-(--bg-overlay) px-2 py-0.5">
+                Empresa: Empresa Demo
+              </span>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 px-6 pb-6">
+            {emailPreviewData ? (
+              <iframe
+                srcDoc={emailPreviewData.html}
+                className="h-full w-full rounded-lg border border-(--border-default)"
+                title="Preview do e-mail"
+                sandbox="allow-same-origin"
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-(--text-secondary)">
+                Carregando...
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* PDF Preview Dialog */}
       <Dialog
@@ -1973,9 +2506,13 @@ function typeLabel(type: LeadMagnetType): string {
     case "pdf":
       return "PDF"
     case "calculator":
-      return "Calculadora"
+      return "Ferramenta"
+    case "email_sequence":
+      return "Sequência"
+    case "link":
+      return "Link externo"
     default:
-      return "Sequencia"
+      return type
   }
 }
 

@@ -4257,6 +4257,14 @@ export interface components {
       file_url: string | null
       /** Cta Text */
       cta_text: string | null
+      /** Email Subject */
+      email_subject: string | null
+      /** Email Headline */
+      email_headline: string | null
+      /** Email Body Text */
+      email_body_text: string | null
+      /** Email Cta Label */
+      email_cta_label: string | null
       /** Sendpulse List Id */
       sendpulse_list_id: string | null
       /** Linked Calculator Id */
@@ -4298,6 +4306,14 @@ export interface components {
       file_url?: string | null
       /** Cta Text */
       cta_text?: string | null
+      /** Email Subject */
+      email_subject?: string | null
+      /** Email Headline */
+      email_headline?: string | null
+      /** Email Body Text */
+      email_body_text?: string | null
+      /** Email Cta Label */
+      email_cta_label?: string | null
       /** Sendpulse List Id */
       sendpulse_list_id?: string | null
       /** Linked Calculator Id */

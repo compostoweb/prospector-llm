@@ -32,6 +32,10 @@ export interface ContentLeadMagnet {
   status: LeadMagnetStatus
   file_url: string | null
   cta_text: string | null
+  email_subject: string | null
+  email_headline: string | null
+  email_body_text: string | null
+  email_cta_label: string | null
   sendpulse_list_id: string | null
   linked_calculator_id: string | null
   total_leads_captured: number
@@ -48,6 +52,10 @@ export interface ContentLeadMagnetCreateInput {
   status?: LeadMagnetStatus
   file_url?: string | null
   cta_text?: string | null
+  email_subject?: string | null
+  email_headline?: string | null
+  email_body_text?: string | null
+  email_cta_label?: string | null
   sendpulse_list_id?: string | null
   linked_calculator_id?: string | null
 }
@@ -58,6 +66,10 @@ export interface ContentLeadMagnetUpdateInput {
   description?: string | null
   file_url?: string | null
   cta_text?: string | null
+  email_subject?: string | null
+  email_headline?: string | null
+  email_body_text?: string | null
+  email_cta_label?: string | null
   sendpulse_list_id?: string | null
   linked_calculator_id?: string | null
 }
@@ -76,6 +88,10 @@ export interface ContentLandingPage {
   author_photo_url: string | null
   meta_title: string | null
   meta_description: string | null
+  publisher_name: string | null
+  features: Array<{ title: string; description: string }> | null
+  expected_result: string | null
+  badge_text: string | null
   published: boolean
   total_views: number
   total_submissions: number
@@ -95,6 +111,10 @@ export interface ContentLandingPageUpsertInput {
   author_photo_url?: string | null
   meta_title?: string | null
   meta_description?: string | null
+  publisher_name?: string | null
+  features?: Array<{ title: string; description: string }> | null
+  expected_result?: string | null
+  badge_text?: string | null
   published?: boolean
 }
 
@@ -159,6 +179,10 @@ export interface LandingPagePublicData {
   author_photo_url: string | null
   meta_title: string | null
   meta_description: string | null
+  publisher_name: string | null
+  features: Array<{ title: string; description: string }> | null
+  expected_result: string | null
+  badge_text: string | null
   public_url: string
 }
 

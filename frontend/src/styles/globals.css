@@ -51,6 +51,13 @@ body {
   outline-offset: 2px;
 }
 
+.no-focus-ring:focus,
+.no-focus-ring:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
+
 .contact-tag-pill-default,
 .contact-tag-swatch-default {
   background-color: var(--text-tertiary);

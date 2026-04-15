@@ -27,7 +27,7 @@ class ContentLeadMagnet(Base, TenantMixin, TimestampMixin):
     type: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
-        comment="pdf | calculator | email_sequence",
+        comment="pdf | calculator | email_sequence | link",
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -40,6 +40,26 @@ class ContentLeadMagnet(Base, TenantMixin, TimestampMixin):
     )
     file_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     cta_text: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    email_subject: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Assunto customizado do email de entrega (substitui o padrão gerado automaticamente)",
+    )
+    email_headline: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Título/headline customizado do email de entrega",
+    )
+    email_body_text: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Texto do corpo do email de entrega (após '{nome},')",
+    )
+    email_cta_label: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Texto do botão CTA customizado no email de entrega",
+    )
     sendpulse_list_id: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,

@@ -301,6 +301,34 @@ async def get_pdf_preview_url(
     return {"url": presigned}
 
 
+@router.get("/{lead_magnet_id}/email-preview")
+async def get_email_preview(
+    lead_magnet_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> dict[str, str]:
+    """Retorna HTML + subject do email de entrega para preview no hub. Não envia nada."""
+    from services.notification import build_lead_magnet_delivery_email_html
+
+    lead_magnet = await _get_lead_magnet_or_404(lead_magnet_id, tenant_id, db)
+    if lead_magnet.type == "calculator":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ferramenta/calculadora não possui email de entrega.",
+        )
+    return build_lead_magnet_delivery_email_html(
+        lead_magnet_type=lead_magnet.type,
+        lead_magnet_title=lead_magnet.title or "Material",
+        lead_magnet_file_url=lead_magnet.file_url,
+        lead_magnet_cta_text=lead_magnet.cta_text,
+        email_subject_override=lead_magnet.email_subject,
+        email_headline_override=lead_magnet.email_headline,
+        email_body_text_override=lead_magnet.email_body_text,
+        email_cta_label_override=lead_magnet.email_cta_label,
+        contact_name="João Silva",
+    )
+
+
 @router.get("/{lead_magnet_id}/posts", response_model=list[ContentLMPostResponse])
 async def list_lead_magnet_posts(
     lead_magnet_id: uuid.UUID,

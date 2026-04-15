@@ -580,55 +580,45 @@ def build_calculator_diagnosis_email_payload(
     }
 
 
-async def send_lead_magnet_delivery_email(
+def build_lead_magnet_delivery_email_html(
     *,
-    lm_lead: ContentLMLead,
-    lead_magnet: ContentLeadMagnet,
-) -> bool:
-    """Envia email de entrega ao lead após captura na LP (exceto calculadora)."""
-    if lead_magnet.type == "calculator":
-        return False
+    lead_magnet_type: str,
+    lead_magnet_title: str,
+    lead_magnet_file_url: str | None,
+    lead_magnet_cta_text: str | None,
+    contact_name: str = "João Silva",
+    email_subject_override: str | None = None,
+    email_headline_override: str | None = None,
+    email_body_text_override: str | None = None,
+    email_cta_label_override: str | None = None,
+) -> dict[str, str]:
+    """Constrói o HTML do email de entrega sem enviar. Usado para preview no hub."""
+    title = html.escape(lead_magnet_title or "Material")
 
-    resend = _get_resend()
-    if not resend:
-        return False
-
-    recipient_email = (lm_lead.email or "").strip().lower()
-    if not recipient_email:
-        logger.warning(
-            "notification.lm_delivery_missing_email",
-            lm_lead_id=str(lm_lead.id),
-        )
-        return False
-
-    contact_name = (lm_lead.name or "").strip() or "Olá"
-    title = html.escape(lead_magnet.title or "Material")
-    reply_to = settings.CONTENT_CALCULATOR_REPLY_TO_EMAIL.strip() or None
-
-    if lead_magnet.type == "pdf":
-        subject = f"Seu material está pronto — {lead_magnet.title}"
+    if lead_magnet_type == "pdf":
+        subject = f"Seu material está pronto — {lead_magnet_title}"
         tag_label = "Material disponível"
         headline = "Seu material está pronto para download"
         body_text = (
             f"{html.escape(contact_name)}, o material que você solicitou está disponível. "
             "Acesse pelo link abaixo para fazer o download."
         )
-        cta_label = lead_magnet.cta_text or "Baixar material"
-        cta_href = html.escape(lead_magnet.file_url or "#")
+        cta_label = lead_magnet_cta_text or "Baixar material"
+        cta_href = html.escape(lead_magnet_file_url or "#")
         note = "O link abre o arquivo diretamente no seu navegador."
-    elif lead_magnet.type == "link":
-        subject = f"Acesse: {lead_magnet.title}"
+    elif lead_magnet_type == "link":
+        subject = f"Acesse: {lead_magnet_title}"
         tag_label = "Acesso liberado"
         headline = "Seu acesso está liberado"
         body_text = (
             f"{html.escape(contact_name)}, o link que você pediu está pronto. "
             "Clique abaixo para acessar."
         )
-        cta_label = lead_magnet.cta_text or "Acessar agora"
-        cta_href = html.escape(lead_magnet.file_url or "#")
+        cta_label = lead_magnet_cta_text or "Acessar agora"
+        cta_href = html.escape(lead_magnet_file_url or "#")
         note = "O link é pessoal e pode ser usado a qualquer momento."
     else:  # email_sequence
-        subject = f"Você entrou na sequência — {lead_magnet.title}"
+        subject = f"Você entrou na sequência — {lead_magnet_title}"
         tag_label = "Sequência ativada"
         headline = "Você entrou na sequência de emails"
         body_text = (
@@ -638,6 +628,19 @@ async def send_lead_magnet_delivery_email(
         cta_label = None
         cta_href = None
         note = "Caso não receba em até 24h, verifique sua caixa de spam."
+
+    if email_subject_override and email_subject_override.strip():
+        subject = email_subject_override.strip()
+
+    if email_headline_override and email_headline_override.strip():
+        headline = email_headline_override.strip()
+
+    if email_body_text_override and email_body_text_override.strip():
+        body_text = f"{html.escape(contact_name)}, {html.escape(email_body_text_override.strip())}"
+
+    if email_cta_label_override and email_cta_label_override.strip():
+        if cta_label is not None:  # não aplica em email_sequence
+            cta_label = email_cta_label_override.strip()
 
     logo_markup = (
         f'<div style="font-size: 22px; line-height: 1; color: {COMPOSTO_WEB_PRIMARY}; '
@@ -717,11 +720,50 @@ async def send_lead_magnet_delivery_email(
     </table>
     """
 
+    return {"html": html_body, "subject": subject}
+
+
+async def send_lead_magnet_delivery_email(
+    *,
+    lm_lead: ContentLMLead,
+    lead_magnet: ContentLeadMagnet,
+) -> bool:
+    """Envia email de entrega ao lead após captura na LP (exceto calculadora)."""
+    if lead_magnet.type == "calculator":
+        return False
+
+    resend = _get_resend()
+    if not resend:
+        return False
+
+    recipient_email = (lm_lead.email or "").strip().lower()
+    if not recipient_email:
+        logger.warning(
+            "notification.lm_delivery_missing_email",
+            lm_lead_id=str(lm_lead.id),
+        )
+        return False
+
+    contact_name = (lm_lead.name or "").strip() or "Olá"
+    reply_to = settings.CONTENT_CALCULATOR_REPLY_TO_EMAIL.strip() or None
+
+    built = build_lead_magnet_delivery_email_html(
+        lead_magnet_type=lead_magnet.type,
+        lead_magnet_title=lead_magnet.title or "Material",
+        lead_magnet_file_url=lead_magnet.file_url,
+        lead_magnet_cta_text=lead_magnet.cta_text,
+        email_subject_override=lead_magnet.email_subject,
+        email_headline_override=lead_magnet.email_headline,
+        email_body_text_override=lead_magnet.email_body_text,
+        email_cta_label_override=lead_magnet.email_cta_label,
+        contact_name=contact_name,
+    )
+
     payload: dict[str, object] = {
         "from": settings.CONTENT_CALCULATOR_NOTIFY_FROM_EMAIL or settings.RESEND_FROM_EMAIL,
         "to": [recipient_email],
-        "subject": subject,
-        "html": html_body,
+        "subject": built["subject"],
+        "html": built["html"],
     }
     if reply_to:
         payload["reply_to"] = reply_to

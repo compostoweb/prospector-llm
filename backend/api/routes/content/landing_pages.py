@@ -191,6 +191,10 @@ async def get_public_landing_page(
         author_photo_url=landing_page.author_photo_url,
         meta_title=landing_page.meta_title,
         meta_description=landing_page.meta_description,
+        publisher_name=landing_page.publisher_name,
+        features=landing_page.features,
+        expected_result=landing_page.expected_result,
+        badge_text=landing_page.badge_text,
         public_url=build_public_landing_page_url(landing_page.slug),
     )
 
@@ -260,6 +264,48 @@ _LP_FIELD_PROMPTS: dict[str, str] = {
     "meta_description": (
         "Você é especialista em SEO. Gere uma meta description de até 155 caracteres com CTA "
         "para a landing page do lead magnet '{lm_title}'. Retorne APENAS a meta description."
+    ),
+    "features": (
+        "Você é copywriter B2B. Gere 2 cards de destaque para a landing page do lead magnet "
+        "'{lm_title}' (tipo: {lm_type}). Cada card tem título curto (3-5 palavras) e descrição "
+        "(2-3 frases práticas, resultado-orientadas). "
+        "Retorne APENAS um JSON array válido, sem code block, neste exato formato:\n"
+        '[{{"title": "...", "description": "..."}}, {{"title": "...", "description": "..."}}]'
+        "\n\nValores atuais:\n{current_value}"
+    ),
+    "expected_result": (
+        "Você é copywriter B2B. Escreva o texto do card 'Resultado esperado' para a landing page "
+        "do lead magnet '{lm_title}'. 2-3 frases diretas descrevendo o resultado prático que o "
+        "lead vai obter. Retorne APENAS o texto, sem aspas."
+        "\n\nTexto atual: {current_value}"
+    ),
+    "badge_text": (
+        "Você é copywriter B2B. Escreva uma frase curta de posicionamento (até 12 palavras) para o "
+        "badge exibido acima do título da landing page do lead magnet '{lm_title}' (tipo: {lm_type}). "
+        "Deve comunicar o perfil do público ou o benefício central — sem verbos de ação, sem pontuação "
+        "final. Retorne APENAS o texto do badge, sem aspas."
+        "\n\nTexto atual: {current_value}"
+    ),
+    "email_subject": (
+        "Você é copywriter B2B especialista em email marketing. Escreva um assunto de e-mail "
+        "transacional para o lead magnet '{lm_title}' (tipo: {lm_type}). "
+        "O e-mail é enviado automaticamente após o lead se cadastrar na landing page para receber o material. "
+        "Máximo 70 caracteres. Tom direto e pessoal. Retorne APENAS o assunto, sem aspas."
+        "\n\nAssunto atual: {current_value}"
+    ),
+    "email_headline": (
+        "Você é copywriter B2B. Escreva o headline principal (H1) do e-mail de entrega do lead magnet "
+        "'{lm_title}' (tipo: {lm_type}). Máximo 10 palavras, tom direto, transmite clareza e valor imediato. "
+        "Retorne APENAS o headline, sem aspas."
+        "\n\nHeadline atual: {current_value}"
+    ),
+    "email_body_text": (
+        "Você é copywriter B2B. Escreva o corpo do e-mail de entrega do lead magnet '{lm_title}' (tipo: {lm_type}). "
+        "O texto vem APÓS o prefixo '{nome},' que é inserido automaticamente — portanto escreva apenas o "
+        "complemento: comece com letra minúscula, como continuação natural da frase após o nome. "
+        "2 a 3 frases curtas, tom pessoal, foca no benefício imediato e instrui o próximo passo. "
+        "Retorne APENAS o texto complementar, sem aspas."
+        "\n\nTexto atual: {current_value}"
     ),
 }
 

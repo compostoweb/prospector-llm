@@ -44,6 +44,10 @@ class ContentLeadMagnetCreate(BaseModel):
     status: LeadMagnetStatus = "draft"
     file_url: str | None = Field(default=None, max_length=2000)
     cta_text: str | None = Field(default=None, max_length=100)
+    email_subject: str | None = Field(default=None, max_length=255)
+    email_headline: str | None = Field(default=None, max_length=255)
+    email_body_text: str | None = None
+    email_cta_label: str | None = Field(default=None, max_length=100)
     sendpulse_list_id: str | None = Field(default=None, max_length=100)
     linked_calculator_id: uuid.UUID | None = None
 
@@ -54,6 +58,10 @@ class ContentLeadMagnetUpdate(BaseModel):
     description: str | None = None
     file_url: str | None = Field(default=None, max_length=2000)
     cta_text: str | None = Field(default=None, max_length=100)
+    email_subject: str | None = Field(default=None, max_length=255)
+    email_headline: str | None = Field(default=None, max_length=255)
+    email_body_text: str | None = None
+    email_cta_label: str | None = Field(default=None, max_length=100)
     sendpulse_list_id: str | None = Field(default=None, max_length=100)
     linked_calculator_id: uuid.UUID | None = None
 
@@ -73,6 +81,10 @@ class ContentLeadMagnetResponse(BaseModel):
     status: LeadMagnetStatus
     file_url: str | None
     cta_text: str | None
+    email_subject: str | None
+    email_headline: str | None
+    email_body_text: str | None
+    email_cta_label: str | None
     sendpulse_list_id: str | None
     linked_calculator_id: uuid.UUID | None
     total_leads_captured: int
@@ -189,6 +201,10 @@ class ContentLandingPageUpsert(BaseModel):
     author_photo_url: str | None = Field(default=None, max_length=2000)
     meta_title: str | None = Field(default=None, max_length=255)
     meta_description: str | None = None
+    publisher_name: str | None = Field(default=None, max_length=255)
+    features: list[dict] | None = None
+    expected_result: str | None = None
+    badge_text: str | None = Field(default=None, max_length=500)
     published: bool = False
 
 
@@ -208,6 +224,10 @@ class ContentLandingPageResponse(BaseModel):
     author_photo_url: str | None
     meta_title: str | None
     meta_description: str | None
+    publisher_name: str | None
+    features: list[dict] | None
+    expected_result: str | None
+    badge_text: str | None
     published: bool
     total_views: int
     total_submissions: int
@@ -234,6 +254,10 @@ class LandingPagePublicResponse(BaseModel):
     author_photo_url: str | None
     meta_title: str | None
     meta_description: str | None
+    publisher_name: str | None
+    features: list[dict] | None
+    expected_result: str | None
+    badge_text: str | None
     public_url: str
 
 
@@ -334,7 +358,7 @@ class LPImageUploadResponse(BaseModel):
 
 
 class LPImproveFieldRequest(BaseModel):
-    field: Literal["title", "subtitle", "benefits", "meta_title", "meta_description"]
+    field: Literal["title", "subtitle", "benefits", "meta_title", "meta_description", "features", "expected_result", "badge_text", "email_subject", "email_headline", "email_body_text"]
     current_value: str
     lead_magnet_title: str
     lead_magnet_type: str

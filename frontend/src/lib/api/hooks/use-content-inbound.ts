@@ -467,7 +467,18 @@ export function useImproveLandingPageField() {
 
   return useMutation({
     mutationFn: async (body: {
-      field: "title" | "subtitle" | "benefits" | "meta_title" | "meta_description"
+      field:
+        | "title"
+        | "subtitle"
+        | "benefits"
+        | "meta_title"
+        | "meta_description"
+        | "features"
+        | "expected_result"
+        | "badge_text"
+        | "email_subject"
+        | "email_headline"
+        | "email_body_text"
       current_value: string
       lead_magnet_title: string
       lead_magnet_type: string
@@ -499,6 +510,23 @@ export function useLeadMagnetPdfPreviewUrl() {
         },
       )
       return parseApiResponse<{ url: string }>(response)
+    },
+  })
+}
+
+export function useLeadMagnetEmailPreview() {
+  const { data: session } = useSession()
+
+  return useMutation({
+    mutationFn: async (leadMagnetId: string) => {
+      const response = await fetch(
+        `${env.NEXT_PUBLIC_API_URL}/api/content/lead-magnets/${leadMagnetId}/email-preview`,
+        {
+          method: "GET",
+          headers: buildAuthHeaders(session?.accessToken),
+        },
+      )
+      return parseApiResponse<{ html: string; subject: string }>(response)
     },
   })
 }
