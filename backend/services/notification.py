@@ -823,15 +823,15 @@ async def send_reply_notification(
         "out_of_office": "🔵 Ausente",
     }.get(intent, intent)
 
-    subject = f"[Composto Web] {intent_label} — {lead.name}"
-    html = f"""
+    subject = f"[Composto Web] {intent_label} — {html.escape(lead.name or '')}"
+    html_body = f"""
     <div style="font-family: sans-serif; max-width: 600px;">
       <h2 style="color: #1a1a2e;">{intent_label}</h2>
-      <p><strong>Lead:</strong> {lead.name}</p>
-      <p><strong>Empresa:</strong> {lead.company or "—"}</p>
-      <p><strong>Cargo:</strong> {lead.job_title or "—"}</p>
+      <p><strong>Lead:</strong> {html.escape(lead.name or '')}</p>
+      <p><strong>Empresa:</strong> {html.escape(lead.company or '—')}</p>
+      <p><strong>Cargo:</strong> {html.escape(lead.job_title or '—')}</p>
       <hr style="border: none; border-top: 1px solid #eee;" />
-      <p style="white-space: pre-wrap; color: #333;">{reply_text}</p>
+      <p style="white-space: pre-wrap; color: #333;">{html.escape(reply_text)}</p>
       <hr style="border: none; border-top: 1px solid #eee;" />
       <p style="font-size: 12px; color: #888;">
         Mensagem enviada pela Composto Web.
@@ -845,7 +845,7 @@ async def send_reply_notification(
                 "from": settings.RESEND_FROM_EMAIL,
                 "to": [notify_email],
                 "subject": subject,
-                "html": html,
+                "html": html_body,
             }
         )
         logger.info(
@@ -883,16 +883,16 @@ async def send_manual_task_notification(
 
     notify_email = config["email"]
 
-    subject = f"[Composto Web] Tarefa manual — {lead.name} (Cadência: {cadence_name})"
-    html = f"""
+    subject = f"[Composto Web] Tarefa manual — {html.escape(lead.name or '')} (Cadência: {html.escape(cadence_name)})"
+    html_body = f"""
     <div style="font-family: sans-serif; max-width: 600px;">
-      <h2 style="color: #1a1a2e;">📋 Tarefa Manual</h2>
-      <p><strong>Lead:</strong> {lead.name}</p>
-      <p><strong>Empresa:</strong> {lead.company or "—"}</p>
-      <p><strong>Cadência:</strong> {cadence_name} — Step {step_number}</p>
+      <h2 style="color: #1a1a2e">📋 Tarefa Manual</h2>
+      <p><strong>Lead:</strong> {html.escape(lead.name or '')}</p>
+      <p><strong>Empresa:</strong> {html.escape(lead.company or '—')}</p>
+      <p><strong>Cadência:</strong> {html.escape(cadence_name)} — Step {step_number}</p>
       <hr style="border: none; border-top: 1px solid #eee;" />
       <p><strong>Instrução:</strong></p>
-      <p style="white-space: pre-wrap; color: #333;">{message}</p>
+      <p style="white-space: pre-wrap; color: #333;">{html.escape(message)}</p>
       <hr style="border: none; border-top: 1px solid #eee;" />
       <p style="font-size: 12px; color: #888;">
         Mensagem enviada pela Composto Web.
@@ -906,7 +906,7 @@ async def send_manual_task_notification(
                 "from": settings.RESEND_FROM_EMAIL,
                 "to": [notify_email],
                 "subject": subject,
-                "html": html,
+                "html": html_body,
             }
         )
         logger.info(

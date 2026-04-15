@@ -358,7 +358,7 @@ class LPImageUploadResponse(BaseModel):
 
 
 class LPImproveFieldRequest(BaseModel):
-    field: Literal["title", "subtitle", "benefits", "meta_title", "meta_description", "features", "expected_result", "badge_text", "email_subject", "email_headline", "email_body_text"]
+    field: Literal["title", "subtitle", "benefits", "meta_title", "meta_description", "features", "expected_result", "badge_text", "email_subject", "email_headline", "email_body_text", "email_cta_label"]
     current_value: str
     lead_magnet_title: str
     lead_magnet_type: str

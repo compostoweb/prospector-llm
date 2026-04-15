@@ -54,7 +54,6 @@ import {
   useContentLeadMagnets,
   useConvertLeadMagnetLead,
   useCreateContentLeadMagnet,
-  useCreateExampleLeadMagnet,
   useDeleteLeadMagnet,
   useLandingPage,
   useLeadMagnetLeads,
@@ -107,7 +106,6 @@ const EVENT_TYPE_OPTIONS: Array<{ value: TestWebhookInput["event_type"]; label: 
 export default function InboundHubPage() {
   const leadMagnetsQuery = useContentLeadMagnets()
   const createLeadMagnet = useCreateContentLeadMagnet()
-  const createExampleLM = useCreateExampleLeadMagnet()
   const updateLeadMagnet = useUpdateContentLeadMagnet()
   const updateLeadMagnetStatus = useUpdateLeadMagnetStatus()
   const upsertLandingPage = useUpsertLandingPage()
@@ -205,6 +203,12 @@ export default function InboundHubPage() {
       email_cta_label: selectedLeadMagnet.email_cta_label,
       sendpulse_list_id: selectedLeadMagnet.sendpulse_list_id,
     })
+    setWebhookTestForm((current) => ({
+      ...current,
+      list_id: selectedLeadMagnet.sendpulse_list_id ?? "",
+    }))
+    setPdfPreviewUrl(null)
+    setEmailPreviewData(null)
   }, [selectedLeadMagnet])
 
   useEffect(() => {
@@ -292,23 +296,6 @@ export default function InboundHubPage() {
       }).toString()}`
     : "/content/gerar"
 
-  async function handleCreateExample() {
-    try {
-      const result = await createExampleLM.mutateAsync()
-      setSelectedLeadMagnetId(result.id)
-      toast.success(
-        <span>
-          LP de exemplo criada!{" "}
-          <a href={result.public_url} target="_blank" rel="noreferrer" className="underline">
-            Abrir
-          </a>
-        </span>,
-      )
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Falha ao criar LP de exemplo")
-    }
-  }
-
   async function handleTestConnection() {
     setConnectionResult(null)
     try {
@@ -328,8 +315,10 @@ export default function InboundHubPage() {
     setWebhookTestResult(null)
     try {
       const result = await testWebhook.mutateAsync({
-        ...webhookTestForm,
-        list_id: webhookTestForm.list_id?.trim() || undefined,
+        event_type: webhookTestForm.event_type,
+        email: webhookTestForm.email,
+        ...(webhookTestForm.list_id?.trim() ? { list_id: webhookTestForm.list_id.trim() } : {}),
+        ...(webhookTestForm.link_url?.trim() ? { link_url: webhookTestForm.link_url.trim() } : {}),
       })
       setWebhookTestResult(result)
       toast.success(result.message)
@@ -360,6 +349,9 @@ export default function InboundHubPage() {
         },
       })
       toast.success("Lead magnet salvo")
+      if (leadMagnetForm.type === "calculator" && activeTab === "email") {
+        setActiveTab("metricas")
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Falha ao salvar lead magnet")
     }
@@ -463,7 +455,8 @@ export default function InboundHubPage() {
       | "badge_text"
       | "email_subject"
       | "email_headline"
-      | "email_body_text",
+      | "email_body_text"
+      | "email_cta_label",
   ) {
     if (!selectedLeadMagnet) {
       return
@@ -481,6 +474,7 @@ export default function InboundHubPage() {
       email_subject: leadMagnetForm.email_subject ?? "",
       email_headline: leadMagnetForm.email_headline ?? "",
       email_body_text: leadMagnetForm.email_body_text ?? "",
+      email_cta_label: leadMagnetForm.email_cta_label ?? "",
     }
 
     setActiveAiField(field)
@@ -506,7 +500,9 @@ export default function InboundHubPage() {
         } catch {
           toast.error("IA retornou formato inválido para os cards")
         }
-      } else if (["email_subject", "email_headline", "email_body_text"].includes(field)) {
+      } else if (
+        ["email_subject", "email_headline", "email_body_text", "email_cta_label"].includes(field)
+      ) {
         setLeadMagnetForm((current) => ({ ...current, [field]: result.improved }))
       } else {
         setLandingPageForm((current) => ({ ...current, [field]: result.improved }))
@@ -547,15 +543,6 @@ export default function InboundHubPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void handleCreateExample()}
-            disabled={createExampleLM.isPending}
-          >
-            <Wand2 className="h-4 w-4" />
-            {createExampleLM.isPending ? "Criando..." : "Criar LP de exemplo"}
-          </Button>
           <Button asChild variant="outline" size="sm">
             <a href="/lm/calculadora" target="_blank" rel="noreferrer">
               <Gauge className="h-4 w-4" />
@@ -776,13 +763,15 @@ export default function InboundHubPage() {
                     cta={publicUrl ? "Abrir LP" : "Configure a LP"}
                     disabled={!publicUrl}
                   />
-                  <QuickLinkCard
-                    icon={BarChart3}
-                    title="Ferramenta pública"
-                    description="Fluxo alternativo para diagnóstico de ROI e qualificação antes do handoff comercial."
-                    href={calculatorUrl || "/lm/calculadora"}
-                    cta="Abrir ferramenta"
-                  />
+                  {selectedLeadMagnet.type === "calculator" && (
+                    <QuickLinkCard
+                      icon={BarChart3}
+                      title="Ferramenta pública"
+                      description="Fluxo alternativo para diagnóstico de ROI e qualificação antes do handoff comercial."
+                      href={calculatorUrl || "/lm/calculadora"}
+                      cta="Abrir ferramenta"
+                    />
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -1477,7 +1466,7 @@ export default function InboundHubPage() {
                   <div className="flex flex-wrap gap-2">
                     <Button
                       onClick={() => void handleSaveLandingPage()}
-                      disabled={upsertLandingPage.isPending}
+                      disabled={upsertLandingPage.isPending || landingPageQuery.isLoading}
                     >
                       <Save className="h-4 w-4" />
                       Salvar landing page
@@ -1514,7 +1503,11 @@ export default function InboundHubPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {(leadsQuery.data ?? []).length === 0 ? (
+                {leadsQuery.isLoading ? (
+                  <div className="flex justify-center p-6">
+                    <Loader2 className="h-5 w-5 animate-spin text-(--text-tertiary)" />
+                  </div>
+                ) : (leadsQuery.data ?? []).length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-(--border-default) bg-(--bg-overlay) p-6 text-center text-sm text-(--text-secondary)">
                     Nenhuma captura registrada ainda para este lead magnet.
                   </div>
@@ -1740,7 +1733,26 @@ export default function InboundHubPage() {
                     </p>
                   </Field>
                   {selectedLeadMagnet?.type !== "email_sequence" && (
-                    <Field label="Texto do botão">
+                    <Field
+                      label="Texto do botão"
+                      action={
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-3 gap-1 px-2 text-xs text-(--accent)"
+                          title="Gerar com IA"
+                          disabled={activeAiField === "email_cta_label"}
+                          onClick={() => void handleImproveField("email_cta_label")}
+                        >
+                          {activeAiField === "email_cta_label" ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Wand2 className="h-3 w-3" />
+                          )}
+                          Gerar com IA
+                        </Button>
+                      }
+                    >
                       <Input
                         value={leadMagnetForm.email_cta_label ?? ""}
                         placeholder={
@@ -2054,6 +2066,20 @@ export default function InboundHubPage() {
                           placeholder="addressbook_id"
                         />
                       </Field>
+                      {webhookTestForm.event_type === "click" && (
+                        <Field label="URL do link (evento click)">
+                          <Input
+                            value={webhookTestForm.link_url ?? ""}
+                            onChange={(event) =>
+                              setWebhookTestForm((current) => ({
+                                ...current,
+                                link_url: event.target.value,
+                              }))
+                            }
+                            placeholder="https://..."
+                          />
+                        </Field>
+                      )}
                     </div>
                     <Button
                       variant="outline"

@@ -307,6 +307,13 @@ _LP_FIELD_PROMPTS: dict[str, str] = {
         "Retorne APENAS o texto complementar, sem aspas."
         "\n\nTexto atual: {current_value}"
     ),
+    "email_cta_label": (
+        "Você é copywriter B2B. Escreva o texto do botão de CTA do e-mail de entrega do lead magnet "
+        "'{lm_title}' (tipo: {lm_type}). Máximo 30 caracteres, imperativo, orientado à ação. "
+        "Exemplos: 'Baixar material', 'Acessar agora', 'Ver diagnóstico'. "
+        "Retorne APENAS o texto do botão, sem aspas."
+        "\n\nTexto atual: {current_value}"
+    ),
 }
 
 

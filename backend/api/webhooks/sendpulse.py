@@ -162,7 +162,7 @@ def _extract_list_id(payload: dict) -> str | None:
 
 
 def _extract_subscriber_id(payload: dict) -> str | None:
-    for key in ("subscriber_id", "id", "contact_id", "event_id"):
+    for key in ("subscriber_id", "contact_id"):
         value = payload.get(key)
         if value:
             return str(value)
@@ -209,7 +209,7 @@ async def _find_lm_lead(
         result = await db.execute(
             select(ContentLMLead).where(ContentLMLead.sendpulse_subscriber_id == subscriber_id)
         )
-        lm_lead = result.scalar_one_or_none()
+        lm_lead = result.scalars().first()
         if lm_lead is not None:
             return lm_lead
 
@@ -257,5 +257,6 @@ def _apply_event_to_lm_lead(
     elif event_type == "sequence_completed":
         lm_lead.sequence_status = "completed"
         lm_lead.sequence_completed = True
+        lm_lead.converted_via_email = True
     elif event_type == "click" and link_url and "diagnostico" in link_url.lower():
         lm_lead.converted_via_email = True

@@ -328,18 +328,25 @@ export default function PublicCalculator({ leadMagnetId }: Props) {
     <div className="min-h-screen bg-(--bg-page) bg-[radial-gradient(circle_at_top_right,color-mix(in_srgb,var(--accent)_14%,transparent),transparent_38%),radial-gradient(circle_at_top_left,color-mix(in_srgb,var(--info)_12%,transparent),transparent_34%),linear-gradient(180deg,var(--bg-page)_0%,var(--bg-surface)_100%)] text-(--text-primary)">
       <div className="mx-auto flex w-full max-w-380 flex-col gap-8 px-6 py-10 lg:px-8 lg:py-14 2xl:max-w-420 2xl:px-10">
         <header className="flex flex-col gap-5">
+          <img
+            src={`${env.NEXT_PUBLIC_API_URL}/assets/branding/compostoweb-logo-primary-transparent.webp`}
+            alt="Composto Web"
+            className="h-auto w-48 object-contain"
+          />
           <Badge className="w-fit px-3 py-1 text-[11px] uppercase tracking-[0.18em]">
             Calculadora de ROI
           </Badge>
-          <h1 className="max-w-4xl text-4xl font-semibold leading-tight tracking-tight lg:text-5xl">
-            Descubra quanto o seu processo manual custa por ano
-          </h1>
-          <p className="max-w-2xl text-base leading-7 text-(--text-secondary)">
-            Preencha os dados do processo atual para estimar custo anual, faixa de investimento,
-            payback e potencial de retorno antes de priorizar a automação.
-          </p>
 
           <div className="grid gap-3 lg:grid-cols-3 xl:gap-4">
+            <div className="col-span-full flex flex-col gap-3">
+              <h1 className="text-4xl font-semibold leading-tight tracking-tight lg:text-5xl">
+                Descubra quanto o seu processo manual custa por ano
+              </h1>
+              <p className="text-base leading-7 text-(--text-secondary)">
+                Preencha os dados do processo atual para estimar custo anual, faixa de investimento,
+                payback e potencial de retorno antes de priorizar a automação.
+              </p>
+            </div>
             {CALCULATOR_PROMISES.map(({ icon: Icon, title, description }) => (
               <PromiseCard key={title} icon={Icon} title={title} description={description} />
             ))}
@@ -752,7 +759,7 @@ export default function PublicCalculator({ leadMagnetId }: Props) {
                             phone: formatWhatsapp(event.target.value),
                           }))
                         }
-                        placeholder="Seu WhatsApp"
+                        placeholder="Seu WhatsApp > (ddd) + número"
                         inputMode="numeric"
                         maxLength={15}
                         required

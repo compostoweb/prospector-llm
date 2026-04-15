@@ -533,6 +533,16 @@ export default function LandingPublicPage({ page }: Props) {
                     "Material desenhado para times B2B que precisam operar melhor sem aumentar equipe"}
                 </div>
 
+                {page.hero_image_url && (
+                  <div className="overflow-hidden rounded-2xl">
+                    <img
+                      src={page.hero_image_url}
+                      alt={page.title}
+                      className="h-auto w-full object-cover"
+                    />
+                  </div>
+                )}
+
                 <div className="space-y-3">
                   <h1 className="max-w-3xl text-4xl font-semibold leading-tight tracking-tight lg:text-5xl">
                     {page.title}
@@ -593,8 +603,16 @@ export default function LandingPublicPage({ page }: Props) {
 
               <div className="rounded-3xl border border-(--border-default) bg-(--bg-surface) p-6 shadow-(--shadow-sm)">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-(--accent-subtle) text-(--accent-subtle-fg)">
-                    <BadgeCheck className="h-5 w-5" />
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-(--accent-subtle) text-(--accent-subtle-fg)">
+                    {page.author_photo_url ? (
+                      <img
+                        src={page.author_photo_url}
+                        alt={page.publisher_name || "Autor"}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <BadgeCheck className="h-5 w-5" />
+                    )}
                   </div>
                   <div>
                     <p className="text-sm font-medium text-(--text-primary)">Quem assina</p>

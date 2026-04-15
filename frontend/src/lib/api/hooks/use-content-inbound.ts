@@ -479,6 +479,7 @@ export function useImproveLandingPageField() {
         | "email_subject"
         | "email_headline"
         | "email_body_text"
+        | "email_cta_label"
       current_value: string
       lead_magnet_title: string
       lead_magnet_type: string
