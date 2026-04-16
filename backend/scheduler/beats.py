@@ -19,12 +19,12 @@ CELERY_BEAT_SCHEDULE: dict = {
     },
     # Captura de leads via Google Maps (Apify) — 1x por dia às 8h
     "capture-maps-daily": {
-        "task": "workers.capture.run_apify_maps",
+        "task": "workers.capture.run_apify_maps_daily",
         "schedule": crontab(hour="8", minute="0"),
     },
     # Captura de leads via LinkedIn (Apify) — 1x por dia às 9h
     "capture-linkedin-daily": {
-        "task": "workers.capture.run_apify_linkedin",
+        "task": "workers.capture.run_apify_linkedin_daily",
         "schedule": crontab(hour="9", minute="0"),
     },
     # Enriquecimento de leads pendentes — a cada 30 minutos

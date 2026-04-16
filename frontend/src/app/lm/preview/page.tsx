@@ -32,6 +32,10 @@ const MOCK_PDF: LandingPagePublicData = {
   author_photo_url: null,
   meta_title: null,
   meta_description: null,
+  publisher_name: null,
+  features: null,
+  expected_result: null,
+  badge_text: null,
   public_url: "https://app.compostoweb.com.br/lm/guia-automacao-b2b",
 }
 
@@ -58,6 +62,10 @@ const MOCK_LINK: LandingPagePublicData = {
   author_photo_url: null,
   meta_title: null,
   meta_description: null,
+  publisher_name: null,
+  features: null,
+  expected_result: null,
+  badge_text: null,
   public_url: "https://app.compostoweb.com.br/lm/planilha-controle-operacional",
 }
 
@@ -87,6 +95,10 @@ const MOCK_SEQUENCE: LandingPagePublicData = {
   author_photo_url: null,
   meta_title: null,
   meta_description: null,
+  publisher_name: null,
+  features: null,
+  expected_result: null,
+  badge_text: null,
   public_url: "https://app.compostoweb.com.br/lm/sequencia-lead-contrato",
 }
 
@@ -114,6 +126,10 @@ const MOCK_CALCULATOR: LandingPagePublicData = {
   author_photo_url: null,
   meta_title: null,
   meta_description: null,
+  publisher_name: null,
+  features: null,
+  expected_result: null,
+  badge_text: null,
   public_url: "https://app.compostoweb.com.br/lm/calculadora-roi",
 }
 

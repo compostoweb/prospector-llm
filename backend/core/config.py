@@ -152,6 +152,15 @@ class Settings(BaseSettings):
     APIFY_GOOGLE_MAPS_ACTOR_ID: str = "compass/google-maps-extractor"
     APIFY_B2B_LEADS_ACTOR_ID: str = "code_crafter/leads-finder"
     APIFY_LINKEDIN_ENRICH_ACTOR_ID: str = "anchor/linkedin-profile-enrichment"
+    # Defaults para captura agendada (beat) — JSON list em env var
+    # Ex: APIFY_DEFAULT_MAPS_QUERIES='["academias São Paulo", "clínicas odontológicas SP"]'
+    APIFY_DEFAULT_MAPS_QUERIES: list[str] = []
+    # Ex: APIFY_DEFAULT_LINKEDIN_TITLES='["CEO", "Sócio", "Diretor"]'
+    APIFY_DEFAULT_LINKEDIN_TITLES: list[str] = []
+    # Ex: APIFY_DEFAULT_LINKEDIN_LOCATIONS='["São Paulo", "Rio de Janeiro"]'
+    APIFY_DEFAULT_LINKEDIN_LOCATIONS: list[str] = []
+    APIFY_DEFAULT_MAX_ITEMS_MAPS: int = 100
+    APIFY_DEFAULT_MAX_ITEMS_LINKEDIN: int = 50
 
     # ── Email finders ─────────────────────────────────────────────────
     PROSPEO_API_KEY: str | None = None

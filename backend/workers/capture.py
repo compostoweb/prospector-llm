@@ -98,6 +98,127 @@ def run_apify_linkedin(
     )
 
 
+# ── Tasks agendadas (beat) — lê config por tenant do banco ──────────
+
+@celery_app.task(
+    bind=True,
+    name="workers.capture.run_apify_maps_daily",
+    max_retries=1,
+    default_retry_delay=300,
+    queue="capture",
+)
+def run_apify_maps_daily(self) -> dict:
+    """
+    Executada pelo Celery Beat (08h diário).
+    Para cada tenant ativo que tiver uma CaptureScheduleConfig com
+    source='google_maps' e is_active=True, dispara a captura.
+    """
+    return asyncio.run(_run_apify_maps_daily_async(self))
+
+
+@celery_app.task(
+    bind=True,
+    name="workers.capture.run_apify_linkedin_daily",
+    max_retries=1,
+    default_retry_delay=300,
+    queue="capture",
+)
+def run_apify_linkedin_daily(self) -> dict:
+    """
+    Executada pelo Celery Beat (09h diário).
+    Para cada tenant ativo que tiver uma CaptureScheduleConfig com
+    source='b2b_database' e is_active=True, dispara a captura.
+    """
+    return asyncio.run(_run_apify_linkedin_daily_async(self))
+
+
+async def _run_apify_maps_daily_async(task) -> dict:
+    from sqlalchemy import select
+    from core.database import WorkerSessionLocal
+    from models.capture_schedule import CaptureScheduleConfig
+    from models.tenant import Tenant
+
+    async with WorkerSessionLocal() as root_session:
+        result = await root_session.execute(
+            select(CaptureScheduleConfig).join(
+                Tenant, Tenant.id == CaptureScheduleConfig.tenant_id
+            ).where(
+                CaptureScheduleConfig.source == "google_maps",
+                CaptureScheduleConfig.is_active.is_(True),
+                Tenant.is_active.is_(True),
+            )
+        )
+        configs = list(result.scalars().all())
+
+    if not configs:
+        logger.info("capture.maps_daily.skipped", reason="nenhum tenant com config ativa")
+        return {"tenants": 0, "skipped": True}
+
+    total: dict = {"tenants": len(configs), "received": 0, "inserted": 0, "skipped": 0}
+    for cfg in configs:
+        queries = cfg.maps_search_terms or []
+        if cfg.maps_location:
+            queries = [f"{q} {cfg.maps_location}".strip() for q in queries] if queries else [cfg.maps_location]
+        if not queries:
+            logger.info("capture.maps_daily.tenant_skipped", tenant_id=str(cfg.tenant_id), reason="sem queries")
+            continue
+        try:
+            outcome = await _run_apify_maps_async(queries, cfg.max_items, str(cfg.tenant_id), task)
+            total["received"] += outcome.get("received", 0)
+            total["inserted"] += outcome.get("inserted", 0)
+            total["skipped"] += outcome.get("skipped", 0)
+        except Exception as exc:
+            logger.error("capture.maps_daily.tenant_error", tenant_id=str(cfg.tenant_id), error=str(exc))
+
+    logger.info("capture.maps_daily.done", **total)
+    return total
+
+
+async def _run_apify_linkedin_daily_async(task) -> dict:
+    from sqlalchemy import select
+    from core.database import WorkerSessionLocal
+    from models.capture_schedule import CaptureScheduleConfig
+    from models.tenant import Tenant
+
+    async with WorkerSessionLocal() as root_session:
+        result = await root_session.execute(
+            select(CaptureScheduleConfig).join(
+                Tenant, Tenant.id == CaptureScheduleConfig.tenant_id
+            ).where(
+                CaptureScheduleConfig.source == "b2b_database",
+                CaptureScheduleConfig.is_active.is_(True),
+                Tenant.is_active.is_(True),
+            )
+        )
+        configs = list(result.scalars().all())
+
+    if not configs:
+        logger.info("capture.linkedin_daily.skipped", reason="nenhum tenant com config ativa")
+        return {"tenants": 0, "skipped": True}
+
+    total: dict = {"tenants": len(configs), "received": 0, "inserted": 0, "skipped": 0}
+    for cfg in configs:
+        titles = cfg.b2b_job_titles or []
+        locations = cfg.b2b_locations or cfg.b2b_cities or []
+        if not titles or not locations:
+            logger.info(
+                "capture.linkedin_daily.tenant_skipped",
+                tenant_id=str(cfg.tenant_id),
+                reason="titles ou locations vazios",
+            )
+            continue
+        try:
+            outcome = await _run_apify_linkedin_async(titles, locations, cfg.max_items, str(cfg.tenant_id), task)
+            total["received"] += outcome.get("received", 0)
+            total["inserted"] += outcome.get("inserted", 0)
+            total["skipped"] += outcome.get("skipped", 0)
+        except Exception as exc:
+            logger.error("capture.linkedin_daily.tenant_error", tenant_id=str(cfg.tenant_id), error=str(exc))
+
+    logger.info("capture.linkedin_daily.done", **total)
+    return total
+
+
 # ── Implementações async ──────────────────────────────────────────────
 
 async def _run_apify_maps_async(

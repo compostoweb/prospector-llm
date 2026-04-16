@@ -4,6 +4,7 @@ import { useMemo, useState } from "react"
 import Link from "next/link"
 import {
   ArrowRight,
+  CalendarClock,
   CheckSquare,
   Linkedin,
   MailSearch,
@@ -21,6 +22,7 @@ import {
   useSearchLinkedIn,
 } from "@/lib/api/hooks/use-leads"
 import { useCreateLeadList, useLeadLists } from "@/lib/api/hooks/use-lead-lists"
+import { useUpsertCaptureSchedule } from "@/lib/api/hooks/use-capture-schedule"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -122,6 +124,8 @@ export default function GerarLeadsPage() {
   const importGeneratedLeads = useGenerateLeadsImport()
   const searchLinkedIn = useSearchLinkedIn()
   const importLinkedIn = useImportLinkedInProfiles()
+  const saveMapsSchedule = useUpsertCaptureSchedule("google_maps")
+  const saveB2BSchedule = useUpsertCaptureSchedule("b2b_database")
 
   const previewRows = useMemo<PreviewRow[]>(() => {
     if (source === "linkedin_search") {
@@ -251,6 +255,37 @@ export default function GerarLeadsPage() {
     }
   }
 
+  async function handleSaveSchedule() {
+    try {
+      if (source === "google_maps") {
+        await saveMapsSchedule.mutateAsync({
+          source: "google_maps",
+          is_active: true,
+          max_items: Number(mapsLimit) || 25,
+          maps_search_terms: splitLines(mapsSearchTerms),
+          maps_location: mapsLocation.trim() || null,
+          maps_categories: splitLines(mapsCategories),
+        })
+        toast.success("Captura automática salva — será executada todos os dias às 08h")
+      } else if (source === "b2b_database") {
+        await saveB2BSchedule.mutateAsync({
+          source: "b2b_database",
+          is_active: true,
+          max_items: Number(b2bLimit) || 50,
+          b2b_job_titles: splitLines(b2bTitles),
+          b2b_locations: splitLines(b2bLocations),
+          b2b_cities: splitLines(b2bCities),
+          b2b_industries: splitLines(b2bIndustries),
+          b2b_company_keywords: splitLines(b2bKeywords),
+          b2b_company_sizes: splitLines(b2bSizes),
+        })
+        toast.success("Captura automática salva — será executada todos os dias às 09h")
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao salvar configuração")
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -358,6 +393,17 @@ export default function GerarLeadsPage() {
                     title="Limite"
                   />
                 </Field>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={handleSaveSchedule}
+                  disabled={saveMapsSchedule.isPending}
+                >
+                  <CalendarClock size={14} aria-hidden="true" />
+                  Salvar como captura automática diária
+                </Button>
               </>
             )}
 
@@ -396,6 +442,17 @@ export default function GerarLeadsPage() {
                     title="Limite"
                   />
                 </Field>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={handleSaveSchedule}
+                  disabled={saveB2BSchedule.isPending}
+                >
+                  <CalendarClock size={14} aria-hidden="true" />
+                  Salvar como captura automática diária
+                </Button>
               </>
             )}
 

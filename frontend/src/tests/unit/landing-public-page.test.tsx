@@ -7,7 +7,7 @@
  */
 
 import { render, screen, fireEvent } from "@testing-library/react"
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import LandingPublicPage from "@/components/content/inbound/landing-public-page"
 import type { LandingPagePublicData } from "@/lib/content-inbound/types"
 
@@ -40,6 +40,10 @@ function makePage(overrides: Partial<LandingPagePublicData> = {}): LandingPagePu
     author_photo_url: null,
     meta_title: null,
     meta_description: null,
+    publisher_name: null,
+    features: null,
+    expected_result: null,
+    badge_text: null,
     public_url: "https://app.compostoweb.com.br/lm/guia-automacao",
     ...overrides,
   }
@@ -275,7 +279,7 @@ describe("Formulário compartilhado — preenchimento e envio", () => {
     fireEvent.change(screen.getByPlaceholderText("Seu melhor e-mail"), {
       target: { value: "joao@empresa.com.br" },
     })
-    fireEvent.submit(screen.getByPlaceholderText("Seu nome").closest("form")!)
+    fireEvent.submit(screen.getByPlaceholderText("Seu nome").closest("form") as HTMLFormElement)
 
     await vi.waitFor(() => {
       expect(assignMock).toHaveBeenCalledWith("/lm/guia-automacao/obrigado")
@@ -295,7 +299,7 @@ describe("Formulário compartilhado — preenchimento e envio", () => {
 
     render(<LandingPublicPage page={makePage()} />)
 
-    fireEvent.submit(screen.getByPlaceholderText("Seu nome").closest("form")!)
+    fireEvent.submit(screen.getByPlaceholderText("Seu nome").closest("form") as HTMLFormElement)
 
     await vi.waitFor(() => {
       expect(screen.getByText("Lead magnet inativo")).toBeInTheDocument()
@@ -318,7 +322,7 @@ describe("Formulário compartilhado — preenchimento e envio", () => {
     render(<LandingPublicPage page={makePage()} />)
     const button = screen.getByRole("button", { name: /receber material/i })
 
-    fireEvent.submit(button.closest("form")!)
+    fireEvent.submit(button.closest("form") as HTMLFormElement)
 
     await vi.waitFor(() => {
       expect(button).toBeDisabled()
