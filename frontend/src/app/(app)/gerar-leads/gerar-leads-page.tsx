@@ -6,6 +6,7 @@ import {
   ArrowRight,
   CalendarClock,
   CheckSquare,
+  Download,
   FileSpreadsheet,
   Linkedin,
   MailSearch,
@@ -43,7 +44,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { CsvXlsImportDialog } from "@/components/leads/csv-xls-import-dialog"
 
@@ -121,6 +122,7 @@ export default function GerarLeadsPage() {
   const [b2bKeywords, setB2bKeywords] = useState("B2B\nSaaS")
   const [b2bSizes, setB2bSizes] = useState("11-20\n21-50\n51-100")
   const [b2bLimit, setB2bLimit] = useState("50")
+  const [b2bNegativeTerms, setB2bNegativeTerms] = useState("")
 
   const [enrichmentUrls, setEnrichmentUrls] = useState("")
   const [enrichmentLimit, setEnrichmentLimit] = useState("25")
@@ -201,6 +203,7 @@ export default function GerarLeadsPage() {
           company_keywords: splitLines(b2bKeywords),
           company_sizes: splitLines(b2bSizes),
           email_status: ["validated"],
+          negative_terms: splitLines(b2bNegativeTerms),
         })
         setGeneratedPreview(result.items)
         setLinkedinPreview([])
@@ -305,6 +308,17 @@ export default function GerarLeadsPage() {
     }
   }
 
+  function downloadEnrichmentTemplate() {
+    const csv = "linkedin_url\nhttps://www.linkedin.com/in/exemplo"
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = "prospector_enrichment_template.csv"
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   async function handleToggleSchedule(cfg: CaptureScheduleConfig) {
     const toggle = cfg.source === "google_maps" ? toggleMaps : toggleB2B
     try {
@@ -333,19 +347,19 @@ export default function GerarLeadsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between mb-2">
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.16em] text-(--accent)">
             Prospecção assistida
           </p>
-          <h1 className="mt-1 text-2xl font-semibold text-(--text-primary)">Gerar leads</h1>
-          <p className="mt-2 max-w-3xl text-sm text-(--text-secondary)">
+          <h1 className="mt-0 text-2xl font-semibold text-(--text-primary)">Gerar leads</h1>
+          <p className="mt-1 max-w-3xl text-sm text-(--text-secondary)">
             Rode captura, enriquecimento e revisão no mesmo fluxo antes de salvar em uma lista
             operacional.
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 ">
           <Button asChild variant="outline">
             <Link href="/listas">Abrir listas</Link>
           </Button>
@@ -366,21 +380,36 @@ export default function GerarLeadsPage() {
       </div>
 
       <Tabs value={pageTab} onValueChange={(v) => setPageTab(v as "capturar" | "automacoes")}>
-        <TabsList>
-          <TabsTrigger value="capturar">Capturar</TabsTrigger>
-          <TabsTrigger value="automacoes">
-            <Settings2 size={14} aria-hidden="true" />
-            Automações
-            {schedules.length > 0 && (
-              <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
-                {schedules.filter((s) => s.is_active).length}
-              </Badge>
-            )}
-          </TabsTrigger>
-        </TabsList>
+        <nav className="flex gap-1 border-b border-(--border-default)">
+          {(
+            [
+              { value: "capturar", label: "Capturar", icon: null },
+              { value: "automacoes", label: "Automações", icon: Settings2 },
+            ] as const
+          ).map(({ value, label, icon: Icon }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setPageTab(value)}
+              className={`flex items-center gap-2 border-b-2 -mb-px px-4 py-2 text-sm transition-colors ${
+                pageTab === value
+                  ? "border-(--accent) text-(--accent) font-medium"
+                  : "border-transparent text-(--text-secondary) hover:text-(--text-primary)"
+              }`}
+            >
+              {Icon && <Icon className="h-4 w-4" />}
+              {label}
+              {value === "automacoes" && schedules.length > 0 && (
+                <Badge variant="neutral" className="ml-0.5 h-4 px-1 text-[10px]">
+                  {schedules.filter((s) => s.is_active).length}
+                </Badge>
+              )}
+            </button>
+          ))}
+        </nav>
 
         <TabsContent value="capturar" className="mt-4">
-          <div className="grid gap-4 xl:grid-cols-4">
+          <div className="grid gap-4 xl:grid-cols-4 mb-4">
             {sourceOptions.map((option) => {
               const Icon = option.icon
               const isActive = option.id === source
@@ -423,24 +452,32 @@ export default function GerarLeadsPage() {
               <CardContent className="space-y-4">
                 {source === "google_maps" && (
                   <>
-                    <Field label="Termos de busca">
+                    <Field
+                      label="Termos de busca"
+                      hint="Um por linha. Ex.: clínicas odontológicas, escritórios de contabilidade. O Apify buscará cada termo no Google Maps."
+                    >
                       <Textarea
                         value={mapsSearchTerms}
                         onChange={(e) => setMapsSearchTerms(e.target.value)}
+                        placeholder={"clínicas odontológicas\nescritórios de contabilidade"}
+                        rows={3}
                       />
                     </Field>
-                    <Field label="Localização (preview)">
+                    <Field
+                      label="Localização para preview"
+                      hint="Cidade, estado ou país onde o preview será rodado. Exemplos: São Paulo, Brasil / Rio de Janeiro, RJ."
+                    >
                       <input
                         value={mapsLocation}
                         onChange={(e) => setMapsLocation(e.target.value)}
                         className={inputClassName}
-                        placeholder="Cidade, estado ou país"
+                        placeholder="São Paulo, Brasil"
                         title="Localização"
                       />
                     </Field>
                     <Field
                       label="Localidades para rotação automática"
-                      hint="Uma por linha — a captura diária vai ciclar uma combinação (termo × local) por dia"
+                      hint="Uma por linha — a captura diária vai ciclar uma combinação (termo × local) por dia. Deixe vazio para usar só a localização do preview acima."
                     >
                       <Textarea
                         value={mapsLocations}
@@ -449,19 +486,30 @@ export default function GerarLeadsPage() {
                         rows={4}
                       />
                     </Field>
-                    <Field label="Categorias">
+                    <Field
+                      label="Categorias (opcional)"
+                      hint="Filtre por categoria do Google Maps. Uma por linha. Ex.: restaurant, dentist. Deixe vazio para não filtrar."
+                    >
                       <Textarea
                         value={mapsCategories}
                         onChange={(e) => setMapsCategories(e.target.value)}
+                        placeholder={"restaurant\ndentist"}
+                        rows={3}
                       />
                     </Field>
-                    <Field label="Limite">
+                    <Field
+                      label="Limite de resultados"
+                      hint="Recomendamos até 100 por execução. A API do Google Maps não tem limite diário fixo, mas volumes altos aumentam o custo do Apify."
+                    >
                       <input
                         value={mapsLimit}
                         onChange={(e) => setMapsLimit(e.target.value)}
                         className={inputClassName}
                         placeholder="25"
                         title="Limite"
+                        type="number"
+                        min={1}
+                        max={200}
                       />
                     </Field>
                     <Button
@@ -480,40 +528,96 @@ export default function GerarLeadsPage() {
 
                 {source === "b2b_database" && (
                   <>
-                    <Field label="Cargos alvo">
-                      <Textarea value={b2bTitles} onChange={(e) => setB2bTitles(e.target.value)} />
+                    <Field
+                      label="Cargos alvo"
+                      hint="Um por linha. Serão buscados como OR. Ex.: Head de Marketing, CMO, Gerente de Vendas."
+                    >
+                      <Textarea
+                        value={b2bTitles}
+                        onChange={(e) => setB2bTitles(e.target.value)}
+                        placeholder={"Head de Marketing\nCMO\nGerente de Vendas"}
+                        rows={3}
+                      />
                     </Field>
-                    <Field label="Localizações">
+                    <Field
+                      label="Localizações (país / estado)"
+                      hint="Um por linha. Use nomes em inglês para melhor precisão. Ex.: Brazil, United States, São Paulo."
+                    >
                       <Textarea
                         value={b2bLocations}
                         onChange={(e) => setB2bLocations(e.target.value)}
+                        placeholder={"Brazil"}
+                        rows={2}
                       />
                     </Field>
-                    <Field label="Cidades">
-                      <Textarea value={b2bCities} onChange={(e) => setB2bCities(e.target.value)} />
+                    <Field
+                      label="Cidades (para rotação automática)"
+                      hint="Uma por linha. A captura diária cicla uma cidade por dia. Ex.: São Paulo, Curitiba, Belo Horizonte."
+                    >
+                      <Textarea
+                        value={b2bCities}
+                        onChange={(e) => setB2bCities(e.target.value)}
+                        placeholder={"São Paulo\nCuritiba\nBelo Horizonte"}
+                        rows={3}
+                      />
                     </Field>
-                    <Field label="Indústrias">
+                    <Field
+                      label="Indústrias"
+                      hint="Um por linha. Filtra pelo setor da empresa. Ex.: Software, Marketing & Advertising, Financial Services."
+                    >
                       <Textarea
                         value={b2bIndustries}
                         onChange={(e) => setB2bIndustries(e.target.value)}
+                        placeholder={"Software\nMarketing & Advertising"}
+                        rows={3}
                       />
                     </Field>
-                    <Field label="Keywords de empresa">
+                    <Field
+                      label="Keywords da empresa"
+                      hint="Um por linha. Filtra empresas cujo nome ou descrição contém o termo. Ex.: SaaS, B2B, agência."
+                    >
                       <Textarea
                         value={b2bKeywords}
                         onChange={(e) => setB2bKeywords(e.target.value)}
+                        placeholder={"SaaS\nB2B"}
+                        rows={2}
                       />
                     </Field>
-                    <Field label="Faixas de tamanho">
-                      <Textarea value={b2bSizes} onChange={(e) => setB2bSizes(e.target.value)} />
+                    <Field
+                      label="Faixas de tamanho de empresa"
+                      hint="Uma por linha. Opções: 1, 2-10, 11-50, 51-200, 201-500, 501-1000, 1001-5000, 5001-10000, 10001+."
+                    >
+                      <Textarea
+                        value={b2bSizes}
+                        onChange={(e) => setB2bSizes(e.target.value)}
+                        placeholder={"11-50\n51-200"}
+                        rows={2}
+                      />
                     </Field>
-                    <Field label="Limite">
+                    <Field
+                      label="Termos negativos (filtro de exclusão)"
+                      hint="Um por linha. Leads com qualquer desses termos no cargo ou nome da empresa serão descartados automaticamente do preview. Ex.: estagiário, trainee, junior."
+                    >
+                      <Textarea
+                        value={b2bNegativeTerms}
+                        onChange={(e) => setB2bNegativeTerms(e.target.value)}
+                        placeholder={"estagiário\ntrainee\njunior\nfreelancer"}
+                        rows={3}
+                      />
+                    </Field>
+                    <Field
+                      label="Limite de resultados"
+                      hint="Máximo de 200 por requisição na API Apify B2B. Recomendamos 50–100 para garantir qualidade e evitar leads repetidos."
+                    >
                       <input
                         value={b2bLimit}
                         onChange={(e) => setB2bLimit(e.target.value)}
                         className={inputClassName}
                         placeholder="50"
                         title="Limite"
+                        type="number"
+                        min={1}
+                        max={200}
                       />
                     </Field>
                     <Button
@@ -532,23 +636,41 @@ export default function GerarLeadsPage() {
 
                 {source === "linkedin_enrichment" && (
                   <>
-                    <Field label="URLs do LinkedIn">
+                    <Field
+                      label="URLs de perfis do LinkedIn"
+                      hint="Uma URL por linha (linkedin.com/in/…). Cole manualmente, importe via CSV/XLSX ou baixe a planilha modelo para preencher offline."
+                    >
                       <Textarea
                         value={enrichmentUrls}
                         onChange={(e) => setEnrichmentUrls(e.target.value)}
-                        placeholder="https://www.linkedin.com/in/..."
+                        placeholder={
+                          "https://www.linkedin.com/in/joaosilva\nhttps://www.linkedin.com/in/mariaoliveira"
+                        }
+                        rows={5}
                       />
                     </Field>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="w-full"
-                      onClick={() => setCsvImportOpen(true)}
-                    >
-                      <FileSpreadsheet size={14} aria-hidden="true" />
-                      Importar URLs via CSV / XLSX
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => setCsvImportOpen(true)}
+                      >
+                        <FileSpreadsheet size={14} aria-hidden="true" />
+                        Importar via CSV / XLSX
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="flex-1"
+                        onClick={downloadEnrichmentTemplate}
+                      >
+                        <Download size={14} aria-hidden="true" />
+                        Baixar planilha modelo
+                      </Button>
+                    </div>
                     <CsvXlsImportDialog
                       open={csvImportOpen}
                       onOpenChange={setCsvImportOpen}
@@ -558,13 +680,19 @@ export default function GerarLeadsPage() {
                         )
                       }
                     />
-                    <Field label="Limite">
+                    <Field
+                      label="Limite de resultados"
+                      hint="Máximo de 100 por execução na API Unipile/LinkedIn. Acima disso aumenta o risco de rate-limit. Recomendamos até 50 por vez."
+                    >
                       <input
                         value={enrichmentLimit}
                         onChange={(e) => setEnrichmentLimit(e.target.value)}
                         className={inputClassName}
                         placeholder="25"
                         title="Limite"
+                        type="number"
+                        min={1}
+                        max={100}
                       />
                     </Field>
                   </>
@@ -817,7 +945,7 @@ export default function GerarLeadsPage() {
                 return (
                   <Card key={cfg.id}>
                     <CardContent className="flex flex-wrap items-center gap-4 py-4">
-                      <Badge variant={isGoogleMaps ? "default" : "secondary"}>
+                      <Badge variant={isGoogleMaps ? "default" : "neutral"}>
                         {isGoogleMaps ? "Google Maps" : "Base B2B"}
                       </Badge>
                       <Badge variant={cfg.is_active ? "default" : "outline"}>

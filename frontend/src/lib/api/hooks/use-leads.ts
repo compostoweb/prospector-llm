@@ -195,6 +195,7 @@ export interface GenerateLeadsPreviewRequest {
   company_sizes?: string[]
   email_status?: string[]
   linkedin_urls?: string[]
+  negative_terms?: string[]
 }
 
 export interface GenerateLeadsPreviewResponse {

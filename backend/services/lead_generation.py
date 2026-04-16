@@ -39,10 +39,37 @@ async def preview_generated_leads(
         )
         source = LeadSource.APIFY_LINKEDIN
 
-    return [
+    items = [
         _normalize_preview_item(item, body.source, source, index)
         for index, item in enumerate(raw_items, start=1)
         if item.name
+    ]
+
+    if body.negative_terms:
+        items = _apply_negative_filter(items, body.negative_terms)
+
+    return items
+
+
+def _apply_negative_filter(
+    items: list[LeadGeneratedPreviewItem],
+    negative_terms: list[str],
+) -> list[LeadGeneratedPreviewItem]:
+    """Descarta leads cujo cargo ou company_keywords contenha algum termo negativo (case-insensitive)."""
+    terms_lower = [t.strip().lower() for t in negative_terms if t.strip()]
+    if not terms_lower:
+        return items
+
+    def _matches_any(value: str | None) -> bool:
+        if not value:
+            return False
+        v = value.lower()
+        return any(term in v for term in terms_lower)
+
+    return [
+        item
+        for item in items
+        if not (_matches_any(item.job_title) or _matches_any(item.company))
     ]
 
 

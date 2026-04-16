@@ -293,6 +293,8 @@ class LeadGenerationPreviewRequest(BaseModel):
     company_sizes: list[str] | None = None
     email_status: list[str] | None = None
     linkedin_urls: list[str] | None = None
+    negative_terms: list[str] | None = None
+    """Termos negativos: leads com qualquer desses termos no cargo ou keyword da empresa são descartados do preview."""
 
     @model_validator(mode="after")
     def validate_source_payload(self) -> LeadGenerationPreviewRequest:
