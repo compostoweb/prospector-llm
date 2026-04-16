@@ -25,6 +25,7 @@ import {
   X,
   Zap,
 } from "lucide-react"
+import Link from "next/link"
 import { toast } from "sonner"
 import { env } from "@/env"
 import { Badge } from "@/components/ui/badge"
@@ -542,12 +543,17 @@ export default function InboundHubPage() {
             Gerencie materiais, landing pages e capturas sem misturar com o outbound.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button asChild variant="outline" size="sm">
-            <a href="/lm/calculadora" target="_blank" rel="noreferrer">
+        <div className="flex flex-wrap items-center gap-2 ">
+          <Button
+            variant="outline"
+            size="sm"
+            className="bg-green-600 text-white hover:bg-green-200 hover:text-black"
+            asChild
+          >
+            <Link href="/lm/calculadora" target="_blank" rel="noopener noreferrer">
               <Gauge className="h-4 w-4" />
-              Ver ferramenta
-            </a>
+              Ver Calculadora de ROI
+            </Link>
           </Button>
           <CreateLeadMagnetDialog
             isPending={createLeadMagnet.isPending}
