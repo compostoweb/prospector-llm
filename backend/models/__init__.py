@@ -5,8 +5,8 @@ from models.anthropic_batch_job import AnthropicBatchJob  # noqa: F401
 from models.audio_file import AudioFile  # noqa: F401
 from models.base import Base  # noqa: F401
 from models.cadence import Cadence  # noqa: F401
-from models.capture_schedule import CaptureScheduleConfig  # noqa: F401
 from models.cadence_step import CadenceStep  # noqa: F401
+from models.capture_schedule import CaptureScheduleConfig  # noqa: F401
 from models.content_calculator_result import ContentCalculatorResult  # noqa: F401
 from models.content_engagement_comment import ContentEngagementComment  # noqa: F401
 from models.content_engagement_discovery_query import ContentEngagementDiscoveryQuery  # noqa: F401
@@ -37,6 +37,7 @@ from models.lead_email import LeadEmail  # noqa: F401
 from models.lead_list import LeadList  # noqa: F401
 from models.lead_tag import LeadTag  # noqa: F401
 from models.linkedin_account import LinkedInAccount  # noqa: F401
+from models.linkedin_search_param import LinkedInSearchParam  # noqa: F401
 from models.llm_usage_event import LLMUsageEvent  # noqa: F401
 from models.llm_usage_hourly import LLMUsageHourlyAggregate  # noqa: F401
 from models.manual_task import ManualTask  # noqa: F401

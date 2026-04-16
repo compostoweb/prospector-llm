@@ -755,6 +755,8 @@ export default function LinkedInSearchPage() {
     setSearchError(null)
     setHasSearched(true)
     setDetailProfile(null)
+    setCompanyEnrichMap(new Map())
+    enrichedIdsRef.current = new Set()
     try {
       const result = await searchLinkedIn(buildParams(null))
       setResults(result.items)
@@ -841,37 +843,54 @@ export default function LinkedInSearchPage() {
   }, [])
 
   // Enriquece resultados com empresa via /users/{id}?linkedin_sections=experience
-  const enrichKey = useMemo(() => results.map((p) => p.provider_id).join("|"), [results])
+  // Só enriquece IDs NOVOS (não re-busca os que já têm empresa no map)
+  const enrichedIdsRef = useRef<Set<string>>(new Set())
+
   useEffect(() => {
-    if (!enrichKey) return
-    setCompanyEnrichMap(new Map())
-    enrichCompanies(enrichKey.split("|"), {
-      onSuccess: (map) => setCompanyEnrichMap(map),
-    })
+    const newIds = results.map((p) => p.provider_id).filter((id) => !enrichedIdsRef.current.has(id))
+    if (newIds.length === 0) return
+
+    // Marca como "em processamento" para não duplicar chamadas
+    for (const id of newIds) enrichedIdsRef.current.add(id)
+
+    // Backend aceita no máx 25 por chamada; faz batches se necessário
+    const BATCH = 25
+    for (let i = 0; i < newIds.length; i += BATCH) {
+      const batch = newIds.slice(i, i + BATCH)
+      enrichCompanies(batch, {
+        onSuccess: (map) => {
+          setCompanyEnrichMap((prev) => {
+            const merged = new Map(prev)
+            map.forEach((v, k) => merged.set(k, v))
+            return merged
+          })
+        },
+      })
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enrichKey])
+  }, [results])
 
   // ── Render ────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-(--bg-canvas)">
-      {/* ── Header ── */}
-      <div className="flex items-center gap-3 border-b border-(--border-default) bg-(--bg-surface) px-6 py-3">
-        <Link
-          href="/leads"
-          className="flex items-center gap-1.5 text-sm text-(--text-secondary) transition-colors hover:text-(--text-primary)"
-        >
-          <ChevronLeft size={15} />
-          Leads
-        </Link>
-        <span className="text-(--border-default)">/</span>
-        <h1 className="text-sm font-bold text-(--text-primary)">Busca LinkedIn</h1>
-      </div>
+    <div className="flex h-full overflow-hidden bg-(--bg-canvas)">
+      {/* ── Painel de filtros (header + filtros) ── */}
+      <aside className="flex w-70 shrink-0 flex-col overflow-hidden border-r border-(--border-default) bg-[#fcfcfc]">
+        {/* Header — dentro da sidebar */}
+        <div className="flex items-center gap-3 border-b border-(--border-default) bg-(--bg-surface) px-4 py-3">
+          <Link
+            href="/leads"
+            className="flex items-center gap-1.5 text-sm text-(--text-secondary) transition-colors hover:text-(--text-primary)"
+          >
+            <ChevronLeft size={15} />
+            Leads
+          </Link>
+          <span className="text-(--border-default)">/</span>
+          <h1 className="text-sm font-bold text-(--text-primary)">Busca LinkedIn</h1>
+        </div>
 
-      {/* ── Layout: filtros | resultados | detalhe ── */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* ── Painel de filtros ── */}
-        <aside className="flex w-70 shrink-0 flex-col overflow-y-auto border-r border-(--border-default) bg-[#fcfcfc]">
+        {/* Filtros scrolláveis */}
+        <div className="flex-1 overflow-y-auto">
           {/* Seção: Palavras-chave */}
           <div className="border-b border-(--border-subtle) p-4">
             <div className="mb-3 flex items-center gap-2">
@@ -1190,10 +1209,12 @@ export default function LinkedInSearchPage() {
               </button>
             )}
           </div>
-        </aside>
+        </div>
+      </aside>
 
-        {/* ── Área de resultados ── */}
-        <main className="relative flex flex-1 flex-col overflow-hidden bg-white dark:bg-gray-950">
+      {/* ── Área de resultados ── */}
+      <main className="relative flex flex-1 flex-col overflow-hidden p-5 pt-2 pb-3">
+        <div className="flex flex-1 flex-col overflow-hidden rounded-lg border border-(--border-default) bg-(--bg-surface) shadow-sm">
           {/* Banner de erro */}
           {searchError && (
             <div className="flex items-center justify-between border-b border-(--border-subtle) bg-red-500/10 px-5 py-2 text-xs">
@@ -1560,19 +1581,19 @@ export default function LinkedInSearchPage() {
               </div>
             )}
           </div>
-        </main>
+        </div>
+      </main>
 
-        {/* ── Sidebar de detalhes do lead ── */}
-        {detailProfile && (
-          <LeadDetailSidebar
-            profile={detailProfile}
-            onClose={() => setDetailProfile(null)}
-            onSelect={() => toggleSelect(detailProfile.provider_id)}
-            isSelected={selectedIds.has(detailProfile.provider_id)}
-            enrichedCompany={companyEnrichMap.get(detailProfile.provider_id) ?? null}
-          />
-        )}
-      </div>
+      {/* ── Sidebar de detalhes do lead ── */}
+      {detailProfile && (
+        <LeadDetailSidebar
+          profile={detailProfile}
+          onClose={() => setDetailProfile(null)}
+          onSelect={() => toggleSelect(detailProfile.provider_id)}
+          isSelected={selectedIds.has(detailProfile.provider_id)}
+          enrichedCompany={companyEnrichMap.get(detailProfile.provider_id) ?? null}
+        />
+      )}
     </div>
   )
 }

@@ -52,6 +52,7 @@ celery_app = Celery(
         "workers.anthropic_batch",
         "workers.content_engagement",
         "workers.enrichment_queue",
+        "workers.linkedin_params_refresh",
     ],
 )
 
@@ -99,6 +100,7 @@ celery_app.conf.update(
         "workers.content_lm_sync.*": {"queue": "content"},
         "workers.content_voyager.*": {"queue": "content"},
         "workers.content_engagement.*": {"queue": "content-engagement"},
+        "workers.linkedin_params_refresh.*": {"queue": "enrich"},
     },
     # Workers
     worker_prefetch_multiplier=1,  # não reservar tasks extras (fairness)

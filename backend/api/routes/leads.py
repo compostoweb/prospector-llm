@@ -233,13 +233,27 @@ async def linkedin_search_params(
     db: AsyncSession = Depends(get_session_flexible),
 ) -> dict[str, object]:
     """
-    Faz lookup de IDs de localização, setor ou empresa no LinkedIn via Unipile.
-    Necessário para usar os filtros nativos do LinkedIn Search.
-    Para COMPANY, o parâmetro `query` é obrigatório (ex: ?type=COMPANY&query=Petrobras).
+    Retorna IDs de localização, setor ou empresa para filtros LinkedIn.
+    LOCATION e INDUSTRY são servidos do cache no BD (tabela linkedin_search_params).
+    Se o cache estiver vazio, busca na Unipile API e persiste.
+    COMPANY sempre vai direto na API (depende do query digitado).
     """
     from core.config import settings
+    from models.linkedin_search_param import LinkedInSearchParam
     from models.tenant import TenantIntegration
 
+    # Para LOCATION e INDUSTRY, tentar cache primeiro
+    if type in ("LOCATION", "INDUSTRY"):
+        cached = await db.execute(
+            select(LinkedInSearchParam)
+            .where(LinkedInSearchParam.param_type == type)
+            .order_by(LinkedInSearchParam.title)
+        )
+        items = cached.scalars().all()
+        if items:
+            return {"items": [{"id": i.external_id, "title": i.title} for i in items]}
+
+    # Precisa de account_id para chamar Unipile
     integ_result = await db.execute(
         select(TenantIntegration).where(TenantIntegration.tenant_id == tenant_id)
     )
@@ -264,7 +278,7 @@ async def linkedin_search_params(
         query=query,
         account_id=linkedin_account_id[:8] + "...",
     )
-    return cast(
+    result = cast(
         dict[str, object],
         await cast(Any, unipile_client).search_linkedin_params(
             account_id=linkedin_account_id,
@@ -272,6 +286,39 @@ async def linkedin_search_params(
             query=query,
         ),
     )
+
+    # Persistir no cache para LOCATION e INDUSTRY (ignora COMPANY que é dinâmico)
+    if type in ("LOCATION", "INDUSTRY"):
+        api_items = result.get("items", [])
+        if api_items and isinstance(api_items, list):
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+            for item in api_items:
+                eid = str(item.get("id", "")) if isinstance(item, dict) else ""
+                title = str(item.get("title", "")) if isinstance(item, dict) else ""
+                if not eid:
+                    continue
+                stmt = (
+                    pg_insert(LinkedInSearchParam)
+                    .values(
+                        param_type=type,
+                        external_id=eid,
+                        title=title,
+                    )
+                    .on_conflict_do_update(
+                        constraint="uq_li_search_param_type_eid",
+                        set_={"title": title},
+                    )
+                )
+                await db.execute(stmt)
+            await db.commit()
+            logger.info(
+                "linkedin_search_params.cached",
+                param_type=type,
+                count=len(api_items),
+            )
+
+    return result
 
 
 # ── Detalhes ──────────────────────────────────────────────────────────

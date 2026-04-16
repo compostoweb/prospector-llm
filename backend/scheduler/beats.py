@@ -81,4 +81,9 @@ CELERY_BEAT_SCHEDULE: dict = {
         "task": "workers.content_voyager.sync_all_voyager",
         "schedule": crontab(hour="20", minute="0"),
     },
+    # Atualizar cache de parâmetros LinkedIn (LOCATION, INDUSTRY) — sábado 4h UTC
+    "refresh-linkedin-search-params": {
+        "task": "workers.linkedin_params_refresh.refresh_linkedin_search_params",
+        "schedule": crontab(day_of_week="saturday", hour="4", minute="0"),
+    },
 }

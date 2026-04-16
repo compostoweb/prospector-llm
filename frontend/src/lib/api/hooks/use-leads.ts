@@ -623,7 +623,7 @@ export function useLinkedInSearchParams(type: "LOCATION" | "INDUSTRY") {
       return json.items ?? []
     },
     enabled: !!session?.accessToken,
-    staleTime: 30 * 60 * 1000,
+    staleTime: 24 * 60 * 60 * 1000, // 24h — dados servidos do cache BD
     retry: 2,
   })
 }
