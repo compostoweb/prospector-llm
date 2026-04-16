@@ -337,7 +337,7 @@ export function CalendarView({ posts }: CalendarViewProps) {
         <CreatePostDialog
           open={createOpen}
           onOpenChange={setCreateOpen}
-          defaultPublishDate={createDate ?? undefined}
+          {...(createDate ? { defaultPublishDate: createDate } : {})}
         />
       </div>
     </TooltipProvider>

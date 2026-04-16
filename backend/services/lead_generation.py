@@ -33,8 +33,10 @@ async def preview_generated_leads(
         )
         source = LeadSource.API
     else:
+        # Trunca antes de enviar ao Apify — evitar cobranças por URLs extras
+        truncated_urls = (body.linkedin_urls or [])[: body.limit]
         raw_items = await apify_client.run_linkedin_enrichment(
-            linkedin_urls=body.linkedin_urls or [],
+            linkedin_urls=truncated_urls,
             max_items=body.limit,
         )
         source = LeadSource.APIFY_LINKEDIN

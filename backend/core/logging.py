@@ -59,3 +59,9 @@ def configure_logging() -> None:
         format="%(message)s",
         level=logging.DEBUG if settings.DEBUG else logging.INFO,
     )
+
+    # Silencia bibliotecas de terceiros muito verbosas mesmo em modo DEBUG
+    logging.getLogger("botocore").setLevel(logging.WARNING)
+    logging.getLogger("boto3").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)

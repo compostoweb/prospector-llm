@@ -30,6 +30,7 @@ from models.content_theme import ContentTheme  # noqa: F401
 from models.email_account import EmailAccount  # noqa: F401
 from models.email_template import EmailTemplate  # noqa: F401
 from models.email_unsubscribe import EmailUnsubscribe  # noqa: F401
+from models.enrichment_job import EnrichmentJob  # noqa: F401
 from models.interaction import Interaction  # noqa: F401
 from models.lead import Lead  # noqa: F401
 from models.lead_email import LeadEmail  # noqa: F401

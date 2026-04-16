@@ -6,8 +6,10 @@ import {
   ArrowRight,
   CalendarClock,
   CheckSquare,
+  Clock,
   Download,
   FileSpreadsheet,
+  Layers,
   Linkedin,
   MailSearch,
   MapPinned,
@@ -16,6 +18,7 @@ import {
   RefreshCw,
   Settings2,
   Sparkles,
+  X,
 } from "lucide-react"
 import { toast } from "sonner"
 import {
@@ -33,6 +36,12 @@ import {
   useUpsertCaptureSchedule,
   type CaptureScheduleConfig,
 } from "@/lib/api/hooks/use-capture-schedule"
+import {
+  useEnrichmentJobs,
+  useCreateEnrichmentJob,
+  useDeleteEnrichmentJob,
+  type EnrichmentJob,
+} from "@/lib/api/hooks/use-enrichment-jobs"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -146,6 +155,9 @@ export default function GerarLeadsPage() {
   const { data: schedules = [] } = useCaptureSchedules()
   const toggleMaps = useToggleCaptureSchedule("google_maps")
   const toggleB2B = useToggleCaptureSchedule("b2b_database")
+  const { data: enrichmentJobs = [], isLoading: isLoadingJobs } = useEnrichmentJobs()
+  const createEnrichmentJob = useCreateEnrichmentJob()
+  const deleteEnrichmentJob = useDeleteEnrichmentJob()
 
   const previewRows = useMemo<PreviewRow[]>(() => {
     if (source === "linkedin_search") {
@@ -317,6 +329,34 @@ export default function GerarLeadsPage() {
     a.download = "prospector_enrichment_template.csv"
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  async function handleCreateEnrichmentQueue() {
+    const urls = splitLines(enrichmentUrls)
+    if (urls.length === 0) {
+      toast.error("Adicione ao menos uma URL antes de criar a fila")
+      return
+    }
+    const batchSize = Math.min(Number(enrichmentLimit) || 25, 100)
+    const listName = newListName.trim() || null
+    const listId = existingListId !== "none" ? existingListId : null
+    try {
+      const job = await createEnrichmentJob.mutateAsync({
+        linkedin_urls: urls,
+        batch_size: batchSize,
+        target_list_id: listId,
+        target_list_name: listName,
+      })
+      const batches = Math.ceil(urls.length / batchSize)
+      toast.success(
+        `Fila criada — ${urls.length} perfis divididos em ${batches} batch${batches > 1 ? "es" : ""} de ${batchSize}. O primeiro processa em até 1h.`,
+      )
+      setEnrichmentUrls("")
+      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+      job // keep TS happy
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao criar fila")
+    }
   }
 
   async function handleToggleSchedule(cfg: CaptureScheduleConfig) {
@@ -695,6 +735,55 @@ export default function GerarLeadsPage() {
                         max={100}
                       />
                     </Field>
+
+                    {/* Botão de fila automática — aparece quando há mais URLs que o limite */}
+                    {splitLines(enrichmentUrls).length > Number(enrichmentLimit || 25) && (
+                      <div className="rounded-md border border-blue-200 bg-blue-50 p-3 space-y-2">
+                        <p className="text-xs text-blue-700 font-medium">
+                          Você tem {splitLines(enrichmentUrls).length} URLs, mas o limite é{" "}
+                          {enrichmentLimit}. Use a fila automática para processar tudo em batches.
+                        </p>
+                        <p className="text-xs text-blue-600">
+                          Serão{" "}
+                          {Math.ceil(
+                            splitLines(enrichmentUrls).length / Number(enrichmentLimit || 25),
+                          )}{" "}
+                          batches processados automaticamente — um por hora — sem intervenção
+                          manual.
+                        </p>
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="w-full"
+                          onClick={handleCreateEnrichmentQueue}
+                          disabled={createEnrichmentJob.isPending}
+                        >
+                          <Layers size={14} aria-hidden="true" />
+                          Criar fila automática (
+                          {Math.ceil(
+                            splitLines(enrichmentUrls).length / Number(enrichmentLimit || 25),
+                          )}{" "}
+                          batches)
+                        </Button>
+                      </div>
+                    )}
+
+                    {/* Painel de jobs de enriquecimento existentes */}
+                    {(enrichmentJobs.length > 0 || isLoadingJobs) && (
+                      <div className="space-y-2 pt-1">
+                        <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                          <Clock size={12} />
+                          Filas de enriquecimento em andamento
+                        </p>
+                        {enrichmentJobs.map((job) => (
+                          <EnrichmentJobCard
+                            key={job.id}
+                            job={job}
+                            onDelete={(id) => deleteEnrichmentJob.mutate(id)}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </>
                 )}
 
@@ -1044,3 +1133,73 @@ function splitLines(value: string) {
 
 const inputClassName =
   "flex h-9 w-full rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-sm text-(--text-primary) shadow-sm transition-colors placeholder:text-(--text-tertiary) focus:border-(--accent) focus:outline-none focus:ring-2 focus:ring-(--accent) focus:ring-offset-0"
+
+// ── Componente de card de job ─────────────────────────────────────────
+
+function EnrichmentJobCard({
+  job,
+  onDelete,
+}: {
+  job: EnrichmentJob
+  onDelete: (id: string) => void
+}) {
+  const statusLabel: Record<EnrichmentJob["status"], string> = {
+    pending: "Aguardando",
+    running: "Processando...",
+    done: "Concluído",
+    failed: "Falhou",
+  }
+  const statusColor: Record<EnrichmentJob["status"], string> = {
+    pending: "text-yellow-600 bg-yellow-50 border-yellow-200",
+    running: "text-blue-600 bg-blue-50 border-blue-200",
+    done: "text-green-600 bg-green-50 border-green-200",
+    failed: "text-red-600 bg-red-50 border-red-200",
+  }
+
+  return (
+    <div className="rounded-md border border-(--border-default) bg-(--bg-overlay) p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span
+          className={`text-[11px] font-medium rounded px-1.5 py-0.5 border ${statusColor[job.status]}`}
+        >
+          {statusLabel[job.status]}
+        </span>
+        <span className="text-xs text-muted-foreground">
+          {job.processed_count}/{job.total_count} perfis
+        </span>
+        {job.status !== "running" && (
+          <button
+            type="button"
+            onClick={() => onDelete(job.id)}
+            className="ml-auto text-muted-foreground hover:text-red-500 transition-colors"
+            title="Remover job"
+          >
+            <X size={14} />
+          </button>
+        )}
+      </div>
+      {/* Barra de progresso */}
+      <div className="h-1.5 rounded-full bg-(--border-default) overflow-hidden">
+        <div
+          className="h-full bg-blue-500 transition-all duration-500"
+          style={{ width: `${job.progress_pct}%` }}
+        />
+      </div>
+      <div className="flex justify-between text-[11px] text-muted-foreground">
+        <span>{job.progress_pct}% concluído</span>
+        {job.status !== "done" && (
+          <span>
+            {job.batches_remaining} batch{job.batches_remaining !== 1 ? "es" : ""} restante
+            {job.batches_remaining !== 1 ? "s" : ""} (~{job.batches_remaining}h)
+          </span>
+        )}
+        {job.target_list_id && <span className="truncate max-w-22.5">{job.target_list_id}</span>}
+      </div>
+      {job.error_message && (
+        <p className="text-[11px] text-red-500 truncate" title={job.error_message}>
+          {job.error_message}
+        </p>
+      )}
+    </div>
+  )
+}
