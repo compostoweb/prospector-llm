@@ -1,4 +1,5 @@
 ﻿import { describe, it, expect, beforeEach } from "vitest"
+import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/sidebar-preferences"
 import { useUIStore } from "@/store/ui-store"
 
 // ── Estado inicial padrão ─────────────────────────────────────────────
@@ -15,6 +16,7 @@ describe("useUIStore", () => {
   beforeEach(() => {
     // Limpa o mock de localStorage entre testes (evita contaminação do persist)
     localStorage.clear()
+    document.cookie = `${SIDEBAR_COLLAPSED_COOKIE}=; path=/; max-age=0`
     useUIStore.setState(DEFAULT_STATE)
   })
 
@@ -45,6 +47,19 @@ describe("useUIStore", () => {
       useUIStore.setState({ sidebarCollapsed: true })
       useUIStore.getState().setSidebarCollapsed(false)
       expect(useUIStore.getState().sidebarCollapsed).toBe(false)
+    })
+
+    it("toggleSidebar sincroniza a preferência em cookie", () => {
+      useUIStore.getState().toggleSidebar()
+      expect(document.cookie).toContain(`${SIDEBAR_COLLAPSED_COOKIE}=true`)
+    })
+
+    it("setSidebarCollapsed sincroniza a preferência em cookie", () => {
+      useUIStore.getState().setSidebarCollapsed(true)
+      expect(document.cookie).toContain(`${SIDEBAR_COLLAPSED_COOKIE}=true`)
+
+      useUIStore.getState().setSidebarCollapsed(false)
+      expect(document.cookie).toContain(`${SIDEBAR_COLLAPSED_COOKIE}=false`)
     })
   })
 

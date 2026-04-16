@@ -281,24 +281,27 @@ export default function ListaDetailPage() {
             <div className="overflow-x-auto">
               <table className="w-full min-w-215 text-sm">
                 <thead>
-                  <tr className="border-b border-(--border-default) bg-(--bg-overlay)">
+                  <tr className="border-b border-(--border-default) bg-(--accent)">
                     <th className="w-12 px-4 py-3">
                       <Checkbox
-                        checked={selected.size === filteredMembers.length && filteredMembers.length > 0}
+                        checked={
+                          selected.size === filteredMembers.length && filteredMembers.length > 0
+                        }
                         onCheckedChange={toggleAll}
                         aria-label="Selecionar todos"
+                        className="border-white/70 hover:border-amber-300"
                       />
                     </th>
-                    <th className="px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-(--text-tertiary)">
+                    <th className="px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-(--text-invert)">
                       Lead
                     </th>
-                    <th className="px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-(--text-tertiary)">
+                    <th className="px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-(--text-invert)">
                       Empresa
                     </th>
-                    <th className="px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-(--text-tertiary)">
+                    <th className="px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-(--text-invert)">
                       Contato
                     </th>
-                    <th className="px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-(--text-tertiary)">
+                    <th className="px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-(--text-invert)">
                       Status
                     </th>
                   </tr>
@@ -322,14 +325,18 @@ export default function ListaDetailPage() {
                           <p className="font-medium text-(--text-primary) hover:text-(--accent)">
                             {lead.name}
                           </p>
-                          <p className="mt-1 text-xs text-(--text-tertiary)">{lead.job_title ?? "Sem cargo"}</p>
+                          <p className="mt-1 text-xs text-(--text-tertiary)">
+                            {lead.job_title ?? "Sem cargo"}
+                          </p>
                         </button>
                       </td>
                       <td className="px-4 py-3 text-(--text-secondary)">{lead.company ?? "—"}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2 text-(--text-secondary)">
                           <Mail size={13} aria-hidden="true" className="text-(--text-tertiary)" />
-                          <span className="text-xs">{lead.email_corporate ?? "Sem email corporativo"}</span>
+                          <span className="text-xs">
+                            {lead.email_corporate ?? "Sem email corporativo"}
+                          </span>
                         </div>
                       </td>
                       <td className="px-4 py-3">

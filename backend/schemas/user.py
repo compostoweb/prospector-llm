@@ -11,6 +11,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
+from models.enums import TenantRole
+
 
 class UserResponse(BaseModel):
     """Dados do usuário autenticado — retornado em GET /auth/me."""
@@ -22,6 +24,8 @@ class UserResponse(BaseModel):
     name: str | None
     is_active: bool
     is_superuser: bool
+    tenant_id: uuid.UUID | None = None
+    tenant_role: TenantRole | None = None
     created_at: datetime
 
 
@@ -42,6 +46,8 @@ class UserTokenResponse(BaseModel):
     email: str
     name: str | None
     is_superuser: bool
+    tenant_id: uuid.UUID | None = None
+    tenant_role: TenantRole | None = None
 
 
 class UserCreateRequest(BaseModel):

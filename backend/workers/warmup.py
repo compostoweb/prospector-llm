@@ -20,14 +20,14 @@ A lógica de negócio (cálculo de volume, envio, logs) fica em warmup_service.
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, timezone
+from datetime import date
 from typing import Any
 
 import structlog
 from sqlalchemy import select
 
-from models.warmup import WarmupCampaign
 from models.tenant import Tenant
+from models.warmup import WarmupCampaign
 from workers.celery_app import celery_app
 
 logger = structlog.get_logger()
@@ -56,9 +56,7 @@ async def _warmup_tick_async() -> dict[str, Any]:
 
     async with WorkerSessionLocal() as db:
         # Busca todos os tenants ativos
-        tenant_result = await db.execute(
-            select(Tenant.id).where(Tenant.is_active.is_(True))
-        )
+        tenant_result = await db.execute(select(Tenant.id).where(Tenant.is_active.is_(True)))
         tenant_ids = [row.id for row in tenant_result]
 
     for tenant_id in tenant_ids:
@@ -87,9 +85,12 @@ async def _warmup_tick_async() -> dict[str, Any]:
             await redis_client.setex(redis_key, 26 * 3600, "1")
 
             # Enfileira a execução
-            warmup_run_campaign.delay(
-                campaign_id=str(campaign.id),
-                tenant_id=str(tenant_id),
+            warmup_run_campaign.apply_async(
+                kwargs={
+                    "campaign_id": str(campaign.id),
+                    "tenant_id": str(tenant_id),
+                },
+                queue="cadence",
             )
             enqueued += 1
 
@@ -120,6 +121,7 @@ async def _warmup_run_campaign_async(
     tenant_id: str,
 ) -> dict[str, Any]:
     import uuid  # noqa: PLC0415
+
     from core.database import WorkerSessionLocal  # noqa: PLC0415
     from services.warmup_service import run_daily_warmup  # noqa: PLC0415
 
@@ -129,9 +131,7 @@ async def _warmup_run_campaign_async(
     async with WorkerSessionLocal() as db:
         # Injeta tenant para RLS
         await db.execute(
-            __import__("sqlalchemy").text(
-                f"SET LOCAL app.current_tenant_id = '{_tenant_id}'"
-            )
+            __import__("sqlalchemy").text(f"SET LOCAL app.current_tenant_id = '{_tenant_id}'")
         )
         result = await run_daily_warmup(
             campaign_id=_campaign_id,

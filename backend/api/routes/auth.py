@@ -48,6 +48,7 @@ from core.security import (
     create_user_token,
     get_current_user_payload,
 )
+from models.enums import TenantRole
 from models.tenant import Tenant
 from models.user import User
 from schemas.browser_extension import (
@@ -59,6 +60,7 @@ from schemas.browser_extension import (
 )
 from schemas.user import UserResponse
 from services.browser_extension import build_extension_callback_url, ensure_extension_id_allowed
+from services.tenant_access import resolve_user_login_context
 
 logger = structlog.get_logger()
 
@@ -205,6 +207,21 @@ async def _resolve_active_user_from_google_profile(
     return user
 
 
+async def _build_user_access_context(
+    *,
+    db: AsyncSession,
+    user: User,
+) -> tuple[uuid.UUID | None, TenantRole | None]:
+    tenant_id, tenant_role = await resolve_user_login_context(db, user)
+    if not user.is_superuser and tenant_id is None:
+        logger.warning("auth.user_without_tenant_membership", email=user.email)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Seu usuário não está vinculado a nenhum tenant ativo.",
+        )
+    return tenant_id, tenant_role
+
+
 def _build_extension_redirect(
     *, extension_id: str, grant_code: str | None = None, error: str | None = None
 ) -> str:
@@ -329,12 +346,15 @@ async def google_callback(
     )
     userinfo = await _fetch_google_userinfo(access_token_google)
     user = await _resolve_active_user_from_google_profile(db=db, userinfo=userinfo)
+    tenant_id, tenant_role = await _build_user_access_context(db=db, user=user)
 
     jwt_token = create_user_token(
         user_id=user.id,
         email=user.email,
         is_superuser=user.is_superuser,
         name=user.name,
+        tenant_id=tenant_id,
+        tenant_role=tenant_role,
     )
 
     logger.info(
@@ -450,6 +470,7 @@ async def extension_google_callback(
         )
         userinfo = await _fetch_google_userinfo(access_token_google)
         user = await _resolve_active_user_from_google_profile(db=db, userinfo=userinfo)
+        tenant_id, tenant_role = await _build_user_access_context(db=db, user=user)
     except HTTPException as exc:
         logger.warning(
             "extension.auth.callback_failed",
@@ -472,6 +493,8 @@ async def extension_google_callback(
         "email": user.email,
         "name": user.name,
         "is_superuser": user.is_superuser,
+        "tenant_id": str(tenant_id) if tenant_id else None,
+        "tenant_role": tenant_role.value if tenant_role else None,
     }
     await redis_client.set(grant_key, json.dumps(grant_payload), ex=_EXTENSION_GRANT_TTL)
     logger.info(
@@ -512,6 +535,14 @@ async def exchange_extension_session(
         email=str(grant_payload["email"]),
         is_superuser=bool(grant_payload.get("is_superuser", False)),
         name=str(grant_payload["name"]) if grant_payload.get("name") else None,
+        tenant_id=(
+            uuid.UUID(str(grant_payload["tenant_id"])) if grant_payload.get("tenant_id") else None
+        ),
+        tenant_role=(
+            TenantRole(str(grant_payload["tenant_role"]))
+            if grant_payload.get("tenant_role")
+            else None
+        ),
     )
     expires_at = datetime.now(UTC) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     logger.info(
@@ -554,7 +585,17 @@ async def get_me(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Usuário não encontrado ou inativo.",
         )
-    return UserResponse.model_validate(user)
+    tenant_id, tenant_role = await _build_user_access_context(db=db, user=user)
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        name=user.name,
+        is_active=user.is_active,
+        is_superuser=user.is_superuser,
+        tenant_id=tenant_id,
+        tenant_role=tenant_role,
+        created_at=user.created_at,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════

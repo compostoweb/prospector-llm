@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.webhooks import unipile as unipile_webhook
+from integrations.llm import LLMRegistry
 from models.enums import Channel, LeadStatus
 from models.lead import Lead
 
@@ -119,6 +120,22 @@ async def test_verify_signature_accepts_custom_auth_header(
     )
 
 
+def test_verify_signature_rejects_when_secret_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(unipile_webhook.settings, "UNIPILE_WEBHOOK_SECRET", "")
+    monkeypatch.setattr(unipile_webhook.settings, "ENV", "dev")
+
+    assert (
+        unipile_webhook._verify_signature(
+            b"{}",
+            signature_header="",
+            custom_auth_header="",
+        )
+        is False
+    )
+
+
 @pytest.mark.asyncio
 async def test_handle_message_received_processes_linkedin_payload(
     db: AsyncSession,
@@ -145,7 +162,9 @@ async def test_handle_message_received_processes_linkedin_payload(
 
     async def _fake_process(**kwargs):  # type: ignore[no-untyped-def]
         captured.update(kwargs)
-        return SimpleNamespace(intent=unipile_webhook.Intent.NEUTRAL, classification={"confidence": 0.91})
+        return SimpleNamespace(
+            intent=unipile_webhook.Intent.NEUTRAL, classification={"confidence": 0.91}
+        )
 
     monkeypatch.setattr(unipile_webhook, "resolve_unipile_account_context", _fake_resolve)
     monkeypatch.setattr(unipile_webhook, "process_inbound_reply", _fake_process)
@@ -165,7 +184,7 @@ async def test_handle_message_received_processes_linkedin_payload(
     await unipile_webhook._handle_message_received(
         payload,
         db,
-        cast(object, SimpleNamespace()),
+        cast(LLMRegistry, SimpleNamespace()),
     )
 
     assert captured["lead"] == lead
@@ -217,7 +236,7 @@ async def test_handle_message_received_marks_bounce_for_mail_received(
     await unipile_webhook._handle_message_received(
         payload,
         db,
-        cast(object, SimpleNamespace()),
+        cast(LLMRegistry, SimpleNamespace()),
     )
 
     await db.refresh(lead)

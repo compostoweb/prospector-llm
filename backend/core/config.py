@@ -103,7 +103,7 @@ class Settings(BaseSettings):
     )
 
     # ── CORS ──────────────────────────────────────────────────────────
-    ALLOWED_ORIGINS: list[str] = Field(default=["*"])
+    ALLOWED_ORIGINS: list[str] = Field(default=["http://localhost:3000", "http://localhost:8000"])
 
     # ── LLM — OpenAI ──────────────────────────────────────────────────
     OPENAI_API_KEY: str | None = None

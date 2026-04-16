@@ -1,6 +1,9 @@
 ﻿import NextAuth, { type DefaultSession } from "next-auth"
 import Credentials from "next-auth/providers/credentials"
 import { jwtDecode } from "jwt-decode"
+import { env } from "@/env"
+
+type TenantRole = "tenant_admin" | "tenant_user"
 
 // ── Type augmentation ────────────────────────────────────────────────
 
@@ -9,13 +12,16 @@ declare module "next-auth" {
     accessToken: string
     user: DefaultSession["user"] & {
       id: string
-      tenant_id: string
+      tenant_id: string | null
+      tenant_role: TenantRole | null
       is_superuser: boolean
     }
   }
 
   interface User {
     id: string
+    tenant_id: string | null
+    tenant_role: TenantRole | null
     is_superuser: boolean
     access_token: string
   }
@@ -28,6 +34,8 @@ interface BackendJWTPayload {
   user_id: string
   email: string
   is_superuser: boolean
+  tenant_id?: string | null
+  tenant_role?: TenantRole | null
   name?: string
   exp: number
 }
@@ -46,7 +54,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const token = credentials["access_token"] as string | undefined
         if (!token) return null
 
-        const response = await fetch(`${process.env["API_URL"]}/auth/me`, {
+        const response = await fetch(`${env.API_URL}/auth/me`, {
           headers: { Authorization: `Bearer ${token}` },
           cache: "no-store",
         })
@@ -58,6 +66,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           email: string
           name: string | null
           is_superuser: boolean
+          tenant_id: string | null
+          tenant_role: TenantRole | null
         }
 
         return {
@@ -65,6 +75,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           email: user.email,
           name: user.name,
           is_superuser: user.is_superuser,
+          tenant_id: user.tenant_id,
+          tenant_role: user.tenant_role,
           access_token: token,
         }
       },
@@ -77,6 +89,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (user) {
         token["user_id"] = user.id
         token["is_superuser"] = user.is_superuser
+        token["tenant_id"] = user.tenant_id
+        token["tenant_role"] = user.tenant_role
         token["access_token"] = user.access_token
 
         // Extrai o `exp` do JWT do backend para controlar refresh
@@ -102,8 +116,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       session.accessToken = token["access_token"] as string
       session.user.id = token["user_id"] as string
       session.user.is_superuser = token["is_superuser"] as boolean
-      // tenant_id não existe no sistema atual — placeholder para multi-tenant futuro
-      session.user.tenant_id = ""
+      session.user.tenant_id = (token["tenant_id"] as string | null | undefined) ?? null
+      session.user.tenant_role = (token["tenant_role"] as TenantRole | null | undefined) ?? null
       return session
     },
   },

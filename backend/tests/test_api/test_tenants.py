@@ -24,7 +24,10 @@ from httpx import AsyncClient
 from sqlalchemy import select
 
 from core.config import settings as app_settings
+from core.security import require_superuser
 from models.cadence import Cadence
+from models.enums import TenantRole
+from models.tenant_user import TenantUser
 
 pytestmark = pytest.mark.asyncio
 
@@ -35,22 +38,26 @@ pytestmark = pytest.mark.asyncio
 async def test_create_tenant_returns_201_and_api_key(
     raw_client: AsyncClient,
     db,
+    superuser_payload,
 ) -> None:
     """Onboarding de tenant válido retorna 201 com api_key em plaintext."""
     from api.main import app
-    from api.routes.auth import _get_raw_session
+    from api.routes.tenants import _get_raw_session
 
     app.dependency_overrides[_get_raw_session] = _make_db_override(db)
+    app.dependency_overrides[require_superuser] = lambda: superuser_payload
 
+    slug = f"empresa-alfa-{uuid.uuid4().hex[:8]}"
     resp = await raw_client.post(
         "/tenants",
-        json={"name": "Empresa Alfa", "slug": "empresa-alfa"},
+        json={"name": "Empresa Alfa", "slug": slug},
     )
     app.dependency_overrides.pop(_get_raw_session, None)
+    app.dependency_overrides.pop(require_superuser, None)
 
     assert resp.status_code == 201
     body = resp.json()
-    assert body["slug"] == "empresa-alfa"
+    assert body["slug"] == slug
     assert body["name"] == "Empresa Alfa"
     assert body["is_active"] is True
     assert "api_key" in body
@@ -60,45 +67,101 @@ async def test_create_tenant_returns_201_and_api_key(
 
 
 async def test_create_tenant_duplicate_slug_returns_409(
-    client: AsyncClient,
+    raw_client: AsyncClient,
     db,
+    superuser_payload,
 ) -> None:
     """Slug já em uso retorna 409 Conflict."""
     from api.main import app
     from api.routes.tenants import _get_raw_session
 
     app.dependency_overrides[_get_raw_session] = _make_db_override(db)
+    app.dependency_overrides[require_superuser] = lambda: superuser_payload
 
     # Cria o primeiro
-    await raw_post_tenant(client, db, slug="dup-slug-test")
+    await raw_post_tenant(raw_client, db, slug="dup-slug-test", superuser_payload=superuser_payload)
     # Tenta criar de novo com o mesmo slug
-    resp = await raw_post_tenant(client, db, slug="dup-slug-test")
+    resp = await raw_post_tenant(
+        raw_client, db, slug="dup-slug-test", superuser_payload=superuser_payload
+    )
     app.dependency_overrides.pop(_get_raw_session, None)
+    app.dependency_overrides.pop(require_superuser, None)
 
     assert resp.status_code == 409
     assert "Slug" in resp.json()["detail"] or "slug" in resp.json()["detail"].lower()
 
 
 async def test_create_tenant_invalid_slug_returns_422(
-    client: AsyncClient,
+    raw_client: AsyncClient,
+    db,
+    superuser_payload,
 ) -> None:
     """Slug com caracteres maiúsculos/especiais → 422 de validação Pydantic."""
-    resp = await client.post(
+    from api.main import app
+    from api.routes.tenants import _get_raw_session
+
+    app.dependency_overrides[_get_raw_session] = _make_db_override(db)
+    app.dependency_overrides[require_superuser] = lambda: superuser_payload
+    resp = await raw_client.post(
         "/tenants",
         json={"name": "Empresa", "slug": "Empresa_Com_MAIUSCULA"},
     )
+    app.dependency_overrides.pop(_get_raw_session, None)
+    app.dependency_overrides.pop(require_superuser, None)
     assert resp.status_code == 422
 
 
 async def test_create_tenant_short_name_returns_422(
-    client: AsyncClient,
+    raw_client: AsyncClient,
+    db,
+    superuser_payload,
 ) -> None:
     """Nome com menos de 2 chars → 422."""
-    resp = await client.post(
+    from api.main import app
+    from api.routes.tenants import _get_raw_session
+
+    app.dependency_overrides[_get_raw_session] = _make_db_override(db)
+    app.dependency_overrides[require_superuser] = lambda: superuser_payload
+    resp = await raw_client.post(
         "/tenants",
         json={"name": "X", "slug": "slug-ok"},
     )
+    app.dependency_overrides.pop(_get_raw_session, None)
+    app.dependency_overrides.pop(require_superuser, None)
     assert resp.status_code == 422
+
+
+async def test_create_tenant_requires_superuser(
+    raw_client: AsyncClient,
+) -> None:
+    resp = await raw_client.post(
+        "/tenants",
+        json={"name": "Empresa Alfa", "slug": "empresa-alfa-bloqueada"},
+    )
+    assert resp.status_code == 401
+
+
+async def test_list_tenants_returns_admin_view(
+    raw_client: AsyncClient,
+    db,
+    tenant,
+    superuser_payload,
+) -> None:
+    from api.main import app
+    from api.routes.tenants import _get_raw_session
+
+    app.dependency_overrides[_get_raw_session] = _make_db_override(db)
+    app.dependency_overrides[require_superuser] = lambda: superuser_payload
+    resp = await raw_client.get("/tenants")
+    app.dependency_overrides.pop(_get_raw_session, None)
+    app.dependency_overrides.pop(require_superuser, None)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    tenant_row = next((item for item in body if item["id"] == str(tenant.id)), None)
+    assert tenant_row is not None
+    assert tenant_row["slug"] == tenant.slug
+    assert tenant_row["member_count"] == 0
 
 
 # ── GET /tenants/me ───────────────────────────────────────────────────
@@ -122,11 +185,92 @@ async def test_get_me_returns_tenant_data(
     assert "api_key" not in body
 
 
+async def test_tenant_admin_can_invite_list_and_remove_member(
+    client: AsyncClient,
+    tenant,
+    tenant_admin_user,
+    tenant_admin_payload,
+) -> None:
+    from api.dependencies import require_tenant_admin
+    from api.main import app
+
+    app.dependency_overrides[require_tenant_admin] = lambda: tenant_admin_payload
+
+    create_resp = await client.post(
+        "/tenants/me/members",
+        json={
+            "email": "novo.usuario@cliente.com",
+            "name": "Novo Usuario",
+            "role": "tenant_user",
+        },
+    )
+    assert create_resp.status_code == 201
+    member = create_resp.json()
+    assert member["email"] == "novo.usuario@cliente.com"
+    assert member["role"] == "tenant_user"
+    assert member["is_active"] is True
+
+    list_resp = await client.get("/tenants/me/members")
+    assert list_resp.status_code == 200
+    assert len(list_resp.json()) == 1
+
+    delete_resp = await client.delete(f"/tenants/me/members/{member['membership_id']}")
+    assert delete_resp.status_code == 204
+
+    list_after_delete = await client.get("/tenants/me/members")
+    assert list_after_delete.status_code == 200
+    assert list_after_delete.json()[0]["is_active"] is False
+
+    app.dependency_overrides.pop(require_tenant_admin, None)
+
+
+async def test_tenant_admin_can_update_member_role(
+    client: AsyncClient,
+    db,
+    tenant,
+    tenant_admin_user,
+    tenant_admin_payload,
+) -> None:
+    from api.dependencies import require_tenant_admin
+    from api.main import app
+    from models.user import User
+
+    user = User(
+        id=uuid.uuid4(),
+        email="membro@cliente.com",
+        name="Membro",
+        is_active=True,
+        is_superuser=False,
+    )
+    db.add(user)
+    await db.flush()
+    membership = TenantUser(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        role=TenantRole.TENANT_USER,
+        is_active=True,
+    )
+    db.add(membership)
+    await db.flush()
+
+    app.dependency_overrides[require_tenant_admin] = lambda: tenant_admin_payload
+    resp = await client.patch(
+        f"/tenants/me/members/{membership.id}",
+        json={"role": "tenant_admin", "is_active": True},
+    )
+    app.dependency_overrides.pop(require_tenant_admin, None)
+
+    assert resp.status_code == 200
+    assert resp.json()["role"] == "tenant_admin"
+
+
 async def test_get_unipile_webhook_status_reports_ready_state(
     client: AsyncClient,
     tenant,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from api.routes import tenants as tenants_route
+
     async def _fake_probe(url: str) -> int | None:
         assert url == "https://api.prospector.compostoweb.com.br/webhooks/unipile"
         return 401
@@ -157,11 +301,8 @@ async def test_get_unipile_webhook_status_reports_ready_state(
             },
         ]
 
-    monkeypatch.setattr("api.routes.tenants._probe_unipile_webhook_endpoint", _fake_probe)
-    monkeypatch.setattr(
-        "api.routes.tenants.unipile_client.get_webhooks_by_url",
-        _fake_get_webhooks_by_url,
-    )
+    monkeypatch.setattr(tenants_route, "_probe_unipile_webhook_endpoint", _fake_probe)
+    monkeypatch.setattr(tenants_route.unipile_client, "get_webhooks_by_url", _fake_get_webhooks_by_url)
     monkeypatch.setattr(app_settings, "API_PUBLIC_URL", "https://api.prospector.compostoweb.com.br")
     monkeypatch.setattr(app_settings, "UNIPILE_WEBHOOK_SECRET", "secret-123")
     monkeypatch.setattr(app_settings, "UNIPILE_API_KEY", "api-key-123")
@@ -259,6 +400,8 @@ async def test_register_unipile_webhook_returns_created_result(
     tenant,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from api.routes import tenants as tenants_route
+
     register_calls: list[tuple[str, list[str] | None]] = []
 
     async def _fake_register(
@@ -293,10 +436,7 @@ async def test_register_unipile_webhook_returns_created_result(
         },
     )
     assert update_resp.status_code == 200
-    monkeypatch.setattr(
-        "api.routes.tenants.unipile_client.ensure_webhook",
-        _fake_register,
-    )
+    monkeypatch.setattr(tenants_route.unipile_client, "ensure_webhook", _fake_register)
 
     resp = await client.post("/tenants/me/unipile/webhook/register")
     assert resp.status_code == 200
@@ -502,14 +642,14 @@ async def test_update_integrations_propagates_llm_defaults_to_existing_cadences(
     )
     assert resp.status_code == 200
 
-    result = await db.execute(select(Cadence).order_by(Cadence.name.asc()))
-    cadences = result.scalars().all()
-    assert cadences[0].llm_model == "gpt-5.4-mini"
-    assert cadences[0].llm_temperature == 0.2
-    assert cadences[0].llm_max_tokens == 640
-    assert cadences[1].llm_model == "gpt-5.4-mini"
-    assert cadences[1].llm_temperature == 0.3
-    assert cadences[1].llm_max_tokens == 2048
+    result = await db.execute(select(Cadence).where(Cadence.tenant_id == tenant.id))
+    cadences = {cadence.cadence_type: cadence for cadence in result.scalars().all()}
+    assert cadences["email_only"].llm_model == "gpt-5.4-mini"
+    assert cadences["email_only"].llm_temperature == 0.2
+    assert cadences["email_only"].llm_max_tokens == 640
+    assert cadences["mixed"].llm_model == "gpt-5.4-mini"
+    assert cadences["mixed"].llm_temperature == 0.3
+    assert cadences["mixed"].llm_max_tokens == 2048
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -524,17 +664,21 @@ def _make_db_override(db):
     return _dep
 
 
-async def raw_post_tenant(client: AsyncClient, db, slug: str):
+async def raw_post_tenant(client: AsyncClient, db, slug: str, superuser_payload=None):
     """Reutilizável para tentar criar tenants sem override de session."""
     from api.main import app
     from api.routes.tenants import _get_raw_session
 
     app.dependency_overrides[_get_raw_session] = _make_db_override(db)
+    if superuser_payload is not None:
+        app.dependency_overrides[require_superuser] = lambda: superuser_payload
     resp = await client.post(
         "/tenants",
         json={"name": "Empresa Teste", "slug": slug},
     )
     app.dependency_overrides.pop(_get_raw_session, None)
+    if superuser_payload is not None:
+        app.dependency_overrides.pop(require_superuser, None)
     return resp
 
 

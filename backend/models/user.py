@@ -18,16 +18,20 @@ Nenhum email pode logar sem estar previamente cadastrado na tabela.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base
 
+if TYPE_CHECKING:
+    from models.tenant_user import TenantUser
+
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class User(Base):
@@ -77,4 +81,18 @@ class User(Base):
         DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
+    )
+
+    memberships: Mapped[list[TenantUser]] = relationship(
+        "TenantUser",
+        back_populates="user",
+        foreign_keys="TenantUser.user_id",
+        lazy="selectin",
+    )
+
+    invited_memberships: Mapped[list[TenantUser]] = relationship(
+        "TenantUser",
+        back_populates="invited_by_user",
+        foreign_keys="TenantUser.invited_by_user_id",
+        lazy="selectin",
     )

@@ -9,8 +9,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import cast
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -53,7 +53,9 @@ async def sendpulse_webhook(
     db: AsyncSession = Depends(get_session_no_auth),
 ) -> dict:
     body = await request.body()
-    signature_header = request.headers.get("X-SendPulse-Signature") or request.headers.get("X-Signature", "")
+    signature_header: str = request.headers.get("X-SendPulse-Signature") or request.headers.get(
+        "X-Signature", ""
+    )
     if not _verify_signature(body, signature_header):
         logger.warning("webhook.sendpulse.invalid_signature")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Assinatura inválida")
@@ -90,13 +92,22 @@ async def sendpulse_webhook(
     lead_magnet = await _find_lead_magnet(db, list_id=list_id, lm_lead=lm_lead)
 
     if lm_lead is None and lead_magnet is None:
-        logger.info("webhook.sendpulse.ignored", event_type=event_type, email=email, list_id=list_id)
+        logger.info(
+            "webhook.sendpulse.ignored", event_type=event_type, email=email, list_id=list_id
+        )
         return {"status": "ignored"}
 
-    tenant_id = lm_lead.tenant_id if lm_lead else lead_magnet.tenant_id
+    resolved_lead_magnet = cast(ContentLeadMagnet, lead_magnet)
+
+    if lm_lead is not None:
+        tenant_id = lm_lead.tenant_id
+    else:
+        tenant_id = resolved_lead_magnet.tenant_id
     event = ContentLMEmailEvent(
         tenant_id=tenant_id,
-        lead_magnet_id=lead_magnet.id if lead_magnet else (lm_lead.lead_magnet_id if lm_lead else None),
+        lead_magnet_id=resolved_lead_magnet.id
+        if lead_magnet
+        else (lm_lead.lead_magnet_id if lm_lead else None),
         lm_lead_id=lm_lead.id if lm_lead else None,
         provider="sendpulse",
         provider_event_id=subscriber_id,
@@ -105,8 +116,8 @@ async def sendpulse_webhook(
         event_timestamp=event_timestamp,
         link_url=link_url,
         payload=payload,
-        processed_at=datetime.now(timezone.utc),
-        created_at=datetime.now(timezone.utc),
+        processed_at=datetime.now(UTC),
+        created_at=datetime.now(UTC),
     )
     db.add(event)
 
@@ -114,16 +125,18 @@ async def sendpulse_webhook(
         _apply_event_to_lm_lead(lm_lead, event_type=event_type, link_url=link_url)
 
     await db.commit()
-    logger.info("webhook.sendpulse.processed", event_type=event_type, lm_lead_id=str(lm_lead.id) if lm_lead else None)
+    logger.info(
+        "webhook.sendpulse.processed",
+        event_type=event_type,
+        lm_lead_id=str(lm_lead.id) if lm_lead else None,
+    )
     return {"status": "ok"}
 
 
 def _verify_signature(body: bytes, signature_header: str) -> bool:
     secret = settings.SENDPULSE_WEBHOOK_SECRET
     if not secret:
-        if settings.ENV == "dev":
-            logger.warning("webhook.sendpulse.secret_not_configured")
-            return True
+        logger.error("webhook.sendpulse.secret_not_configured")
         return False
     digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(digest, signature_header)
@@ -188,7 +201,9 @@ def _extract_link_url(payload: dict) -> str | None:
 
 
 def _extract_event_timestamp(payload: dict) -> datetime | None:
-    raw_value = payload.get("event_timestamp") or payload.get("timestamp") or payload.get("created_at")
+    raw_value = (
+        payload.get("event_timestamp") or payload.get("timestamp") or payload.get("created_at")
+    )
     if raw_value is None:
         return None
     try:

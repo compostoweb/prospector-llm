@@ -222,6 +222,58 @@ async def create_lead(
     return serialize_lead(lead_with_lists)
 
 
+# ── LinkedIn search params (DEVE vir antes de /{lead_id}) ────────────
+
+
+@router.get("/linkedin-search-params", response_model=dict)
+async def linkedin_search_params(
+    type: Annotated[str, Query(description="LOCATION | INDUSTRY | COMPANY")],
+    query: Annotated[str, Query(description="Texto para busca (obrigatório para COMPANY)")] = "",
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> dict[str, object]:
+    """
+    Faz lookup de IDs de localização, setor ou empresa no LinkedIn via Unipile.
+    Necessário para usar os filtros nativos do LinkedIn Search.
+    Para COMPANY, o parâmetro `query` é obrigatório (ex: ?type=COMPANY&query=Petrobras).
+    """
+    from core.config import settings
+    from models.tenant import TenantIntegration
+
+    integ_result = await db.execute(
+        select(TenantIntegration).where(TenantIntegration.tenant_id == tenant_id)
+    )
+    integration = integ_result.scalar_one_or_none()
+    linkedin_account_id = (
+        (integration and integration.unipile_linkedin_account_id)
+        or settings.UNIPILE_ACCOUNT_ID_LINKEDIN
+        or ""
+    )
+    if not linkedin_account_id:
+        logger.warning(
+            "linkedin_search_params.no_account_id",
+            tenant_id=str(tenant_id),
+            integration_found=integration is not None,
+        )
+        return {"items": []}
+    from integrations.unipile_client import unipile_client
+
+    logger.debug(
+        "linkedin_search_params.calling_unipile",
+        param_type=type,
+        query=query,
+        account_id=linkedin_account_id[:8] + "...",
+    )
+    return cast(
+        dict[str, object],
+        await cast(Any, unipile_client).search_linkedin_params(
+            account_id=linkedin_account_id,
+            param_type=type,
+            query=query,
+        ),
+    )
+
+
 # ── Detalhes ──────────────────────────────────────────────────────────
 
 
@@ -603,9 +655,7 @@ async def import_leads(
             duplicates += 1
             continue
         # Dedup por website
-        if item.website and (
-            item.website in existing_websites or item.website in seen_websites
-        ):
+        if item.website and (item.website in existing_websites or item.website in seen_websites):
             duplicates += 1
             continue
         try:
@@ -644,6 +694,7 @@ async def import_leads(
     # Associa à lista se solicitado
     if target_list_id and imported_lead_ids:
         from models.lead_list import lead_list_members as llm_table
+
         await db.execute(
             llm_table.insert().values(
                 [{"lead_list_id": target_list_id, "lead_id": lid} for lid in imported_lead_ids]
@@ -790,7 +841,8 @@ class LinkedInSearchRequest(_BaseModel):
     keywords: str
     # filtros multi-valor (mapeiam para o schema Unipile Classic - People)
     titles: list[str] | None = None  # advanced_keywords.title (OR-joined)
-    companies: list[str] | None = None  # advanced_keywords.company (OR-joined)
+    companies: list[str] | None = None  # advanced_keywords.company texto livre (OR-joined)
+    company_ids: list[str] | None = None  # IDs nativos do LinkedIn (filtro COMPANY nativo)
     location_ids: list[str] | None = None  # IDs numéricos do lookup /linkedin-search-params
     industry_ids: list[str] | None = None  # IDs numéricos do lookup /linkedin-search-params
     network_distance: list[int] | None = None  # [1=1º, 2=2º, 3=3º+]
@@ -840,6 +892,7 @@ async def search_linkedin(
             keywords=body.keywords,
             titles=body.titles,
             companies=body.companies,
+            company_ids=body.company_ids,
             location_ids=body.location_ids,
             industry_ids=body.industry_ids,
             network_distance=body.network_distance,
@@ -848,46 +901,6 @@ async def search_linkedin(
         ),
     )
     return result
-
-
-@router.get("/linkedin-search-params", response_model=dict)
-async def linkedin_search_params(
-    type: Annotated[str, Query(description="LOCATION | INDUSTRY")],
-    query: Annotated[str, Query(description="Texto para busca")] = "",
-    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
-    db: AsyncSession = Depends(get_session_flexible),
-) -> dict[str, object]:
-    """
-    Faz lookup de IDs de localização ou setor no LinkedIn via Unipile.
-    Necessário para usar os filtros native do LinkedIn Search.
-    """
-    from core.config import settings
-    from models.tenant import TenantIntegration
-
-    integ_result = await db.execute(
-        select(TenantIntegration).where(TenantIntegration.tenant_id == tenant_id)
-    )
-    integration = integ_result.scalar_one_or_none()
-    linkedin_account_id = (
-        (integration and integration.unipile_linkedin_account_id)
-        or settings.UNIPILE_ACCOUNT_ID_LINKEDIN
-        or ""
-    )
-    if not linkedin_account_id:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Conta LinkedIn não configurada para este tenant.",
-        )
-    from integrations.unipile_client import unipile_client
-
-    return cast(
-        dict[str, object],
-        await cast(Any, unipile_client).search_linkedin_params(
-            account_id=linkedin_account_id,
-            param_type=type,
-            query=query,
-        ),
-    )
 
 
 @router.post("/import-linkedin", response_model=dict, status_code=status.HTTP_201_CREATED)
@@ -911,6 +924,61 @@ async def import_linkedin(
             db=db,
         ),
     )
+
+
+class _LinkedInEnrichRequest(_BaseModel):
+    provider_ids: list[str]
+
+
+@router.post("/linkedin-enrich-companies", response_model=dict)
+async def linkedin_enrich_companies(
+    body: _LinkedInEnrichRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> dict[str, object]:
+    """
+    Para cada provider_id fornecido, busca a empresa atual do perfil LinkedIn
+    via GET /users/{id}?linkedin_sections=experience (concorrente, máx 5).
+    Retorna {"results": [{"provider_id": "...", "company": "..."}]}.
+    """
+    import asyncio
+
+    from core.config import settings
+    from models.tenant import TenantIntegration
+
+    integ_result = await db.execute(
+        select(TenantIntegration).where(TenantIntegration.tenant_id == tenant_id)
+    )
+    integration = integ_result.scalar_one_or_none()
+    account_id = (
+        (integration and integration.unipile_linkedin_account_id)
+        or settings.UNIPILE_ACCOUNT_ID_LINKEDIN
+        or ""
+    )
+    if not account_id:
+        logger.warning("linkedin_enrich_companies.no_account_id", tenant_id=str(tenant_id))
+        return {"results": []}
+
+    from integrations.unipile_client import unipile_client
+
+    # Limitar a 25 perfis por chamada; semáforo de 5 concorrentes
+    ids = body.provider_ids[:25]
+    sem = asyncio.Semaphore(5)
+
+    async def fetch_one(pid: str) -> dict[str, object]:
+        async with sem:
+            company = await cast(Any, unipile_client).fetch_profile_company(account_id, pid)
+            return {"provider_id": pid, "company": company}
+
+    raw = await asyncio.gather(*[fetch_one(pid) for pid in ids], return_exceptions=True)
+    results = [r for r in raw if isinstance(r, dict)]
+    logger.info(
+        "linkedin_enrich_companies.done",
+        requested=len(ids),
+        returned=len(results),
+        tenant_id=str(tenant_id),
+    )
+    return {"results": results}
 
 
 # ── Helper ────────────────────────────────────────────────────────────

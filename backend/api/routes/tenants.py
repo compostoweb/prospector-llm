@@ -24,20 +24,28 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from api.dependencies import (
     get_current_tenant_flexible,
     get_effective_tenant_id,
     get_session_flexible,
+    require_tenant_admin,
 )
 from api.routes.auth import hash_api_key
 from core.config import settings
 from core.database import AsyncSessionLocal
+from core.security import UserPayload, require_superuser
 from integrations.unipile_client import UnipileNonRetryableError, unipile_client
 from models.cadence import Cadence
+from models.enums import TenantRole
 from models.tenant import Tenant, TenantIntegration
+from models.tenant_user import TenantUser
+from models.user import User
 from schemas.tenant import (
-    TenantCreateRequest,
+    TenantAdminCreateRequest,
+    TenantAdminResponse,
+    TenantAdminUpdate,
     TenantCreateResponse,
     TenantIntegrationResponse,
     TenantIntegrationUpdate,
@@ -48,7 +56,9 @@ from schemas.tenant import (
     UnipileWebhookSourceStatus,
     UnipileWebhookStatusResponse,
 )
+from schemas.tenant_user import TenantUserInviteRequest, TenantUserResponse, TenantUserUpdateRequest
 from services.content.theme_bank import seed_theme_bank_for_tenant
+from services.tenant_access import count_active_members, upsert_tenant_membership
 
 logger = structlog.get_logger()
 
@@ -103,10 +113,55 @@ async def _get_raw_session() -> AsyncGenerator[AsyncSession, Any]:
     async with AsyncSessionLocal() as session:
         try:
             yield session
-            await session.commit()
         except Exception:
             await session.rollback()
             raise
+
+
+async def _build_tenant_admin_response(
+    db: AsyncSession,
+    tenant: Tenant,
+) -> TenantAdminResponse:
+    member_count = await count_active_members(db, tenant_id=tenant.id)
+    admin_count = await count_active_members(db, tenant_id=tenant.id, role=TenantRole.TENANT_ADMIN)
+    admin_result = await db.execute(
+        select(User.email)
+        .join(TenantUser, TenantUser.user_id == User.id)
+        .where(
+            TenantUser.tenant_id == tenant.id,
+            TenantUser.is_active.is_(True),
+            TenantUser.role == TenantRole.TENANT_ADMIN,
+        )
+        .order_by(TenantUser.joined_at.asc())
+        .limit(1)
+    )
+    return TenantAdminResponse(
+        id=tenant.id,
+        name=tenant.name,
+        slug=tenant.slug,
+        is_active=tenant.is_active,
+        created_at=tenant.created_at,
+        member_count=member_count,
+        admin_count=admin_count,
+        primary_admin_email=admin_result.scalar_one_or_none(),
+    )
+
+
+def _build_member_response(membership: TenantUser) -> TenantUserResponse:
+    return TenantUserResponse(
+        membership_id=membership.id,
+        user_id=membership.user_id,
+        tenant_id=membership.tenant_id,
+        email=membership.user.email,
+        name=membership.user.name,
+        role=membership.role,
+        is_active=membership.is_active,
+        is_superuser=membership.user.is_superuser,
+        joined_at=membership.joined_at,
+        invited_by_email=membership.invited_by_user.email if membership.invited_by_user else None,
+        created_at=membership.created_at,
+        updated_at=membership.updated_at,
+    )
 
 
 # ── Onboarding ────────────────────────────────────────────────────────
@@ -114,7 +169,8 @@ async def _get_raw_session() -> AsyncGenerator[AsyncSession, Any]:
 
 @router.post("", response_model=TenantCreateResponse, status_code=status.HTTP_201_CREATED)
 async def create_tenant(
-    body: TenantCreateRequest,
+    body: TenantAdminCreateRequest,
+    admin: UserPayload = Depends(require_superuser),
     db: AsyncSession = Depends(_get_raw_session),
 ) -> TenantCreateResponse:
     """
@@ -140,6 +196,16 @@ async def create_tenant(
     integration = TenantIntegration(tenant_id=tenant.id)
     db.add(integration)
 
+    if body.primary_admin_email:
+        await upsert_tenant_membership(
+            db,
+            tenant_id=tenant.id,
+            email=str(body.primary_admin_email),
+            name=body.primary_admin_name,
+            role=TenantRole.TENANT_ADMIN,
+            invited_by_user_id=admin.user_id,
+        )
+
     seeded = await seed_theme_bank_for_tenant(db, tenant.id)
 
     await db.commit()
@@ -158,6 +224,19 @@ async def create_tenant(
     )
 
 
+@router.get("", response_model=list[TenantAdminResponse])
+async def list_tenants(
+    _admin: UserPayload = Depends(require_superuser),
+    db: AsyncSession = Depends(_get_raw_session),
+) -> list[TenantAdminResponse]:
+    result = await db.execute(select(Tenant).order_by(Tenant.created_at.asc()))
+    tenants = result.scalars().all()
+    responses: list[TenantAdminResponse] = []
+    for tenant in tenants:
+        responses.append(await _build_tenant_admin_response(db, tenant))
+    return responses
+
+
 # ── Dados do tenant autenticado ───────────────────────────────────────
 
 
@@ -171,6 +250,122 @@ async def get_me(
         int_resp.pipedrive_api_token_set = bool(tenant.integration.pipedrive_api_token)
         resp.integration = int_resp
     return resp
+
+
+@router.get("/me/members", response_model=list[TenantUserResponse])
+async def list_tenant_members(
+    _admin: UserPayload = Depends(require_tenant_admin),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> list[TenantUserResponse]:
+    result = await db.execute(
+        select(TenantUser)
+        .where(TenantUser.tenant_id == tenant_id)
+        .options(
+            selectinload(TenantUser.user),
+            selectinload(TenantUser.invited_by_user),
+        )
+        .order_by(TenantUser.is_active.desc(), TenantUser.joined_at.asc())
+    )
+    memberships = result.scalars().all()
+    return [_build_member_response(membership) for membership in memberships]
+
+
+@router.post("/me/members", response_model=TenantUserResponse, status_code=status.HTTP_201_CREATED)
+async def invite_tenant_member(
+    body: TenantUserInviteRequest,
+    admin: UserPayload = Depends(require_tenant_admin),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> TenantUserResponse:
+    _user, membership, _created_user = await upsert_tenant_membership(
+        db,
+        tenant_id=tenant_id,
+        email=str(body.email),
+        name=body.name,
+        role=body.role,
+        invited_by_user_id=admin.user_id,
+    )
+    await db.commit()
+
+    result = await db.execute(
+        select(TenantUser)
+        .where(TenantUser.id == membership.id)
+        .options(
+            selectinload(TenantUser.user),
+            selectinload(TenantUser.invited_by_user),
+        )
+    )
+    refreshed = result.scalar_one()
+    logger.info(
+        "tenant.member_upserted",
+        tenant_id=str(tenant_id),
+        email=refreshed.user.email,
+        role=refreshed.role.value,
+        invited_by=str(admin.user_id),
+    )
+    return _build_member_response(refreshed)
+
+
+@router.patch("/me/members/{membership_id}", response_model=TenantUserResponse)
+async def update_tenant_member(
+    membership_id: uuid.UUID,
+    body: TenantUserUpdateRequest,
+    admin: UserPayload = Depends(require_tenant_admin),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> TenantUserResponse:
+    result = await db.execute(
+        select(TenantUser)
+        .where(TenantUser.id == membership_id, TenantUser.tenant_id == tenant_id)
+        .options(
+            selectinload(TenantUser.user),
+            selectinload(TenantUser.invited_by_user),
+        )
+    )
+    membership = result.scalar_one_or_none()
+    if membership is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membro não encontrado.")
+
+    membership.role = body.role
+    if body.is_active is not None:
+        membership.is_active = body.is_active
+    await db.commit()
+    logger.info(
+        "tenant.member_updated",
+        tenant_id=str(tenant_id),
+        membership_id=str(membership_id),
+        role=membership.role.value,
+        is_active=membership.is_active,
+        updated_by=str(admin.user_id),
+    )
+    return _build_member_response(membership)
+
+
+@router.delete(
+    "/me/members/{membership_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None
+)
+async def remove_tenant_member(
+    membership_id: uuid.UUID,
+    admin: UserPayload = Depends(require_tenant_admin),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> None:
+    result = await db.execute(
+        select(TenantUser).where(TenantUser.id == membership_id, TenantUser.tenant_id == tenant_id)
+    )
+    membership = result.scalar_one_or_none()
+    if membership is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membro não encontrado.")
+
+    membership.is_active = False
+    await db.commit()
+    logger.info(
+        "tenant.member_removed",
+        tenant_id=str(tenant_id),
+        membership_id=str(membership_id),
+        removed_by=str(admin.user_id),
+    )
 
 
 @router.get("/me/unipile/webhook", response_model=UnipileWebhookStatusResponse)
@@ -444,6 +639,35 @@ async def update_integrations(
     resp = TenantIntegrationResponse.model_validate(integration)
     resp.pipedrive_api_token_set = bool(integration.pipedrive_api_token)
     return resp
+
+
+@router.patch("/{tenant_id}", response_model=TenantAdminResponse)
+async def update_tenant_admin(
+    tenant_id: uuid.UUID,
+    body: TenantAdminUpdate,
+    _admin: UserPayload = Depends(require_superuser),
+    db: AsyncSession = Depends(_get_raw_session),
+) -> TenantAdminResponse:
+    result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+    tenant = result.scalar_one_or_none()
+    if tenant is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant não encontrado.")
+
+    updates = body.model_dump(exclude_unset=True)
+    if "slug" in updates and updates["slug"] != tenant.slug:
+        duplicate_result = await db.execute(
+            select(Tenant.id).where(Tenant.slug == updates["slug"], Tenant.id != tenant.id)
+        )
+        if duplicate_result.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Slug já em uso.")
+
+    for field, value in updates.items():
+        setattr(tenant, field, value)
+
+    await db.commit()
+    await db.refresh(tenant)
+    logger.info("tenant.updated", tenant_id=str(tenant.id), fields=list(updates.keys()))
+    return await _build_tenant_admin_response(db, tenant)
 
 
 async def _probe_unipile_webhook_endpoint(url: str) -> int | None:

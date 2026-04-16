@@ -276,11 +276,13 @@ async def _handle_chat_read(payload: dict) -> None:
     # Invalida cache Redis para que a próxima query retorne unread_count atualizado
     if account_id:
         from integrations.unipile_client import unipile_client
+
         await unipile_client.invalidate_inbox_cache(account_id, chat_id=chat_id)
 
     # Broadcast WS para todos os tenants conectados (sem isolamento de tenant aqui,
     # pois não temos o tenant_id no payload — o frontend filtra pelo chat_id)
     from api.routes.ws import broadcast_all_tenants
+
     await broadcast_all_tenants({"type": "inbox.chat_read", "chat_id": chat_id})
     logger.info("webhook.unipile.chat_read", chat_id=chat_id, account_id=account_id or None)
 
@@ -433,9 +435,9 @@ def _verify_signature(body: bytes, signature_header: str, custom_auth_header: st
     if not secret or secret == "...":
         if settings.ENV == "prod":
             logger.error("webhook.unipile.no_secret_in_prod")
-            return False
-        logger.warning("webhook.unipile.no_secret_configured")
-        return True
+        else:
+            logger.error("webhook.unipile.no_secret_configured")
+        return False
 
     if custom_auth_header and hmac.compare_digest(custom_auth_header, secret):
         return True

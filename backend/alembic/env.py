@@ -38,6 +38,7 @@ from models.lead_tag import LeadTag  # noqa: F401
 from models.manual_task import ManualTask  # noqa: F401
 from models.sandbox import SandboxRun, SandboxStep  # noqa: F401
 from models.tenant import Tenant, TenantIntegration  # noqa: F401
+from models.tenant_user import TenantUser  # noqa: F401
 from models.user import User  # noqa: F401
 
 # Objeto de configuração do Alembic (lê alembic.ini)

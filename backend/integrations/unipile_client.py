@@ -539,13 +539,13 @@ class UnipileClient:
         last = data.get("last_name") or ""
         full_name = f"{first} {last}".strip() or data.get("public_identifier", "")
 
-        # Empresa atual = primeiro item de experience
+        # Empresa atual = primeiro item de work_experience
         company: str | None = None
-        experiences = data.get("experience") or []
+        experiences = data.get("work_experience") or []
         if experiences and isinstance(experiences, list):
             exp = experiences[0]
             if isinstance(exp, dict):
-                company = exp.get("company_name") or exp.get("company") or None
+                company = exp.get("company") or exp.get("company_name") or None
 
         return LinkedInProfile(
             profile_id=data.get("provider_id") or data.get("public_identifier", ""),
@@ -553,6 +553,32 @@ class UnipileClient:
             headline=data.get("headline"),
             company=company,
         )
+
+    async def fetch_profile_company(
+        self,
+        account_id: str,
+        provider_id: str,
+    ) -> str | None:
+        """
+        Retorna o nome da empresa atual de um perfil LinkedIn via experience section.
+        Usa GET /users/{provider_id}?linkedin_sections=experience.
+        """
+        try:
+            r = await self._client.get(
+                f"/users/{provider_id}",
+                params={"account_id": account_id, "linkedin_sections": "experience"},
+            )
+            if r.status_code != 200:
+                return None
+            data = r.json()
+            exp = data.get("work_experience") or []
+            if isinstance(exp, list) and exp:
+                first = exp[0]
+                if isinstance(first, dict):
+                    return first.get("company") or first.get("company_name") or None
+            return None
+        except Exception:
+            return None
 
     async def get_relation_status(
         self,
@@ -636,8 +662,8 @@ class UnipileClient:
                 "profile_picture_url": data.get("profile_picture_url"),
                 "public_identifier": public_id,
                 "headline": data.get("headline") or None,
-                "company": (data.get("experience") or [{}])[0].get("company_name")
-                if isinstance(data.get("experience"), list) and data.get("experience")
+                "company": (data.get("work_experience") or [{}])[0].get("company")
+                if isinstance(data.get("work_experience"), list) and data.get("work_experience")
                 else None,
                 "location": data.get("location") or None,
                 "email": contact_email,
@@ -1450,7 +1476,7 @@ class UnipileClient:
         try:
             response = await self._client.get(
                 "/linkedin/search/parameters",
-                params={"account_id": account_id, "type": param_type, "query": query},
+                params={"account_id": account_id, "type": param_type, "keywords": query},
             )
             response.raise_for_status()
             data = response.json()
@@ -1460,8 +1486,13 @@ class UnipileClient:
                     {"id": item.get("id", ""), "title": item.get("title", "")} for item in items
                 ]
             }
-        except httpx.HTTPError as exc:
-            logger.warning("unipile.search_params.error", param_type=param_type, error=str(exc))
+        except Exception as exc:
+            logger.warning(
+                "unipile.search_params.error",
+                param_type=param_type,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
             return {"items": []}
 
     def _parse_linkedin_items(self, raw_items: list[dict]) -> list[dict]:
@@ -1484,6 +1515,7 @@ class UnipileClient:
                     or (f"{p.get('first_name', '')} {p.get('last_name', '')}".strip()),
                     "headline": p.get("headline") or p.get("title") or None,
                     "company": p.get("company") or p.get("current_company") or None,
+                    "industry": p.get("industry") or None,
                     "location": p.get("location") or None,
                     "profile_url": (
                         p.get("public_profile_url")
@@ -1527,6 +1559,7 @@ class UnipileClient:
         keywords: str,
         titles: list[str] | None = None,
         companies: list[str] | None = None,
+        company_ids: list[str] | None = None,
         location_ids: list[str] | None = None,
         industry_ids: list[str] | None = None,
         network_distance: list[int] | None = None,
@@ -1552,6 +1585,9 @@ class UnipileClient:
             body["industry"] = industry_ids
         if network_distance:
             body["network_distance"] = network_distance
+        # Filtro nativo por IDs de empresa (mais preciso que advanced_keywords)
+        if company_ids:
+            body["company"] = company_ids
 
         advanced: dict = {}
         if titles:

@@ -51,6 +51,7 @@ celery_app = Celery(
         "workers.connection_check",
         "workers.anthropic_batch",
         "workers.content_engagement",
+        "workers.enrichment_queue",
     ],
 )
 
@@ -82,6 +83,23 @@ celery_app.conf.update(
     task_default_queue="dispatch",
     task_default_exchange="prospector",
     task_default_routing_key="dispatch",
+    # Roteamento explícito de tasks para filas
+    task_routes={
+        "workers.capture.*": {"queue": "capture"},
+        "workers.enrich.*": {"queue": "enrich"},
+        "workers.enrichment_queue.*": {"queue": "enrich"},
+        "workers.anthropic_batch.*": {"queue": "enrich"},
+        "workers.cadence.*": {"queue": "cadence"},
+        "workers.linkedin_poll.*": {"queue": "cadence"},
+        "workers.email_inbox_poll.*": {"queue": "cadence"},
+        "workers.connection_check.*": {"queue": "cadence"},
+        "workers.warmup.*": {"queue": "cadence"},
+        "workers.dispatch.*": {"queue": "dispatch"},
+        "workers.content.*": {"queue": "content"},
+        "workers.content_lm_sync.*": {"queue": "content"},
+        "workers.content_voyager.*": {"queue": "content"},
+        "workers.content_engagement.*": {"queue": "content-engagement"},
+    },
     # Workers
     worker_prefetch_multiplier=1,  # não reservar tasks extras (fairness)
     task_acks_late=True,  # confirmar só após execução bem-sucedida

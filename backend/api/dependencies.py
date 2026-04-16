@@ -38,7 +38,9 @@ from core.database import AsyncSessionLocal
 from core.database import get_session as _get_session
 from core.redis_client import RedisClient, redis_client
 from core.security import (
+    UserPayload,
     decode_token,
+    get_current_user_payload,
 )
 from core.security import (
     get_current_tenant_id as _get_current_tenant_id,
@@ -46,6 +48,9 @@ from core.security import (
 from integrations.llm.registry import LLMRegistry
 from integrations.tts.registry import TTSRegistry
 from models.tenant import Tenant
+from models.tenant_user import TenantUser
+from models.user import User
+from services.tenant_access import get_active_membership, resolve_user_login_context
 
 logger = structlog.get_logger()
 
@@ -71,6 +76,25 @@ async def get_session_no_auth() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+async def _require_active_tenant_id(tenant_id: uuid.UUID) -> uuid.UUID:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Tenant.id).where(
+                Tenant.id == tenant_id,
+                Tenant.is_active.is_(True),
+            )
+        )
+        active_tenant_id = result.scalar_one_or_none()
+
+    if active_tenant_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant não encontrado ou inativo.",
+        )
+
+    return tenant_id
+
+
 # ── Session com tenant injetado ───────────────────────────────────────
 
 
@@ -81,7 +105,8 @@ async def get_session(
     Abre uma AsyncSession com o tenant_id injetado via SET LOCAL (RLS).
     Commit automático no final, rollback em caso de exceção.
     """
-    async for session in _get_session(tenant_id):
+    active_tenant_id = await _require_active_tenant_id(tenant_id)
+    async for session in _get_session(active_tenant_id):
         yield session
 
 
@@ -121,23 +146,46 @@ async def get_effective_tenant_id(
         tenant_id_str: str | None = payload.get("tenant_id")
         if tenant_id_str is None:
             raise credentials_exception
-        return uuid.UUID(tenant_id_str)
+        return await _require_active_tenant_id(uuid.UUID(tenant_id_str))
 
-    # Token de usuário → busca o primeiro tenant ativo (MVP)
+    # Token de usuário → valida membership/tentant explícito
+    user_id_str: str | None = payload.get("user_id")
+    if user_id_str is None:
+        raise credentials_exception
+
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Tenant.id)
-            .where(Tenant.is_active.is_(True))
-            .order_by((Tenant.slug == settings.DEFAULT_TENANT_SLUG).desc(), Tenant.created_at.asc())
-            .limit(1)
+        user_result = await session.execute(
+            select(User).where(
+                User.id == uuid.UUID(user_id_str),
+                User.is_active.is_(True),
+            )
         )
-        tenant_id = result.scalar_one_or_none()
+        user = user_result.scalar_one_or_none()
 
-    if tenant_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Nenhum tenant ativo encontrado.",
-        )
+        if user is None:
+            raise credentials_exception
+
+        token_tenant_id = payload.get("tenant_id")
+        tenant_id = uuid.UUID(token_tenant_id) if token_tenant_id else None
+        if tenant_id is None:
+            tenant_id, _tenant_role = await resolve_user_login_context(session, user)
+
+        if tenant_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Usuário sem acesso a tenant ativo.",
+            )
+
+        await _require_active_tenant_id(tenant_id)
+
+        if not user.is_superuser:
+            membership = await get_active_membership(session, user_id=user.id, tenant_id=tenant_id)
+            if membership is None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Usuário não possui acesso a este tenant.",
+                )
+
     logger.debug("auth.user_tenant_resolved", tenant_id=str(tenant_id))
     return tenant_id
 
@@ -198,13 +246,60 @@ async def get_current_tenant_flexible(
     return tenant
 
 
+async def get_current_active_user(
+    user: UserPayload = Depends(get_current_user_payload),
+) -> User:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(User).where(User.id == user.user_id, User.is_active.is_(True))
+        )
+        db_user = result.scalar_one_or_none()
+    if db_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuário não encontrado ou inativo.",
+        )
+    return db_user
+
+
+async def get_current_tenant_membership(
+    user: UserPayload = Depends(get_current_user_payload),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+) -> TenantUser | None:
+    if user.is_superuser:
+        return None
+
+    async with AsyncSessionLocal() as session:
+        membership = await get_active_membership(session, user_id=user.user_id, tenant_id=tenant_id)
+
+    if membership is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Usuário não possui acesso a este tenant.",
+        )
+    return membership
+
+
+async def require_tenant_admin(
+    user: UserPayload = Depends(get_current_user_payload),
+    membership: TenantUser | None = Depends(get_current_tenant_membership),
+) -> UserPayload:
+    if user.is_superuser:
+        return user
+    if membership is None or membership.role.value != "tenant_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso restrito a admins do tenant.",
+        )
+    return user
+
+
 # ── LLM Registry ──────────────────────────────────────────────────────
 
 
 @lru_cache(maxsize=1)
 def _build_llm_registry() -> LLMRegistry:
     """Constrói o LLMRegistry uma única vez (singleton via lru_cache)."""
-    from core.config import settings
 
     return LLMRegistry(settings=settings, redis=redis_client)
 
@@ -220,7 +315,6 @@ def get_llm_registry() -> LLMRegistry:
 @lru_cache(maxsize=1)
 def _build_tts_registry() -> TTSRegistry:
     """Constrói o TTSRegistry uma única vez (singleton via lru_cache)."""
-    from core.config import settings
 
     return TTSRegistry(settings=settings, redis=redis_client)
 

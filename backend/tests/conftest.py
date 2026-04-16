@@ -37,6 +37,7 @@ import models.cadence_step  # noqa: F401  # pyright: ignore[reportUnusedImport]
 import models.interaction  # noqa: F401  # pyright: ignore[reportUnusedImport]
 import models.lead  # noqa: F401  # pyright: ignore[reportUnusedImport]
 import models.lead_email  # noqa: F401  # pyright: ignore[reportUnusedImport]
+import models.tenant_user  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from api.dependencies import (
     get_current_tenant_id,
     get_effective_tenant_id,
@@ -45,9 +46,12 @@ from api.dependencies import (
 )
 from api.main import app
 from core.config import settings
-from core.security import create_access_token
+from core.security import UserPayload, create_access_token, create_user_token
 from models.base import Base
+from models.enums import TenantRole
 from models.tenant import Tenant, TenantIntegration
+from models.tenant_user import TenantUser
+from models.user import User
 
 _TEST_DB_URL = os.getenv("TEST_DATABASE_URL", settings.DATABASE_URL)
 
@@ -133,6 +137,87 @@ def access_token(tenant_id: uuid.UUID) -> str:
 @pytest.fixture
 def auth_headers(access_token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {access_token}"}
+
+
+@pytest_asyncio.fixture
+async def superuser(db: AsyncSession) -> User:
+    user = User(
+        id=uuid.uuid4(),
+        email="admin@composto.test",
+        name="Admin Geral",
+        is_active=True,
+        is_superuser=True,
+    )
+    db.add(user)
+    await db.flush()
+    return user
+
+
+@pytest.fixture
+def superuser_payload(superuser: User, tenant_id: uuid.UUID) -> UserPayload:
+    return UserPayload(
+        user_id=superuser.id,
+        email=superuser.email,
+        is_superuser=True,
+        name=superuser.name,
+        tenant_id=tenant_id,
+        tenant_role=None,
+    )
+
+
+@pytest.fixture
+def superuser_auth_headers(superuser: User, tenant_id: uuid.UUID) -> dict[str, str]:
+    token = create_user_token(
+        user_id=superuser.id,
+        email=superuser.email,
+        is_superuser=True,
+        name=superuser.name,
+        tenant_id=tenant_id,
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest_asyncio.fixture
+async def tenant_admin_user(db: AsyncSession) -> User:
+    user = User(
+        id=uuid.uuid4(),
+        email="tenant-admin@composto.test",
+        name="Admin Tenant",
+        is_active=True,
+        is_superuser=False,
+    )
+    db.add(user)
+    await db.flush()
+    return user
+
+
+@pytest_asyncio.fixture
+async def tenant_admin_membership(
+    db: AsyncSession,
+    tenant: Tenant,
+    tenant_admin_user: User,
+) -> TenantUser:
+    membership = TenantUser(
+        tenant_id=tenant.id,
+        user_id=tenant_admin_user.id,
+        role=TenantRole.TENANT_ADMIN,
+        is_active=True,
+    )
+    db.add(membership)
+    await db.flush()
+    return membership
+
+
+@pytest.fixture
+def tenant_admin_payload(tenant_admin_user: User, tenant_id: uuid.UUID) -> UserPayload:
+    return UserPayload(
+        user_id=tenant_admin_user.id,
+        email=tenant_admin_user.email,
+        is_superuser=False,
+        name=tenant_admin_user.name,
+        tenant_id=tenant_id,
+        tenant_role=TenantRole.TENANT_ADMIN,
+    )
 
 
 # ── Cliente HTTP com overrides de dependências ────────────────────────

@@ -30,14 +30,15 @@ from api.routes import audio as audio_router
 from api.routes import audio_files as audio_files_router
 from api.routes import auth as auth_router
 from api.routes import cadences as cadences_router
+from api.routes import capture_schedule as capture_schedule_router
 from api.routes import email_accounts as email_accounts_router
 from api.routes import email_templates as email_templates_router
 from api.routes import email_tracking as email_tracking_router
+from api.routes import enrichment_jobs as enrichment_jobs_router
+from api.routes import files as files_router
 from api.routes import inbox as inbox_router
 from api.routes import lead_analysis as lead_analysis_router
 from api.routes import lead_lists as lead_lists_router
-from api.routes import capture_schedule as capture_schedule_router
-from api.routes import enrichment_jobs as enrichment_jobs_router
 from api.routes import leads as leads_router
 from api.routes import linkedin_accounts as linkedin_accounts_router
 from api.routes import llm as llm_router
@@ -49,7 +50,6 @@ from api.routes import tenants as tenants_router
 from api.routes import tts as tts_router
 from api.routes import warmup as warmup_router
 from api.routes import ws as ws_router
-from api.routes import files as files_router
 from api.routes.content import router as content_router
 from api.webhooks import sendpulse as sendpulse_webhook
 from api.webhooks import unipile as unipile_webhook
@@ -89,6 +89,21 @@ def _resolve_allowed_origins(origins: list[str]) -> list[str]:
             expanded_origins.append(alternate_origin)
 
     return expanded_origins
+
+
+def _apply_security_headers(response: Response) -> None:
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=()",
+    )
+    if settings.ENV == "prod":
+        response.headers.setdefault(
+            "Strict-Transport-Security",
+            "max-age=31536000; includeSubDomains",
+        )
 
 
 # ── Seed: superadmin ─────────────────────────────────────────────────
@@ -192,6 +207,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Garante que os prefixos de arquivos públicos estejam com policy pública no MinIO
     from integrations.s3_client import s3_client as _s3
+
     if _s3:
         try:
             _s3.set_public_read_prefixes(["lm-pdfs/", "lm-images/"])
@@ -239,6 +255,7 @@ async def log_requests(
 ) -> Response:
     start = time.perf_counter()
     response: Response = await call_next(request)  # type: ignore[operator]
+    _apply_security_headers(response)
     duration_ms = round((time.perf_counter() - start) * 1000, 2)
     logger.info(
         "http.request",

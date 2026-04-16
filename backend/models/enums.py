@@ -181,3 +181,10 @@ class ManualTaskStatus(str, Enum):
     SENT = "sent"
     DONE_EXTERNAL = "done_external"
     SKIPPED = "skipped"
+
+
+class TenantRole(str, Enum):
+    """Papel do usuário dentro de um tenant."""
+
+    TENANT_ADMIN = "tenant_admin"
+    TENANT_USER = "tenant_user"

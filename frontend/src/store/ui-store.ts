@@ -1,5 +1,14 @@
 ﻿import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/sidebar-preferences"
+
+function persistSidebarCollapsedPreference(collapsed: boolean) {
+  if (typeof document === "undefined") {
+    return
+  }
+
+  document.cookie = `${SIDEBAR_COLLAPSED_COOKIE}=${collapsed}; path=/; max-age=31536000; samesite=lax`
+}
 
 // ── Tipos ─────────────────────────────────────────────────────────────
 
@@ -37,8 +46,16 @@ export const useUIStore = create<UIState>()(
     (set) => ({
       // Sidebar — persiste no localStorage
       sidebarCollapsed: false,
-      toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
-      setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
+      toggleSidebar: () =>
+        set((state) => {
+          const nextCollapsed = !state.sidebarCollapsed
+          persistSidebarCollapsedPreference(nextCollapsed)
+          return { sidebarCollapsed: nextCollapsed }
+        }),
+      setSidebarCollapsed: (collapsed) => {
+        persistSidebarCollapsedPreference(collapsed)
+        set({ sidebarCollapsed: collapsed })
+      },
 
       // Filtros — NÃO persistem (resetam ao recarregar)
       activeFilters: {},
@@ -56,6 +73,11 @@ export const useUIStore = create<UIState>()(
       name: "prospector-ui",
       // Persiste apenas a sidebar
       partialize: (state) => ({ sidebarCollapsed: state.sidebarCollapsed }),
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          persistSidebarCollapsedPreference(state.sidebarCollapsed)
+        }
+      },
     },
   ),
 )

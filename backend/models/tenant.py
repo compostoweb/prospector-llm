@@ -15,16 +15,20 @@ sobrescrevendo os defaults globais definidos em core/config.py.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base
 
+if TYPE_CHECKING:
+    from models.tenant_user import TenantUser
+
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Tenant(Base):
@@ -54,11 +58,16 @@ class Tenant(Base):
     )
 
     # Relacionamento com as integrações
-    integration: Mapped["TenantIntegration | None"] = relationship(
+    integration: Mapped[TenantIntegration | None] = relationship(
         "TenantIntegration",
         back_populates="tenant",
         uselist=False,
         lazy="select",
+    )
+    members: Mapped[list[TenantUser]] = relationship(
+        "TenantUser",
+        back_populates="tenant",
+        lazy="selectin",
     )
 
 
@@ -69,9 +78,7 @@ class TenantIntegration(Base):
     """
 
     __tablename__ = "tenant_integrations"
-    __table_args__ = (
-        UniqueConstraint("tenant_id", name="uq_tenant_integrations_tenant_id"),
-    )
+    __table_args__ = (UniqueConstraint("tenant_id", name="uq_tenant_integrations_tenant_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(
         primary_key=True,
@@ -110,37 +117,53 @@ class TenantIntegration(Base):
 
     # ── LLM — padrão do sistema ───────────────────────────────────────
     llm_default_provider: Mapped[str] = mapped_column(
-        String(50), default="openai", nullable=False,
+        String(50),
+        default="openai",
+        nullable=False,
         comment="Provedor LLM padrão ao criar novas cadências",
     )
     llm_default_model: Mapped[str] = mapped_column(
-        String(100), default="gpt-4o-mini", nullable=False,
+        String(100),
+        default="gpt-4o-mini",
+        nullable=False,
         comment="Modelo LLM padrão ao criar novas cadências",
     )
     llm_default_temperature: Mapped[float] = mapped_column(
-        Float, default=0.7, nullable=False,
+        Float,
+        default=0.7,
+        nullable=False,
         comment="Temperatura LLM padrão (0.0–1.0)",
     )
     llm_default_max_tokens: Mapped[int] = mapped_column(
-        Integer, default=1024, nullable=False,
+        Integer,
+        default=1024,
+        nullable=False,
         comment="Max tokens LLM padrão (64–8192)",
     )
 
     # ── LLM — padrão Cold Email ───────────────────────────────────────
     cold_email_llm_provider: Mapped[str] = mapped_column(
-        String(50), default="openai", nullable=False,
+        String(50),
+        default="openai",
+        nullable=False,
         comment="Provedor LLM padrão para campanhas de cold email",
     )
     cold_email_llm_model: Mapped[str] = mapped_column(
-        String(100), default="gpt-4o-mini", nullable=False,
+        String(100),
+        default="gpt-4o-mini",
+        nullable=False,
         comment="Modelo LLM padrão para campanhas de cold email",
     )
     cold_email_llm_temperature: Mapped[float] = mapped_column(
-        Float, default=0.7, nullable=False,
+        Float,
+        default=0.7,
+        nullable=False,
         comment="Temperatura LLM para cold email (0.0–1.0)",
     )
     cold_email_llm_max_tokens: Mapped[int] = mapped_column(
-        Integer, default=512, nullable=False,
+        Integer,
+        default=512,
+        nullable=False,
         comment="Max tokens LLM para cold email (64–8192)",
     )
 
@@ -151,4 +174,4 @@ class TenantIntegration(Base):
     )
 
     # Relacionamento reverso
-    tenant: Mapped["Tenant"] = relationship("Tenant", back_populates="integration")
+    tenant: Mapped[Tenant] = relationship("Tenant", back_populates="integration")

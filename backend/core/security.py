@@ -22,14 +22,18 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
+from sqlalchemy import select
 
 from core.config import settings
+from core.database import AsyncSessionLocal
+from models.enums import TenantRole
+from models.user import User
 
 ALGORITHM = "HS256"
 
@@ -37,6 +41,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
 
 # ── Criação de tokens ─────────────────────────────────────────────────
+
 
 def create_access_token(
     data: dict[str, Any],
@@ -47,7 +52,7 @@ def create_access_token(
     O campo 'tenant_id' deve estar presente em data para tokens de tenant.
     """
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (
+    expire = datetime.now(UTC) + (
         expires_delta
         if expires_delta is not None
         else timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -61,18 +66,24 @@ def create_user_token(
     email: str,
     is_superuser: bool,
     name: str | None = None,
+    tenant_id: uuid.UUID | None = None,
+    tenant_role: TenantRole | None = None,
 ) -> str:
     """
     Gera um JWT para usuário humano autenticado via Google OAuth.
     O campo 'type' = 'user' distingue do token de tenant.
     """
-    return create_access_token({
-        "type": "user",
-        "user_id": str(user_id),
-        "email": email,
-        "is_superuser": is_superuser,
-        "name": name,
-    })
+    return create_access_token(
+        {
+            "type": "user",
+            "user_id": str(user_id),
+            "email": email,
+            "is_superuser": is_superuser,
+            "name": name,
+            "tenant_id": str(tenant_id) if tenant_id else None,
+            "tenant_role": tenant_role.value if tenant_role else None,
+        }
+    )
 
 
 def decode_token(token: str) -> dict[str, Any]:
@@ -84,6 +95,7 @@ def decode_token(token: str) -> dict[str, Any]:
 
 
 # ── Dependências FastAPI ──────────────────────────────────────────────
+
 
 def get_current_tenant_id(
     token: str = Depends(oauth2_scheme),
@@ -119,6 +131,8 @@ class UserPayload:
     email: str
     is_superuser: bool
     name: str | None
+    tenant_id: uuid.UUID | None
+    tenant_role: TenantRole | None
 
 
 def get_current_user_payload(
@@ -146,22 +160,43 @@ def get_current_user_payload(
             email=email,
             is_superuser=bool(payload.get("is_superuser", False)),
             name=payload.get("name"),
+            tenant_id=uuid.UUID(payload["tenant_id"]) if payload.get("tenant_id") else None,
+            tenant_role=(
+                TenantRole(payload["tenant_role"]) if payload.get("tenant_role") else None
+            ),
         )
     except (JWTError, ValueError):
         raise credentials_exception
 
 
-def require_superuser(
+async def require_superuser(
     user: UserPayload = Depends(get_current_user_payload),
 ) -> UserPayload:
     """
     Dependência para rotas exclusivas de superadmin.
-    Levanta 403 se o usuário não for superuser.
+    Revalida no banco para garantir que tokens antigos parem de funcionar
+    após desativação ou remoção do privilégio de superuser.
     """
     if not user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Acesso restrito a superadmins.",
         )
-    return user
 
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(User).where(
+                User.id == user.user_id,
+                User.is_active.is_(True),
+                User.is_superuser.is_(True),
+            )
+        )
+        db_user = result.scalar_one_or_none()
+
+    if db_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuário não encontrado, inativo ou sem privilégio de superadmin.",
+        )
+
+    return user

@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useSession } from "next-auth/react"
 import { createBrowserClient } from "@/lib/api/client"
+import { env } from "@/env"
 
 // ── Tipos ─────────────────────────────────────────────────────────────
 
@@ -483,6 +484,7 @@ export interface LinkedInSearchParams {
   keywords: string
   titles?: string[] | undefined
   companies?: string[] | undefined
+  company_ids?: string[] | undefined // IDs nativos (filtro COMPANY do LinkedIn)
   location_ids?: string[] | undefined
   industry_ids?: string[] | undefined
   network_distance?: number[] | undefined // [1, 2, 3]
@@ -495,6 +497,7 @@ export interface LinkedInProfile {
   name: string
   headline: string | null
   company: string | null
+  industry: string | null
   location: string | null
   profile_url: string | null
   profile_picture_url: string | null
@@ -602,8 +605,7 @@ export interface LinkedInSearchParamItem {
 
 /**
  * Busca todos os itens de LOCATION ou INDUSTRY disponíveis via Unipile.
- * O endpoint retorna uma lista estática (ignora query), então buscamos
- * uma única vez por tipo e filtramos no cliente.
+ * Usa fetch direto (evita problemas de serialização do openapi-fetch com paths não tipados).
  */
 export function useLinkedInSearchParams(type: "LOCATION" | "INDUSTRY") {
   const { data: session } = useSession()
@@ -611,16 +613,48 @@ export function useLinkedInSearchParams(type: "LOCATION" | "INDUSTRY") {
   return useQuery<LinkedInSearchParamItem[]>({
     queryKey: ["linkedin-search-params", type],
     queryFn: async () => {
-      if (!session?.accessToken) return []
-      const client = createBrowserClient(session.accessToken)
-      const { data, error } = await client.GET("/leads/linkedin-search-params" as never, {
-        params: { query: { type } } as never,
+      if (!session?.accessToken) throw new Error("No session")
+      const url = `${env.NEXT_PUBLIC_API_URL}/leads/linkedin-search-params?type=${encodeURIComponent(type)}`
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
       })
-      if (error) return []
-      const result = data as { items: LinkedInSearchParamItem[] }
-      return result.items ?? []
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const json = (await res.json()) as { items?: LinkedInSearchParamItem[] }
+      return json.items ?? []
     },
     enabled: !!session?.accessToken,
     staleTime: 30 * 60 * 1000,
+    retry: 2,
+  })
+}
+
+export interface LinkedInEnrichResult {
+  provider_id: string
+  company: string | null
+}
+
+/**
+ * Enriquece uma lista de perfis LinkedIn com a empresa atual.
+ * Faz POST /leads/linkedin-enrich-companies com os provider_ids.
+ * Retorna um map provider_id → company_name.
+ */
+export function useLinkedInEnrichCompanies() {
+  const { data: session } = useSession()
+
+  return useMutation<Map<string, string>, Error, string[]>({
+    mutationFn: async (providerIds: string[]) => {
+      const map = new Map<string, string>()
+      if (!session?.accessToken || providerIds.length === 0) return map
+      const client = createBrowserClient(session.accessToken)
+      const { data, error } = await client.POST("/leads/linkedin-enrich-companies" as never, {
+        body: { provider_ids: providerIds } as never,
+      })
+      if (error) return map
+      const result = data as { results: LinkedInEnrichResult[] }
+      for (const r of result.results ?? []) {
+        if (r.company) map.set(r.provider_id, r.company)
+      }
+      return map
+    },
   })
 }

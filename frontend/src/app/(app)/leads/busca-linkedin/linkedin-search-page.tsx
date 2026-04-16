@@ -36,11 +36,12 @@ import {
   useSearchLinkedIn,
   useImportLinkedInProfiles,
   useLinkedInSearchParams,
+  useLinkedInEnrichCompanies,
   type LinkedInProfile,
   type LinkedInSearchParams,
   type LinkedInSearchParamItem,
 } from "@/lib/api/hooks/use-leads"
-import { useLeadLists } from "@/lib/api/hooks/use-lead-lists"
+import { useLeadLists, useCreateLeadList } from "@/lib/api/hooks/use-lead-lists"
 import { cn } from "@/lib/utils"
 
 // ── Constantes ────────────────────────────────────────────────────────
@@ -201,7 +202,8 @@ function TypeaheadTagInput({
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   // Busca todos os itens uma vez (Unipile ignora o query param, filtramos no cliente)
-  const { data: allItems = [], isFetching } = useLinkedInSearchParams(type)
+  const { data: allItems = [], isFetching, isError, isPending } = useLinkedInSearchParams(type)
+  const isLoadingItems = isPending || (isFetching && allItems.length === 0)
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -254,24 +256,41 @@ function TypeaheadTagInput({
         ) : null}
       </div>
 
-      {open && filteredSuggestions.length > 0 && (
+      {open && (
         <div className="absolute top-9 z-50 max-h-48 w-full overflow-y-auto rounded-lg border border-(--border-default) bg-(--bg-surface) py-1 shadow-xl">
-          {filteredSuggestions.slice(0, 12).map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => {
-                onAdd(item)
-                setQuery("")
-                // Keep dropdown open for multi-select
-                setTimeout(() => inputRef.current?.focus(), 0)
-              }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-(--text-primary) transition-colors hover:bg-(--accent-subtle)"
-            >
-              <Plus size={10} className="shrink-0 text-(--text-tertiary)" />
-              {item.title}
-            </button>
-          ))}
+          {isLoadingItems ? (
+            <div className="flex items-center gap-2 px-3 py-2 text-xs text-(--text-tertiary)">
+              <Loader2 size={11} className="animate-spin" />
+              Carregando opções…
+            </div>
+          ) : isError ? (
+            <div className="px-3 py-2 text-xs text-red-500">
+              Erro ao carregar opções. Tente novamente.
+            </div>
+          ) : filteredSuggestions.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-(--text-tertiary)">
+              {query.trim()
+                ? "Nenhum resultado para essa busca"
+                : "Todas as opções já foram selecionadas"}
+            </div>
+          ) : (
+            filteredSuggestions.slice(0, 12).map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  onAdd(item)
+                  setQuery("")
+                  // Keep dropdown open for multi-select
+                  setTimeout(() => inputRef.current?.focus(), 0)
+                }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-(--text-primary) transition-colors hover:bg-(--accent-subtle)"
+              >
+                <Plus size={10} className="shrink-0 text-(--text-tertiary)" />
+                {item.title}
+              </button>
+            ))
+          )}
         </div>
       )}
 
@@ -284,6 +303,64 @@ function TypeaheadTagInput({
               onRemove={() => onRemove(item.id)}
               color={tagColor}
             />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Componente: Input de texto livre com chips (Empresa) ───────────────
+
+function SimpleTagInput({
+  selected,
+  onAdd,
+  onRemove,
+  placeholder,
+  tagColor = "default",
+}: {
+  selected: string[]
+  onAdd: (value: string) => void
+  onRemove: (value: string) => void
+  placeholder?: string
+  tagColor?: "default" | "blue" | "emerald" | "amber"
+}) {
+  const [value, setValue] = useState("")
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const commit = () => {
+    const trimmed = value.trim()
+    if (trimmed && !selected.includes(trimmed)) {
+      onAdd(trimmed)
+    }
+    setValue("")
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="relative">
+        <input
+          ref={inputRef}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === ",") {
+              e.preventDefault()
+              commit()
+            } else if (e.key === "Backspace" && value === "" && selected.length > 0) {
+              const last = selected[selected.length - 1]
+              if (last !== undefined) onRemove(last)
+            }
+          }}
+          onBlur={commit}
+          placeholder={placeholder ?? "Ex: Nubank, iFood — Enter para adicionar"}
+          className="h-8 w-full rounded-lg border border-(--border-default) bg-(--bg-surface) px-2.5 text-xs text-(--text-primary) placeholder:text-(--text-tertiary) focus:outline-none focus:ring-2 focus:ring-(--accent)/40 focus:border-(--accent)"
+        />
+      </div>
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {selected.map((v) => (
+            <Tag key={v} label={v} onRemove={() => onRemove(v)} color={tagColor} />
           ))}
         </div>
       )}
@@ -352,12 +429,37 @@ function CheckboxGroup<T extends string | number>({
 
 function extractCompanyFromHeadline(headline: string | null): string | null {
   if (!headline) return null
-  // Formatos comuns: "Cargo | Empresa", "Cargo – Empresa", "Cargo - Empresa", "Cargo @ Empresa"
-  const separators = [" | ", " · ", " – ", " — ", " @ ", " at ", " na ", " em "]
-  for (const sep of separators) {
+
+  // " / " é o separador mais comum no LinkedIn brasileiro: "Cargo / Empresa"
+  const slashIdx = headline.indexOf(" / ")
+  if (slashIdx > 0) return headline.slice(slashIdx + 3).trim()
+
+  // " @ " também é confiável: "Cargo @ Empresa"
+  const atIdx = headline.indexOf(" @ ")
+  if (atIdx > 0) return headline.slice(atIdx + 3).trim()
+
+  // Preposições indicando empresa em PT/EN: "Cargo na Empresa", "Cargo em Empresa"
+  for (const prep of [" na ", " no ", " em ", " at "]) {
+    const idx = headline.indexOf(prep)
+    if (idx > 0) {
+      const candidate = headline.slice(idx + prep.length).trim()
+      if (candidate.length > 2) return candidate
+    }
+  }
+
+  // " | " só quando há exatamente um pipe — múltiplos pipes = múltiplos cargos/skills
+  const pipeCount = (headline.match(/\|/g) ?? []).length
+  if (pipeCount === 1) {
+    const pipeIdx = headline.indexOf(" | ")
+    if (pipeIdx > 0) return headline.slice(pipeIdx + 3).trim()
+  }
+
+  // Separadores tipográficos: "·", "–", "—"
+  for (const sep of [" · ", " – ", " — "]) {
     const idx = headline.indexOf(sep)
     if (idx > 0) return headline.slice(idx + sep.length).trim()
   }
+
   return null
 }
 
@@ -368,13 +470,16 @@ function LeadDetailSidebar({
   onClose,
   onSelect,
   isSelected,
+  enrichedCompany,
 }: {
   profile: LinkedInProfile
   onClose: () => void
   onSelect: () => void
   isSelected: boolean
+  enrichedCompany?: string | null
 }) {
-  const derivedCompany = profile.company ?? extractCompanyFromHeadline(profile.headline)
+  const derivedCompany =
+    enrichedCompany ?? profile.company ?? extractCompanyFromHeadline(profile.headline)
 
   return (
     <aside className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-(--border-default) bg-(--bg-surface)">
@@ -502,7 +607,7 @@ function LeadDetailSidebar({
 // ── Componente principal ──────────────────────────────────────────────
 
 export default function LinkedInSearchPage() {
-  // ── Filtros
+  // ── Filtros positivos
   const [keywords, setKeywords] = useState("")
   const [titles, setTitles] = useState<string[]>([])
   const [companies, setCompanies] = useState<string[]>([])
@@ -510,6 +615,11 @@ export default function LinkedInSearchPage() {
   const [industryItems, setIndustryItems] = useState<LinkedInSearchParamItem[]>([])
   const [networkDistance, setNetworkDistance] = useState<number[]>([])
   const [limit, setLimit] = useState(25)
+
+  // ── Filtros negativos (client-side)
+  const [negativeTitles, setNegativeTitles] = useState<string[]>([])
+  const [negativeCompanies, setNegativeCompanies] = useState<string[]>([])
+  const [excludeOpenToWork, setExcludeOpenToWork] = useState(false)
 
   // ── Resultados
   const [results, setResults] = useState<LinkedInProfile[]>([])
@@ -524,6 +634,7 @@ export default function LinkedInSearchPage() {
 
   // ── Import
   const [targetListId, setTargetListId] = useState<string>("__none")
+  const [newListName, setNewListName] = useState("")
   const [importResult, setImportResult] = useState<{ created: number; skipped: number } | null>(
     null,
   )
@@ -533,21 +644,48 @@ export default function LinkedInSearchPage() {
   const [searchError, setSearchError] = useState<string | null>(null)
   const keywordsRef = useRef<HTMLTextAreaElement>(null)
 
+  const [companyEnrichMap, setCompanyEnrichMap] = useState<Map<string, string>>(new Map())
+
   const { status: sessionStatus } = useSession()
   const { mutateAsync: searchLinkedIn, isPending: isSearching } = useSearchLinkedIn()
   const { mutateAsync: importProfiles, isPending: isImporting } = useImportLinkedInProfiles()
   const { data: lists = [] } = useLeadLists()
+  const { mutateAsync: createList, isPending: isCreatingList } = useCreateLeadList()
+  const { mutate: enrichCompanies, isPending: isEnriching } = useLinkedInEnrichCompanies()
 
-  // ── Filtragem client-side de network distance ─────────────────────
-  // A Unipile pode retornar graus fora do filtro selecionado, então
-  // filtramos no cliente para garantir consistência.
+  // ── Filtragem client-side ─────────────────────────────────────────
+  // Aplica filtros de grau de conexão, termos negativos e Open to Work.
   const filteredResults = useMemo(() => {
-    if (networkDistance.length === 0) return results
-    return results.filter((p) => {
-      if (p.network_distance == null) return true
-      return networkDistance.includes(p.network_distance)
-    })
-  }, [results, networkDistance])
+    let list = results
+
+    // Grau de conexão
+    if (networkDistance.length > 0) {
+      list = list.filter((p) => {
+        if (p.network_distance == null) return true
+        return networkDistance.includes(p.network_distance)
+      })
+    }
+
+    // Cargos negativos
+    if (negativeTitles.length > 0) {
+      list = list.filter((p) => {
+        const h = (p.headline ?? "").toLowerCase()
+        return !negativeTitles.some((t) => h.includes(t.toLowerCase()))
+      })
+    }
+
+    // Empresas negativas
+    if (negativeCompanies.length > 0) {
+      const derivedCompany = (p: LinkedInProfile) =>
+        (p.company ?? extractCompanyFromHeadline(p.headline) ?? "").toLowerCase()
+      list = list.filter((p) => {
+        const co = derivedCompany(p)
+        return !negativeCompanies.some((c) => co.includes(c.toLowerCase()))
+      })
+    }
+
+    return list
+  }, [results, networkDistance, negativeTitles, negativeCompanies])
 
   // ── Helpers ───────────────────────────────────────────────────────
 
@@ -574,8 +712,10 @@ export default function LinkedInSearchPage() {
 
   const buildParams = useCallback(
     (nextCursor?: string | null): LinkedInSearchParams => {
+      let kw = keywords.trim() || " "
+      if (excludeOpenToWork) kw += ' NOT "open to work" NOT "#opentowork"'
       const params: LinkedInSearchParams = {
-        keywords: keywords.trim() || " ",
+        keywords: kw,
         limit,
         ...(nextCursor ? { cursor: nextCursor } : {}),
       }
@@ -586,7 +726,16 @@ export default function LinkedInSearchPage() {
       if (networkDistance.length > 0) params.network_distance = networkDistance
       return params
     },
-    [keywords, titles, companies, locationItems, industryItems, networkDistance, limit],
+    [
+      keywords,
+      titles,
+      companies,
+      locationItems,
+      industryItems,
+      networkDistance,
+      limit,
+      excludeOpenToWork,
+    ],
   )
 
   const hasAnyFilter =
@@ -648,9 +797,20 @@ export default function LinkedInSearchPage() {
 
   const handleImport = async () => {
     const toImport = filteredResults.filter((p) => selectedIds.has(p.provider_id))
+
+    let listId: string | undefined
+    if (newListName.trim()) {
+      const created = await createList({ name: newListName.trim() })
+      listId = created.id
+      setNewListName("")
+      setTargetListId(created.id)
+    } else if (targetListId && targetListId !== "__none") {
+      listId = targetListId
+    }
+
     const res = await importProfiles({
       profiles: toImport,
-      ...(targetListId && targetListId !== "__none" ? { list_id: targetListId } : {}),
+      ...(listId ? { list_id: listId } : {}),
     })
     setImportResult({ created: res.created, skipped: res.skipped })
     setSelectedIds(new Set())
@@ -665,7 +825,10 @@ export default function LinkedInSearchPage() {
     companies.length > 0 ||
     locationItems.length > 0 ||
     industryItems.length > 0 ||
-    networkDistance.length > 0
+    networkDistance.length > 0 ||
+    negativeTitles.length > 0 ||
+    negativeCompanies.length > 0 ||
+    excludeOpenToWork
 
   const allSelected = filteredResults.length > 0 && selectedIds.size === filteredResults.length
 
@@ -676,6 +839,17 @@ export default function LinkedInSearchPage() {
     window.addEventListener("keydown", handler)
     return () => window.removeEventListener("keydown", handler)
   }, [])
+
+  // Enriquece resultados com empresa via /users/{id}?linkedin_sections=experience
+  const enrichKey = useMemo(() => results.map((p) => p.provider_id).join("|"), [results])
+  useEffect(() => {
+    if (!enrichKey) return
+    setCompanyEnrichMap(new Map())
+    enrichCompanies(enrichKey.split("|"), {
+      onSuccess: (map) => setCompanyEnrichMap(map),
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enrichKey])
 
   // ── Render ────────────────────────────────────────────────────────
 
@@ -697,7 +871,7 @@ export default function LinkedInSearchPage() {
       {/* ── Layout: filtros | resultados | detalhe ── */}
       <div className="flex flex-1 overflow-hidden">
         {/* ── Painel de filtros ── */}
-        <aside className="flex w-70 shrink-0 flex-col overflow-y-auto border-r border-(--border-default) bg-(--bg-surface)">
+        <aside className="flex w-70 shrink-0 flex-col overflow-y-auto border-r border-(--border-default) bg-[#fcfcfc]">
           {/* Seção: Palavras-chave */}
           <div className="border-b border-(--border-subtle) p-4">
             <div className="mb-3 flex items-center gap-2">
@@ -820,11 +994,11 @@ export default function LinkedInSearchPage() {
                 Empresa
               </p>
             </div>
-            <TagInput
-              tags={companies}
+            <SimpleTagInput
+              selected={companies}
               onAdd={(v) => setCompanies((p) => [...p, v])}
               onRemove={(v) => setCompanies((p) => p.filter((x) => x !== v))}
-              placeholder="Ex: Nubank, iFood"
+              tagColor="blue"
             />
           </div>
 
@@ -885,10 +1059,82 @@ export default function LinkedInSearchPage() {
             />
           </div>
 
+          {/* Seção: Excluir / termos negativos */}
+          <div className="border-b border-(--border-subtle) p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <div className="flex h-5 w-5 items-center justify-center rounded bg-red-500/10">
+                <X size={10} className="text-red-600 dark:text-red-400" />
+              </div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-(--text-secondary)">
+                Excluir
+              </p>
+            </div>
+            <div className="flex flex-col gap-3">
+              {/* Open to Work */}
+              <button
+                type="button"
+                onClick={() => setExcludeOpenToWork((v) => !v)}
+                className={cn(
+                  "flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors",
+                  excludeOpenToWork
+                    ? "border-red-500/40 bg-red-500/10 text-(--text-primary)"
+                    : "border-(--border-default) text-(--text-secondary) hover:border-(--border-strong) hover:text-(--text-primary)",
+                )}
+              >
+                <span
+                  className={cn(
+                    "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition-colors",
+                    excludeOpenToWork ? "border-red-500 bg-red-500" : "border-(--border-default)",
+                  )}
+                >
+                  {excludeOpenToWork && (
+                    <svg viewBox="0 0 10 10" className="h-2.5 w-2.5">
+                      <path
+                        d="M2 5l2.5 2.5L8 3"
+                        stroke="white"
+                        strokeWidth="1.5"
+                        fill="none"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
+                </span>
+                <span className="font-medium">Open to Work</span>
+              </button>
+
+              {/* Cargos negativos */}
+              <div>
+                <p className="mb-1.5 text-xs font-medium text-(--text-secondary)">Excluir cargos</p>
+                <TagInput
+                  tags={negativeTitles}
+                  onAdd={(v) => setNegativeTitles((p) => [...p, v])}
+                  onRemove={(v) => setNegativeTitles((p) => p.filter((x) => x !== v))}
+                  placeholder="Ex: estagiário, trainee"
+                  tagColor="default"
+                />
+              </div>
+
+              {/* Empresas negativas */}
+              <div>
+                <p className="mb-1.5 text-xs font-medium text-(--text-secondary)">
+                  Excluir empresas
+                </p>
+                <TagInput
+                  tags={negativeCompanies}
+                  onAdd={(v) => setNegativeCompanies((p) => [...p, v])}
+                  onRemove={(v) => setNegativeCompanies((p) => p.filter((x) => x !== v))}
+                  placeholder="Ex: freelancer, autônomo"
+                  tagColor="default"
+                />
+              </div>
+            </div>
+          </div>
+
           {/* Seção: Ações */}
           <div className="mt-auto border-t border-(--border-default) bg-(--bg-canvas) p-4">
             <div className="mb-3 flex items-center justify-between">
-              <Label className="text-[10px] font-semibold uppercase tracking-wider text-(--text-tertiary)">
+              <Label className="text-[10px] font-semibold uppercase tracking-wider text-black">
                 Resultados
               </Label>
               <Select value={String(limit)} onValueChange={(v) => setLimit(Number(v))}>
@@ -933,6 +1179,9 @@ export default function LinkedInSearchPage() {
                   setLocationItems([])
                   setIndustryItems([])
                   setNetworkDistance([])
+                  setNegativeTitles([])
+                  setNegativeCompanies([])
+                  setExcludeOpenToWork(false)
                 }}
                 className="mt-2 flex w-full items-center justify-center gap-1 text-[11px] text-(--text-tertiary) hover:text-(--text-secondary)"
               >
@@ -944,7 +1193,7 @@ export default function LinkedInSearchPage() {
         </aside>
 
         {/* ── Área de resultados ── */}
-        <main className="flex flex-1 flex-col overflow-hidden">
+        <main className="relative flex flex-1 flex-col overflow-hidden bg-white dark:bg-gray-950">
           {/* Banner de erro */}
           {searchError && (
             <div className="flex items-center justify-between border-b border-(--border-subtle) bg-red-500/10 px-5 py-2 text-xs">
@@ -987,8 +1236,14 @@ export default function LinkedInSearchPage() {
                     selecionado{selectedIds.size !== 1 ? "s" : ""}
                   </span>
                   <Separator orientation="vertical" className="h-4" />
-                  <Select value={targetListId} onValueChange={setTargetListId}>
-                    <SelectTrigger className="h-7 w-44 text-xs">
+                  <Select
+                    value={targetListId}
+                    onValueChange={(v) => {
+                      setTargetListId(v)
+                      setNewListName("")
+                    }}
+                  >
+                    <SelectTrigger className="h-7 w-40 text-xs">
                       <SelectValue placeholder="Sem lista" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1002,13 +1257,23 @@ export default function LinkedInSearchPage() {
                       ))}
                     </SelectContent>
                   </Select>
+                  <span className="text-[10px] text-(--text-tertiary)">ou</span>
+                  <input
+                    value={newListName}
+                    onChange={(e) => {
+                      setNewListName(e.target.value)
+                      if (e.target.value) setTargetListId("__none")
+                    }}
+                    placeholder="Nova lista…"
+                    className="h-7 w-32 rounded-md border border-(--border-default) bg-(--bg-canvas) px-2 text-xs text-(--text-primary) placeholder:text-(--text-tertiary) focus:outline-none focus:ring-1 focus:ring-(--accent)/40"
+                  />
                   <Button
                     size="sm"
                     onClick={() => void handleImport()}
-                    disabled={isImporting}
+                    disabled={isImporting || isCreatingList}
                     className="h-7 text-xs"
                   >
-                    {isImporting ? (
+                    {isImporting || isCreatingList ? (
                       <Loader2 size={12} className="animate-spin" />
                     ) : (
                       <UserCheck size={12} />
@@ -1018,10 +1283,15 @@ export default function LinkedInSearchPage() {
                 </>
               )}
 
-              <div className="ml-auto text-(--text-tertiary)">
-                {filteredResults.length} resultado{filteredResults.length !== 1 ? "s" : ""}
-                {networkDistance.length > 0 && filteredResults.length !== results.length && (
-                  <span className="ml-1 text-(--text-tertiary)">
+              <div className="ml-auto">
+                <span className="font-semibold text-(--text-primary)">
+                  {filteredResults.length}
+                </span>{" "}
+                <span className="text-(--text-secondary)">
+                  resultado{filteredResults.length !== 1 ? "s" : ""}
+                </span>
+                {filteredResults.length !== results.length && (
+                  <span className="ml-1 text-[11px] text-(--text-tertiary)">
                     (filtrado de {results.length})
                   </span>
                 )}
@@ -1055,7 +1325,23 @@ export default function LinkedInSearchPage() {
           )}
 
           {/* Lista de resultados */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="relative flex-1 overflow-y-auto">
+            {/* Loading overlay */}
+            {isSearching && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-5 bg-white/80 backdrop-blur-sm dark:bg-gray-950/80">
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-(--accent) ring-4 ring-(--accent)/50">
+                  <Loader2 size={32} className="animate-spin text-white" />
+                </div>
+                <div className="text-center">
+                  <p className="text-lg font-semibold text-(--text-primary)">
+                    Buscando resultados…
+                  </p>
+                  <p className="mt-1 text-sm text-(--text-tertiary)">
+                    Consultando o LinkedIn via API
+                  </p>
+                </div>
+              </div>
+            )}
             {/* Estado inicial */}
             {!hasSearched && (
               <div className="flex flex-col items-center justify-center gap-4 py-28">
@@ -1094,22 +1380,31 @@ export default function LinkedInSearchPage() {
 
             {/* Resultados */}
             {filteredResults.length > 0 && (
-              <div className="divide-y divide-(--border-subtle)">
+              <div className="divide-y divide-gray-200 dark:divide-gray-800">
                 {filteredResults.map((profile) => {
                   const isSelected = selectedIds.has(profile.provider_id)
                   const isActive = detailProfile?.provider_id === profile.provider_id
-                  const rowCompany = profile.company ?? extractCompanyFromHeadline(profile.headline)
+                  // Empresa enriquecida via API (mais precisa) tem prioridade sobre headline
+                  const enrichedCompany = companyEnrichMap.get(profile.provider_id)
+                  const headlineCompany = (() => {
+                    const ex = profile.company ?? extractCompanyFromHeadline(profile.headline)
+                    return ex && ex !== profile.headline ? ex : null
+                  })()
+                  // Enquanto enriquecendo, não mostrar company extraída do headline (evita flash de dado errado)
+                  const rowCompany = enrichedCompany ?? (isEnriching ? null : headlineCompany)
+                  // Industry como fallback quando não há empresa disponível
+                  const rowIndustry = !rowCompany && !isEnriching ? profile.industry : null
                   return (
                     <div
                       key={profile.provider_id}
                       onClick={() => setDetailProfile(isActive ? null : profile)}
                       className={cn(
-                        "flex cursor-pointer items-center gap-3.5 px-5 py-3.5 transition-all",
+                        "flex cursor-pointer items-center gap-3.5 px-5 py-4 transition-all",
                         isActive
-                          ? "bg-(--accent-subtle) border-l-2 border-l-(--accent)"
+                          ? "border-l-[3px] border-l-amber-500 bg-amber-50 dark:bg-violet-950/30"
                           : isSelected
-                            ? "bg-(--bg-overlay) border-l-2 border-l-transparent"
-                            : "border-l-2 border-l-transparent hover:bg-(--bg-overlay)",
+                            ? "border-l-[3px] border-l-blue-400 bg-blue-50 dark:bg-blue-950/20"
+                            : "border-l-[3px] border-l-transparent hover:bg-gray-50 dark:hover:bg-gray-900",
                       )}
                     >
                       {/* Checkbox */}
@@ -1137,7 +1432,21 @@ export default function LinkedInSearchPage() {
                             unoptimized
                           />
                         ) : (
-                          <span className="text-sm font-semibold text-(--text-tertiary)">
+                          <span
+                            className={cn(
+                              "flex h-full w-full items-center justify-center rounded-full text-sm font-bold text-white",
+                              [
+                                "bg-violet-500",
+                                "bg-blue-500",
+                                "bg-emerald-500",
+                                "bg-amber-500",
+                                "bg-rose-500",
+                                "bg-indigo-500",
+                                "bg-teal-500",
+                                "bg-orange-500",
+                              ][profile.name.charCodeAt(0) % 8],
+                            )}
+                          >
                             {profile.name.charAt(0).toUpperCase()}
                           </span>
                         )}
@@ -1167,10 +1476,21 @@ export default function LinkedInSearchPage() {
                           </span>
                         )}
                         <div className="flex flex-wrap gap-x-3 gap-y-0.5">
-                          {rowCompany && (
-                            <span className="flex items-center gap-1 text-[11px] text-(--text-tertiary)">
+                          {rowCompany ? (
+                            <span className="flex items-center gap-1 text-[11px] font-medium text-blue-700 dark:text-blue-400">
                               <Building2 size={10} />
                               {rowCompany}
+                            </span>
+                          ) : isEnriching && !enrichedCompany ? (
+                            <span className="flex items-center gap-1 text-[11px] text-(--text-tertiary)">
+                              <Loader2 size={10} className="animate-spin" />
+                              Buscando empresa…
+                            </span>
+                          ) : null}
+                          {rowIndustry && (
+                            <span className="flex items-center gap-1 text-[11px] text-(--text-tertiary)">
+                              <Building2 size={10} />
+                              {rowIndustry}
                             </span>
                           )}
                           {profile.location && (
@@ -1249,6 +1569,7 @@ export default function LinkedInSearchPage() {
             onClose={() => setDetailProfile(null)}
             onSelect={() => toggleSelect(detailProfile.provider_id)}
             isSelected={selectedIds.has(detailProfile.provider_id)}
+            enrichedCompany={companyEnrichMap.get(detailProfile.provider_id) ?? null}
           />
         )}
       </div>

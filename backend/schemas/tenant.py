@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 
 class TenantCreateRequest(BaseModel):
@@ -18,6 +18,36 @@ class TenantCreateRequest(BaseModel):
 
     name: str = Field(..., min_length=2, max_length=200)
     slug: str = Field(..., min_length=2, max_length=100, pattern=r"^[a-z0-9-]+$")
+
+
+class TenantAdminCreateRequest(TenantCreateRequest):
+    """Criação de tenant pelo painel administrativo."""
+
+    primary_admin_email: EmailStr | None = None
+    primary_admin_name: str | None = Field(default=None, max_length=300)
+
+
+class TenantAdminUpdate(BaseModel):
+    """Atualização administrativa de um tenant."""
+
+    name: str | None = Field(default=None, min_length=2, max_length=200)
+    slug: str | None = Field(default=None, min_length=2, max_length=100, pattern=r"^[a-z0-9-]+$")
+    is_active: bool | None = None
+
+
+class TenantAdminResponse(BaseModel):
+    """Tenant com metadados úteis para o painel administrativo."""
+
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    name: str
+    slug: str
+    is_active: bool
+    created_at: datetime
+    member_count: int = 0
+    admin_count: int = 0
+    primary_admin_email: str | None = None
 
 
 class TenantResponse(BaseModel):

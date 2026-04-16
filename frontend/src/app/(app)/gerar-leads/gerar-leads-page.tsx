@@ -10,7 +10,6 @@ import {
   Download,
   FileSpreadsheet,
   Layers,
-  Linkedin,
   MailSearch,
   MapPinned,
   Pause,
@@ -23,11 +22,8 @@ import {
 import { toast } from "sonner"
 import {
   type GeneratedLeadPreviewItem,
-  type LinkedInProfile,
   useGenerateLeadsImport,
   useGenerateLeadsPreview,
-  useImportLinkedInProfiles,
-  useSearchLinkedIn,
 } from "@/lib/api/hooks/use-leads"
 import { useCreateLeadList, useLeadLists } from "@/lib/api/hooks/use-lead-lists"
 import {
@@ -57,11 +53,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { CsvXlsImportDialog } from "@/components/leads/csv-xls-import-dialog"
 
-type LeadGeneratorSource =
-  | "google_maps"
-  | "b2b_database"
-  | "linkedin_enrichment"
-  | "linkedin_search"
+type LeadGeneratorSource = "google_maps" | "b2b_database" | "linkedin_enrichment"
 
 interface PreviewRow {
   id: string
@@ -74,7 +66,6 @@ interface PreviewRow {
   linkedinUrl: string | null
   originLabel: string
   generatedItem?: GeneratedLeadPreviewItem
-  linkedinProfile?: LinkedInProfile
 }
 
 const sourceOptions: Array<{
@@ -100,12 +91,6 @@ const sourceOptions: Array<{
     title: "Enriquecimento LinkedIn",
     description: "Complete dados a partir de URLs de perfis já capturados.",
     icon: Sparkles,
-  },
-  {
-    id: "linkedin_search",
-    title: "Busca LinkedIn",
-    description: "Use a busca atual do sistema sem sair desta central.",
-    icon: Linkedin,
   },
 ]
 
@@ -136,20 +121,12 @@ export default function GerarLeadsPage() {
   const [enrichmentUrls, setEnrichmentUrls] = useState("")
   const [enrichmentLimit, setEnrichmentLimit] = useState("25")
 
-  const [linkedinKeywords, setLinkedinKeywords] = useState("marketing automation")
-  const [linkedinTitles, setLinkedinTitles] = useState("Head de Marketing\nCMO")
-  const [linkedinCompanies, setLinkedinCompanies] = useState("")
-  const [linkedinLimit, setLinkedinLimit] = useState("25")
-
   const [generatedPreview, setGeneratedPreview] = useState<GeneratedLeadPreviewItem[]>([])
-  const [linkedinPreview, setLinkedinPreview] = useState<LinkedInProfile[]>([])
 
   const { data: leadLists } = useLeadLists()
   const createLeadList = useCreateLeadList()
   const previewGeneratedLeads = useGenerateLeadsPreview()
   const importGeneratedLeads = useGenerateLeadsImport()
-  const searchLinkedIn = useSearchLinkedIn()
-  const importLinkedIn = useImportLinkedInProfiles()
   const saveMapsSchedule = useUpsertCaptureSchedule("google_maps")
   const saveB2BSchedule = useUpsertCaptureSchedule("b2b_database")
   const { data: schedules = [] } = useCaptureSchedules()
@@ -160,21 +137,6 @@ export default function GerarLeadsPage() {
   const deleteEnrichmentJob = useDeleteEnrichmentJob()
 
   const previewRows = useMemo<PreviewRow[]>(() => {
-    if (source === "linkedin_search") {
-      return linkedinPreview.map((profile) => ({
-        id: profile.provider_id,
-        name: profile.name,
-        jobTitle: profile.headline,
-        company: profile.company,
-        location: profile.location,
-        email: null,
-        phone: null,
-        linkedinUrl: profile.profile_url,
-        originLabel: "Busca LinkedIn",
-        linkedinProfile: profile,
-      }))
-    }
-
     return generatedPreview.map((item) => ({
       id: item.preview_id,
       name: item.name,
@@ -187,7 +149,7 @@ export default function GerarLeadsPage() {
       originLabel: item.origin_label,
       generatedItem: item,
     }))
-  }, [generatedPreview, linkedinPreview, source])
+  }, [generatedPreview])
 
   const selectedRows = previewRows.filter((row) => selectedIds.includes(row.id))
   const allSelected = previewRows.length > 0 && previewRows.length === selectedIds.length
@@ -203,7 +165,6 @@ export default function GerarLeadsPage() {
           categories: splitLines(mapsCategories),
         })
         setGeneratedPreview(result.items)
-        setLinkedinPreview([])
       } else if (source === "b2b_database") {
         const result = await previewGeneratedLeads.mutateAsync({
           source,
@@ -218,7 +179,6 @@ export default function GerarLeadsPage() {
           negative_terms: splitLines(b2bNegativeTerms),
         })
         setGeneratedPreview(result.items)
-        setLinkedinPreview([])
       } else if (source === "linkedin_enrichment") {
         const result = await previewGeneratedLeads.mutateAsync({
           source,
@@ -226,16 +186,6 @@ export default function GerarLeadsPage() {
           linkedin_urls: splitLines(enrichmentUrls),
         })
         setGeneratedPreview(result.items)
-        setLinkedinPreview([])
-      } else {
-        const result = await searchLinkedIn.mutateAsync({
-          keywords: linkedinKeywords.trim(),
-          titles: splitLines(linkedinTitles),
-          companies: splitLines(linkedinCompanies),
-          limit: Number(linkedinLimit) || 25,
-        })
-        setLinkedinPreview(result.items)
-        setGeneratedPreview([])
       }
 
       setSelectedIds([])
@@ -259,27 +209,16 @@ export default function GerarLeadsPage() {
         listId = createdList.id
       }
 
-      if (source === "linkedin_search") {
-        const profiles = selectedRows
-          .map((row) => row.linkedinProfile)
-          .filter((profile): profile is LinkedInProfile => Boolean(profile))
-        const result = await importLinkedIn.mutateAsync({
-          profiles,
-          ...(listId ? { list_id: listId } : {}),
-        })
-        toast.success(`${result.created} leads importados do LinkedIn`)
-      } else {
-        const items = selectedRows
-          .map((row) => row.generatedItem)
-          .filter((item): item is GeneratedLeadPreviewItem => Boolean(item))
-        const result = await importGeneratedLeads.mutateAsync({
-          source,
-          items,
-          ...(listId ? { list_id: listId } : {}),
-          merge_duplicates: mergeDuplicates,
-        })
-        toast.success(`${result.created} leads criados e ${result.updated} atualizados`)
-      }
+      const items = selectedRows
+        .map((row) => row.generatedItem)
+        .filter((item): item is GeneratedLeadPreviewItem => Boolean(item))
+      const result = await importGeneratedLeads.mutateAsync({
+        source,
+        items,
+        ...(listId ? { list_id: listId } : {}),
+        merge_duplicates: mergeDuplicates,
+      })
+      toast.success(`${result.created} leads criados e ${result.updated} atualizados`)
 
       setSelectedIds([])
       setNewListName("")
@@ -403,16 +342,11 @@ export default function GerarLeadsPage() {
           <Button asChild variant="outline">
             <Link href="/listas">Abrir listas</Link>
           </Button>
-          <Button
-            onClick={handlePreview}
-            disabled={previewGeneratedLeads.isPending || searchLinkedIn.isPending}
-          >
+          <Button onClick={handlePreview} disabled={previewGeneratedLeads.isPending}>
             <RefreshCw
               size={14}
               aria-hidden="true"
-              className={
-                previewGeneratedLeads.isPending || searchLinkedIn.isPending ? "animate-spin" : ""
-              }
+              className={previewGeneratedLeads.isPending ? "animate-spin" : ""}
             />
             Gerar preview
           </Button>
@@ -449,7 +383,7 @@ export default function GerarLeadsPage() {
         </nav>
 
         <TabsContent value="capturar" className="mt-4">
-          <div className="grid gap-4 xl:grid-cols-4 mb-4">
+          <div className="mx-auto grid max-w-auto gap-4 xl:grid-cols-3 mb-4">
             {sourceOptions.map((option) => {
               const Icon = option.icon
               const isActive = option.id === source
@@ -786,41 +720,6 @@ export default function GerarLeadsPage() {
                     )}
                   </>
                 )}
-
-                {source === "linkedin_search" && (
-                  <>
-                    <Field label="Keywords">
-                      <input
-                        value={linkedinKeywords}
-                        onChange={(e) => setLinkedinKeywords(e.target.value)}
-                        className={inputClassName}
-                        placeholder="keyword principal"
-                        title="Keywords"
-                      />
-                    </Field>
-                    <Field label="Cargos">
-                      <Textarea
-                        value={linkedinTitles}
-                        onChange={(e) => setLinkedinTitles(e.target.value)}
-                      />
-                    </Field>
-                    <Field label="Empresas">
-                      <Textarea
-                        value={linkedinCompanies}
-                        onChange={(e) => setLinkedinCompanies(e.target.value)}
-                      />
-                    </Field>
-                    <Field label="Limite">
-                      <input
-                        value={linkedinLimit}
-                        onChange={(e) => setLinkedinLimit(e.target.value)}
-                        className={inputClassName}
-                        placeholder="25"
-                        title="Limite"
-                      />
-                    </Field>
-                  </>
-                )}
               </CardContent>
             </Card>
 
@@ -877,7 +776,6 @@ export default function GerarLeadsPage() {
                         disabled={
                           selectedRows.length === 0 ||
                           importGeneratedLeads.isPending ||
-                          importLinkedIn.isPending ||
                           createLeadList.isPending
                         }
                       >

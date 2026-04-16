@@ -27,6 +27,7 @@ logger = structlog.get_logger()
 
 # ── sync_tenant_voyager ───────────────────────────────────────────────
 
+
 @celery_app.task(
     bind=True,
     name="workers.content_voyager.sync_tenant_voyager",
@@ -36,9 +37,7 @@ logger = structlog.get_logger()
 )
 def sync_tenant_voyager(self, tenant_id: str) -> dict:  # type: ignore[type-arg]
     """Sincroniza analytics Voyager para um tenant especifico."""
-    return asyncio.run(
-        _sync_tenant_async(tenant_id, self)
-    )
+    return asyncio.run(_sync_tenant_async(tenant_id, self))
 
 
 async def _sync_tenant_async(tenant_id: str, task) -> dict:  # type: ignore[type-arg]
@@ -72,6 +71,7 @@ async def _sync_tenant_async(tenant_id: str, task) -> dict:  # type: ignore[type
 
 # ── sync_all_voyager ──────────────────────────────────────────────────
 
+
 @celery_app.task(
     name="workers.content_voyager.sync_all_voyager",
     queue="content",
@@ -92,15 +92,19 @@ async def _sync_all_async() -> dict:
 
     dispatched = 0
     async with WorkerSessionLocal() as db:
-        stmt = select(LinkedInAccount.tenant_id).where(
-            LinkedInAccount.is_active.is_(True),
-            LinkedInAccount.unipile_account_id.is_not(None),
-        ).distinct()
+        stmt = (
+            select(LinkedInAccount.tenant_id)
+            .where(
+                LinkedInAccount.is_active.is_(True),
+                LinkedInAccount.unipile_account_id.is_not(None),
+            )
+            .distinct()
+        )
         rows = await db.execute(stmt)
         tenant_ids = [str(row[0]) for row in rows.fetchall()]
 
     for tenant_id in tenant_ids:
-        sync_tenant_voyager.delay(tenant_id)
+        sync_tenant_voyager.apply_async(args=[tenant_id], queue="content")
         dispatched += 1
 
     logger.info("voyager_task.all_dispatched", dispatched=dispatched)
