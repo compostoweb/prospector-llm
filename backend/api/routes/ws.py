@@ -55,6 +55,12 @@ async def broadcast_event(tenant_id: str, event: dict[str, Any]) -> None:
     sockets -= dead
 
 
+async def broadcast_all_tenants(event: dict[str, Any]) -> None:
+    """Envia evento para todos os tenants conectados (usado quando não há tenant_id no payload)."""
+    for tenant_id in list(_connections.keys()):
+        await broadcast_event(tenant_id, event)
+
+
 def _normalize_event_payload(tenant_id: str, event: dict[str, Any]) -> dict[str, Any]:
     """
     Mantém compatibilidade com emissores legados e entrega o envelope esperado

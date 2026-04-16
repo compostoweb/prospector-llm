@@ -225,11 +225,14 @@ export function LeadImportDialog() {
   }
 
   function handleImport() {
-    mutate(items, {
-      onSuccess: () => {
-        // keep dialog open to show result
+    mutate(
+      { items },
+      {
+        onSuccess: () => {
+          // keep dialog open to show result
+        },
       },
-    })
+    )
   }
 
   function handleClose() {

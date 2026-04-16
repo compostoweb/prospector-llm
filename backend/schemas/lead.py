@@ -145,6 +145,7 @@ class LeadResponse(BaseModel):
     phone: str | None
     enriched_at: datetime | None
     notes: str | None
+    capture_query: str | None = None
     lead_lists: list[LeadListSummary] = []
     origin_key: str = "manual"
     origin_label: str = "Manual"
@@ -222,6 +223,8 @@ class LeadImportRequest(BaseModel):
     """Requisição de importação em lote."""
 
     items: list[LeadImportItem] = Field(..., min_length=1, max_length=5000)
+    list_id: uuid.UUID | None = None
+    list_name: str | None = None
 
 
 class LeadImportResponse(BaseModel):
@@ -230,6 +233,7 @@ class LeadImportResponse(BaseModel):
     imported: int
     duplicates: int
     errors: list[str]
+    list_id: uuid.UUID | None = None
 
 
 class LeadMergeRequest(BaseModel):

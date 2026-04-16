@@ -126,7 +126,15 @@ async def unipile_webhook(
             account_id=account_status.get("account_id") or payload.get("account_id"),
             status=event_type,
         )
-    # Outros eventos são ignorados silenciosamente
+    elif event_type in {"message_read", "chat_read", "message_seen", "read_receipt"}:
+        await _handle_chat_read(payload)
+    else:
+        # Log para descobrir novos eventos da Unipile (ex: chat_read, typing, etc.)
+        logger.info(
+            "webhook.unipile.unhandled",
+            event_type=event_type,
+            payload_keys=list(payload.keys()),
+        )
 
     return {"status": "ok"}
 
@@ -246,6 +254,35 @@ async def _handle_relation_created(
             "profile_id": profile_id,
         },
     )
+
+
+async def _handle_chat_read(payload: dict) -> None:
+    """
+    Propaga leitura de mensagem detectada no LinkedIn para o inbox do Prospector.
+    Invalida cache Redis do chat e faz broadcast WS para todos os tenants com a conta.
+    """
+    chat_id: str = (
+        payload.get("chat_id")
+        or payload.get("chatId")
+        or (payload.get("chat") or {}).get("id")
+        or ""
+    )
+    account_id: str = payload.get("account_id") or ""
+
+    if not chat_id:
+        logger.warning("webhook.unipile.chat_read.no_chat_id", payload_keys=list(payload.keys()))
+        return
+
+    # Invalida cache Redis para que a próxima query retorne unread_count atualizado
+    if account_id:
+        from integrations.unipile_client import unipile_client
+        await unipile_client.invalidate_inbox_cache(account_id, chat_id=chat_id)
+
+    # Broadcast WS para todos os tenants conectados (sem isolamento de tenant aqui,
+    # pois não temos o tenant_id no payload — o frontend filtra pelo chat_id)
+    from api.routes.ws import broadcast_all_tenants
+    await broadcast_all_tenants({"type": "inbox.chat_read", "chat_id": chat_id})
+    logger.info("webhook.unipile.chat_read", chat_id=chat_id, account_id=account_id or None)
 
 
 async def _handle_message_received(

@@ -17,6 +17,7 @@ export interface CaptureScheduleConfig {
 
   maps_search_terms: string[] | null
   maps_location: string | null
+  maps_locations: string[] | null
   maps_categories: string[] | null
 
   b2b_job_titles: string[] | null
@@ -25,6 +26,11 @@ export interface CaptureScheduleConfig {
   b2b_industries: string[] | null
   b2b_company_keywords: string[] | null
   b2b_company_sizes: string[] | null
+
+  maps_combo_index: number
+  b2b_rotation_index: number
+  last_run_at: string | null
+  last_list_id: string | null
 
   created_at: string
   updated_at: string
@@ -36,6 +42,7 @@ export interface CaptureScheduleUpsert {
   max_items?: number
   maps_search_terms?: string[]
   maps_location?: string | null
+  maps_locations?: string[]
   maps_categories?: string[]
   b2b_job_titles?: string[]
   b2b_locations?: string[]
@@ -47,6 +54,23 @@ export interface CaptureScheduleUpsert {
 
 // ── Hooks ──────────────────────────────────────────────────────────────
 
+export function useCaptureSchedules() {
+  const { data: session } = useSession()
+  const token = session?.accessToken as string | undefined
+
+  return useQuery<CaptureScheduleConfig[]>({
+    queryKey: ["capture-schedules"],
+    queryFn: async () => {
+      if (!token) return []
+      const client = createBrowserClient(token)
+      const { data, error } = await client.GET("/capture-schedule" as never)
+      if (error) throw new Error("Falha ao buscar capturas automáticas")
+      return data as CaptureScheduleConfig[]
+    },
+    enabled: !!token,
+  })
+}
+
 export function useCaptureSchedule(source: CaptureSource) {
   const { data: session } = useSession()
   const token = session?.accessToken as string | undefined
@@ -56,9 +80,9 @@ export function useCaptureSchedule(source: CaptureSource) {
     queryFn: async () => {
       if (!token) return null
       const client = createBrowserClient(token)
-      const res = await client.get(`/capture-schedule/${source}`)
-      if (res.status === 404) return null
-      return res.data as CaptureScheduleConfig
+      const { data, error } = await client.GET(`/capture-schedule/${source}` as never)
+      if (error) return null
+      return data as CaptureScheduleConfig
     },
     enabled: !!token,
     retry: false,
@@ -72,12 +96,19 @@ export function useUpsertCaptureSchedule(source: CaptureSource) {
 
   return useMutation<CaptureScheduleConfig, Error, CaptureScheduleUpsert>({
     mutationFn: async (payload) => {
-      const client = createBrowserClient(token!)
-      const res = await client.put(`/capture-schedule/${source}`, payload)
-      return res.data as CaptureScheduleConfig
+      const client = createBrowserClient(token ?? "")
+      const { data, error } = await client.PUT(
+        `/capture-schedule/${source}` as never,
+        {
+          body: payload,
+        } as never,
+      )
+      if (error) throw new Error("Falha ao salvar configuração")
+      return data as CaptureScheduleConfig
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["capture-schedule", source] })
+      queryClient.invalidateQueries({ queryKey: ["capture-schedules"] })
     },
   })
 }
@@ -89,11 +120,37 @@ export function useDisableCaptureSchedule(source: CaptureSource) {
 
   return useMutation<void, Error, void>({
     mutationFn: async () => {
-      const client = createBrowserClient(token!)
-      await client.delete(`/capture-schedule/${source}`)
+      const client = createBrowserClient(token ?? "")
+      const { error } = await client.DELETE(`/capture-schedule/${source}` as never)
+      if (error) throw new Error("Falha ao desativar captura")
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["capture-schedule", source] })
+      queryClient.invalidateQueries({ queryKey: ["capture-schedules"] })
+    },
+  })
+}
+
+export function useToggleCaptureSchedule(source: CaptureSource) {
+  const { data: session } = useSession()
+  const token = session?.accessToken as string | undefined
+  const queryClient = useQueryClient()
+
+  return useMutation<CaptureScheduleConfig, Error, { config: CaptureScheduleConfig }>({
+    mutationFn: async ({ config }) => {
+      const client = createBrowserClient(token ?? "")
+      const { data, error } = await client.PUT(
+        `/capture-schedule/${source}` as never,
+        {
+          body: { ...config, is_active: !config.is_active },
+        } as never,
+      )
+      if (error) throw new Error("Falha ao alterar estado da captura")
+      return data as CaptureScheduleConfig
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["capture-schedule", source] })
+      queryClient.invalidateQueries({ queryKey: ["capture-schedules"] })
     },
   })
 }

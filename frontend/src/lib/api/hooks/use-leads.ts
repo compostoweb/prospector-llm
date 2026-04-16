@@ -153,6 +153,7 @@ export interface ImportLeadsResponse {
   imported: number
   duplicates: number
   errors: string[]
+  list_id: string | null
 }
 
 export interface GeneratedLeadPreviewItem {
@@ -408,21 +409,28 @@ export function useCreateLead() {
   })
 }
 
+export interface ImportLeadsPayload {
+  items: ImportLeadItem[]
+  list_id?: string | null
+  list_name?: string | null
+}
+
 export function useImportLeads() {
   const { data: session } = useSession()
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (items: ImportLeadItem[]): Promise<ImportLeadsResponse> => {
+    mutationFn: async (payload: ImportLeadsPayload): Promise<ImportLeadsResponse> => {
       const client = createBrowserClient(session?.accessToken)
       const { data, error } = await client.POST("/leads/import" as never, {
-        body: { items } as never,
+        body: payload as never,
       })
       if (error) throw new Error("Falha ao importar leads")
       return data as ImportLeadsResponse
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["leads"] })
+      void queryClient.invalidateQueries({ queryKey: ["lead-lists"] })
     },
   })
 }

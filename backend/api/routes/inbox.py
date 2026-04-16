@@ -761,6 +761,17 @@ async def remove_reaction(
     return {"status": "ok", "message_id": message_id, "emoji": body.emoji}
 
 
+@router.post("/conversations/{chat_id}/read")
+async def mark_as_read(chat_id: str) -> dict:
+    """Marca a conversa como lida no LinkedIn via Unipile (best-effort)."""
+    account_id = settings.UNIPILE_ACCOUNT_ID_LINKEDIN or ""
+    await unipile_client.mark_chat_as_read(chat_id)
+    if account_id:
+        await unipile_client.invalidate_inbox_cache(account_id, chat_id=chat_id)
+    logger.info("inbox.marked_as_read", chat_id=chat_id)
+    return {"ok": True}
+
+
 # ── Helpers ───────────────────────────────────────────────────────────
 # ── Recent Activity ───────────────────────────────────────────────────
 

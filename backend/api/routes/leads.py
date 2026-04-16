@@ -543,8 +543,8 @@ async def import_leads(
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> LeadImportResponse:
-    """Importa leads em lote. Deduplica por linkedin_url (quando presente) dentro do tenant."""
-    # Busca linkedin_urls já existentes no tenant
+    """Importa leads em lote. Deduplica por linkedin_url e website dentro do tenant."""
+    # Pré-carrega linkedin_urls e websites existentes para dedup em lote
     urls = [item.linkedin_url for item in body.items if item.linkedin_url]
     existing_urls: set[str] = set()
     if urls:
@@ -556,14 +556,55 @@ async def import_leads(
         )
         existing_urls = {row[0] for row in existing_result.all() if row[0]}
 
+    websites = [item.website for item in body.items if item.website]
+    existing_websites: set[str] = set()
+    if websites:
+        ws_result = await db.execute(
+            select(Lead.website).where(
+                Lead.tenant_id == tenant_id,
+                Lead.website.in_(websites),
+            )
+        )
+        existing_websites = {row[0] for row in ws_result.all() if row[0]}
+
+    # Cria ou resolve a lista de destino
+    target_list_id: uuid.UUID | None = None
+    if body.list_name:
+        target_list = await get_or_create_list(db, tenant_id=tenant_id, list_name=body.list_name)
+        await db.flush()
+        target_list_id = target_list.id
+    elif body.list_id:
+        list_result = await db.execute(
+            select(LeadList).where(
+                LeadList.id == body.list_id,
+                LeadList.tenant_id == tenant_id,
+            )
+        )
+        found_list = list_result.scalar_one_or_none()
+        if found_list is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Lista não encontrada.",
+            )
+        target_list_id = found_list.id
+
     imported = 0
     duplicates = 0
     errors: list[str] = []
     seen_urls: set[str] = set()
+    seen_websites: set[str] = set()
+    imported_lead_ids: list[uuid.UUID] = []
 
     for i, item in enumerate(body.items):
+        # Dedup por linkedin_url
         if item.linkedin_url and (
             item.linkedin_url in existing_urls or item.linkedin_url in seen_urls
+        ):
+            duplicates += 1
+            continue
+        # Dedup por website
+        if item.website and (
+            item.website in existing_websites or item.website in seen_websites
         ):
             duplicates += 1
             continue
@@ -590,11 +631,24 @@ async def import_leads(
                 source=LeadSource.IMPORT,
             )
             db.add(lead)
+            await db.flush()
             if item.linkedin_url:
                 seen_urls.add(item.linkedin_url)
+            if item.website:
+                seen_websites.add(item.website)
+            imported_lead_ids.append(lead.id)
             imported += 1
         except Exception as exc:
             errors.append(f"Linha {i + 1}: {exc!s}")
+
+    # Associa à lista se solicitado
+    if target_list_id and imported_lead_ids:
+        from models.lead_list import lead_list_members as llm_table
+        await db.execute(
+            llm_table.insert().values(
+                [{"lead_list_id": target_list_id, "lead_id": lid} for lid in imported_lead_ids]
+            )
+        )
 
     if imported > 0:
         await db.commit()
@@ -605,8 +659,14 @@ async def import_leads(
         imported=imported,
         duplicates=duplicates,
         errors=len(errors),
+        list_id=str(target_list_id) if target_list_id else None,
     )
-    return LeadImportResponse(imported=imported, duplicates=duplicates, errors=errors)
+    return LeadImportResponse(
+        imported=imported,
+        duplicates=duplicates,
+        errors=errors,
+        list_id=target_list_id,
+    )
 
 
 @router.post("/generate-preview", response_model=LeadGenerationPreviewResponse)

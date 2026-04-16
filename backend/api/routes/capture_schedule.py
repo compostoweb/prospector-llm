@@ -80,6 +80,7 @@ async def upsert_capture_schedule(
     config.max_items = payload.max_items
     config.maps_search_terms = payload.maps_search_terms or None
     config.maps_location = payload.maps_location
+    config.maps_locations = payload.maps_locations or None
     config.maps_categories = payload.maps_categories or None
     config.b2b_job_titles = payload.b2b_job_titles or None
     config.b2b_locations = payload.b2b_locations or None

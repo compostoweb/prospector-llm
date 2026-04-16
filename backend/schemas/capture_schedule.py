@@ -41,6 +41,7 @@ class CaptureScheduleUpsert(BaseModel):
     # Google Maps
     maps_search_terms: list[str] = Field(default_factory=list)
     maps_location: str | None = None
+    maps_locations: list[str] = Field(default_factory=list)
     maps_categories: list[str] = Field(default_factory=list)
 
     # B2B Database
@@ -61,6 +62,7 @@ class CaptureScheduleResponse(BaseModel):
 
     maps_search_terms: list[str] | None
     maps_location: str | None
+    maps_locations: list[str] | None
     maps_categories: list[str] | None
 
     b2b_job_titles: list[str] | None
@@ -69,6 +71,11 @@ class CaptureScheduleResponse(BaseModel):
     b2b_industries: list[str] | None
     b2b_company_keywords: list[str] | None
     b2b_company_sizes: list[str] | None
+
+    maps_combo_index: int
+    b2b_rotation_index: int
+    last_run_at: datetime | None
+    last_list_id: uuid.UUID | None
 
     created_at: datetime
     updated_at: datetime

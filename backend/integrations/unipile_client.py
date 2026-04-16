@@ -37,7 +37,7 @@ _OWN_PROFILE_TIMEOUT = httpx.Timeout(8.0, connect=8.0, read=8.0, write=8.0, pool
 _PROFILE_CACHE_TTL = 86400  # 24h
 _PROFILE_CACHE_TTL_EMPTY = 3600  # 1h for unresolved names
 _PREVIEW_CACHE_TTL = 300  # 5min for message previews
-_CHAT_LIST_CACHE_TTL = 600  # 10min for full conversation list
+_CHAT_LIST_CACHE_TTL = 120  # 2min — alinhado com refetchInterval do frontend
 
 
 class _LoopBoundAsyncClient:
@@ -1074,6 +1074,19 @@ class UnipileClient:
             return ok
         except Exception:
             logger.warning("unipile.account.sync_error", account_id=account_id)
+            return False
+
+    async def mark_chat_as_read(self, chat_id: str) -> bool:
+        """Marca um chat como lido via Unipile (propaga para o LinkedIn)."""
+        try:
+            response = await self._client.patch(
+                f"/chats/{chat_id}",
+                json={"action": "setReadStatus", "value": True},
+            )
+            response.raise_for_status()
+            return True
+        except httpx.HTTPError:
+            logger.warning("unipile.mark_read.error", chat_id=chat_id)
             return False
 
     async def add_reaction(

@@ -131,6 +131,14 @@ class Lead(Base, TenantMixin, TimestampMixin):
         comment="Tipo do bounce: 'hard' (permanente) ou 'soft' (temporário).",
     )
 
+    # ── Captura automática ───────────────────────────────────────────
+    capture_query: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        default=None,
+        comment="Termo de busca que originou o lead na captura automática (ex: 'academia' ou 'CEO em SP')",
+    )
+
     # ── Análise LLM (Anthropic Batch API) ────────────────────────────
     llm_icp_score: Mapped[float | None] = mapped_column(
         Float,

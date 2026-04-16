@@ -17,6 +17,7 @@ export type WSEventType =
   | "cadence.finished"
   | "connection.accepted"
   | "inbox.new_message"
+  | "inbox.chat_read"
   | "ping"
 
 export interface WSEvent {
@@ -62,6 +63,9 @@ const INVALIDATION_MAP: Partial<Record<WSEventType, string[][]>> = {
   "inbox.new_message": [
     ["inbox", "conversations"],
     ["inbox", "messages"],
+  ],
+  "inbox.chat_read": [
+    ["inbox", "conversations"],
   ],
 }
 
@@ -123,6 +127,24 @@ export function useEvents() {
           title: "Nova mensagem",
           ...(msg.sender_name ? { body: `${msg.sender_name} enviou uma mensagem` } : {}),
         })
+      }
+
+      if (event.type === "inbox.chat_read") {
+        const { chat_id } = event.data as { chat_id?: string }
+        if (chat_id) {
+          queryClient.setQueriesData<{ items: Array<{ chat_id: string; unread_count: number }> }>(
+            { queryKey: ["inbox", "conversations"] },
+            (old) => {
+              if (!old?.items) return old
+              return {
+                ...old,
+                items: old.items.map((c) =>
+                  c.chat_id === chat_id ? { ...c, unread_count: 0 } : c,
+                ),
+              }
+            },
+          )
+        }
       }
     },
     [queryClient, push],

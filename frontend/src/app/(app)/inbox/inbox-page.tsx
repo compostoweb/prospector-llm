@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useRef, useState } from "react"
-import { type InboxFilter, useConversations, useSyncInbox } from "@/lib/api/hooks/use-inbox"
+import { type InboxFilter, useConversations, useSyncInbox, useMarkChatAsRead } from "@/lib/api/hooks/use-inbox"
 import { ConversationList } from "@/components/inbox/conversation-list"
 import { ChatPanel } from "@/components/inbox/chat-panel"
 import { ContactSidebar } from "@/components/inbox/contact-sidebar"
@@ -26,8 +26,20 @@ export default function InboxPage() {
 
   const { data, isLoading, isError } = useConversations({ filter, search: debouncedSearch })
   const syncMutation = useSyncInbox()
+  const markAsRead = useMarkChatAsRead()
 
   const conversations = data?.items ?? []
+
+  const handleSelectChat = useCallback(
+    (chatId: string) => {
+      setSelectedChatId(chatId)
+      const conv = conversations.find((c) => c.chat_id === chatId)
+      if (conv && conv.unread_count > 0) {
+        markAsRead.mutate({ chatId })
+      }
+    },
+    [conversations, markAsRead],
+  )
 
   return (
     <div className="-m-6 flex h-screen overflow-hidden">
@@ -36,7 +48,7 @@ export default function InboxPage() {
         conversations={conversations}
         isLoading={isLoading}
         selectedChatId={selectedChatId}
-        onSelect={setSelectedChatId}
+        onSelect={handleSelectChat}
         filter={filter}
         onFilterChange={setFilter}
         search={search}

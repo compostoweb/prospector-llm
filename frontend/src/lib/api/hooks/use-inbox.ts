@@ -147,6 +147,8 @@ export function useConversations(opts?: {
     refetchOnMount: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+    refetchInterval: 2 * 60 * 1000,
+    refetchIntervalInBackground: false,
     enabled: !!session?.accessToken,
   })
 }
@@ -457,6 +459,34 @@ export function useRemoveReaction() {
       void queryClient.invalidateQueries({
         queryKey: ["inbox", "messages", chatId],
       })
+    },
+  })
+}
+
+export function useMarkChatAsRead() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ chatId }: { chatId: string }) => {
+      const client = createBrowserClient(session?.accessToken)
+      const { error } = await client.POST(`/inbox/conversations/${chatId}/read` as never)
+      if (error) throw new Error("Falha ao marcar como lido")
+    },
+    onSuccess: (_data, { chatId }) => {
+      // Optimistic update: zera unread_count em todas as páginas da query de conversas
+      queryClient.setQueriesData<ConversationListResponse>(
+        { queryKey: ["inbox", "conversations"] },
+        (old) => {
+          if (!old?.items) return old
+          return {
+            ...old,
+            items: old.items.map((c) =>
+              c.chat_id === chatId ? { ...c, unread_count: 0 } : c,
+            ),
+          }
+        },
+      )
     },
   })
 }

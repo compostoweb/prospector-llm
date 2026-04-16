@@ -26,6 +26,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base
@@ -122,6 +123,36 @@ class CaptureScheduleConfig(Base):
         ARRAY(Text),
         nullable=True,
         comment="Tamanhos de empresa (ex: ['11-20', '21-50'])",
+    )
+
+    # ── Campos de rotação ──────────────────────────────────────────────
+    maps_locations: Mapped[list[str] | None] = mapped_column(
+        ARRAY(Text),
+        nullable=True,
+        comment="Lista de cidades/regiões para rotação automática Maps (uma por execução)",
+    )
+    maps_combo_index: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        comment="Índice atual no produto cartesiano terms × locations",
+    )
+    b2b_rotation_index: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        comment="Índice atual na lista b2b_cities para rotação",
+    )
+    last_run_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_list_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("lead_lists.id", ondelete="SET NULL"),
+        nullable=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(
