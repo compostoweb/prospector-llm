@@ -64,6 +64,9 @@ class _LoopBoundAsyncClient:
     async def put(self, *args: Any, **kwargs: Any) -> httpx.Response:
         return await self._get_client().put(*args, **kwargs)
 
+    async def patch(self, *args: Any, **kwargs: Any) -> httpx.Response:
+        return await self._get_client().patch(*args, **kwargs)
+
     async def delete(self, *args: Any, **kwargs: Any) -> httpx.Response:
         return await self._get_client().delete(*args, **kwargs)
 
