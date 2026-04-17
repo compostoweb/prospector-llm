@@ -491,12 +491,12 @@ function SortHeader({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="flex items-center gap-1">
+        <div className="flex w-full items-center justify-start gap-1 whitespace-nowrap">
           <button
             type="button"
             onClick={() => onSort(sortKey)}
             className={cn(
-              "flex items-center gap-1 rounded-full px-2 py-1 transition-colors",
+              "inline-flex min-w-0 items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold transition-colors",
               active
                 ? "bg-white/14 text-(--text-invert) ring-1 ring-white/20 hover:bg-white/18"
                 : "text-(--text-invert) hover:text-amber-300",
@@ -513,19 +513,21 @@ function SortHeader({
               <ArrowUpDown className="h-3 w-3 opacity-50" />
             )}
           </button>
-          {active && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                onSort("recent")
-              }}
-              className="rounded-full p-1 text-(--text-invert) opacity-70 transition-opacity hover:opacity-100"
-              aria-label="Remover ordenação"
-            >
-              <X className="h-2.5 w-2.5" />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onSort("recent")
+            }}
+            className={cn(
+              "inline-flex h-5 w-5 items-center justify-center rounded-full bg-white/12 text-(--text-invert) ring-1 ring-white/18 transition-all",
+              active ? "opacity-100 hover:bg-white/18" : "pointer-events-none opacity-0",
+            )}
+            aria-label="Remover ordenação"
+            tabIndex={active ? 0 : -1}
+          >
+            <X className="h-3 w-3" />
+          </button>
         </div>
       </TooltipTrigger>
       <TooltipContent side="bottom" className="text-xs max-w-48 text-center">
