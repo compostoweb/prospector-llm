@@ -341,6 +341,7 @@ export function EditPostDialog({
   const isTooShort = charCount > 0 && charCount < 900
   const initialPublishDate = utcToLocalDateTimeInputValue(post?.publish_date)
   const canScheduleAtSelectedTime = isFutureLocalDateTime(publishDate)
+  const hasPastPublishDateSelection = !!publishDate && !canScheduleAtSelectedTime
   const initialWeekNumber = post?.week_number ? String(post.week_number) : ""
   const hasUnsavedChanges =
     !syncWarning &&
@@ -568,6 +569,11 @@ export function EditPostDialog({
                   value={publishDate}
                   onChange={(e) => setPublishDate(e.target.value)}
                 />
+                {hasPastPublishDateSelection && (
+                  <p className="text-xs text-(--warning-subtle-fg)">
+                    A data escolhida já passou. Para agendar, ajuste também o dia, não só a hora.
+                  </p>
+                )}
               </div>
 
               <div className="grid gap-1.5">
@@ -1070,7 +1076,7 @@ export function EditPostDialog({
                             !publishDate
                               ? "Defina uma data de publicação para agendar"
                               : !canScheduleAtSelectedTime
-                                ? "A data de publicação precisa estar no futuro"
+                                ? "A data de publicação está no passado. Ajuste também o dia para agendar"
                                 : undefined
                           }
                           onClick={async () => {

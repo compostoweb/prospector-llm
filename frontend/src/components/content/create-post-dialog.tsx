@@ -14,7 +14,7 @@ import {
   Maximize2,
   X,
 } from "lucide-react"
-import { localDateToUTC } from "@/lib/date"
+import { getDayOfMonthFromLocalDateTime, isFutureLocalDateTime, localDateToUTC } from "@/lib/date"
 import {
   useCreateContentPost,
   useUpdatePost,
@@ -177,13 +177,10 @@ export function CreatePostDialog({
 
   useEffect(() => {
     if (!publishDate) return
-    try {
-      const date = new Date(publishDate)
-      const weekOfMonth = Math.ceil(date.getDate() / 7)
-      setWeekNumber(String(weekOfMonth))
-    } catch {
-      // data inválida, ignora
-    }
+    const dayOfMonth = getDayOfMonthFromLocalDateTime(publishDate)
+    if (dayOfMonth == null) return
+    const weekOfMonth = Math.ceil(dayOfMonth / 7)
+    setWeekNumber(String(weekOfMonth))
   }, [publishDate])
 
   useEffect(() => {
@@ -217,6 +214,9 @@ export function CreatePostDialog({
       week_number: weekNumber ? parseInt(weekNumber, 10) : null,
     }
   }
+
+  const canAutoScheduleAtSelectedTime = isFutureLocalDateTime(publishDate)
+  const hasPastPublishDateSelection = !!publishDate && !canAutoScheduleAtSelectedTime
 
   async function ensureDraftPost() {
     const existingDraftId = draftPostIdRef.current
@@ -319,6 +319,11 @@ export function CreatePostDialog({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+
+    if (publishDate && !canAutoScheduleAtSelectedTime) {
+      alert("A data de publicação está no passado. Ajuste também o dia para agendar.")
+      return
+    }
 
     let savedPost: ContentPost
     const payload = buildPostPayload()
@@ -889,6 +894,11 @@ export function CreatePostDialog({
                   value={publishDate}
                   onChange={(e) => setPublishDate(e.target.value)}
                 />
+                {hasPastPublishDateSelection && (
+                  <p className="text-xs text-(--warning-subtle-fg)">
+                    A data escolhida já passou. Para agendar, ajuste também o dia, não só a hora.
+                  </p>
+                )}
               </div>
 
               <div className="grid gap-1.5">
