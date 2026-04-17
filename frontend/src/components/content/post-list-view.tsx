@@ -491,13 +491,15 @@ function SortHeader({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={() => onSort(sortKey)}
             className={cn(
-              "flex items-center gap-0.5 cursor-pointer transition-colors",
-              active ? "text-(--accent)" : "hover:text-amber-300",
+              "flex items-center gap-1 rounded-full px-2 py-1 transition-colors",
+              active
+                ? "bg-white/14 text-(--text-invert) ring-1 ring-white/20 hover:bg-white/18"
+                : "text-(--text-invert) hover:text-amber-300",
             )}
           >
             {label}
@@ -518,7 +520,7 @@ function SortHeader({
                 e.stopPropagation()
                 onSort("recent")
               }}
-              className="ml-0.5 text-(--text-tertiary) hover:text-(--danger) transition-colors"
+              className="rounded-full p-1 text-(--text-invert) opacity-70 transition-opacity hover:opacity-100"
               aria-label="Remover ordenação"
             >
               <X className="h-2.5 w-2.5" />

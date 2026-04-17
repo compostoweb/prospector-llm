@@ -18,7 +18,13 @@ from pydantic import BaseModel
 
 from api.dependencies import get_effective_tenant_id, get_llm_registry
 from core.security import UserPayload, get_current_user_payload
-from integrations.llm import LLMMessage, LLMRegistry, LLMUsageContext, ModelInfo
+from integrations.llm import (
+    LLMMessage,
+    LLMNonRetryableError,
+    LLMRegistry,
+    LLMUsageContext,
+    ModelInfo,
+)
 
 router = APIRouter(prefix="/llm", tags=["LLM"])
 
@@ -167,6 +173,8 @@ async def test_model(
             ok=True,
         )
     except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except LLMNonRetryableError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Erro no provider: {exc}")
