@@ -21,8 +21,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible
+from models.capture_execution_log import CaptureExecutionLog
 from models.capture_schedule import CaptureScheduleConfig
-from schemas.capture_schedule import CaptureScheduleResponse, CaptureScheduleUpsert
+from schemas.capture_schedule import (
+    CaptureExecutionLogResponse,
+    CaptureScheduleResponse,
+    CaptureScheduleUpsert,
+)
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/capture-schedule", tags=["Capture Schedule"])
@@ -35,6 +40,28 @@ async def list_capture_schedules(
 ) -> list[CaptureScheduleConfig]:
     result = await db.execute(
         select(CaptureScheduleConfig).where(CaptureScheduleConfig.tenant_id == tenant_id)
+    )
+    return list(result.scalars().all())
+
+
+@router.get(
+    "/{source}/history",
+    response_model=list[CaptureExecutionLogResponse],
+)
+async def list_execution_history(
+    source: str,
+    db: AsyncSession = Depends(get_session_flexible),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    limit: int = 50,
+) -> list[CaptureExecutionLog]:
+    result = await db.execute(
+        select(CaptureExecutionLog)
+        .where(
+            CaptureExecutionLog.tenant_id == tenant_id,
+            CaptureExecutionLog.source == source,
+        )
+        .order_by(CaptureExecutionLog.executed_at.desc())
+        .limit(min(limit, 100))
     )
     return list(result.scalars().all())
 

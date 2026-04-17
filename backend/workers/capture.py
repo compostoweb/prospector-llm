@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import structlog
 
@@ -43,6 +43,7 @@ logger = structlog.get_logger()
 
 
 # ── Tasks manuais ──────────────────────────────────────────────────────
+
 
 @celery_app.task(
     bind=True,
@@ -70,9 +71,7 @@ def run_apify_maps(
     if not tenant_id:
         raise ValueError("tenant_id é obrigatório para captura de leads")
 
-    return asyncio.run(
-        _run_apify_maps_async(queries, max_items, tenant_id, self)
-    )
+    return asyncio.run(_run_apify_maps_async(queries, max_items, tenant_id, self))
 
 
 @celery_app.task(
@@ -103,12 +102,11 @@ def run_apify_linkedin(
     if not tenant_id:
         raise ValueError("tenant_id é obrigatório para captura de leads")
 
-    return asyncio.run(
-        _run_apify_linkedin_async(titles, locations, max_items, tenant_id, self)
-    )
+    return asyncio.run(_run_apify_linkedin_async(titles, locations, max_items, tenant_id, self))
 
 
 # ── Tasks agendadas (beat) — motor de rotação por tenant ─────────────
+
 
 @celery_app.task(
     bind=True,
@@ -148,17 +146,19 @@ def run_apify_linkedin_daily(self) -> dict:
 
 # ── Motor de rotação: Google Maps ────────────────────────────────────
 
+
 async def _run_apify_maps_daily_async(task) -> dict:
     from sqlalchemy import select
+
     from core.database import WorkerSessionLocal
     from models.capture_schedule import CaptureScheduleConfig
     from models.tenant import Tenant
 
     async with WorkerSessionLocal() as root_session:
         result = await root_session.execute(
-            select(CaptureScheduleConfig).join(
-                Tenant, Tenant.id == CaptureScheduleConfig.tenant_id
-            ).where(
+            select(CaptureScheduleConfig)
+            .join(Tenant, Tenant.id == CaptureScheduleConfig.tenant_id)
+            .where(
                 CaptureScheduleConfig.source == "google_maps",
                 CaptureScheduleConfig.is_active.is_(True),
                 Tenant.is_active.is_(True),
@@ -190,7 +190,7 @@ async def _run_apify_maps_daily_async(task) -> dict:
         combo_index = cfg.maps_combo_index % len(combos)
         term, location = combos[combo_index]
 
-        today_str = datetime.now(timezone.utc).strftime("%d/%m/%y")
+        today_str = datetime.now(UTC).strftime("%d/%m/%y")
         list_name = f"Maps {today_str} — {term} em {location}"[:200]
         list_desc = (
             f"Captura automática Google Maps | Termo: {term} | Local: {location} | {today_str}"
@@ -235,6 +235,16 @@ async def _run_apify_maps_daily_async(task) -> dict:
                 last_list_id=list_id,
             )
 
+            await _log_execution(
+                tenant_id=cfg.tenant_id,
+                capture_config_id=cfg.id,
+                source="google_maps",
+                list_id=list_id,
+                list_name=list_name,
+                combo_label=f"{term} em {location}",
+                outcome=outcome,
+            )
+
             logger.info(
                 "capture.maps_daily.tenant_done",
                 tenant_id=str(cfg.tenant_id),
@@ -250,6 +260,17 @@ async def _run_apify_maps_daily_async(task) -> dict:
                     tenant_id=str(cfg.tenant_id),
                     error=str(exc),
                 )
+                await _log_execution(
+                    tenant_id=cfg.tenant_id,
+                    capture_config_id=cfg.id,
+                    source="google_maps",
+                    list_id=None,
+                    list_name=None,
+                    combo_label=None,
+                    outcome=None,
+                    status="failed",
+                    error_message=str(exc),
+                )
 
     logger.info("capture.maps_daily.done", **total)
     return total
@@ -257,17 +278,19 @@ async def _run_apify_maps_daily_async(task) -> dict:
 
 # ── Motor de rotação: B2B ─────────────────────────────────────────────
 
+
 async def _run_apify_linkedin_daily_async(task) -> dict:
     from sqlalchemy import select
+
     from core.database import WorkerSessionLocal
     from models.capture_schedule import CaptureScheduleConfig
     from models.tenant import Tenant
 
     async with WorkerSessionLocal() as root_session:
         result = await root_session.execute(
-            select(CaptureScheduleConfig).join(
-                Tenant, Tenant.id == CaptureScheduleConfig.tenant_id
-            ).where(
+            select(CaptureScheduleConfig)
+            .join(Tenant, Tenant.id == CaptureScheduleConfig.tenant_id)
+            .where(
                 CaptureScheduleConfig.source == "b2b_database",
                 CaptureScheduleConfig.is_active.is_(True),
                 Tenant.is_active.is_(True),
@@ -297,7 +320,7 @@ async def _run_apify_linkedin_daily_async(task) -> dict:
         city_index = cfg.b2b_rotation_index % len(cities)
         city = cities[city_index]
 
-        today_str = datetime.now(timezone.utc).strftime("%d/%m/%y")
+        today_str = datetime.now(UTC).strftime("%d/%m/%y")
         titles_preview = ", ".join(titles[:3])
         list_name = f"B2B {today_str} — {city} | {titles_preview}"[:200]
         list_desc = (
@@ -347,6 +370,17 @@ async def _run_apify_linkedin_daily_async(task) -> dict:
                 last_list_id=list_id,
             )
 
+            combo_label = f"{titles_preview} — {city}"
+            await _log_execution(
+                tenant_id=cfg.tenant_id,
+                capture_config_id=cfg.id,
+                source="b2b_database",
+                list_id=list_id,
+                list_name=list_name,
+                combo_label=combo_label,
+                outcome=outcome,
+            )
+
             logger.info(
                 "capture.linkedin_daily.tenant_done",
                 tenant_id=str(cfg.tenant_id),
@@ -361,12 +395,57 @@ async def _run_apify_linkedin_daily_async(task) -> dict:
                     tenant_id=str(cfg.tenant_id),
                     error=str(exc),
                 )
+                await _log_execution(
+                    tenant_id=cfg.tenant_id,
+                    capture_config_id=cfg.id,
+                    source="b2b_database",
+                    list_id=None,
+                    list_name=None,
+                    combo_label=None,
+                    outcome=None,
+                    status="failed",
+                    error_message=str(exc),
+                )
 
     logger.info("capture.linkedin_daily.done", **total)
     return total
 
 
 # ── Helpers de banco de dados ─────────────────────────────────────────
+
+
+async def _log_execution(
+    tenant_id: uuid.UUID,
+    capture_config_id: uuid.UUID,
+    source: str,
+    list_id: uuid.UUID | None,
+    list_name: str | None,
+    combo_label: str | None,
+    outcome: dict | None,
+    status: str = "success",
+    error_message: str | None = None,
+) -> None:
+    """Registra uma execução de captura no histórico."""
+    from core.database import WorkerSessionLocal
+    from models.capture_execution_log import CaptureExecutionLog
+
+    async with WorkerSessionLocal() as session:
+        log = CaptureExecutionLog(
+            tenant_id=tenant_id,
+            capture_config_id=capture_config_id,
+            source=source,
+            list_id=list_id,
+            list_name=list_name,
+            combo_label=combo_label,
+            leads_received=outcome.get("received", 0) if outcome else 0,
+            leads_inserted=outcome.get("inserted", 0) if outcome else 0,
+            leads_skipped=outcome.get("skipped", 0) if outcome else 0,
+            status=status,
+            error_message=error_message,
+        )
+        session.add(log)
+        await session.commit()
+
 
 async def _create_daily_list(
     tenant_id: uuid.UUID,
@@ -402,6 +481,7 @@ async def _update_rotation_state(
 ) -> None:
     """Atualiza maps_combo_index, last_run_at e last_list_id após execução de Maps."""
     from sqlalchemy import update
+
     from core.database import WorkerSessionLocal
     from models.capture_schedule import CaptureScheduleConfig
 
@@ -411,7 +491,7 @@ async def _update_rotation_state(
             .where(CaptureScheduleConfig.id == cfg_id)
             .values(
                 maps_combo_index=new_combo_index,
-                last_run_at=datetime.now(timezone.utc),
+                last_run_at=datetime.now(UTC),
                 last_list_id=last_list_id,
             )
         )
@@ -425,6 +505,7 @@ async def _update_b2b_rotation_state(
 ) -> None:
     """Atualiza b2b_rotation_index, last_run_at e last_list_id após execução de B2B."""
     from sqlalchemy import update
+
     from core.database import WorkerSessionLocal
     from models.capture_schedule import CaptureScheduleConfig
 
@@ -434,7 +515,7 @@ async def _update_b2b_rotation_state(
             .where(CaptureScheduleConfig.id == cfg_id)
             .values(
                 b2b_rotation_index=new_rotation_index,
-                last_run_at=datetime.now(timezone.utc),
+                last_run_at=datetime.now(UTC),
                 last_list_id=last_list_id,
             )
         )
@@ -442,6 +523,7 @@ async def _update_b2b_rotation_state(
 
 
 # ── Implementações async (tarefas manuais) ────────────────────────────
+
 
 async def _run_apify_maps_async(
     queries: list[str],
@@ -510,6 +592,7 @@ async def _persist_leads(
     Novos leads recebem capture_query e são adicionados à daily_list se fornecida.
     """
     from sqlalchemy import select
+
     from core.database import WorkerSessionLocal, get_worker_session
     from models.lead import Lead
     from models.lead_list import lead_list_members

@@ -15,11 +15,11 @@ cadência de alto valor usa gpt-4o ou gemini-2.5-pro.
 import uuid
 
 from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base, TenantMixin, TimestampMixin
-
 
 # Defaults globais — usados quando cadência não sobrescreve
 DEFAULT_LLM_PROVIDER = "openai"

@@ -14,8 +14,10 @@ import {
   MailSearch,
   MapPinned,
   Pause,
+  Pencil,
   Play,
   RefreshCw,
+  Save,
   Settings2,
   Sparkles,
   Trash2,
@@ -29,11 +31,13 @@ import {
 } from "@/lib/api/hooks/use-leads"
 import { useCreateLeadList, useLeadLists } from "@/lib/api/hooks/use-lead-lists"
 import {
+  useCaptureExecutionHistory,
   useCaptureSchedules,
   useDeleteCaptureSchedule,
   useToggleCaptureSchedule,
   useUpsertCaptureSchedule,
   type CaptureScheduleConfig,
+  type CaptureSource,
 } from "@/lib/api/hooks/use-capture-schedule"
 import {
   useEnrichmentJobs,
@@ -52,7 +56,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Tabs, TabsContent } from "@/components/ui/tabs"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
@@ -117,23 +121,23 @@ export default function GerarLeadsPage() {
   const [newListName, setNewListName] = useState("")
   const [mergeDuplicates, setMergeDuplicates] = useState(true)
 
-  const [mapsSearchTerms, setMapsSearchTerms] = useState("clínicas odontológicas\ncontabilidades")
-  const [mapsLocation, setMapsLocation] = useState("São Paulo, Brasil")
+  const [mapsSearchTerms, setMapsSearchTerms] = useState("")
+  const [mapsLocation, setMapsLocation] = useState("")
   const [mapsLocations, setMapsLocations] = useState("")
-  const [mapsCategories, setMapsCategories] = useState("clínica odontológica\nconsultoria")
-  const [mapsLimit, setMapsLimit] = useState("25")
+  const [mapsCategories, setMapsCategories] = useState("")
+  const [mapsLimit, setMapsLimit] = useState("")
 
-  const [b2bTitles, setB2bTitles] = useState("Head de Marketing\nDiretor Comercial")
-  const [b2bLocations, setB2bLocations] = useState("Brasil")
-  const [b2bCities, setB2bCities] = useState("São Paulo\nCuritiba")
-  const [b2bIndustries, setB2bIndustries] = useState("software\nmarketing & advertising")
-  const [b2bKeywords, setB2bKeywords] = useState("B2B\nSaaS")
-  const [b2bSizes, setB2bSizes] = useState("11-20\n21-50\n51-100")
+  const [b2bTitles, setB2bTitles] = useState("")
+  const [b2bLocations, setB2bLocations] = useState("")
+  const [b2bCities, setB2bCities] = useState("")
+  const [b2bIndustries, setB2bIndustries] = useState("")
+  const [b2bKeywords, setB2bKeywords] = useState("")
+  const [b2bSizes, setB2bSizes] = useState("")
   const [b2bLimit, setB2bLimit] = useState("50")
   const [b2bNegativeTerms, setB2bNegativeTerms] = useState("")
 
   const [enrichmentUrls, setEnrichmentUrls] = useState("")
-  const [enrichmentLimit, setEnrichmentLimit] = useState("25")
+  const [enrichmentLimit, setEnrichmentLimit] = useState("")
 
   const [generatedPreview, setGeneratedPreview] = useState<GeneratedLeadPreviewItem[]>([])
 
@@ -447,7 +451,7 @@ export default function GerarLeadsPage() {
             })}
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-[1.05fr_1.45fr]">
+          <div className="grid gap-6 xl:grid-cols-[0.5fr_1.50fr]">
             <Card>
               <CardHeader>
                 <CardTitle>Filtros da fonte</CardTitle>
@@ -547,12 +551,12 @@ export default function GerarLeadsPage() {
                     </Field>
                     <Field
                       label="Localizações (país / estado)"
-                      hint="Um por linha. Use nomes em inglês para melhor precisão. Ex.: Brazil, United States, São Paulo."
+                      hint="Um por linha. Use nomes em inglês para melhor precisão. Ex.: Brasil, United States, São Paulo."
                     >
                       <Textarea
                         value={b2bLocations}
                         onChange={(e) => setB2bLocations(e.target.value)}
-                        placeholder={"Brazil"}
+                        placeholder={"Brasil"}
                         rows={2}
                       />
                     </Field>
@@ -830,8 +834,8 @@ export default function GerarLeadsPage() {
                     <div className="overflow-x-auto rounded-lg border border-(--border-default)">
                       <table className="w-full min-w-6xl text-sm">
                         <thead>
-                          <tr className="border-b border-(--border-default) bg-(--bg-overlay)">
-                            <th className="px-4 py-3 text-left">
+                          <tr className="border-b border-(--border-default) bg-(--accent)">
+                            <th className="px-4 py-3 text-left text-(--text-invert)">
                               <Checkbox
                                 checked={allSelected}
                                 onCheckedChange={(checked) =>
@@ -841,16 +845,16 @@ export default function GerarLeadsPage() {
                                 }
                               />
                             </th>
-                            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-(--text-tertiary)">
+                            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-(--text-invert)">
                               Lead
                             </th>
-                            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-(--text-tertiary)">
+                            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-(--text-invert)">
                               Empresa
                             </th>
-                            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-(--text-tertiary)">
+                            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-(--text-invert)">
                               Contato
                             </th>
-                            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-(--text-tertiary)">
+                            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-(--text-invert)">
                               Origem
                             </th>
                           </tr>
@@ -1027,15 +1031,17 @@ export default function GerarLeadsPage() {
         </TabsContent>
       </Tabs>
 
-      {/* Modal de detalhes da automação */}
+      {/* Modal de detalhes / edição da automação */}
       <Dialog open={!!detailConfig} onOpenChange={(open) => !open && setDetailConfig(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>
-              {detailConfig?.source === "google_maps" ? "Google Maps" : "Base B2B"} — Configuração
+              {detailConfig?.source === "google_maps" ? "Google Maps" : "Base B2B"} — Automação
             </DialogTitle>
           </DialogHeader>
-          {detailConfig && <ScheduleDetailContent config={detailConfig} />}
+          {detailConfig && (
+            <ScheduleDetailModal config={detailConfig} onClose={() => setDetailConfig(null)} />
+          )}
         </DialogContent>
       </Dialog>
 
@@ -1065,63 +1071,305 @@ export default function GerarLeadsPage() {
   )
 }
 
-function ScheduleDetailContent({ config }: { config: CaptureScheduleConfig }) {
+function ScheduleDetailModal({
+  config,
+  onClose,
+}: {
+  config: CaptureScheduleConfig
+  onClose: () => void
+}) {
   const isGoogleMaps = config.source === "google_maps"
+  const source: CaptureSource = config.source as CaptureSource
+  const upsert = useUpsertCaptureSchedule(source)
+  const { data: history = [], isLoading: historyLoading } = useCaptureExecutionHistory(source)
 
-  const rows: { label: string; value: string }[] = isGoogleMaps
-    ? [
-        { label: "Termos de busca", value: config.maps_search_terms?.join(", ") || "—" },
-        {
-          label: "Localizações",
-          value: config.maps_locations?.join(", ") || config.maps_location || "—",
-        },
-        { label: "Categorias", value: config.maps_categories?.join(", ") || "—" },
-        { label: "Máx. resultados", value: String(config.max_items) },
-        { label: "Índice de combo", value: String(config.maps_combo_index) },
-      ]
-    : [
-        { label: "Cargos", value: config.b2b_job_titles?.join(", ") || "—" },
-        { label: "Cidades", value: config.b2b_cities?.join(", ") || "—" },
-        { label: "Localizações", value: config.b2b_locations?.join(", ") || "—" },
-        { label: "Indústrias", value: config.b2b_industries?.join(", ") || "—" },
-        { label: "Palavras-chave", value: config.b2b_company_keywords?.join(", ") || "—" },
-        { label: "Tamanhos de empresa", value: config.b2b_company_sizes?.join(", ") || "—" },
-        { label: "Máx. resultados", value: String(config.max_items) },
-        { label: "Índice de rotação", value: String(config.b2b_rotation_index) },
-      ]
+  // Edit state — initialize from config
+  const [editing, setEditing] = useState(false)
+  const [maxItems, setMaxItems] = useState(String(config.max_items))
+  const [mapsTerms, setMapsTerms] = useState(config.maps_search_terms?.join("\n") ?? "")
+  const [mapsLocs, setMapsLocs] = useState(
+    (config.maps_locations ?? (config.maps_location ? [config.maps_location] : [])).join("\n"),
+  )
+  const [mapsCats, setMapsCats] = useState(config.maps_categories?.join("\n") ?? "")
+  const [b2bTitles, setB2bTitles] = useState(config.b2b_job_titles?.join("\n") ?? "")
+  const [b2bCities, setB2bCities] = useState(config.b2b_cities?.join("\n") ?? "")
+  const [b2bLocs, setB2bLocs] = useState(config.b2b_locations?.join("\n") ?? "")
+  const [b2bIndustries, setB2bIndustries] = useState(config.b2b_industries?.join("\n") ?? "")
+  const [b2bKeywords, setB2bKeywords] = useState(config.b2b_company_keywords?.join("\n") ?? "")
+  const [b2bSizes, setB2bSizes] = useState(config.b2b_company_sizes?.join("\n") ?? "")
+
+  const splitLines = (v: string) =>
+    v
+      .split(/\r?\n|,|;/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+
+  async function handleSave() {
+    try {
+      await upsert.mutateAsync({
+        source,
+        is_active: config.is_active,
+        max_items: Number(maxItems) || 25,
+        maps_search_terms: splitLines(mapsTerms),
+        maps_location: null,
+        maps_locations: splitLines(mapsLocs),
+        maps_categories: splitLines(mapsCats),
+        b2b_job_titles: splitLines(b2bTitles),
+        b2b_locations: splitLines(b2bLocs),
+        b2b_cities: splitLines(b2bCities),
+        b2b_industries: splitLines(b2bIndustries),
+        b2b_company_keywords: splitLines(b2bKeywords),
+        b2b_company_sizes: splitLines(b2bSizes),
+      })
+      toast.success("Automação atualizada")
+      onClose()
+    } catch {
+      toast.error("Falha ao salvar alterações")
+    }
+  }
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <Badge variant={config.is_active ? "default" : "outline"}>
-          {config.is_active ? "Ativa" : "Pausada"}
-        </Badge>
-        <span className="text-xs text-(--text-tertiary)">
-          Última execução:{" "}
-          {config.last_run_at
-            ? new Date(config.last_run_at).toLocaleDateString("pt-BR", {
-                day: "2-digit",
-                month: "2-digit",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })
-            : "Nunca"}
-        </span>
-      </div>
-      <div className="space-y-2">
-        {rows.map((r) => (
-          <div key={r.label} className="grid grid-cols-[140px_1fr] gap-2 text-sm">
-            <span className="font-medium text-(--text-secondary)">{r.label}</span>
-            <span className="text-(--text-primary)">{r.value}</span>
+    <Tabs defaultValue="config" className="mt-2">
+      <TabsList>
+        <TabsTrigger value="config">Configuração</TabsTrigger>
+        <TabsTrigger value="history">Histórico</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="config" className="mt-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Badge variant={config.is_active ? "default" : "outline"}>
+              {config.is_active ? "Ativa" : "Pausada"}
+            </Badge>
+            <span className="text-xs text-(--text-tertiary)">
+              Última execução:{" "}
+              {config.last_run_at
+                ? new Date(config.last_run_at).toLocaleDateString("pt-BR", {
+                    day: "2-digit",
+                    month: "2-digit",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                : "Nunca"}
+            </span>
           </div>
-        ))}
-      </div>
-      <p className="text-xs text-(--text-tertiary)">
-        Criada em {new Date(config.created_at).toLocaleDateString("pt-BR")} · Atualizada em{" "}
-        {new Date(config.updated_at).toLocaleDateString("pt-BR")}
-      </p>
-    </div>
+          {!editing && (
+            <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
+              <Pencil size={14} />
+              Editar
+            </Button>
+          )}
+        </div>
+
+        {editing ? (
+          <div className="space-y-3">
+            <label className="block space-y-1">
+              <span className="text-sm font-medium text-(--text-primary)">Máx. resultados</span>
+              <input
+                type="number"
+                min={1}
+                max={500}
+                value={maxItems}
+                onChange={(e) => setMaxItems(e.target.value)}
+                className={inputClassName}
+              />
+            </label>
+
+            {isGoogleMaps ? (
+              <>
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium text-(--text-primary)">Termos de busca</span>
+                  <Textarea
+                    rows={3}
+                    value={mapsTerms}
+                    onChange={(e) => setMapsTerms(e.target.value)}
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium text-(--text-primary)">Localizações</span>
+                  <Textarea
+                    rows={3}
+                    value={mapsLocs}
+                    onChange={(e) => setMapsLocs(e.target.value)}
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium text-(--text-primary)">Categorias</span>
+                  <Textarea
+                    rows={2}
+                    value={mapsCats}
+                    onChange={(e) => setMapsCats(e.target.value)}
+                  />
+                </label>
+              </>
+            ) : (
+              <>
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium text-(--text-primary)">Cargos</span>
+                  <Textarea
+                    rows={3}
+                    value={b2bTitles}
+                    onChange={(e) => setB2bTitles(e.target.value)}
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium text-(--text-primary)">Cidades</span>
+                  <Textarea
+                    rows={2}
+                    value={b2bCities}
+                    onChange={(e) => setB2bCities(e.target.value)}
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium text-(--text-primary)">Localizações</span>
+                  <Textarea rows={2} value={b2bLocs} onChange={(e) => setB2bLocs(e.target.value)} />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium text-(--text-primary)">Indústrias</span>
+                  <Textarea
+                    rows={2}
+                    value={b2bIndustries}
+                    onChange={(e) => setB2bIndustries(e.target.value)}
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium text-(--text-primary)">
+                    Palavras-chave empresa
+                  </span>
+                  <Textarea
+                    rows={2}
+                    value={b2bKeywords}
+                    onChange={(e) => setB2bKeywords(e.target.value)}
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium text-(--text-primary)">
+                    Tamanhos de empresa
+                  </span>
+                  <Textarea
+                    rows={2}
+                    value={b2bSizes}
+                    onChange={(e) => setB2bSizes(e.target.value)}
+                  />
+                </label>
+              </>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
+                Cancelar
+              </Button>
+              <Button size="sm" onClick={handleSave} disabled={upsert.isPending}>
+                <Save size={14} />
+                {upsert.isPending ? "Salvando..." : "Salvar"}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {(isGoogleMaps
+              ? [
+                  { label: "Termos de busca", value: config.maps_search_terms?.join(", ") || "—" },
+                  {
+                    label: "Localizações",
+                    value: config.maps_locations?.join(", ") || config.maps_location || "—",
+                  },
+                  { label: "Categorias", value: config.maps_categories?.join(", ") || "—" },
+                  { label: "Máx. resultados", value: String(config.max_items) },
+                  { label: "Índice de combo", value: String(config.maps_combo_index) },
+                ]
+              : [
+                  { label: "Cargos", value: config.b2b_job_titles?.join(", ") || "—" },
+                  { label: "Cidades", value: config.b2b_cities?.join(", ") || "—" },
+                  { label: "Localizações", value: config.b2b_locations?.join(", ") || "—" },
+                  { label: "Indústrias", value: config.b2b_industries?.join(", ") || "—" },
+                  {
+                    label: "Palavras-chave",
+                    value: config.b2b_company_keywords?.join(", ") || "—",
+                  },
+                  {
+                    label: "Tamanhos de empresa",
+                    value: config.b2b_company_sizes?.join(", ") || "—",
+                  },
+                  { label: "Máx. resultados", value: String(config.max_items) },
+                  { label: "Índice de rotação", value: String(config.b2b_rotation_index) },
+                ]
+            ).map((r) => (
+              <div key={r.label} className="grid grid-cols-[140px_1fr] gap-2 text-sm">
+                <span className="font-medium text-(--text-secondary)">{r.label}</span>
+                <span className="text-(--text-primary)">{r.value}</span>
+              </div>
+            ))}
+            <p className="text-xs text-(--text-tertiary)">
+              Criada em {new Date(config.created_at).toLocaleDateString("pt-BR")} · Atualizada em{" "}
+              {new Date(config.updated_at).toLocaleDateString("pt-BR")}
+            </p>
+          </div>
+        )}
+      </TabsContent>
+
+      <TabsContent value="history" className="mt-4">
+        {historyLoading ? (
+          <p className="py-6 text-center text-sm text-(--text-tertiary)">Carregando...</p>
+        ) : history.length === 0 ? (
+          <p className="py-6 text-center text-sm text-(--text-tertiary)">
+            Nenhuma execução registrada ainda.
+          </p>
+        ) : (
+          <div className="max-h-80 overflow-auto rounded-md border border-(--border-default)">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-(--bg-surface) text-left">
+                <tr>
+                  <th className="px-3 py-2 font-medium text-(--text-secondary)">Data</th>
+                  <th className="px-3 py-2 font-medium text-(--text-secondary)">Lista</th>
+                  <th className="px-3 py-2 font-medium text-(--text-secondary)">Combo</th>
+                  <th className="px-3 py-2 text-right font-medium text-(--text-secondary)">
+                    Inseridos
+                  </th>
+                  <th className="px-3 py-2 text-right font-medium text-(--text-secondary)">
+                    Total
+                  </th>
+                  <th className="px-3 py-2 font-medium text-(--text-secondary)">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-(--border-default)">
+                {history.map((log) => (
+                  <tr key={log.id}>
+                    <td className="whitespace-nowrap px-3 py-2 text-(--text-primary)">
+                      {new Date(log.executed_at).toLocaleDateString("pt-BR", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </td>
+                    <td className="max-w-40 truncate px-3 py-2 text-(--text-primary)">
+                      {log.list_name || "—"}
+                    </td>
+                    <td className="max-w-32 truncate px-3 py-2 text-(--text-tertiary)">
+                      {log.combo_label || "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right font-medium text-(--text-primary)">
+                      {log.leads_inserted}
+                    </td>
+                    <td className="px-3 py-2 text-right text-(--text-tertiary)">
+                      {log.leads_received}
+                    </td>
+                    <td className="px-3 py-2">
+                      <Badge variant={log.status === "success" ? "default" : "danger"}>
+                        {log.status === "success" ? "OK" : "Falhou"}
+                      </Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </TabsContent>
+    </Tabs>
   )
 }
 

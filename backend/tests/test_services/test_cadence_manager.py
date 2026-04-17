@@ -10,14 +10,12 @@ from __future__ import annotations
 import uuid
 
 import pytest
-import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.cadence import Cadence
 from models.enums import Channel, LeadStatus, StepStatus
 from models.lead import Lead
-from services.cadence_manager import CadenceManager, _DEFAULT_TEMPLATE
-
+from services.cadence_manager import _DEFAULT_TEMPLATE, CadenceManager
 
 pytestmark = pytest.mark.asyncio
 

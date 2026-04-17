@@ -168,3 +168,37 @@ export function useToggleCaptureSchedule(source: CaptureSource) {
     },
   })
 }
+
+// ── Execution history ──────────────────────────────────────────────────
+
+export interface CaptureExecutionLog {
+  id: string
+  capture_config_id: string
+  source: CaptureSource
+  list_id: string | null
+  list_name: string | null
+  combo_label: string | null
+  leads_received: number
+  leads_inserted: number
+  leads_skipped: number
+  status: "success" | "failed"
+  error_message: string | null
+  executed_at: string
+}
+
+export function useCaptureExecutionHistory(source: CaptureSource | null) {
+  const { data: session } = useSession()
+  const token = session?.accessToken as string | undefined
+
+  return useQuery<CaptureExecutionLog[]>({
+    queryKey: ["capture-execution-history", source],
+    queryFn: async () => {
+      if (!token || !source) return []
+      const client = createBrowserClient(token)
+      const { data, error } = await client.GET(`/capture-schedule/${source}/history` as never)
+      if (error) throw new Error("Falha ao buscar histórico de execuções")
+      return data as CaptureExecutionLog[]
+    },
+    enabled: !!token && !!source,
+  })
+}

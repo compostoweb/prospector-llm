@@ -70,7 +70,7 @@ async def test_create_sandbox_run_for_paused_cadence(
         json={"lead_ids": [str(lead.id)]},
     )
 
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 201, resp.text
     body = resp.json()
     assert body["cadence_id"] == cadence["id"]
     assert body["status"] == "running"
@@ -93,7 +93,7 @@ async def test_start_from_sandbox_approved_run_activates_paused_cadence(
         f"/cadences/{cadence['id']}/sandbox",
         json={"lead_ids": [str(lead.id)]},
     )
-    assert sandbox_resp.status_code == 200, sandbox_resp.text
+    assert sandbox_resp.status_code == 201, sandbox_resp.text
     run = sandbox_resp.json()
 
     approve_resp = await client.patch(f"/sandbox/{run['id']}/approve")
@@ -127,7 +127,7 @@ async def test_start_from_sandbox_requires_approved_run(
         f"/cadences/{cadence['id']}/sandbox",
         json={"lead_ids": [str(lead.id)]},
     )
-    assert sandbox_resp.status_code == 200, sandbox_resp.text
+    assert sandbox_resp.status_code == 201, sandbox_resp.text
     run_id = sandbox_resp.json()["id"]
 
     run = await db.get(SandboxRun, uuid.UUID(run_id))

@@ -6,6 +6,7 @@ from models.audio_file import AudioFile  # noqa: F401
 from models.base import Base  # noqa: F401
 from models.cadence import Cadence  # noqa: F401
 from models.cadence_step import CadenceStep  # noqa: F401
+from models.capture_execution_log import CaptureExecutionLog  # noqa: F401
 from models.capture_schedule import CaptureScheduleConfig  # noqa: F401
 from models.content_calculator_result import ContentCalculatorResult  # noqa: F401
 from models.content_engagement_comment import ContentEngagementComment  # noqa: F401

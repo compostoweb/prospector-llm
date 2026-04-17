@@ -12,7 +12,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
 CaptureSource = Literal["google_maps", "b2b_database"]
 
 
@@ -79,5 +78,22 @@ class CaptureScheduleResponse(BaseModel):
 
     created_at: datetime
     updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class CaptureExecutionLogResponse(BaseModel):
+    id: uuid.UUID
+    capture_config_id: uuid.UUID
+    source: str
+    list_id: uuid.UUID | None
+    list_name: str | None
+    combo_label: str | None
+    leads_received: int
+    leads_inserted: int
+    leads_skipped: int
+    status: str
+    error_message: str | None
+    executed_at: datetime
 
     model_config = {"from_attributes": True}

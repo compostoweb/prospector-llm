@@ -128,7 +128,12 @@ async def test_create_cadence_uses_cold_email_default_when_llm_omitted(
 
 async def test_create_cadence_invalid_provider(client: AsyncClient):
     payload = _cadence_payload(
-        llm={"provider": "anthropic", "model": "claude-3", "temperature": 0.5, "max_tokens": 512}
+        llm={
+            "provider": "invalid-provider",
+            "model": "whatever-model",
+            "temperature": 0.5,
+            "max_tokens": 512,
+        }
     )
     resp = await client.post("/cadences", json=payload)
     assert resp.status_code == 422
