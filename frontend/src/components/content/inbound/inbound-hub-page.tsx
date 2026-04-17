@@ -1,5 +1,6 @@
 "use client"
 
+import Image from "next/image"
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
   Activity,
@@ -593,7 +594,7 @@ export default function InboundHubPage() {
                   setActiveTab("metricas")
                 }}
               >
-                <SelectTrigger className="h-9 w-full max-w-[600px] text-sm">
+                <SelectTrigger className="h-9 w-full max-w-150 text-sm">
                   <SelectValue placeholder="Escolher lead magnet..." />
                 </SelectTrigger>
                 <SelectContent>
@@ -1715,7 +1716,7 @@ export default function InboundHubPage() {
                     <div className="flex items-start gap-2 rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-sm shadow-sm transition-colors focus-within:border-(--accent) focus-within:ring-2 focus-within:ring-(--accent) focus-within:ring-offset-0">
                       <span className="mt-0.5 shrink-0 text-(--text-tertiary)">{"{nome},"}</span>
                       <textarea
-                        className="no-focus-ring min-h-[64px] w-full flex-1 resize-none border-0 bg-transparent p-0 text-sm text-(--text-primary) outline-none placeholder:text-(--text-tertiary)"
+                        className="no-focus-ring min-h-16 w-full flex-1 resize-none border-0 bg-transparent p-0 text-sm text-(--text-primary) outline-none placeholder:text-(--text-tertiary)"
                         value={leadMagnetForm.email_body_text ?? ""}
                         placeholder={
                           selectedLeadMagnet?.type === "pdf"
@@ -2240,11 +2241,11 @@ function ImageUploadField({
       <div className="flex items-start gap-3">
         {/* Thumbnail / placeholder */}
         <div
-          className="flex h-16 w-16 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-xl border border-(--border-default) bg-(--bg-overlay) hover:opacity-80"
+          className="relative flex h-16 w-16 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-xl border border-(--border-default) bg-(--bg-overlay) hover:opacity-80"
           onClick={() => inputRef.current?.click()}
         >
           {value ? (
-            <img src={value} alt={label} className="h-full w-full object-cover" />
+            <Image src={value} alt={label} fill unoptimized className="object-cover" />
           ) : (
             <ImageIcon className="h-6 w-6 text-(--text-tertiary)" />
           )}

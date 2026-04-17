@@ -75,7 +75,11 @@ const MOCKS: { key: string; label: string; badge: string; page: LandingPagePubli
 export default function ThankYouPreviewPage() {
   const [active, setActive] = useState("pdf")
 
-  const current = MOCKS.find((m) => m.key === active)!
+  const current = MOCKS.find((m) => m.key === active) ?? MOCKS[0]
+
+  if (!current) {
+    return null
+  }
 
   return (
     <div className="min-h-screen bg-zinc-950">

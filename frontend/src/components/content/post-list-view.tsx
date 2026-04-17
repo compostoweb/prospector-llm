@@ -270,8 +270,10 @@ export function PostListView({ posts, sortBy, onSortChange }: PostListViewProps)
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className={`flex items-center gap-1 text-xs font-medium uppercase tracking-wide hover:text-amber-300 transition-colors ${
-                    statusFilter !== "all" ? "text-(--accent)" : "text-(--text-invert)"
+                  className={`flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium uppercase tracking-wide transition-colors ${
+                    statusFilter !== "all"
+                      ? "bg-white/14 text-(--text-invert) ring-1 ring-white/20 hover:bg-white/18"
+                      : "text-(--text-invert) hover:text-amber-300"
                   }`}
                 >
                   Status
@@ -302,8 +304,10 @@ export function PostListView({ posts, sortBy, onSortChange }: PostListViewProps)
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className={`flex items-center gap-1 text-xs font-medium uppercase tracking-wide hover:text-amber-300 transition-colors ${
-                    pillarFilter !== "all" ? "text-(--accent)" : "text-(--text-invert)"
+                  className={`flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium uppercase tracking-wide transition-colors ${
+                    pillarFilter !== "all"
+                      ? "bg-white/14 text-(--text-invert) ring-1 ring-white/20 hover:bg-white/18"
+                      : "text-(--text-invert) hover:text-amber-300"
                   }`}
                 >
                   Pilar

@@ -156,7 +156,11 @@ const TEMPLATES: { key: TemplateKey; label: string; badge: string; page: Landing
 export default function LpPreviewPage() {
   const [active, setActive] = useState<TemplateKey>("pdf")
 
-  const current = TEMPLATES.find((t) => t.key === active)!
+  const current = TEMPLATES.find((t) => t.key === active) ?? TEMPLATES[0]
+
+  if (!current) {
+    return null
+  }
 
   return (
     <div className="min-h-screen bg-zinc-950">

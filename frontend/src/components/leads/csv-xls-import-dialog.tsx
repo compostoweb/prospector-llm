@@ -63,7 +63,9 @@ function parseWorkbook(file: File): Promise<{ headers: string[]; rows: string[][
         const data = e.target?.result
         if (!data) return reject(new Error("Arquivo vazio"))
         const wb = XLSX.read(data, { type: "array" })
-        const ws = wb.Sheets[wb.SheetNames[0]!]
+        const firstSheetName = wb.SheetNames[0]
+        if (!firstSheetName) return reject(new Error("Planilha não encontrada"))
+        const ws = wb.Sheets[firstSheetName]
         if (!ws) return reject(new Error("Planilha não encontrada"))
         const raw = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1 })
         if (raw.length < 1) return reject(new Error("Nenhuma linha encontrada"))
@@ -126,16 +128,12 @@ export function CsvXlsImportDialog({ open, onOpenChange, onConfirm }: Props) {
 
   // ── Drag & drop ──────────────────────────────────────────────────
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
-      e.preventDefault()
-      setIsDragging(false)
-      const file = e.dataTransfer.files[0]
-      if (file) processFile(file)
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  )
+  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    setIsDragging(false)
+    const file = e.dataTransfer.files[0]
+    if (file) processFile(file)
+  }, [])
 
   const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()

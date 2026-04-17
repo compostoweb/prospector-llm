@@ -39,6 +39,13 @@ export const enrichmentJobKeys = {
   detail: (id: string) => ["enrichment-jobs", id] as const,
 }
 
+function getAuthorizedClient(token?: string) {
+  if (!token) {
+    throw new Error("Sessão expirada. Faça login novamente.")
+  }
+  return createBrowserClient(token)
+}
+
 // ── Hooks ──────────────────────────────────────────────────────────────
 
 export function useEnrichmentJobs() {
@@ -49,7 +56,7 @@ export function useEnrichmentJobs() {
     queryKey: enrichmentJobKeys.all,
     enabled: !!token,
     queryFn: async () => {
-      const client = createBrowserClient(token!)
+      const client = getAuthorizedClient(token)
       const res = await client.GET("/enrichment-jobs" as never)
       if (res.error) throw res.error
       return (res.data as EnrichmentJob[]) ?? []
@@ -70,7 +77,7 @@ export function useCreateEnrichmentJob() {
 
   return useMutation<EnrichmentJob, Error, EnrichmentJobCreate>({
     mutationFn: async (payload) => {
-      const client = createBrowserClient(token!)
+      const client = getAuthorizedClient(token)
       const res = await client.POST("/enrichment-jobs" as never, {
         body: payload as never,
       })
@@ -90,7 +97,7 @@ export function useDeleteEnrichmentJob() {
 
   return useMutation<void, Error, string>({
     mutationFn: async (jobId) => {
-      const client = createBrowserClient(token!)
+      const client = getAuthorizedClient(token)
       const res = await client.DELETE(`/enrichment-jobs/${jobId}` as never)
       if (res.error) throw res.error
     },

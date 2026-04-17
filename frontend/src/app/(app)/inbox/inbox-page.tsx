@@ -1,7 +1,12 @@
 "use client"
 
-import { useCallback, useRef, useState } from "react"
-import { type InboxFilter, useConversations, useSyncInbox, useMarkChatAsRead } from "@/lib/api/hooks/use-inbox"
+import { useCallback, useMemo, useRef, useState } from "react"
+import {
+  type InboxFilter,
+  useConversations,
+  useSyncInbox,
+  useMarkChatAsRead,
+} from "@/lib/api/hooks/use-inbox"
 import { ConversationList } from "@/components/inbox/conversation-list"
 import { ChatPanel } from "@/components/inbox/chat-panel"
 import { ContactSidebar } from "@/components/inbox/contact-sidebar"
@@ -28,7 +33,7 @@ export default function InboxPage() {
   const syncMutation = useSyncInbox()
   const markAsRead = useMarkChatAsRead()
 
-  const conversations = data?.items ?? []
+  const conversations = useMemo(() => data?.items ?? [], [data?.items])
 
   const handleSelectChat = useCallback(
     (chatId: string) => {
@@ -83,9 +88,7 @@ export default function InboxPage() {
       )}
 
       {/* Col 3: Contact sidebar */}
-      {selectedChatId && showContact && (
-        <ContactSidebar chatId={selectedChatId} />
-      )}
+      {selectedChatId && showContact && <ContactSidebar chatId={selectedChatId} />}
     </div>
   )
 }

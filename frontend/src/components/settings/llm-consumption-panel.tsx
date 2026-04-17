@@ -50,7 +50,7 @@ export function LLMConsumptionPanel() {
   const searchParams = useSearchParams()
 
   const { data: modelsData } = useLLMModels()
-  const availableModels = modelsData?.models ?? []
+  const availableModels = useMemo(() => modelsData?.models ?? [], [modelsData?.models])
   const [days, setDays] = useState<number>(() => resolveDays(searchParams.get("consumo_days")))
   const [granularity, setGranularity] = useState<LLMUsageGranularity>(() =>
     resolveGranularity(searchParams.get("consumo_granularity")),
@@ -60,11 +60,17 @@ export function LLMConsumptionPanel() {
   )
   const [model, setModel] = useState<string>(() => searchParams.get("consumo_model") ?? "all")
 
-  const knownProviders = new Set<string>(availableModels.map((item) => item.provider))
-  const visibleModelOptions =
-    provider === "all"
-      ? availableModels
-      : availableModels.filter((item) => item.provider === provider)
+  const knownProviders = useMemo(
+    () => new Set<string>(availableModels.map((item) => item.provider)),
+    [availableModels],
+  )
+  const visibleModelOptions = useMemo(
+    () =>
+      provider === "all"
+        ? availableModels
+        : availableModels.filter((item) => item.provider === provider),
+    [availableModels, provider],
+  )
 
   useEffect(() => {
     setDays(resolveDays(searchParams.get("consumo_days")))

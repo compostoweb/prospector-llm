@@ -1,5 +1,6 @@
 "use client"
 
+import Image from "next/image"
 import { useState } from "react"
 import {
   ArrowRight,
@@ -12,7 +13,6 @@ import {
   Users,
 } from "lucide-react"
 import { env } from "@/env"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type {
@@ -23,6 +23,8 @@ import type {
 interface Props {
   page: LandingPagePublicData
 }
+
+const BRAND_LOGO_SRC = `${env.NEXT_PUBLIC_API_URL}/assets/branding/compostoweb-logo-primary-transparent.webp`
 
 export default function LandingPublicPage({ page }: Props) {
   const [error, setError] = useState<string | null>(null)
@@ -158,9 +160,12 @@ export default function LandingPublicPage({ page }: Props) {
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10 lg:px-8 lg:py-14">
           {/* Logo + Social proof */}
           <div className="flex flex-col gap-3">
-            <img
-              src={`${env.NEXT_PUBLIC_API_URL}/assets/branding/compostoweb-logo-primary-transparent.webp`}
+            <Image
+              src={BRAND_LOGO_SRC}
               alt="Composto Web"
+              width={208}
+              height={48}
+              unoptimized
               className="h-auto w-52 object-contain"
             />
 
@@ -289,9 +294,12 @@ export default function LandingPublicPage({ page }: Props) {
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10 lg:px-8 lg:py-14">
           {/* Logo + Social proof */}
           <div className="flex flex-col gap-3">
-            <img
-              src={`${env.NEXT_PUBLIC_API_URL}/assets/branding/compostoweb-logo-primary-transparent.webp`}
+            <Image
+              src={BRAND_LOGO_SRC}
               alt="Composto Web"
+              width={208}
+              height={48}
+              unoptimized
               className="h-auto w-52 object-contain"
             />
             <div className="flex flex-wrap items-center gap-3">
@@ -419,9 +427,12 @@ export default function LandingPublicPage({ page }: Props) {
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10 lg:px-8 lg:py-14">
         {/* Logo + Social proof */}
         <div className="flex flex-col gap-3">
-          <img
-            src={`${env.NEXT_PUBLIC_API_URL}/assets/branding/compostoweb-logo-primary-transparent.webp`}
+          <Image
+            src={BRAND_LOGO_SRC}
             alt="Composto Web"
+            width={208}
+            height={48}
+            unoptimized
             className="h-auto w-52 object-contain"
           />
           <div className="flex flex-wrap items-center gap-3">
@@ -452,9 +463,12 @@ export default function LandingPublicPage({ page }: Props) {
 
                 {page.hero_image_url && (
                   <div className="overflow-hidden rounded-2xl">
-                    <img
+                    <Image
                       src={page.hero_image_url}
                       alt={page.title}
+                      width={1200}
+                      height={675}
+                      unoptimized
                       className="h-auto w-full object-cover"
                     />
                   </div>
@@ -522,9 +536,12 @@ export default function LandingPublicPage({ page }: Props) {
                 <div className="flex items-center gap-3">
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-(--accent-subtle) text-(--accent-subtle-fg)">
                     {page.author_photo_url ? (
-                      <img
+                      <Image
                         src={page.author_photo_url}
                         alt={page.publisher_name || "Autor"}
+                        width={48}
+                        height={48}
+                        unoptimized
                         className="h-full w-full object-cover"
                       />
                     ) : (
