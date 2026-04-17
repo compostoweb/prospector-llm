@@ -562,23 +562,47 @@ class UnipileClient:
         """
         Retorna o nome da empresa atual de um perfil LinkedIn via experience section.
         Usa GET /users/{provider_id}?linkedin_sections=experience.
+        Faz até 4 retentativas com backoff progressivo em caso de erro/rate-limit.
         """
-        try:
-            r = await self._client.get(
-                f"/users/{provider_id}",
-                params={"account_id": account_id, "linkedin_sections": "experience"},
-            )
-            if r.status_code != 200:
+        max_retries = 4
+        for attempt in range(max_retries + 1):
+            try:
+                r = await self._client.get(
+                    f"/users/{provider_id}",
+                    params={"account_id": account_id, "linkedin_sections": "experience"},
+                )
+                if r.status_code == 429:
+                    # Rate-limited: backoff progressivo (3s, 6s, 9s, 12s)
+                    if attempt < max_retries:
+                        wait = 3.0 * (attempt + 1)
+                        logger.debug(
+                            "unipile.fetch_company.429_retry",
+                            provider_id=provider_id,
+                            attempt=attempt + 1,
+                            wait_s=wait,
+                        )
+                        await asyncio.sleep(wait)
+                        continue
+                    logger.warning(
+                        "unipile.fetch_company.429_exhausted",
+                        provider_id=provider_id,
+                    )
+                    return None
+                if r.status_code != 200:
+                    return None
+                data = r.json()
+                exp = data.get("work_experience") or []
+                if isinstance(exp, list) and exp:
+                    first = exp[0]
+                    if isinstance(first, dict):
+                        return first.get("company") or first.get("company_name") or None
                 return None
-            data = r.json()
-            exp = data.get("work_experience") or []
-            if isinstance(exp, list) and exp:
-                first = exp[0]
-                if isinstance(first, dict):
-                    return first.get("company") or first.get("company_name") or None
-            return None
-        except Exception:
-            return None
+            except Exception:
+                if attempt < max_retries:
+                    await asyncio.sleep(2.0 * (attempt + 1))
+                    continue
+                return None
+        return None
 
     async def get_relation_status(
         self,

@@ -1008,21 +1008,23 @@ async def linkedin_enrich_companies(
 
     from integrations.unipile_client import unipile_client
 
-    # Limitar a 25 perfis por chamada; semáforo de 5 concorrentes
-    ids = body.provider_ids[:25]
-    sem = asyncio.Semaphore(5)
+    # Aceita até 100 perfis por chamada; processar EM SÉRIE com delay para evitar 429 da Unipile
+    ids = body.provider_ids[:100]
+    results: list[dict[str, object]] = []
 
-    async def fetch_one(pid: str) -> dict[str, object]:
-        async with sem:
-            company = await cast(Any, unipile_client).fetch_profile_company(account_id, pid)
-            return {"provider_id": pid, "company": company}
+    for pid in ids:
+        company = await cast(Any, unipile_client).fetch_profile_company(account_id, pid)
+        results.append({"provider_id": pid, "company": company})
+        # Delay entre chamadas para respeitar rate-limit Unipile
+        await asyncio.sleep(0.4)
 
-    raw = await asyncio.gather(*[fetch_one(pid) for pid in ids], return_exceptions=True)
-    results = [r for r in raw if isinstance(r, dict)]
+    found = sum(1 for r in results if r.get("company"))
     logger.info(
         "linkedin_enrich_companies.done",
         requested=len(ids),
         returned=len(results),
+        with_company=found,
+        without_company=len(results) - found,
         tenant_id=str(tenant_id),
     )
     return {"results": results}

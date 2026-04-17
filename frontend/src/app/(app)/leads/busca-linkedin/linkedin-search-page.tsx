@@ -651,7 +651,7 @@ export default function LinkedInSearchPage() {
   const { mutateAsync: importProfiles, isPending: isImporting } = useImportLinkedInProfiles()
   const { data: lists = [] } = useLeadLists()
   const { mutateAsync: createList, isPending: isCreatingList } = useCreateLeadList()
-  const { mutate: enrichCompanies, isPending: isEnriching } = useLinkedInEnrichCompanies()
+  const { mutateAsync: enrichCompaniesAsync, isPending: isEnriching } = useLinkedInEnrichCompanies()
 
   // ── Filtragem client-side ─────────────────────────────────────────
   // Aplica filtros de grau de conexão, termos negativos e Open to Work.
@@ -748,6 +748,7 @@ export default function LinkedInSearchPage() {
 
   const handleSearch = useCallback(async () => {
     if (!hasAnyFilter) return
+    searchGenRef.current++ // invalida lotes de enrichment em andamento
     setResults([])
     setCursor(null)
     setSelectedIds(new Set())
@@ -843,30 +844,38 @@ export default function LinkedInSearchPage() {
   }, [])
 
   // Enriquece resultados com empresa via /users/{id}?linkedin_sections=experience
-  // Só enriquece IDs NOVOS (não re-busca os que já têm empresa no map)
+  // Processa em lotes de 5 para resposta progressiva (cada lote ~3s).
+  // Funciona com Load More: novos IDs são processados sem bloquear lotes em andamento.
   const enrichedIdsRef = useRef<Set<string>>(new Set())
+  const searchGenRef = useRef(0)
 
   useEffect(() => {
     const newIds = results.map((p) => p.provider_id).filter((id) => !enrichedIdsRef.current.has(id))
     if (newIds.length === 0) return
 
-    // Marca como "em processamento" para não duplicar chamadas
+    // Marca IDs como já agendados para evitar duplicação
     for (const id of newIds) enrichedIdsRef.current.add(id)
 
-    // Backend aceita no máx 25 por chamada; faz batches se necessário
-    const BATCH = 25
-    for (let i = 0; i < newIds.length; i += BATCH) {
-      const batch = newIds.slice(i, i + BATCH)
-      enrichCompanies(batch, {
-        onSuccess: (map) => {
+    const gen = searchGenRef.current // captura geração atual da busca
+    const BATCH_SIZE = 5
+
+    void (async () => {
+      for (let i = 0; i < newIds.length; i += BATCH_SIZE) {
+        if (searchGenRef.current !== gen) return // busca mudou — aborta
+        const batch = newIds.slice(i, i + BATCH_SIZE)
+        try {
+          const map = await enrichCompaniesAsync(batch)
+          if (searchGenRef.current !== gen) return // busca mudou — aborta
           setCompanyEnrichMap((prev) => {
             const merged = new Map(prev)
             map.forEach((v, k) => merged.set(k, v))
             return merged
           })
-        },
-      })
-    }
+        } catch {
+          // batch falhou — continua com próximo
+        }
+      }
+    })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [results])
 
@@ -1357,7 +1366,7 @@ export default function LinkedInSearchPage() {
                   <p className="text-lg font-semibold text-(--text-primary)">
                     Buscando resultados…
                   </p>
-                  <p className="mt-1 text-sm text-(--text-tertiary)">
+                  <p className="mt-1 text-lg text-(--text-tertiary)">
                     Consultando o LinkedIn via API
                   </p>
                 </div>
@@ -1370,15 +1379,15 @@ export default function LinkedInSearchPage() {
                   <Search size={28} strokeWidth={1.5} className="text-violet-500" />
                 </div>
                 <div className="text-center">
-                  <p className="text-sm font-semibold text-(--text-primary)">
+                  <p className="text-xl font-semibold text-(--text-primary)">
                     Busque profissionais no LinkedIn
                   </p>
-                  <p className="mt-1 max-w-sm text-xs leading-relaxed text-(--text-tertiary)">
-                    Use os filtros ao lado para encontrar leads. Combine palavras-chave, cargos,
-                    localização e grau de conexão.
+                  <p className="mt-1 max-w-auto text-lg leading-relaxed text-(--text-tertiary)">
+                    Use os filtros ao lado para encontrar leads. <br /> Combine palavras-chave,
+                    cargos, localização e grau de conexão.
                   </p>
                 </div>
-                <kbd className="rounded-lg border border-(--border-default) bg-(--bg-surface) px-2.5 py-1 font-mono text-[11px] text-(--text-tertiary)">
+                <kbd className="rounded-lg border border-(--border-default) bg-(--bg-surface) px-2.5 py-1 font-mono text-[15px] text-(--text-tertiary)">
                   Ctrl+Enter para buscar
                 </kbd>
               </div>
@@ -1411,10 +1420,10 @@ export default function LinkedInSearchPage() {
                     const ex = profile.company ?? extractCompanyFromHeadline(profile.headline)
                     return ex && ex !== profile.headline ? ex : null
                   })()
-                  // Enquanto enriquecendo, não mostrar company extraída do headline (evita flash de dado errado)
-                  const rowCompany = enrichedCompany ?? (isEnriching ? null : headlineCompany)
+                  // Mostra empresa disponível imediatamente; enrichment sobrescreve quando chegar
+                  const rowCompany = enrichedCompany ?? headlineCompany
                   // Industry como fallback quando não há empresa disponível
-                  const rowIndustry = !rowCompany && !isEnriching ? profile.industry : null
+                  const rowIndustry = !rowCompany ? profile.industry : null
                   return (
                     <div
                       key={profile.provider_id}

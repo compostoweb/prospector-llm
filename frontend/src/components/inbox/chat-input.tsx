@@ -3,7 +3,11 @@
 import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { useSendVoiceMessage, useSendAttachments, type SuggestTone } from "@/lib/api/hooks/use-inbox"
+import {
+  useSendVoiceMessage,
+  useSendAttachments,
+  type SuggestTone,
+} from "@/lib/api/hooks/use-inbox"
 import {
   Send,
   Sparkles,
@@ -209,11 +213,7 @@ export function ChatInput({
               >
                 <Trash2 size={14} aria-hidden="true" />
               </button>
-              <Button
-                size="sm"
-                onClick={sendRecording}
-                disabled={sendVoice.isPending}
-              >
+              <Button size="sm" onClick={sendRecording} disabled={sendVoice.isPending}>
                 {sendVoice.isPending ? (
                   <Loader2 size={14} className="mr-1 animate-spin" />
                 ) : (
@@ -254,7 +254,7 @@ export function ChatInput({
       )}
 
       {/* Text input + actions */}
-      <div className="flex items-end gap-2">
+      <div className="flex items-center gap-2">
         {/* Hidden file input */}
         <input
           ref={fileInputRef}
@@ -367,10 +367,12 @@ export function ChatInput({
           {/* Send */}
           <Button
             onClick={handleSendWithAttachments}
-            disabled={(isSending || sendAttachments.isPending) && !pendingFiles.length && !value.trim()}
+            disabled={
+              (isSending || sendAttachments.isPending) && !pendingFiles.length && !value.trim()
+            }
             className="h-9"
           >
-            {(isSending || sendAttachments.isPending) ? (
+            {isSending || sendAttachments.isPending ? (
               <Loader2 size={14} className="animate-spin" />
             ) : (
               <Send size={14} aria-hidden="true" />
@@ -383,9 +385,44 @@ export function ChatInput({
 }
 
 const COMMON_EMOJIS = [
-  "😀", "😂", "😊", "🥰", "😎", "🤔", "👍", "👋",
-  "🎉", "🔥", "💯", "❤️", "👏", "🙌", "💪", "🤝",
-  "✅", "⭐", "🚀", "💡", "📊", "📈", "🏆", "🎯",
-  "😅", "😉", "🤩", "😍", "🫡", "🤗", "😤", "🫠",
-  "👀", "🙏", "✨", "💬", "📌", "🔗", "📞", "📧",
+  "😀",
+  "😂",
+  "😊",
+  "🥰",
+  "😎",
+  "🤔",
+  "👍",
+  "👋",
+  "🎉",
+  "🔥",
+  "💯",
+  "❤️",
+  "👏",
+  "🙌",
+  "💪",
+  "🤝",
+  "✅",
+  "⭐",
+  "🚀",
+  "💡",
+  "📊",
+  "📈",
+  "🏆",
+  "🎯",
+  "😅",
+  "😉",
+  "🤩",
+  "😍",
+  "🫡",
+  "🤗",
+  "😤",
+  "🫠",
+  "👀",
+  "🙏",
+  "✨",
+  "💬",
+  "📌",
+  "🔗",
+  "📞",
+  "📧",
 ]

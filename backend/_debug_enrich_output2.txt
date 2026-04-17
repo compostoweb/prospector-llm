@@ -1,0 +1,33 @@
+Search: 25 itens
+
+  [OK]  1. Leandro Ramos                       | search_co=None                      | enrich_co=Eh Medical Ltda
+  [OK]  2. Manoel Scarlatelli Neto             | search_co=None                      | enrich_co=Guardio
+  [OK]  3. Raphael Oliveira                    | search_co=None                      | enrich_co=Stanley 1913
+  [OK]  4. Edson Vedovato                      | search_co=None                      | enrich_co=Tradeworks Serviços de Comérci
+  [OK]  5. Marcus Pierucci                     | search_co=None                      | enrich_co=Zeiki Medical
+  [OK]  6. Renato Florencio                    | search_co=None                      | enrich_co=Sentric Soluções Inteligentes
+  [OK]  7. Rodrigo Alvim                       | search_co=None                      | enrich_co=Wooh Mídia
+  [OK]  8. Jorge Camilo Trabulsi               | search_co=None                      | enrich_co=Walsywa
+  [OK]  9. Humberto Gondim                     | search_co=None                      | enrich_co=PETROMAQ
+  [OK] 10. Jeff Wendell                        | search_co=None                      | enrich_co=WB Comunicação Brasil
+  [OK] 11. Yuri Souza                          | search_co=None                      | enrich_co=BPM4B - BPM for Business
+  [OK] 12. Pedro Soares                        | search_co=None                      | enrich_co=Agência TB Web
+  [OK] 13. Sergio Salomao                      | search_co=None                      | enrich_co=Thermas da Mata
+  [OK] 14. Jorge Ichikawa                      | search_co=None                      | enrich_co=Career Break
+  [OK] 15. Daniel Lopes                        | search_co=None                      | enrich_co=Sys Manager
+  [OK] 16. Marcos Aurelio Moura                | search_co=None                      | enrich_co=ICONIC
+  [OK] 17. Welliton Souza                      | search_co=None                      | enrich_co=Grupo Jorlan
+  [OK] 18. Anderson Carlos                     | search_co=None                      | enrich_co=Agência Volkan
+  [OK] 19. Thyago Carvalho                     | search_co=None                      | enrich_co=SigaLuz Digital Marketing
+  [OK] 20. Luiz Gildin                         | search_co=None                      | enrich_co=Ticket Fácil
+  [OK] 21. Matheus Rizo                        | search_co=None                      | enrich_co=meutudo.
+  [OK] 22. Harlem Queirós                      | search_co=None                      | enrich_co=Rede Américas
+  [OK] 23. Gustavo Costa                       | search_co=None                      | enrich_co=US Media Consulting
+  [OK] 24. Eraldo Lima                         | search_co=None                      | enrich_co=Aliare
+  [OK] 25. Michel Duran                        | search_co=None                      | enrich_co=UniSoma Computação
+
+=== SUMMARY ===
+  Total: 25
+  Found company: 25
+  No experience: 0
+  Errors: 0

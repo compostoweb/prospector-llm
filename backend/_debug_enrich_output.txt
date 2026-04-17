@@ -1,0 +1,100 @@
+Search: 3 itens
+
+
+=== Perfil 1: Leonardo Custodio CEA (pid=ACoAADyhYiYB5-m7VZ8Aq2KkxofmxDwCWST93_Y) ===
+  search.company = None
+  search.current_company = None
+  search.headline = Gerente Geral
+  GET /users status = 200
+  top keys = ['connections_count', 'first_name', 'follower_count', 'headline', 'is_creator', 'is_influencer', 'is_open_profile', 'is_premium', 'is_relationship', 'is_self', 'last_name', 'location', 'member_urn', 'network_distance', 'object', 'primary_locale', 'profile_picture_url', 'profile_picture_url_large', 'provider', 'provider_id', 'public_identifier', 'shared_connections_count', 'websites', 'work_experience', 'work_experience_total_count']
+  network_distance = "SECOND_DEGREE"
+  work_experience = [{"company_id": "162778", "company": "Bradesco", "position": "Gerente executivo comercial", "status": "Full-time", "company_picture_url": "https://media.licdn.com/dms/image/v2/C4E0BAQEXB9xussWsHQ/company-logo_200_200/company-logo_200_200/0/1680038081184/bradesco_logo?e=1778112000&v=beta&t=ePfhrLYL35Nk6j8fsGpvz9hipHJJ1HnMwwsCIo-GuAk", "skills": [], "start": null, "end": null}, {"company_id": "162778", "company": "Bradesco", "position": "Gerente geral", "location": "On-site", "status": "Full-time", "company_picture_url": "https://media.licdn.com/dms/image/v2/C4E0BAQEXB9xussWsHQ/company-logo_200_
+  work_experience_total_count = 3
+
+  FULL JSON:
+{
+  "object": "UserProfile",
+  "provider": "LINKEDIN",
+  "provider_id": "ACoAADyhYiYB5-m7VZ8Aq2KkxofmxDwCWST93_Y",
+  "public_identifier": "leonardo-custodio-cea-a067b2244",
+  "member_urn": "1017209382",
+  "first_name": "Leonardo",
+  "last_name": "Custodio CEA",
+  "headline": "Gerente Geral",
+  "primary_locale": {
+    "country": "BR",
+    "language": "pt"
+  },
+  "is_open_profile": false,
+  "is_premium": false,
+  "is_influencer": false,
+  "is_creator": false,
+  "is_relationship": false,
+  "network_distance": "SECOND_DEGREE",
+  "is_self": false,
+  "websites": [],
+  "follower_count": 2013,
+  "connections_count": 1984,
+  "location": "Rio de Janeiro, Rio de Janeiro, Brazil",
+  "profile_picture_url": "https://media.licdn.com/dms/image/v2/D4E03AQGDDMca2Ardvw/profile-displayphoto-shrink_100_100/profile-displayphoto-shrink_100_100/0/1700615070527?e=1778112000&v=beta&t=GQk7lcPi2NQk328ZBjMyAAx5FPsNOJkQ5E-HKz-NCbA",
+  "profile_picture_url_large": "https://media.licdn.com/dms/image/v2/D4E03AQGDDMca2Ardvw/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1700615070527?e=1778112000&v=beta&t=DEbL0fRHI3gR4ZRMezFwiD7NnYolNv16JNnQVd14RlA",
+  "work_experience_total_count": 3,
+  "work_experience": [
+    {
+      "company_id": "162778",
+      "company": "Bradesco",
+      "position": "Gerente executivo comercial",
+      "status": "Full-time",
+      "company_picture_url": "https://media.licdn.com/dms/image/v2/C4E0BAQEXB9xussWsHQ/company-logo_200_200/company-logo_200_200/0/1680038081184/bradesco_logo?e=1778112000&v=beta&t=ePfhrLYL35Nk6j8fsGpvz9hipHJJ1HnMwwsCIo-GuAk",
+      "skills": [],
+      "start": null,
+      "end": null
+    },
+    {
+      "company_id": "162778",
+      "company": "Bradesco",
+      "position": "Gerente geral",
+      "location": "On-site",
+      "status": "Full-time",
+      "company_picture_url": "https://media.licdn.com/dms/image/v2/C4E0BAQEXB9xussWsHQ/company-logo_200_200/company-logo_200_200/0/1680038081184/bradesco_logo?e=1778112000&v=beta&t=ePfhrLYL35Nk6j8fsGpvz9hipHJJ1HnMwwsCIo-GuAk",
+      "skills": [
+        "Atendimento ao cliente",
+        "Atividades de integração de equipe"
+      ],
+      "start": "3/1/2024",
+      "end": null
+    },
+    {
+      "company_id": "162778",
+      "company": "Bradesco",
+      "position": "Gerente Geral Banco Bradesco",
+      "location": "On-site",
+      "company_picture_url": "https://media.licdn.com/dms/image/v2/C4E0BAQEXB9xussWsHQ/company-logo_200_200/company-logo_200_200/0/1680038081184/bradesco_logo?e=1778112000&v=beta&t=ePfhrLYL35Nk6j8fsGpvz9hipHJJ1HnMwwsCIo-GuAk",
+      "skills": [],
+      "start": "11/1/2022",
+      "end": "10/1/2024"
+    }
+  ],
+  "shared_connections_count": 2
+}
+
+=== Perfil 2: Arthur Wallace Costa Gomes (pid=ACoAAAjTqsUBAVGduROoHikfhYaGxqQqwfX8_44) ===
+  search.company = None
+  search.current_company = None
+  search.headline = Gerente
+  GET /users status = 200
+  top keys = ['birthdate', 'connections_count', 'first_name', 'follower_count', 'headline', 'is_creator', 'is_influencer', 'is_open_profile', 'is_open_to_work', 'is_premium', 'is_relationship', 'is_self', 'last_name', 'location', 'member_urn', 'network_distance', 'object', 'primary_locale', 'profile_picture_url', 'profile_picture_url_large', 'provider', 'provider_id', 'public_identifier', 'shared_connections_count', 'websites', 'work_experience', 'work_experience_total_count']
+  is_open_to_work = true
+  network_distance = "SECOND_DEGREE"
+  work_experience = [{"company": "AW Brasil Comércio de Embalagens", "position": "Representante Comercial & Inteligência de Mercado", "location": "Rio de Janeiro, Brazil · Hybrid", "description": "Atuação independente na prospecção de parcerias entre indústrias (SP, MG, PA e RJ) e redes de varejo no Estado do Rio de Janeiro. Realização de auditorias e estratificação de mercado, mapeamento de mais de 1.200 pontos de venda em mais de 50 redes do varejo no Estado do RJ, com conexões com diversas indústrias de vários segmentos.", "status": "Self-employed", "skills": ["Inteligência de mercado", "Capacidade de Trabalha
+  work_experience_total_count = 8
+
+=== Perfil 3: Ivanise Santos (pid=ACoAACH2IFYBCQv8lCmhmQOdGwjQqbunM-WaNu8) ===
+  search.company = None
+  search.current_company = None
+  search.headline = Gerente de recursos humanos / Columbus Offshore
+  GET /users status = 200
+  top keys = ['connections_count', 'first_name', 'follower_count', 'headline', 'is_creator', 'is_influencer', 'is_open_profile', 'is_premium', 'is_relationship', 'is_self', 'last_name', 'location', 'member_urn', 'network_distance', 'object', 'primary_locale', 'profile_picture_url', 'profile_picture_url_large', 'provider', 'provider_id', 'public_identifier', 'shared_connections_count', 'websites', 'work_experience', 'work_experience_total_count']
+  network_distance = "SECOND_DEGREE"
+  work_experience = [{"company": "Asgaard Bourbon Navegação S/A", "position": "Gerente de recursos humanos", "location": "Rio de Janeiro, Rio de Janeiro", "status": "Full-time", "skills": [], "start": "6/1/2017", "end": null}, {"company_id": "936290", "company": "GRUPO CBO - Companhia Brasileira de Offshore", "position": "Human Resource Coordinator", "status": "Full-time", "company_picture_url": "https://media.licdn.com/dms/image/v2/D4D0BAQF6jMCTibRBMw/company-logo_200_200/company-logo_200_200/0/1688474315603/companhia_brasileira_de_offshore___cbo_logo?e=1778112000&v=beta&t=bDwLnsyEGGWgtwfeiw8tIOAnQL5ZNP9cPvtcmfM
+  work_experience_total_count = 2

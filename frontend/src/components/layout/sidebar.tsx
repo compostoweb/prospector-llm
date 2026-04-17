@@ -99,7 +99,9 @@ function SidebarItemInner({
           active
             ? "border-(--accent)/20 bg-(--accent)/10 text-(--accent) shadow-[0_10px_25px_-18px_var(--accent)]"
             : "border-transparent text-current",
-          collapsed && !active && "group-hover/item:border-(--border-default) group-hover/item:bg-(--bg-overlay)",
+          collapsed &&
+            !active &&
+            "group-hover/item:border-(--border-default) group-hover/item:bg-(--bg-overlay)",
         )}
       >
         <Icon size={16} aria-hidden="true" className="shrink-0" />
@@ -171,16 +173,21 @@ export function Sidebar({ initialSidebarCollapsed = false }: SidebarProps) {
   const { data: session } = useSession()
   const unreadCount = useNotificationsStore((s) => s.unreadCount)
   const user = session?.user
-  const [hydrated, setHydrated] = useState(useUIStore.persist.hasHydrated())
+  const [hydrated, setHydrated] = useState(false)
 
   useEffect(() => {
-    const unsubscribe = useUIStore.persist.onFinishHydration(() => {
+    // persist pode não estar disponível durante SSR
+    const api = useUIStore.persist
+    if (!api) return
+
+    if (api.hasHydrated()) {
+      setHydrated(true)
+      return
+    }
+
+    const unsubscribe = api.onFinishHydration(() => {
       setHydrated(true)
     })
-
-    if (useUIStore.persist.hasHydrated()) {
-      setHydrated(true)
-    }
 
     return unsubscribe
   }, [])
@@ -210,7 +217,9 @@ export function Sidebar({ initialSidebarCollapsed = false }: SidebarProps) {
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[linear-gradient(135deg,var(--accent),color-mix(in_srgb,var(--accent)_72%,black_28%))] shadow-[0_16px_30px_-20px_var(--accent)]">
             <span className="text-[10px] font-bold text-white">P</span>
           </div>
-          {!collapsed && <span className="text-sm font-semibold text-(--text-primary)">Prospector</span>}
+          {!collapsed && (
+            <span className="text-sm font-semibold text-(--text-primary)">Prospector</span>
+          )}
         </div>
 
         {/* Navegação principal */}
@@ -287,45 +296,104 @@ export function Sidebar({ initialSidebarCollapsed = false }: SidebarProps) {
         {/* Rodapé — controles de usuário */}
         <div className="flex flex-col gap-0.5 border-t border-(--border-default) p-2">
           {collapsed ? (
-          /* ── Modo colapsado: ícones centralizados ── */
-          <>
-            <div className="flex justify-center">
-              <ThemeToggle collapsed />
-            </div>
+            /* ── Modo colapsado: ícones centralizados ── */
+            <>
+              <div className="flex justify-center">
+                <ThemeToggle collapsed />
+              </div>
 
-            {/* Bell */}
-            <div className="flex justify-center">
+              {/* Bell */}
+              <div className="flex justify-center">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Notificações${unreadCount > 0 ? ` — ${unreadCount} não lidas` : ""}`}
+                  className="relative h-8 w-8"
+                >
+                  <Bell size={16} aria-hidden="true" />
+                  {unreadCount > 0 && (
+                    <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-(--danger) text-[9px] font-bold text-white">
+                      {unreadCount > 9 ? "9+" : unreadCount}
+                    </span>
+                  )}
+                </Button>
+              </div>
+
+              {/* User avatar */}
+              <div className="flex justify-center">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      aria-label="Menu do usuário"
+                    >
+                      <Avatar className="size-6">
+                        <AvatarImage src={user?.image ?? undefined} alt={user?.name ?? "Usuário"} />
+                        <AvatarFallback className="text-[10px]">
+                          {user?.name?.charAt(0).toUpperCase() ?? "U"}
+                        </AvatarFallback>
+                      </Avatar>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="right" align="end" className="w-48">
+                    <DropdownMenuLabel className="font-normal">
+                      <p className="truncate text-xs font-medium text-(--text-primary)">
+                        {user?.name}
+                      </p>
+                      <p className="truncate text-xs text-(--text-tertiary)">{user?.email}</p>
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      destructive
+                      className="cursor-pointer"
+                      onClick={handleSignOut}
+                    >
+                      <LogOut size={14} aria-hidden="true" />
+                      Sair
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </>
+          ) : (
+            /* ── Modo expandido: controles com labels ── */
+            <>
+              <div className="flex justify-center py-0.5">
+                <ThemeToggle />
+              </div>
+
+              {/* Bell */}
               <Button
                 variant="ghost"
-                size="icon"
                 aria-label={`Notificações${unreadCount > 0 ? ` — ${unreadCount} não lidas` : ""}`}
-                className="relative h-8 w-8"
+                className="relative flex h-8 w-full items-center justify-start gap-2.5 rounded-md px-2.5 text-sm text-(--text-secondary) hover:bg-(--bg-overlay) hover:text-(--text-primary)"
               >
-                <Bell size={16} aria-hidden="true" />
+                <Bell size={16} aria-hidden="true" className="shrink-0" />
+                <span>Notificações</span>
                 {unreadCount > 0 && (
-                  <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-(--danger) text-[9px] font-bold text-white">
+                  <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-(--danger) px-1 text-[9px] font-bold text-white">
                     {unreadCount > 9 ? "9+" : unreadCount}
                   </span>
                 )}
               </Button>
-            </div>
 
-            {/* User avatar */}
-            <div className="flex justify-center">
+              {/* User dropdown */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
+                    className="flex h-8 w-full items-center justify-start gap-2.5 rounded-md px-2.5 text-sm text-(--text-secondary) hover:bg-(--bg-overlay) hover:text-(--text-primary)"
                     aria-label="Menu do usuário"
                   >
-                    <Avatar className="size-6">
+                    <Avatar className="size-5 shrink-0">
                       <AvatarImage src={user?.image ?? undefined} alt={user?.name ?? "Usuário"} />
                       <AvatarFallback className="text-[10px]">
                         {user?.name?.charAt(0).toUpperCase() ?? "U"}
                       </AvatarFallback>
                     </Avatar>
+                    <span className="truncate">{user?.name ?? user?.email}</span>
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent side="right" align="end" className="w-48">
@@ -342,60 +410,7 @@ export function Sidebar({ initialSidebarCollapsed = false }: SidebarProps) {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-            </div>
-          </>
-        ) : (
-          /* ── Modo expandido: controles com labels ── */
-          <>
-            <div className="flex justify-center py-0.5">
-              <ThemeToggle />
-            </div>
-
-            {/* Bell */}
-            <Button
-              variant="ghost"
-              aria-label={`Notificações${unreadCount > 0 ? ` — ${unreadCount} não lidas` : ""}`}
-              className="relative flex h-8 w-full items-center justify-start gap-2.5 rounded-md px-2.5 text-sm text-(--text-secondary) hover:bg-(--bg-overlay) hover:text-(--text-primary)"
-            >
-              <Bell size={16} aria-hidden="true" className="shrink-0" />
-              <span>Notificações</span>
-              {unreadCount > 0 && (
-                <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-(--danger) px-1 text-[9px] font-bold text-white">
-                  {unreadCount > 9 ? "9+" : unreadCount}
-                </span>
-              )}
-            </Button>
-
-            {/* User dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  className="flex h-8 w-full items-center justify-start gap-2.5 rounded-md px-2.5 text-sm text-(--text-secondary) hover:bg-(--bg-overlay) hover:text-(--text-primary)"
-                  aria-label="Menu do usuário"
-                >
-                  <Avatar className="size-5 shrink-0">
-                    <AvatarImage src={user?.image ?? undefined} alt={user?.name ?? "Usuário"} />
-                    <AvatarFallback className="text-[10px]">
-                      {user?.name?.charAt(0).toUpperCase() ?? "U"}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="truncate">{user?.name ?? user?.email}</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="right" align="end" className="w-48">
-                <DropdownMenuLabel className="font-normal">
-                  <p className="truncate text-xs font-medium text-(--text-primary)">{user?.name}</p>
-                  <p className="truncate text-xs text-(--text-tertiary)">{user?.email}</p>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem destructive className="cursor-pointer" onClick={handleSignOut}>
-                  <LogOut size={14} aria-hidden="true" />
-                  Sair
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </>
+            </>
           )}
         </div>
 
