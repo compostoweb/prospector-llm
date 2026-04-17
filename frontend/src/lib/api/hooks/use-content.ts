@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useSession } from "next-auth/react"
+import { toast } from "sonner"
 
 // ── Tipos ─────────────────────────────────────────────────────────────
 
@@ -192,6 +193,11 @@ export const contentKeys = {
   themeSuggestions: () => [...contentKeys.all, "theme-suggestions"] as const,
 }
 
+async function buildApiError(res: Response, fallbackMessage: string): Promise<Error> {
+  const payload = (await res.json().catch(() => null)) as { detail?: string } | null
+  return new Error(payload?.detail ?? fallbackMessage)
+}
+
 // ── Posts ─────────────────────────────────────────────────────────────
 
 export function useContentPosts(filters?: {
@@ -271,9 +277,11 @@ export function useApprovePost() {
           headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
         },
       )
-      if (!res.ok) throw new Error("Erro ao aprovar post")
+      if (!res.ok) throw await buildApiError(res, "Erro ao aprovar post")
       return res.json() as Promise<ContentPost>
     },
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "Erro ao aprovar post"),
     onSuccess: () => qc.invalidateQueries({ queryKey: contentKeys.all }),
   })
 }
@@ -290,9 +298,11 @@ export function useSchedulePost() {
           headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
         },
       )
-      if (!res.ok) throw new Error("Erro ao agendar post")
+      if (!res.ok) throw await buildApiError(res, "Erro ao agendar post")
       return res.json() as Promise<ContentPost>
     },
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "Erro ao agendar post"),
     onSuccess: () => qc.invalidateQueries({ queryKey: contentKeys.all }),
   })
 }
@@ -309,9 +319,11 @@ export function useCancelSchedule() {
           headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
         },
       )
-      if (!res.ok) throw new Error("Erro ao cancelar agendamento")
+      if (!res.ok) throw await buildApiError(res, "Erro ao cancelar agendamento")
       return res.json() as Promise<ContentPost>
     },
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "Erro ao cancelar agendamento"),
     onSuccess: () => qc.invalidateQueries({ queryKey: contentKeys.all }),
   })
 }
@@ -328,9 +340,11 @@ export function usePublishNow() {
           headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
         },
       )
-      if (!res.ok) throw new Error("Erro ao publicar post")
+      if (!res.ok) throw await buildApiError(res, "Erro ao publicar post")
       return res.json() as Promise<ContentPost>
     },
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "Erro ao publicar post"),
     onSuccess: () => qc.invalidateQueries({ queryKey: contentKeys.all }),
   })
 }

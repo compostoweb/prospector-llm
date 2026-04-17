@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { formatDateBR } from "@/lib/date"
 import { toZonedTime } from "date-fns-tz"
+import { isFutureUTCDate } from "@/lib/date"
 import {
   ExternalLink,
   Eye,
@@ -52,6 +53,8 @@ import {
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
+  import { formatDateBR } from "@/lib/date"
+  import { toZonedTime } from "date-fns-tz"
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
@@ -576,6 +579,7 @@ function PostRow({
   const cancelSchedulePost = useCancelSchedule()
   const publishNowPost = usePublishNow()
   const deletePostMut = useDeletePost()
+  const canSchedulePost = isFutureUTCDate(post.publish_date)
 
   function runAction(action: string) {
     switch (action) {
@@ -662,7 +666,7 @@ function PostRow({
                 <DropdownMenuItem
                   key={t.action}
                   onClick={() => runAction(t.action)}
-                  disabled={t.action === "schedule" && !post.publish_date}
+                  disabled={t.action === "schedule" && !canSchedulePost}
                 >
                   {t.icon}
                   {t.label}
@@ -766,7 +770,7 @@ function PostRow({
                     size="icon"
                     className="h-7 w-7"
                     onClick={() => schedulePost.mutate(post.id)}
-                    disabled={!post.publish_date}
+                    disabled={!canSchedulePost}
                   >
                     <Clock className="h-3.5 w-3.5" />
                   </Button>

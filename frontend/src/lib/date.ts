@@ -5,10 +5,7 @@ import { toZonedTime, fromZonedTime } from "date-fns-tz"
 const TZ = "America/Sao_Paulo"
 
 /** Formata ISO date string no fuso America/Sao_Paulo */
-export function formatDateBR(
-  isoString: string,
-  fmt: string = "dd MMM yyyy 'às' HH:mm",
-): string {
+export function formatDateBR(isoString: string, fmt: string = "dd MMM yyyy 'às' HH:mm"): string {
   const zonedDate = toZonedTime(isoString, TZ)
   return format(zonedDate, fmt, { locale: ptBR })
 }
@@ -20,4 +17,16 @@ export function formatDateBR(
  */
 export function localDateToUTC(datetimeLocal: string): string {
   return fromZonedTime(datetimeLocal, TZ).toISOString()
+}
+
+export function isFutureLocalDateTime(datetimeLocal: string | null | undefined): boolean {
+  if (!datetimeLocal) return false
+  const parsed = fromZonedTime(datetimeLocal, TZ)
+  return !Number.isNaN(parsed.getTime()) && parsed.getTime() > Date.now()
+}
+
+export function isFutureUTCDate(isoString: string | null | undefined): boolean {
+  if (!isoString) return false
+  const parsed = new Date(isoString)
+  return !Number.isNaN(parsed.getTime()) && parsed.getTime() > Date.now()
 }

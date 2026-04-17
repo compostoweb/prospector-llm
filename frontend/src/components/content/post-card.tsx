@@ -2,7 +2,7 @@
 
 import Image from "next/image"
 import { useState } from "react"
-import { formatDateBR } from "@/lib/date"
+import { formatDateBR, isFutureUTCDate } from "@/lib/date"
 import {
   Calendar,
   Check,
@@ -256,6 +256,7 @@ function ActionMenu({
   onPublishNow,
   onDelete,
 }: ActionMenuProps) {
+  const canSchedulePost = isFutureUTCDate(post.publish_date)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -287,7 +288,7 @@ function ActionMenu({
         )}
         {post.status === "approved" && (
           <>
-            <DropdownMenuItem onClick={onSchedule} disabled={!post.publish_date}>
+            <DropdownMenuItem onClick={onSchedule} disabled={!canSchedulePost}>
               <Clock className="h-3.5 w-3.5 mr-2" />
               Agendar
             </DropdownMenuItem>

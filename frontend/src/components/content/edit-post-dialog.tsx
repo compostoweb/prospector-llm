@@ -20,7 +20,7 @@ import {
 } from "lucide-react"
 import { format } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
-import { localDateToUTC } from "@/lib/date"
+import { isFutureLocalDateTime, localDateToUTC } from "@/lib/date"
 import {
   useUpdatePost,
   useImprovePost,
@@ -347,6 +347,7 @@ export function EditPostDialog({
   const initialPublishDate = post?.publish_date
     ? format(toZonedTime(post.publish_date, "America/Sao_Paulo"), "yyyy-MM-dd'T'HH:mm")
     : ""
+  const canScheduleAtSelectedTime = isFutureLocalDateTime(publishDate)
   const initialWeekNumber = post?.week_number ? String(post.week_number) : ""
   const hasUnsavedChanges =
     !syncWarning &&
@@ -1071,16 +1072,22 @@ export function EditPostDialog({
                           variant="outline"
                           size="sm"
                           className="h-7 text-xs gap-1"
-                          disabled={isActionPending || !publishDate}
+                          disabled={isActionPending || !publishDate || !canScheduleAtSelectedTime}
                           title={
-                            !publishDate ? "Defina uma data de publicação para agendar" : undefined
+                            !publishDate
+                              ? "Defina uma data de publicação para agendar"
+                              : !canScheduleAtSelectedTime
+                                ? "A data de publicação precisa estar no futuro"
+                                : undefined
                           }
                           onClick={async () => {
                             // Salva data primeiro se mudou, depois agenda
-                            if (publishDate !== (post.publish_date?.slice(0, 16) ?? "")) {
+                            if (publishDate !== initialPublishDate) {
                               await updatePost.mutateAsync({
                                 postId: post.id,
-                                data: { publish_date: publishDate || null },
+                                data: {
+                                  publish_date: publishDate ? localDateToUTC(publishDate) : null,
+                                },
                               })
                             }
                             await schedulePost.mutateAsync(post.id)
