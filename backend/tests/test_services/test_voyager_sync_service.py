@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 from sqlalchemy import select
 
@@ -457,6 +459,163 @@ async def test_sync_voyager_updates_existing_post_metrics(
     assert refreshed_post.comments == 12
     assert refreshed_post.shares == 5
     assert refreshed_post.saves == 3
+
+
+async def test_sync_voyager_reconciles_content_hub_post_when_unipile_returns_activity_urn(
+    db,
+    tenant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    account = LinkedInAccount(
+        tenant_id=tenant.id,
+        display_name="Conta principal",
+        linkedin_username="adrianovaladao",
+        provider_type="unipile",
+        unipile_account_id="acc-reconcile-activity",
+        is_active=True,
+    )
+    db.add(account)
+
+    existing_post = ContentPost(
+        tenant_id=tenant.id,
+        title="A clínica que queria chatbot",
+        body="Uma clínica me chamou porque queria um chatbot no WhatsApp.\n\nQuando entrei nos processos, vi que o gargalo era outro.",
+        pillar="case",
+        status="published",
+        linkedin_post_urn="urn:li:share:7450905912996786177",
+        published_at=datetime.fromisoformat("2026-04-17T14:00:01+00:00"),
+        impressions=0,
+        likes=0,
+        comments=0,
+        shares=0,
+        saves=0,
+    )
+    db.add(existing_post)
+    await db.flush()
+
+    fake_client = _FakeUnipileClient(
+        own_profile={
+            "provider_id": "ACoAAA67iMoBbojHonHEtRD-byA0CEuERMcFRCQ",
+            "public_identifier": "adrianovaladao",
+        },
+        posts_by_identifier={
+            "ACoAAA67iMoBbojHonHEtRD-byA0CEuERMcFRCQ": [
+                {
+                    "id": "unipile-post-activity",
+                    "social_id": "urn:li:activity:7450905913617522688",
+                    "text": "Uma clínica me chamou porque queria um chatbot no WhatsApp.\n\nQuando entrei nos processos, vi que o gargalo era outro.",
+                    "impressions_counter": 20,
+                    "reaction_counter": 3,
+                    "comment_counter": 1,
+                    "repost_counter": 0,
+                    "save_counter": 0,
+                    "parsed_datetime": "2026-04-17T14:00:00.944000+00:00",
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(voyager_sync_service, "UnipileClient", lambda: fake_client)
+
+    result = await voyager_sync_service.sync_voyager_for_tenant(str(tenant.id), db)
+
+    assert result.success is True
+    assert result.posts_created == 0
+    assert result.posts_updated == 1
+
+    posts = (
+        (await db.execute(select(ContentPost).where(ContentPost.tenant_id == tenant.id)))
+        .scalars()
+        .all()
+    )
+    assert len(posts) == 1
+    assert posts[0].id == existing_post.id
+    assert posts[0].linkedin_post_urn == "urn:li:share:7450905912996786177"
+    assert posts[0].impressions == 20
+    assert posts[0].likes == 3
+    assert posts[0].comments == 1
+
+
+async def test_sync_voyager_preserves_content_hub_post_when_legacy_duplicate_already_exists(
+    db,
+    tenant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    account = LinkedInAccount(
+        tenant_id=tenant.id,
+        display_name="Conta principal",
+        linkedin_username="adrianovaladao",
+        provider_type="unipile",
+        unipile_account_id="acc-preserve-content-hub-post",
+        is_active=True,
+    )
+    db.add(account)
+
+    original_post = ContentPost(
+        tenant_id=tenant.id,
+        title="A clínica que queria chatbot",
+        body="Uma clínica me chamou porque queria um chatbot no WhatsApp.\n\nQuando entrei nos processos, vi que o gargalo era outro.",
+        pillar="case",
+        status="published",
+        publish_date=datetime.fromisoformat("2026-04-17T14:00:00+00:00"),
+        linkedin_post_urn="urn:li:share:7450905912996786177",
+        published_at=datetime.fromisoformat("2026-04-17T14:00:01+00:00"),
+    )
+    duplicate_imported_post = ContentPost(
+        tenant_id=tenant.id,
+        title="[LinkedIn] Uma clínica me chamou porque queria um chatbot no WhatsApp...",
+        body="Uma clínica me chamou porque queria um chatbot no WhatsApp.\n\nQuando entrei nos processos, vi que o gargalo era outro.",
+        pillar="authority",
+        status="published",
+        linkedin_post_urn="urn:li:activity:7450905913617522688",
+        published_at=datetime.fromisoformat("2026-04-17T14:00:00.944000+00:00"),
+        impressions=20,
+    )
+    db.add(original_post)
+    db.add(duplicate_imported_post)
+    await db.flush()
+
+    fake_client = _FakeUnipileClient(
+        own_profile={
+            "provider_id": "ACoAAA67iMoBbojHonHEtRD-byA0CEuERMcFRCQ",
+            "public_identifier": "adrianovaladao",
+        },
+        posts_by_identifier={
+            "ACoAAA67iMoBbojHonHEtRD-byA0CEuERMcFRCQ": [
+                {
+                    "id": "unipile-post-activity-legacy-duplicate",
+                    "social_id": "urn:li:activity:7450905913617522688",
+                    "text": "Uma clínica me chamou porque queria um chatbot no WhatsApp.\n\nQuando entrei nos processos, vi que o gargalo era outro.",
+                    "impressions_counter": 25,
+                    "reaction_counter": 4,
+                    "comment_counter": 2,
+                    "repost_counter": 1,
+                    "save_counter": 0,
+                    "parsed_datetime": "2026-04-17T14:00:00.944000+00:00",
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(voyager_sync_service, "UnipileClient", lambda: fake_client)
+
+    result = await voyager_sync_service.sync_voyager_for_tenant(str(tenant.id), db)
+
+    assert result.success is True
+    assert result.posts_created == 0
+    assert result.posts_updated == 1
+
+    posts = (
+        (await db.execute(select(ContentPost).where(ContentPost.tenant_id == tenant.id)))
+        .scalars()
+        .all()
+    )
+    assert len(posts) == 1
+    assert posts[0].id == original_post.id
+    assert posts[0].title == "A clínica que queria chatbot"
+    assert posts[0].linkedin_post_urn == "urn:li:share:7450905912996786177"
+    assert posts[0].impressions == 25
+    assert posts[0].likes == 4
+    assert posts[0].comments == 2
+    assert posts[0].shares == 1
 
 
 async def test_sync_voyager_retries_provider_id_posts_without_falling_back_to_username(

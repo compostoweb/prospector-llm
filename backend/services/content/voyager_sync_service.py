@@ -19,8 +19,8 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 import structlog
 from sqlalchemy import select
@@ -28,8 +28,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.redis_client import redis_client
 from integrations.unipile_client import UnipileClient
+from models.content_engagement_session import ContentEngagementSession
 from models.content_linkedin_account import ContentLinkedInAccount
+from models.content_lm_post import ContentLMPost
 from models.content_post import ContentPost
+from models.content_publish_log import ContentPublishLog
+from models.content_theme import ContentTheme
 from models.linkedin_account import LinkedInAccount
 
 logger = structlog.get_logger()
@@ -37,6 +41,7 @@ logger = structlog.get_logger()
 _OWN_PROFILE_CACHE_TTL = 86400
 _OWN_PROFILE_MAX_ATTEMPTS = 2
 _OWN_POSTS_MAX_ATTEMPTS = 2
+_POST_RECONCILIATION_WINDOW = timedelta(minutes=5)
 
 
 @dataclass
@@ -270,9 +275,36 @@ async def sync_voyager_for_tenant(
 
     # 4. Upsert posts no banco
     now = datetime.now(UTC)
-    post_urns = [str(raw.get("social_id") or raw.get("id") or "").strip() for raw in posts_raw]
+    parsed_posts: list[dict[str, Any]] = []
+    post_urns: list[str] = []
+    reconciliation_texts: set[str] = set()
+    reconciliation_dates: list[datetime] = []
+
+    for raw in posts_raw:
+        post_urn = str(raw.get("social_id") or raw.get("id") or "").strip()
+        post_text = str(raw.get("text", "") or "")
+        normalized_text = _normalize_post_body(post_text)
+        published_at = _parse_unipile_post_datetime(raw)
+
+        parsed_posts.append(
+            {
+                "raw": raw,
+                "post_urn": post_urn,
+                "text": post_text,
+                "normalized_text": normalized_text,
+                "published_at": published_at,
+            }
+        )
+
+        if post_urn:
+            post_urns.append(post_urn)
+        if normalized_text and published_at is not None:
+            reconciliation_texts.add(normalized_text)
+            reconciliation_dates.append(published_at)
+
     normalized_post_urns = [post_urn for post_urn in post_urns if post_urn]
     existing_posts_by_urn: dict[str, ContentPost] = {}
+    reconciliation_candidates: list[ContentPost] = []
 
     if normalized_post_urns:
         existing_posts_stmt = select(ContentPost).where(
@@ -286,9 +318,23 @@ async def sync_voyager_for_tenant(
             if post.linkedin_post_urn
         }
 
-    for raw in posts_raw:
+    if reconciliation_texts and reconciliation_dates:
+        reconciliation_start = min(reconciliation_dates) - _POST_RECONCILIATION_WINDOW
+        reconciliation_end = max(reconciliation_dates) + _POST_RECONCILIATION_WINDOW
+        reconciliation_stmt = select(ContentPost).where(
+            ContentPost.tenant_id == tenant_id,  # type: ignore[arg-type]
+            ContentPost.status == "published",
+            ContentPost.published_at.is_not(None),
+            ContentPost.published_at >= reconciliation_start,
+            ContentPost.published_at <= reconciliation_end,
+        )
+        reconciliation_result = await db.execute(reconciliation_stmt)
+        reconciliation_candidates = list(reconciliation_result.scalars())
+
+    for parsed_post in parsed_posts:
+        raw = parsed_post["raw"]
         # Identificador unico do post: social_id ou id do Unipile
-        post_urn: str = raw.get("social_id") or raw.get("id", "")
+        post_urn = parsed_post["post_urn"]
         if not post_urn:
             result.posts_skipped += 1
             continue
@@ -307,17 +353,16 @@ async def sync_voyager_for_tenant(
                 (likes + comments_count + shares + saves) / impressions * 100, 2
             )
 
-        # Data de publicacao (parsed_datetime contem ISO8601, date e texto relativo)
-        published_at: datetime | None = None
-        date_str = raw.get("parsed_datetime") or raw.get("date")
-        if date_str:
-            try:
-                parsed = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-                published_at = parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed
-            except (ValueError, TypeError):
-                pass
+        published_at = parsed_post["published_at"]
 
-        existing = existing_posts_by_urn.get(post_urn)
+        matched_posts = _find_matching_posts(
+            existing_posts_by_urn=existing_posts_by_urn,
+            reconciliation_candidates=reconciliation_candidates,
+            post_urn=post_urn,
+            normalized_body=parsed_post["normalized_text"],
+            published_at=published_at,
+        )
+        existing = _select_canonical_post(matched_posts)
 
         if existing:
             # Atualiza apenas metricas (nao sobrescreve titulo/body manualmente editados)
@@ -331,10 +376,17 @@ async def sync_voyager_for_tenant(
             existing.metrics_updated_at = now  # type: ignore[assignment]
             if published_at and not existing.published_at:
                 existing.published_at = published_at  # type: ignore[assignment]
+            duplicate_posts = _find_consolidation_duplicates(matched_posts, canonical_post=existing)
+            if duplicate_posts:
+                await _consolidate_duplicate_posts(
+                    db,
+                    canonical_post=existing,
+                    duplicate_posts=duplicate_posts,
+                )
             result.posts_updated += 1
         else:
             # Cria novo post importado do LinkedIn — status "published"
-            text: str = raw.get("text", "") or ""
+            text = cast(str, parsed_post["text"])
             if not text.strip():
                 # Post sem texto (somente imagem, video, etc.)
                 result.posts_skipped += 1
@@ -517,3 +569,165 @@ async def _cache_own_profile_identifiers(account_id: str, profile: dict[str, Any
             account_id=account_id,
             error=str(exc),
         )
+
+
+def _normalize_post_body(text: str) -> str:
+    return "\n".join(line.rstrip() for line in text.replace("\r\n", "\n").strip().split("\n"))
+
+
+def _parse_unipile_post_datetime(raw: dict[str, Any]) -> datetime | None:
+    date_str = raw.get("parsed_datetime") or raw.get("date")
+    if not date_str:
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(str(date_str).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+
+
+def _find_matching_posts(
+    *,
+    existing_posts_by_urn: dict[str, ContentPost],
+    reconciliation_candidates: list[ContentPost],
+    post_urn: str,
+    normalized_body: str,
+    published_at: datetime | None,
+) -> list[ContentPost]:
+    matches: list[ContentPost] = []
+    seen_post_ids: set[str] = set()
+
+    exact_match = existing_posts_by_urn.get(post_urn)
+    if exact_match is not None:
+        seen_post_ids.add(str(exact_match.id))
+        matches.append(exact_match)
+
+    if not normalized_body or published_at is None:
+        return matches
+
+    for candidate in reconciliation_candidates:
+        if str(candidate.id) in seen_post_ids:
+            continue
+        if not _post_matches_body_and_time(
+            candidate,
+            normalized_body=normalized_body,
+            published_at=published_at,
+        ):
+            continue
+        seen_post_ids.add(str(candidate.id))
+        matches.append(candidate)
+
+    return matches
+
+
+def _post_matches_body_and_time(
+    candidate: ContentPost,
+    *,
+    normalized_body: str,
+    published_at: datetime,
+) -> bool:
+    candidate_published_at = _coerce_datetime(candidate.published_at)
+    if candidate_published_at is None:
+        return False
+    if _normalize_post_body(candidate.body) != normalized_body:
+        return False
+    return abs(candidate_published_at - published_at) <= _POST_RECONCILIATION_WINDOW
+
+
+def _select_canonical_post(candidates: list[ContentPost]) -> ContentPost | None:
+    if not candidates:
+        return None
+
+    return min(candidates, key=_canonical_post_priority)
+
+
+def _canonical_post_priority(post: ContentPost) -> tuple[int, int, datetime, str]:
+    publish_date_rank = 0 if post.publish_date is not None else 1
+    imported_rank = 1 if _looks_like_imported_post(post) else 0
+    created_at = _coerce_datetime(post.created_at) or datetime.max.replace(tzinfo=UTC)
+    return (publish_date_rank, imported_rank, created_at, str(post.id))
+
+
+def _looks_like_imported_post(post: ContentPost) -> bool:
+    return post.publish_date is None and post.title.startswith("[LinkedIn]")
+
+
+def _find_consolidation_duplicates(
+    candidates: list[ContentPost],
+    *,
+    canonical_post: ContentPost,
+) -> list[ContentPost]:
+    duplicates: list[ContentPost] = []
+    for candidate in candidates:
+        if candidate.id == canonical_post.id:
+            continue
+        if _looks_like_imported_post(candidate):
+            duplicates.append(candidate)
+    return duplicates
+
+
+async def _consolidate_duplicate_posts(
+    db: AsyncSession,
+    *,
+    canonical_post: ContentPost,
+    duplicate_posts: list[ContentPost],
+) -> None:
+    for duplicate_post in duplicate_posts:
+        await _reassign_post_references(
+            db,
+            source_post_id=duplicate_post.id,
+            target_post_id=canonical_post.id,
+        )
+        await db.delete(duplicate_post)
+        logger.info(
+            "unipile_sync.duplicate_post_consolidated",
+            canonical_post_id=str(canonical_post.id),
+            duplicate_post_id=str(duplicate_post.id),
+        )
+
+
+async def _reassign_post_references(
+    db: AsyncSession,
+    *,
+    source_post_id: Any,
+    target_post_id: Any,
+) -> None:
+    content_theme_result = await db.execute(
+        select(ContentTheme).where(ContentTheme.used_in_post_id == source_post_id)
+    )
+    for theme_row in content_theme_result.scalars():
+        theme_row.used_in_post_id = target_post_id  # type: ignore[assignment]
+
+    content_lm_post_result = await db.execute(
+        select(ContentLMPost).where(ContentLMPost.content_post_id == source_post_id)
+    )
+    for lm_post_row in content_lm_post_result.scalars():
+        lm_post_row.content_post_id = target_post_id  # type: ignore[assignment]
+
+    publish_log_result = await db.execute(
+        select(ContentPublishLog).where(ContentPublishLog.post_id == source_post_id)
+    )
+    for publish_log_row in publish_log_result.scalars():
+        publish_log_row.post_id = target_post_id  # type: ignore[assignment]
+
+    engagement_session_result = await db.execute(
+        select(ContentEngagementSession).where(
+            ContentEngagementSession.linked_post_id == source_post_id
+        )
+    )
+    for session_row in engagement_session_result.scalars():
+        session_row.linked_post_id = target_post_id  # type: ignore[assignment]
+
+
+def _coerce_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+    if isinstance(value, str) and value:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+    return None
