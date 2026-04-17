@@ -45,6 +45,7 @@ def _make_cadence(tenant_id: uuid.UUID, allow_personal_email: bool = False) -> C
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         name="Cadência Teste",
+        is_active=True,
         allow_personal_email=allow_personal_email,
     )
 

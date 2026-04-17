@@ -136,6 +136,7 @@ async def test_process_inbound_reply_marks_connect_step_replied_for_linkedin_dm(
         id=uuid.uuid4(),
         tenant_id=tenant.id,
         name="Cadência Teste",
+        is_active=True,
         llm_provider="openai",
         llm_model="gpt-4o-mini",
         llm_temperature=0.7,

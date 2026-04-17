@@ -523,9 +523,9 @@ class SandboxService:
         """Inicia cadência real a partir de sandbox aprovado."""
         run = await self._get_run(run_id, tenant_id, db)
 
-        if run.status not in (SandboxRunStatus.APPROVED, SandboxRunStatus.COMPLETED):
+        if run.status != SandboxRunStatus.APPROVED:
             raise ValueError(
-                f"Sandbox run deve estar 'approved' ou 'completed' para iniciar. "
+                f"Sandbox run deve estar 'approved' para iniciar. "
                 f"Status atual: {run.status.value}"
             )
 

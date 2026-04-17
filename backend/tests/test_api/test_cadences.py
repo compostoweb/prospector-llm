@@ -52,7 +52,7 @@ async def test_create_cadence(client: AsyncClient):
     assert data["name"] == "Cadência Teste"
     assert data["llm_provider"] == "openai"
     assert data["llm_model"] == "gpt-4o-mini"
-    assert data["is_active"] is True
+    assert data["is_active"] is False
     assert "id" in data
 
 

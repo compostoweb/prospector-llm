@@ -13,7 +13,7 @@ Endpoints:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -34,9 +34,7 @@ async def list_capture_schedules(
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
 ) -> list[CaptureScheduleConfig]:
     result = await db.execute(
-        select(CaptureScheduleConfig).where(
-            CaptureScheduleConfig.tenant_id == tenant_id
-        )
+        select(CaptureScheduleConfig).where(CaptureScheduleConfig.tenant_id == tenant_id)
     )
     return list(result.scalars().all())
 
@@ -88,7 +86,7 @@ async def upsert_capture_schedule(
     config.b2b_industries = payload.b2b_industries or None
     config.b2b_company_keywords = payload.b2b_company_keywords or None
     config.b2b_company_sizes = payload.b2b_company_sizes or None
-    config.updated_at = datetime.now(timezone.utc)
+    config.updated_at = datetime.now(UTC)
 
     await db.commit()
     await db.refresh(config)
@@ -103,7 +101,7 @@ async def upsert_capture_schedule(
 
 
 @router.delete("/{source}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
-async def disable_capture_schedule(
+async def delete_capture_schedule(
     source: str,
     db: AsyncSession = Depends(get_session_flexible),
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
@@ -112,11 +110,10 @@ async def disable_capture_schedule(
     if not config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Config não encontrada")
 
-    config.is_active = False
-    config.updated_at = datetime.now(timezone.utc)
+    await db.delete(config)
     await db.commit()
 
-    logger.info("capture_schedule.disabled", tenant_id=str(tenant_id), source=source)
+    logger.info("capture_schedule.deleted", tenant_id=str(tenant_id), source=source)
 
 
 async def _get_config(

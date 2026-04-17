@@ -864,7 +864,7 @@ export default function NovaCadenciaPage() {
 
     try {
       const created = await createCadence.mutateAsync(body)
-      toast.success("Cadência criada com sucesso!")
+      toast.success("Cadência criada em pausa. Use o play para iniciar quando estiver pronta.")
       router.push(`/cadencias/${created.id}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao criar cadência.")

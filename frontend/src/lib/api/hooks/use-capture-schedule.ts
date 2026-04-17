@@ -113,7 +113,7 @@ export function useUpsertCaptureSchedule(source: CaptureSource) {
   })
 }
 
-export function useDisableCaptureSchedule(source: CaptureSource) {
+export function useDeleteCaptureSchedule(source: CaptureSource) {
   const { data: session } = useSession()
   const token = session?.accessToken as string | undefined
   const queryClient = useQueryClient()
@@ -122,7 +122,7 @@ export function useDisableCaptureSchedule(source: CaptureSource) {
     mutationFn: async () => {
       const client = createBrowserClient(token ?? "")
       const { error } = await client.DELETE(`/capture-schedule/${source}` as never)
-      if (error) throw new Error("Falha ao desativar captura")
+      if (error) throw new Error("Falha ao excluir automação")
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["capture-schedule", source] })
@@ -142,7 +142,21 @@ export function useToggleCaptureSchedule(source: CaptureSource) {
       const { data, error } = await client.PUT(
         `/capture-schedule/${source}` as never,
         {
-          body: { ...config, is_active: !config.is_active },
+          body: {
+            source: config.source,
+            is_active: !config.is_active,
+            max_items: config.max_items,
+            maps_search_terms: config.maps_search_terms ?? [],
+            maps_location: config.maps_location,
+            maps_locations: config.maps_locations ?? [],
+            maps_categories: config.maps_categories ?? [],
+            b2b_job_titles: config.b2b_job_titles ?? [],
+            b2b_locations: config.b2b_locations ?? [],
+            b2b_cities: config.b2b_cities ?? [],
+            b2b_industries: config.b2b_industries ?? [],
+            b2b_company_keywords: config.b2b_company_keywords ?? [],
+            b2b_company_sizes: config.b2b_company_sizes ?? [],
+          },
         } as never,
       )
       if (error) throw new Error("Falha ao alterar estado da captura")

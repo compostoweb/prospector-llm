@@ -203,6 +203,7 @@ def _make_cadence(tenant_id: uuid.UUID) -> Cadence:
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         name="Cadência Tick",
+        is_active=True,
         llm_provider="openai",
         llm_model="gpt-4o-mini",
     )

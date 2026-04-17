@@ -34,7 +34,12 @@ class Cadence(Base, TenantMixin, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(String(500))
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        comment="Cadência ativa para execução real. Novas cadências nascem pausadas até ativação manual.",
+    )
     allow_personal_email: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # -------------------------------------------------------

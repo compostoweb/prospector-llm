@@ -8,6 +8,7 @@ import {
   CheckSquare,
   Clock,
   Download,
+  Eye,
   FileSpreadsheet,
   Layers,
   MailSearch,
@@ -17,6 +18,7 @@ import {
   RefreshCw,
   Settings2,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -28,6 +30,7 @@ import {
 import { useCreateLeadList, useLeadLists } from "@/lib/api/hooks/use-lead-lists"
 import {
   useCaptureSchedules,
+  useDeleteCaptureSchedule,
   useToggleCaptureSchedule,
   useUpsertCaptureSchedule,
   type CaptureScheduleConfig,
@@ -51,6 +54,17 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { CsvXlsImportDialog } from "@/components/leads/csv-xls-import-dialog"
 
 type LeadGeneratorSource = "google_maps" | "b2b_database" | "linkedin_enrichment"
@@ -132,9 +146,14 @@ export default function GerarLeadsPage() {
   const { data: schedules = [] } = useCaptureSchedules()
   const toggleMaps = useToggleCaptureSchedule("google_maps")
   const toggleB2B = useToggleCaptureSchedule("b2b_database")
+  const deleteMaps = useDeleteCaptureSchedule("google_maps")
+  const deleteB2B = useDeleteCaptureSchedule("b2b_database")
   const { data: enrichmentJobs = [], isLoading: isLoadingJobs } = useEnrichmentJobs()
   const createEnrichmentJob = useCreateEnrichmentJob()
   const deleteEnrichmentJob = useDeleteEnrichmentJob()
+
+  const [detailConfig, setDetailConfig] = useState<CaptureScheduleConfig | null>(null)
+  const [deleteConfig, setDeleteConfig] = useState<CaptureScheduleConfig | null>(null)
 
   const previewRows = useMemo<PreviewRow[]>(() => {
     return generatedPreview.map((item) => ({
@@ -305,6 +324,19 @@ export default function GerarLeadsPage() {
       toast.success(cfg.is_active ? "Captura pausada" : "Captura reativada")
     } catch {
       toast.error("Falha ao alterar estado da captura")
+    }
+  }
+
+  async function handleDeleteSchedule() {
+    if (!deleteConfig) return
+    const del = deleteConfig.source === "google_maps" ? deleteMaps : deleteB2B
+    try {
+      await del.mutateAsync()
+      toast.success("Automação excluída")
+    } catch {
+      toast.error("Falha ao excluir automação")
+    } finally {
+      setDeleteConfig(null)
     }
   }
 
@@ -963,15 +995,29 @@ export default function GerarLeadsPage() {
                           </span>
                         )}
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleToggleSchedule(cfg)}
-                        disabled={toggleMaps.isPending || toggleB2B.isPending}
-                      >
-                        {cfg.is_active ? <Pause size={14} /> : <Play size={14} />}
-                        {cfg.is_active ? "Pausar" : "Retomar"}
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => setDetailConfig(cfg)}>
+                          <Eye size={14} />
+                          Ver
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleToggleSchedule(cfg)}
+                          disabled={toggleMaps.isPending || toggleB2B.isPending}
+                        >
+                          {cfg.is_active ? <Pause size={14} /> : <Play size={14} />}
+                          {cfg.is_active ? "Pausar" : "Retomar"}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setDeleteConfig(cfg)}
+                          className="text-(--text-danger) hover:text-(--text-danger)"
+                        >
+                          <Trash2 size={14} />
+                        </Button>
+                      </div>
                     </CardContent>
                   </Card>
                 )
@@ -980,6 +1026,101 @@ export default function GerarLeadsPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* Modal de detalhes da automação */}
+      <Dialog open={!!detailConfig} onOpenChange={(open) => !open && setDetailConfig(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {detailConfig?.source === "google_maps" ? "Google Maps" : "Base B2B"} — Configuração
+            </DialogTitle>
+          </DialogHeader>
+          {detailConfig && <ScheduleDetailContent config={detailConfig} />}
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirmação de exclusão */}
+      <AlertDialog open={!!deleteConfig} onOpenChange={(open) => !open && setDeleteConfig(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir automação?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A automação{" "}
+              <strong>{deleteConfig?.source === "google_maps" ? "Google Maps" : "Base B2B"}</strong>{" "}
+              será removida permanentemente. Essa ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteSchedule}
+              className="bg-(--bg-danger) text-(--text-on-danger) hover:bg-(--bg-danger)/90"
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  )
+}
+
+function ScheduleDetailContent({ config }: { config: CaptureScheduleConfig }) {
+  const isGoogleMaps = config.source === "google_maps"
+
+  const rows: { label: string; value: string }[] = isGoogleMaps
+    ? [
+        { label: "Termos de busca", value: config.maps_search_terms?.join(", ") || "—" },
+        {
+          label: "Localizações",
+          value: config.maps_locations?.join(", ") || config.maps_location || "—",
+        },
+        { label: "Categorias", value: config.maps_categories?.join(", ") || "—" },
+        { label: "Máx. resultados", value: String(config.max_items) },
+        { label: "Índice de combo", value: String(config.maps_combo_index) },
+      ]
+    : [
+        { label: "Cargos", value: config.b2b_job_titles?.join(", ") || "—" },
+        { label: "Cidades", value: config.b2b_cities?.join(", ") || "—" },
+        { label: "Localizações", value: config.b2b_locations?.join(", ") || "—" },
+        { label: "Indústrias", value: config.b2b_industries?.join(", ") || "—" },
+        { label: "Palavras-chave", value: config.b2b_company_keywords?.join(", ") || "—" },
+        { label: "Tamanhos de empresa", value: config.b2b_company_sizes?.join(", ") || "—" },
+        { label: "Máx. resultados", value: String(config.max_items) },
+        { label: "Índice de rotação", value: String(config.b2b_rotation_index) },
+      ]
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <Badge variant={config.is_active ? "default" : "outline"}>
+          {config.is_active ? "Ativa" : "Pausada"}
+        </Badge>
+        <span className="text-xs text-(--text-tertiary)">
+          Última execução:{" "}
+          {config.last_run_at
+            ? new Date(config.last_run_at).toLocaleDateString("pt-BR", {
+                day: "2-digit",
+                month: "2-digit",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : "Nunca"}
+        </span>
+      </div>
+      <div className="space-y-2">
+        {rows.map((r) => (
+          <div key={r.label} className="grid grid-cols-[140px_1fr] gap-2 text-sm">
+            <span className="font-medium text-(--text-secondary)">{r.label}</span>
+            <span className="text-(--text-primary)">{r.value}</span>
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-(--text-tertiary)">
+        Criada em {new Date(config.created_at).toLocaleDateString("pt-BR")} · Atualizada em{" "}
+        {new Date(config.updated_at).toLocaleDateString("pt-BR")}
+      </p>
     </div>
   )
 }

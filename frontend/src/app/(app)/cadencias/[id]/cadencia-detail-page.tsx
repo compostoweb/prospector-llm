@@ -73,7 +73,7 @@ export default function CadenciaDetailPage() {
                   : "bg-(--bg-overlay) text-(--text-secondary)",
               )}
             >
-              {cadence.is_active ? "Ativa" : "Inativa"}
+              {cadence.is_active ? "Ativa" : "Pausada"}
             </span>
             <span className="rounded-full bg-(--accent-subtle) px-2.5 py-1 font-medium text-(--accent-subtle-fg)">
               {cadence.cadence_type === "email_only" ? "Só e-mail" : "Multicanal"}
@@ -115,7 +115,7 @@ export default function CadenciaDetailPage() {
                 { id: cadence.id, is_active: !cadence.is_active },
                 {
                   onSuccess: () =>
-                    toast.success(cadence.is_active ? "Cadência pausada" : "Cadência ativada"),
+                    toast.success(cadence.is_active ? "Cadência pausada" : "Cadência iniciada"),
                   onError: () => toast.error("Falha ao alterar status da cadência"),
                 },
               )
@@ -134,7 +134,7 @@ export default function CadenciaDetailPage() {
             ) : (
               <Play size={14} />
             )}
-            {cadence.is_active ? "Pausar" : "Ativar"}
+            {cadence.is_active ? "Pausar" : "Iniciar"}
           </button>
         </div>
       </div>

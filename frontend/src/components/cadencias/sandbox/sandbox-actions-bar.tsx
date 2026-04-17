@@ -114,7 +114,7 @@ export function SandboxActionsBar({ run, onGenerate, isGenerating }: SandboxActi
             ) : (
               <Rocket size={14} aria-hidden="true" />
             )}
-            {startFromSandbox.isPending ? "Iniciando…" : "Aprovar e iniciar cadência"}
+            {startFromSandbox.isPending ? "Iniciando…" : "Iniciar cadência"}
           </Button>
         )}
       </div>

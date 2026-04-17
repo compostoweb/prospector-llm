@@ -156,6 +156,7 @@ class CadenceCreateRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=200)
     description: str | None = None
     allow_personal_email: bool = False
+    # Novas cadências nascem pausadas; a ativação ocorre via PATCH /cadences/{id}
     mode: CadenceMode = Field(
         default=CadenceMode.AUTOMATIC,
         description="Modo: automatic | semi_manual",

@@ -329,6 +329,7 @@ async def test_list_leads_filters_by_cadence_id(client: AsyncClient, db: AsyncSe
     cadence = Cadence(
         tenant_id=uuid.UUID(created["tenant_id"]),
         name="Cadência Filtro",
+        is_active=True,
         llm_provider="openai",
         llm_model="gpt-4o-mini",
     )
