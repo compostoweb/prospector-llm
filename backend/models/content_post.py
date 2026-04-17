@@ -80,7 +80,7 @@ class ContentPost(Base, TenantMixin, TimestampMixin):
     publish_date: Mapped[str | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        comment="Data/hora agendada para publicação",
+        comment="Data/hora agendada para publicação, persistida em UTC e exibida em America/Sao_Paulo na UI",
     )
     week_number: Mapped[int | None] = mapped_column(
         Integer,

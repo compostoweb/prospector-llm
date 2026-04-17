@@ -10,10 +10,23 @@ Cobre: ContentPost, ContentTheme, ContentSettings,
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
-from typing import Literal
+from datetime import UTC, datetime
+from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from pydantic.config import ExtraValues
+
+CONTENT_HUB_TIMEZONE = ZoneInfo("America/Sao_Paulo")
+
+
+def _normalize_content_publish_date(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=CONTENT_HUB_TIMEZONE).astimezone(UTC)
+    return value.astimezone(UTC)
+
 
 # ── Tipos literais ────────────────────────────────────────────────────
 
@@ -40,6 +53,11 @@ class ContentPostCreate(BaseModel):
     publish_date: datetime | None = None
     week_number: int | None = Field(default=None, ge=1, le=54)
 
+    @field_validator("publish_date")
+    @classmethod
+    def normalize_publish_date_to_utc(cls, value: datetime | None) -> datetime | None:
+        return _normalize_content_publish_date(value)
+
 
 class ContentPostUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=255)
@@ -51,6 +69,11 @@ class ContentPostUpdate(BaseModel):
     publish_date: datetime | None = None
     week_number: int | None = Field(default=None, ge=1, le=54)
     error_message: str | None = None
+
+    @field_validator("publish_date")
+    @classmethod
+    def normalize_publish_date_to_utc(cls, value: datetime | None) -> datetime | None:
+        return _normalize_content_publish_date(value)
 
 
 class ContentPostMetricsUpdate(BaseModel):
@@ -147,9 +170,16 @@ class ContentSettingsUpdate(BaseModel):
     author_name: str | None = Field(default=None, max_length=100)
     author_voice: str | None = None
     # Notion — enviar apenas ao alterar; None = nao modifica o valor existente
-    notion_api_key: str | None = Field(default=None, description="Internal Integration token do Notion (secret_xxx). Enviar None para nao alterar.")
-    notion_database_id: str | None = Field(default=None, max_length=100, description="UUID do banco de dados Notion (extraido da URL)")
-    notion_column_mappings: "NotionColumnMappings | None" = Field(default=None, description="Mapeamento de colunas Notion para campos internos")
+    notion_api_key: str | None = Field(
+        default=None,
+        description="Internal Integration token do Notion (secret_xxx). Enviar None para nao alterar.",
+    )
+    notion_database_id: str | None = Field(
+        default=None, max_length=100, description="UUID do banco de dados Notion (extraido da URL)"
+    )
+    notion_column_mappings: NotionColumnMappings | None = Field(
+        default=None, description="Mapeamento de colunas Notion para campos internos"
+    )
 
 
 class ContentSettingsResponse(BaseModel):
@@ -162,16 +192,32 @@ class ContentSettingsResponse(BaseModel):
     author_name: str | None
     author_voice: str | None
     # Notion — chave nunca exposta; apenas indica se esta configurada
-    notion_api_key_set: bool = Field(default=False, description="True se notion_api_key esta configurada")
+    notion_api_key_set: bool = Field(
+        default=False, description="True se notion_api_key esta configurada"
+    )
     notion_database_id: str | None
-    notion_column_mappings: "NotionColumnMappings | None" = Field(default=None, description="Mapeamento de colunas Notion configurado pelo tenant")
+    notion_column_mappings: NotionColumnMappings | None = Field(
+        default=None, description="Mapeamento de colunas Notion configurado pelo tenant"
+    )
     created_at: datetime
     updated_at: datetime
 
     @classmethod
-    def model_validate(cls, obj: object, **kwargs: object) -> "ContentSettingsResponse":  # type: ignore[override]
+    def model_validate(
+        cls,
+        obj: Any,
+        *,
+        strict: bool | None = None,
+        extra: ExtraValues | None = None,
+        from_attributes: bool | None = None,
+        context: Any | None = None,
+        by_alias: bool | None = None,
+        by_name: bool | None = None,
+    ) -> ContentSettingsResponse:
         import json
+
         from models.content_settings import ContentSettings
+
         if isinstance(obj, ContentSettings):
             mappings: NotionColumnMappings | None = None
             if obj.notion_column_mappings:
@@ -179,10 +225,12 @@ class ContentSettingsResponse(BaseModel):
                     mappings = NotionColumnMappings(**json.loads(obj.notion_column_mappings))
                 except Exception:
                     mappings = None
-            return cls(
+            return cls(  # type: ignore[call-arg]
                 id=obj.id,
                 tenant_id=obj.tenant_id,
-                default_publish_time=str(obj.default_publish_time) if obj.default_publish_time else None,
+                default_publish_time=str(obj.default_publish_time)
+                if obj.default_publish_time
+                else None,
                 posts_per_week=obj.posts_per_week,
                 author_name=obj.author_name,
                 author_voice=obj.author_voice,
@@ -192,7 +240,15 @@ class ContentSettingsResponse(BaseModel):
                 created_at=obj.created_at,
                 updated_at=obj.updated_at,
             )
-        return super().model_validate(obj, **kwargs)
+        return super().model_validate(
+            obj,
+            strict=strict,
+            extra=extra,
+            from_attributes=from_attributes,
+            context=context,
+            by_alias=by_alias,
+            by_name=by_name,
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -413,11 +469,21 @@ class NotionColumnMappings(BaseModel):
 
     title: str = Field(..., description="Coluna Notion que contem o titulo do post (tipo: title)")
     body: str = Field(..., description="Coluna Notion que contem o texto do post (tipo: rich_text)")
-    pillar: str | None = Field(default=None, description="Coluna Notion para o pilar (tipo: select)")
-    status: str | None = Field(default=None, description="Coluna Notion para o status (tipo: select)")
-    publish_date: str | None = Field(default=None, description="Coluna Notion para a data de publicacao (tipo: date)")
-    week_number: str | None = Field(default=None, description="Coluna Notion para o numero da semana (tipo: number)")
-    hashtags: str | None = Field(default=None, description="Coluna Notion para hashtags (tipo: rich_text)")
+    pillar: str | None = Field(
+        default=None, description="Coluna Notion para o pilar (tipo: select)"
+    )
+    status: str | None = Field(
+        default=None, description="Coluna Notion para o status (tipo: select)"
+    )
+    publish_date: str | None = Field(
+        default=None, description="Coluna Notion para a data de publicacao (tipo: date)"
+    )
+    week_number: str | None = Field(
+        default=None, description="Coluna Notion para o numero da semana (tipo: number)"
+    )
+    hashtags: str | None = Field(
+        default=None, description="Coluna Notion para hashtags (tipo: rich_text)"
+    )
 
 
 class NotionPostPreview(BaseModel):

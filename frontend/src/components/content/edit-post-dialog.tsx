@@ -18,9 +18,12 @@ import {
   Upload,
   Maximize2,
 } from "lucide-react"
-import { format } from "date-fns"
-import { toZonedTime } from "date-fns-tz"
-import { isFutureLocalDateTime, localDateToUTC } from "@/lib/date"
+import {
+  getDayOfMonthFromLocalDateTime,
+  isFutureLocalDateTime,
+  localDateToUTC,
+  utcToLocalDateTimeInputValue,
+} from "@/lib/date"
 import {
   useUpdatePost,
   useImprovePost,
@@ -269,11 +272,7 @@ export function EditPostDialog({
     setPillar(post.pillar)
     setHookType(post.hook_type ?? "none")
     setHashtags(post.hashtags ?? "")
-    setPublishDate(
-      post.publish_date
-        ? format(toZonedTime(post.publish_date, "America/Sao_Paulo"), "yyyy-MM-dd'T'HH:mm")
-        : "",
-    )
+    setPublishDate(utcToLocalDateTimeInputValue(post.publish_date))
     setWeekNumber(post.week_number ? String(post.week_number) : "")
     setSyncWarning(null)
     setImproveOpen(defaultImproveOpen ?? false)
@@ -287,14 +286,10 @@ export function EditPostDialog({
   // Auto-calcula semana do mês quando a data de publicação muda
   useEffect(() => {
     if (!publishDate) return
-    try {
-      const d = new Date(publishDate)
-      // Semana do mês: ceil(dia / 7), máximo 5
-      const weekOfMonth = Math.ceil(d.getDate() / 7)
-      setWeekNumber(String(weekOfMonth))
-    } catch {
-      // data inválida, ignora
-    }
+    const dayOfMonth = getDayOfMonthFromLocalDateTime(publishDate)
+    if (dayOfMonth == null) return
+    const weekOfMonth = Math.ceil(dayOfMonth / 7)
+    setWeekNumber(String(weekOfMonth))
   }, [publishDate])
 
   // Reseta estado local de vídeo apenas quando abre dialog para um post diferente (não em cada refetch)
@@ -344,9 +339,7 @@ export function EditPostDialog({
   const charCount = body.length
   const isOverLimit = charCount > 3000
   const isTooShort = charCount > 0 && charCount < 900
-  const initialPublishDate = post?.publish_date
-    ? format(toZonedTime(post.publish_date, "America/Sao_Paulo"), "yyyy-MM-dd'T'HH:mm")
-    : ""
+  const initialPublishDate = utcToLocalDateTimeInputValue(post?.publish_date)
   const canScheduleAtSelectedTime = isFutureLocalDateTime(publishDate)
   const initialWeekNumber = post?.week_number ? String(post.week_number) : ""
   const hasUnsavedChanges =
