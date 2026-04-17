@@ -1,9 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { formatDateBR } from "@/lib/date"
+import { formatDateBR, isFutureUTCDate } from "@/lib/date"
 import { toZonedTime } from "date-fns-tz"
-import { isFutureUTCDate } from "@/lib/date"
 import {
   ExternalLink,
   Eye,
@@ -53,8 +52,6 @@ import {
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
-  import { formatDateBR } from "@/lib/date"
-  import { toZonedTime } from "date-fns-tz"
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
