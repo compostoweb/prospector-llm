@@ -1,7 +1,17 @@
 "use client"
 
 import { useState, useMemo } from "react"
-import { format, parseISO, startOfWeek, subWeeks, subDays, isAfter } from "date-fns"
+import {
+  endOfDay,
+  format,
+  isAfter,
+  isWithinInterval,
+  parseISO,
+  startOfDay,
+  startOfWeek,
+  subDays,
+  subWeeks,
+} from "date-fns"
 import { ptBR } from "date-fns/locale"
 import {
   BarChart,
@@ -154,10 +164,13 @@ function CustomTooltip({
 }
 
 // ── Main component ────────────────────────────────────────────────────
-type PeriodKey = "all" | "30d" | "60d" | "90d" | "180d" | "365d"
+type PeriodKey = "all" | "today" | "yesterday" | "7d" | "30d" | "60d" | "90d" | "180d" | "365d"
 
 const PERIOD_OPTIONS: { key: PeriodKey; label: string }[] = [
   { key: "all", label: "Todo o período" },
+  { key: "today", label: "Hoje" },
+  { key: "yesterday", label: "Ontem" },
+  { key: "7d", label: "7 dias" },
   { key: "30d", label: "30 dias" },
   { key: "60d", label: "60 dias" },
   { key: "90d", label: "90 dias" },
@@ -167,7 +180,31 @@ const PERIOD_OPTIONS: { key: PeriodKey; label: string }[] = [
 
 function filterByPeriod(posts: ContentPost[], period: PeriodKey): ContentPost[] {
   if (period === "all") return posts
-  const days = parseInt(period)
+
+  const now = new Date()
+
+  if (period === "today") {
+    return posts.filter((post) => {
+      const publishedAt = post.published_at ?? post.created_at
+      return isWithinInterval(parseISO(publishedAt), {
+        start: startOfDay(now),
+        end: endOfDay(now),
+      })
+    })
+  }
+
+  if (period === "yesterday") {
+    const yesterday = subDays(now, 1)
+    return posts.filter((post) => {
+      const publishedAt = post.published_at ?? post.created_at
+      return isWithinInterval(parseISO(publishedAt), {
+        start: startOfDay(yesterday),
+        end: endOfDay(yesterday),
+      })
+    })
+  }
+
+  const days = parseInt(period, 10)
   const cutoff = subDays(new Date(), days)
   return posts.filter((p) => {
     const d = p.published_at ?? p.created_at
@@ -190,6 +227,7 @@ export default function ContentDashboardPage() {
 
     const totalImpressions = published.reduce((s, p) => s + p.impressions, 0)
     const totalLikes = published.reduce((s, p) => s + p.likes, 0)
+    const totalComments = published.reduce((s, p) => s + p.comments, 0)
     const avgEngagement =
       withMetrics.length > 0
         ? withMetrics.reduce((s, p) => s + (p.engagement_rate ?? 0), 0) / withMetrics.length
@@ -312,6 +350,7 @@ export default function ContentDashboardPage() {
       totalScheduled: scheduled.length,
       totalImpressions,
       totalLikes,
+      totalComments,
       avgEngagement,
       topByImpressions,
       topByEngagement,
@@ -341,15 +380,17 @@ export default function ContentDashboardPage() {
       {/* ── Filtro de período ────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <Calendar className="h-4 w-4 text-(--text-tertiary)" />
-          <div className="flex items-center rounded-md border border-(--border-default) overflow-hidden h-8">
+          <div className="flex h-8 w-8 items-center justify-center rounded-md border border-(--border-default) bg-(--accent-subtle) text-(--accent-subtle-fg)">
+            <Calendar className="h-4 w-4" />
+          </div>
+          <div className="flex h-8 items-center overflow-hidden rounded-md border border-(--border-default) bg-(--bg-surface)">
             {PERIOD_OPTIONS.map((opt) => (
               <button
                 key={opt.key}
                 type="button"
                 onClick={() => setPeriod(opt.key)}
                 className={cn(
-                  "px-3 h-full text-xs font-medium transition-colors",
+                  "h-full bg-(--bg-surface) px-3 text-xs font-medium transition-colors",
                   period === opt.key
                     ? "bg-(--accent) text-white"
                     : "text-(--text-secondary) hover:bg-(--bg-overlay)",
@@ -378,7 +419,7 @@ export default function ContentDashboardPage() {
       </div>
 
       {/* ── Row 1: Stat cards ──────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 2xl:grid-cols-7 gap-3">
         <StatCard
           icon={<FileText className="h-3.5 w-3.5" />}
           label="Total de posts"
@@ -408,6 +449,12 @@ export default function ContentDashboardPage() {
           icon={<Heart className="h-3.5 w-3.5" />}
           label="Likes"
           value={fmt(stats.totalLikes)}
+          sub="total acumulado"
+        />
+        <StatCard
+          icon={<MessageCircle className="h-3.5 w-3.5" />}
+          label="Comentários"
+          value={fmt(stats.totalComments)}
           sub="total acumulado"
         />
         <StatCard
