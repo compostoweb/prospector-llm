@@ -291,9 +291,7 @@ class SandboxService:
             template_steps=len(template),
         )
 
-        # Re-carrega com steps
-        await db.refresh(run, attribute_names=["steps"])
-        return run
+        return await self._get_run(run.id, tenant_id, db)
 
     # ── Geração de mensagens ──────────────────────────────────────────
 
@@ -394,7 +392,7 @@ class SandboxService:
             generated=sum(1 for s in run.steps if s.status == SandboxStepStatus.GENERATED),
         )
 
-        return run
+        return await self._get_run(run.id, tenant_id, db)
 
     async def regenerate_step(
         self,
@@ -477,7 +475,7 @@ class SandboxService:
                 cadence.llm_temperature = original_temp
 
         await db.flush()
-        return step
+        return await self._get_step(step.id, tenant_id, db)
 
     # ── Aprovação / Rejeição ──────────────────────────────────────────
 
@@ -491,7 +489,7 @@ class SandboxService:
         step = await self._get_step(step_id, tenant_id, db)
         step.status = SandboxStepStatus.APPROVED
         await db.flush()
-        return step
+        return await self._get_step(step.id, tenant_id, db)
 
     async def reject_step(
         self,
@@ -503,7 +501,7 @@ class SandboxService:
         step = await self._get_step(step_id, tenant_id, db)
         step.status = SandboxStepStatus.REJECTED
         await db.flush()
-        return step
+        return await self._get_step(step.id, tenant_id, db)
 
     async def approve_run(
         self,
@@ -525,9 +523,7 @@ class SandboxService:
 
         run.status = SandboxRunStatus.APPROVED
         await db.flush()
-        await db.refresh(run, attribute_names=["steps"])
-
-        return run, approved_count
+        return await self._get_run(run.id, tenant_id, db), approved_count
 
     # ── Start real ────────────────────────────────────────────────────
 
@@ -731,8 +727,7 @@ class SandboxService:
                 step.adjusted_scheduled_at = None
 
         await db.flush()
-        await db.refresh(run, attribute_names=["steps"])
-        return run
+        return await self._get_run(run.id, tenant_id, db)
 
     # ── Pipedrive dry-run ─────────────────────────────────────────────
 
@@ -953,7 +948,7 @@ class SandboxService:
         """Carrega run com steps, valida tenant."""
         result = await db.execute(
             select(SandboxRun)
-            .options(selectinload(SandboxRun.steps))
+            .options(selectinload(SandboxRun.steps).selectinload(SandboxStep.lead))
             .where(SandboxRun.id == run_id, SandboxRun.tenant_id == tenant_id)
         )
         run = result.scalar_one_or_none()
@@ -969,7 +964,9 @@ class SandboxService:
     ) -> SandboxStep:
         """Carrega step, valida tenant."""
         result = await db.execute(
-            select(SandboxStep).where(SandboxStep.id == step_id, SandboxStep.tenant_id == tenant_id)
+            select(SandboxStep)
+            .options(selectinload(SandboxStep.lead))
+            .where(SandboxStep.id == step_id, SandboxStep.tenant_id == tenant_id)
         )
         step = result.scalar_one_or_none()
         if not step:
@@ -1416,7 +1413,7 @@ class SandboxService:
             confidence=step.simulated_confidence,
         )
 
-        return step
+        return await self._get_step(step.id, step.tenant_id, db)
 
     def _find_next_available_slot(
         self,

@@ -23,6 +23,7 @@ from models.lead_list import LeadList
 from models.tenant import TenantIntegration
 from services.ai_composer import AIComposer
 from services.cadence_delivery_budget import CadenceDeliveryBudgetSnapshot
+from services.test_email_service import EmailTestSendResult
 
 pytestmark = pytest.mark.asyncio
 
@@ -531,6 +532,71 @@ async def test_preview_cadence_step_renders_linkedin_inmail_json(
     assert data["subject"] == "Ideia para Atlas Bio"
     assert data["body"] == "Fernanda, queria abrir uma conversa objetiva."
     assert data["method"] == "linkedin_inmail_json"
+
+
+async def test_send_test_email_from_cadence_step_uses_rendered_draft(
+    client: AsyncClient,
+    db,
+    tenant_id,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    lead = Lead(
+        tenant_id=tenant_id,
+        name="Mariana Costa",
+        first_name="Mariana",
+        company="Acme Labs",
+        city="Campinas",
+        source=LeadSource.MANUAL,
+        status=LeadStatus.RAW,
+    )
+    db.add(lead)
+    await db.flush()
+
+    created = await _create_cadence(
+        client,
+        steps_template=[
+            {
+                "channel": "email",
+                "day_offset": 0,
+                "message_template": "Texto salvo {company}",
+                "use_voice": False,
+                "audio_file_id": None,
+                "step_type": "email_first",
+            }
+        ],
+    )
+
+    captured: dict[str, object] = {}
+
+    async def _fake_send_test_email(**kwargs):
+        captured.update(kwargs)
+        return EmailTestSendResult(
+            to_email=str(kwargs["to_email"]),
+            subject=str(kwargs["subject"]),
+            provider_type="unipile_gmail",
+            body_is_html=bool(kwargs["body_is_html"]),
+        )
+
+    monkeypatch.setattr(cadence_routes, "send_test_email", _fake_send_test_email)
+
+    resp = await client.post(
+        f"/cadences/{created['id']}/steps/0/send-test-email",
+        json={
+            "to_email": "teste@composto.com",
+            "lead_id": str(lead.id),
+            "current_text": "Olá {first_name}, vi a {company} em {city}.",
+            "current_subject": "Ideia rápida para {company}",
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["to_email"] == "teste@composto.com"
+    assert data["subject"] == "Ideia rápida para Acme Labs"
+    assert data["provider_type"] == "unipile_gmail"
+    assert captured["subject"] == "Ideia rápida para Acme Labs"
+    assert captured["body"] == "Olá Mariana, vi a Acme Labs em Campinas."
+    assert captured["body_is_html"] is False
 
 
 # ── PATCH /cadences/{id} ──────────────────────────────────────────────

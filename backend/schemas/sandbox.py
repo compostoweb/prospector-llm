@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from models.enums import (
     Channel,
@@ -84,6 +84,10 @@ class SimulateReplyRequest(BaseModel):
     )
 
 
+class SandboxTestEmailRequest(BaseModel):
+    to_email: EmailStr = Field(..., description="Endereço que receberá o e-mail de teste.")
+
+
 # ── Response schemas ──────────────────────────────────────────────────
 
 
@@ -101,6 +105,10 @@ class CompositionContextResponse(BaseModel):
     few_shot_method: str | None
     has_site_summary: bool
     has_recent_posts: bool
+    source_site_summary_preview: str | None = None
+    source_company_news_preview: str | None = None
+    source_recent_posts_preview: str | None = None
+    editorial_validation: dict | None = None
 
 
 class SandboxStepResponse(BaseModel):
@@ -111,6 +119,9 @@ class SandboxStepResponse(BaseModel):
     id: uuid.UUID
     sandbox_run_id: uuid.UUID
     lead_id: uuid.UUID | None
+    lead_name: str
+    lead_company: str | None = None
+    lead_job_title: str | None = None
     fictitious_lead_data: FictitiousLeadData | None = None
     step_number: int
     channel: Channel
@@ -189,6 +200,13 @@ class SandboxStartResponse(BaseModel):
     cadence_id: uuid.UUID
     leads_enrolled: int
     steps_created: int
+
+
+class SandboxTestEmailResponse(BaseModel):
+    to_email: EmailStr
+    subject: str
+    provider_type: str
+    body_is_html: bool
 
 
 class PipedrivePersonPreview(BaseModel):

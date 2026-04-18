@@ -78,6 +78,13 @@ export interface CadenceStepPreviewResult {
   method: string
 }
 
+export interface CadenceStepTestEmailResult {
+  to_email: string
+  subject: string
+  provider_type: string
+  body_is_html: boolean
+}
+
 export interface Cadence {
   id: string
   tenant_id: string
@@ -366,6 +373,48 @@ export function useToggleCadence() {
       void queryClient.invalidateQueries({ queryKey: ["cadences", cadence.id] })
       void queryClient.invalidateQueries({ queryKey: ["cadences"] })
       void queryClient.invalidateQueries({ queryKey: ["analytics", "cadences"] })
+    },
+  })
+}
+
+export function useSendCadenceStepTestEmail() {
+  const { data: session } = useSession()
+
+  return useMutation({
+    mutationFn: async ({
+      cadenceId,
+      stepIndex,
+      to_email,
+      leadId,
+      currentText,
+      currentSubject,
+      currentEmailTemplateId,
+    }: {
+      cadenceId: string
+      stepIndex: number
+      to_email: string
+      leadId?: string | null
+      currentText?: string | null
+      currentSubject?: string | null
+      currentEmailTemplateId?: string | null
+    }): Promise<CadenceStepTestEmailResult> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.POST(
+        `/cadences/${cadenceId}/steps/${stepIndex}/send-test-email` as never,
+        {
+          body: {
+            to_email,
+            lead_id: leadId ?? null,
+            current_text: currentText ?? null,
+            current_subject: currentSubject ?? null,
+            current_email_template_id: currentEmailTemplateId ?? null,
+          } as never,
+        },
+      )
+      if (error) {
+        throw new Error(extractApiErrorMessage(error, "Falha ao enviar e-mail de teste"))
+      }
+      return data as CadenceStepTestEmailResult
     },
   })
 }

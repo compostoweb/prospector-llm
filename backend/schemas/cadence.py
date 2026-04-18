@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from models.enums import CadenceMode, Channel, StepType
 
@@ -364,6 +364,10 @@ class StepPreviewRequest(BaseModel):
     )
 
 
+class StepSendTestEmailRequest(StepPreviewRequest):
+    to_email: EmailStr = Field(..., description="Endereço que receberá o e-mail de teste.")
+
+
 class StepComposeResponse(BaseModel):
     action: Literal["generate", "improve"]
     channel: Channel
@@ -385,6 +389,13 @@ class StepPreviewResponse(BaseModel):
     body_is_html: bool = False
     variables: list[str] = Field(default_factory=list)
     method: str = Field(default="manual_template")
+
+
+class StepSendTestEmailResponse(BaseModel):
+    to_email: EmailStr
+    subject: str
+    provider_type: str
+    body_is_html: bool
 
 
 class CadenceDeliveryBudgetItemResponse(BaseModel):

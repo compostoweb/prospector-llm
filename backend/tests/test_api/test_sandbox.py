@@ -6,9 +6,11 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.routes import sandbox as sandbox_routes
 from models.enums import SandboxRunStatus
 from models.lead import Lead
-from models.sandbox import SandboxRun
+from models.sandbox import SandboxRun, SandboxStep
+from services.test_email_service import EmailTestSendResult
 
 pytestmark = pytest.mark.asyncio
 
@@ -49,6 +51,8 @@ def _make_lead(tenant_id: uuid.UUID) -> Lead:
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         name="Lead Sandbox",
+        company="Empresa Sandbox",
+        job_title="Head de Operações",
     )
 
 
@@ -76,6 +80,9 @@ async def test_create_sandbox_run_for_paused_cadence(
     assert body["status"] == "running"
     assert body["lead_source"] == "real"
     assert len(body["steps"]) == 1
+    assert body["steps"][0]["lead_name"] == "Lead Sandbox"
+    assert body["steps"][0]["lead_company"] == "Empresa Sandbox"
+    assert body["steps"][0]["lead_job_title"] == "Head de Operações"
 
 
 async def test_start_from_sandbox_approved_run_activates_paused_cadence(
@@ -142,3 +149,74 @@ async def test_start_from_sandbox_requires_approved_run(
     cadence_resp = await client.get(f"/cadences/{cadence['id']}")
     assert cadence_resp.status_code == 200
     assert cadence_resp.json()["is_active"] is False
+
+
+async def test_send_test_email_from_sandbox_step_uses_generated_content(
+    client: AsyncClient,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    tenant,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    lead = Lead(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        name="Lead Sandbox",
+        company="Empresa Sandbox",
+        job_title="Head de Operações",
+        email_corporate="lead@sandbox.com",
+    )
+    db.add(lead)
+    await db.flush()
+
+    cadence = await _create_manual_task_cadence(
+        client,
+        steps_template=[
+            {
+                "channel": "email",
+                "day_offset": 0,
+                "message_template": "Olá {first_name}",
+                "use_voice": False,
+                "audio_file_id": None,
+                "step_type": "email_first",
+            }
+        ],
+    )
+    sandbox_resp = await client.post(
+        f"/cadences/{cadence['id']}/sandbox",
+        json={"lead_ids": [str(lead.id)]},
+    )
+    assert sandbox_resp.status_code == 201, sandbox_resp.text
+    run = sandbox_resp.json()
+
+    step = await db.get(SandboxStep, uuid.UUID(run["steps"][0]["id"]))
+    assert step is not None
+    step.message_content = "Teste sandbox renderizado"
+    step.email_subject = None
+    await db.flush()
+
+    captured: dict[str, object] = {}
+
+    async def _fake_send_test_email(**kwargs):
+        captured.update(kwargs)
+        return EmailTestSendResult(
+            to_email=str(kwargs["to_email"]),
+            subject=str(kwargs["subject"]),
+            provider_type="unipile_gmail",
+            body_is_html=bool(kwargs["body_is_html"]),
+        )
+
+    monkeypatch.setattr(sandbox_routes, "send_test_email", _fake_send_test_email)
+
+    resp = await client.post(
+        f"/sandbox/steps/{step.id}/send-test-email",
+        json={"to_email": "qa@composto.com"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["to_email"] == "qa@composto.com"
+    assert data["provider_type"] == "unipile_gmail"
+    assert captured["body"] == "Teste sandbox renderizado"
+    assert captured["body_is_html"] is False
+    assert captured["subject"] == "Empresa Sandbox: processo manual ou automatizado?"

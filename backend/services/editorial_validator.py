@@ -39,6 +39,14 @@ _HIGH_FRICTION_CTA_PATTERNS: tuple[tuple[str, str], ...] = (
     ),
 )
 
+_UNATTRIBUTED_EXTERNAL_PROOF_PATTERNS: tuple[tuple[str, str, str], ...] = (
+    (
+        "unattributed_external_proof",
+        r"\b(um estudo recente|uma pesquisa recente|um levantamento recente|um relat[oó]rio recente|dados recentes mostram|um estudo sobre|pesquisas recentes mostram|estudos recentes mostram)\b",
+        "Nao cite estudo, pesquisa, relatorio ou dado externo sem fonte explicita.",
+    ),
+)
+
 _EMAIL_SUBJECT_BANNED_PATTERNS: tuple[tuple[str, str, str], ...] = (
     (
         "generic_subject",
@@ -147,6 +155,10 @@ def validate_editorial_output(
     for code, pattern in _HIGH_FRICTION_CTA_PATTERNS:
         if re.search(pattern, body_lower, re.IGNORECASE):
             add_issue(code, "error", "CTA de alto atrito nao e permitido neste stage.")
+
+    for code, pattern, message in _UNATTRIBUTED_EXTERNAL_PROOF_PATTERNS:
+        if re.search(pattern, body_lower, re.IGNORECASE):
+            add_issue(code, "error", message)
 
     if _UNICODE_DASH_RE.search(body) or _ASCII_DASH_RE.search(body):
         add_issue("dash_punctuation", "error", "Nao use travessao como pontuacao.")

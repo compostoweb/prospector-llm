@@ -2,11 +2,13 @@
 
 import { useMemo } from "react"
 import type { SandboxRun } from "@/lib/api/hooks/use-sandbox"
+import type { TestEmailTransportSummary } from "@/lib/cadences/test-email-transport"
 import { SandboxStepCard } from "./sandbox-step-card"
 import { Users } from "lucide-react"
 
 interface SandboxTimelineProps {
   run: SandboxRun
+  emailTransportSummary: TestEmailTransportSummary
 }
 
 interface LeadGroup {
@@ -16,17 +18,17 @@ interface LeadGroup {
   steps: SandboxRun["steps"]
 }
 
-export function SandboxTimeline({ run }: SandboxTimelineProps) {
+export function SandboxTimeline({ run, emailTransportSummary }: SandboxTimelineProps) {
   const grouped = useMemo(() => {
     const map = new Map<string, LeadGroup>()
 
     for (const step of run.steps) {
-      const key = step.lead_id ?? step.fictitious_lead_data?.name ?? `fict-${step.id}`
+      const key = step.lead_id ?? step.lead_name ?? step.fictitious_lead_data?.name ?? `fict-${step.id}`
       if (!map.has(key)) {
         map.set(key, {
           leadId: step.lead_id,
-          leadName: step.fictitious_lead_data?.name ?? "Lead",
-          leadCompany: step.fictitious_lead_data?.company ?? "",
+          leadName: step.lead_name ?? step.fictitious_lead_data?.name ?? "Lead",
+          leadCompany: step.lead_company ?? step.fictitious_lead_data?.company ?? "",
           steps: [],
         })
       }
@@ -81,7 +83,7 @@ export function SandboxTimeline({ run }: SandboxTimelineProps) {
                           : "bg-(--text-disabled)"
                   }`}
                 />
-                <SandboxStepCard step={step} />
+                <SandboxStepCard step={step} emailTransportSummary={emailTransportSummary} />
               </div>
             ))}
           </div>

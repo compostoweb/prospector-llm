@@ -30,6 +30,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_effective_tenant_id, get_llm_registry, get_session_flexible
 from integrations.llm.registry import LLMRegistry
+from models.cadence import Cadence
+from models.enums import Channel
 from models.sandbox import SandboxRun
 from schemas.sandbox import (
     PipedriveDryRunResponse,
@@ -41,9 +43,13 @@ from schemas.sandbox import (
     SandboxRunResponse,
     SandboxStartResponse,
     SandboxStepResponse,
+    SandboxTestEmailRequest,
+    SandboxTestEmailResponse,
     SimulateReplyRequest,
 )
+from services.message_quality import build_fallback_email_subject
 from services.sandbox_service import sandbox_service
+from services.test_email_service import send_test_email
 
 logger = structlog.get_logger()
 
@@ -259,6 +265,61 @@ async def start_from_sandbox(
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post(
+    "/sandbox/steps/{step_id}/send-test-email",
+    response_model=SandboxTestEmailResponse,
+)
+async def send_sandbox_step_test_email(
+    step_id: uuid.UUID,
+    body: SandboxTestEmailRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> SandboxTestEmailResponse:
+    try:
+        step = await sandbox_service._get_step(step_id, tenant_id, db)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    if step.channel != Channel.EMAIL:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Envio de teste por e-mail disponível apenas para passos EMAIL.",
+        )
+    if not step.message_content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Gere o conteúdo do passo antes de enviar um teste.",
+        )
+
+    run = await sandbox_service._get_run(step.sandbox_run_id, tenant_id, db)
+    cadence_result = await db.execute(
+        select(Cadence).where(Cadence.id == run.cadence_id, Cadence.tenant_id == tenant_id)
+    )
+    cadence = cadence_result.scalar_one_or_none()
+    if cadence is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cadência do sandbox não encontrada.",
+        )
+
+    result = await send_test_email(
+        db=db,
+        cadence=cadence,
+        tenant_id=tenant_id,
+        to_email=str(body.to_email),
+        subject=step.email_subject
+        or build_fallback_email_subject(step.lead_company or step.lead_name, step.step_number),
+        body=step.message_content,
+        body_is_html=False,
+    )
+    return SandboxTestEmailResponse(
+        to_email=result.to_email,
+        subject=result.subject,
+        provider_type=result.provider_type,
+        body_is_html=result.body_is_html,
+    )
 
 
 # ── Simular reply ────────────────────────────────────────────────────

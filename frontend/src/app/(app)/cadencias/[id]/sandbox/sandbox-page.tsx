@@ -3,6 +3,8 @@
 import { useState } from "react"
 import { useParams } from "next/navigation"
 import Link from "next/link"
+import { useCadence } from "@/lib/api/hooks/use-cadences"
+import { useEmailAccounts } from "@/lib/api/hooks/use-email-accounts"
 import {
   useSandboxRuns,
   useSandboxRun,
@@ -16,6 +18,7 @@ import { SandboxActionsBar } from "@/components/cadencias/sandbox/sandbox-action
 import { SandboxPipedrivePreview } from "@/components/cadencias/sandbox/sandbox-pipedrive-preview"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { buildTestEmailTransportSummary } from "@/lib/cadences/test-email-transport"
 import { ArrowLeft, Plus, Trash2, Loader2 } from "lucide-react"
 import { formatRelativeTime } from "@/lib/utils"
 
@@ -41,6 +44,14 @@ export default function SandboxPage() {
   const [createOpen, setCreateOpen] = useState(false)
 
   const { data: selectedRun } = useSandboxRun(selectedRunId)
+  const cadenceQuery = useCadence(selectedRun?.cadence_id ?? "")
+  const emailAccountsQuery = useEmailAccounts()
+  const testEmailTransport = buildTestEmailTransportSummary({
+    cadence: cadenceQuery.data,
+    emailAccounts: emailAccountsQuery.data?.accounts,
+    isCadenceLoading: cadenceQuery.isLoading,
+    isEmailAccountsLoading: emailAccountsQuery.isLoading,
+  })
 
   function handleCreated(run: SandboxRun) {
     setSelectedRunId(run.id)
@@ -136,7 +147,7 @@ export default function SandboxPage() {
           />
 
           {/* Timeline dos steps */}
-          <SandboxTimeline run={selectedRun} />
+          <SandboxTimeline run={selectedRun} emailTransportSummary={testEmailTransport} />
 
           {/* Pipedrive dry-run */}
           <SandboxPipedrivePreview run={selectedRun} />

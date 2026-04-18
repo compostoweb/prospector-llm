@@ -17,19 +17,28 @@ import {
   Wand2,
 } from "lucide-react"
 import {
+  useCadence,
   useCadenceTemplateVariables,
   useCadenceStepPreview,
   useComposeCadenceStep,
+  useSendCadenceStepTestEmail,
   type CadenceChannel,
   type CadenceStep,
   type StepType,
 } from "@/lib/api/hooks/use-cadences"
 import type { AudioFile } from "@/lib/api/hooks/use-audio-files"
+import { useEmailAccounts } from "@/lib/api/hooks/use-email-accounts"
 import type { EmailTemplate } from "@/lib/api/hooks/use-email-templates"
 import type { LeadListLeadItem } from "@/lib/api/hooks/use-lead-lists"
 import { StepAudioRecorder } from "@/components/cadencias/step-audio-recorder"
+import { SendTestEmailDialog } from "@/components/cadencias/send-test-email-dialog"
 import { useTestTTS } from "@/lib/api/hooks/use-tts"
+import {
+  buildTestEmailSuccessMessage,
+  buildTestEmailTransportSummary,
+} from "@/lib/cadences/test-email-transport"
 import { cn } from "@/lib/utils"
+import { toast } from "sonner"
 
 // ─── Tipos ────────────────────────────────────────────────────────────
 
@@ -289,8 +298,12 @@ export function StepEditorSidebar({
   const [isPreviewing, setIsPreviewing] = useState(false)
   const [recentUploadedAudio, setRecentUploadedAudio] = useState<AudioFile | null>(null)
   const [selectedPreviewLeadId, setSelectedPreviewLeadId] = useState<string>("")
+  const [testEmailOpen, setTestEmailOpen] = useState(false)
   const testTTS = useTestTTS()
+  const cadenceQuery = useCadence(cadenceId)
   const composeStep = useComposeCadenceStep()
+  const emailAccountsQuery = useEmailAccounts()
+  const sendTestEmail = useSendCadenceStepTestEmail()
   const templateVariablesQuery = useCadenceTemplateVariables()
 
   const stepTypeOptions = STEP_TYPE_OPTIONS[step.channel] ?? []
@@ -339,6 +352,12 @@ export function StepEditorSidebar({
       ? (emailTemplates.find((t) => t.id === step.email_template_id) ?? null)
       : null
   const composerCopy = getComposerCopy(step.channel, Boolean(selectedEmailTemplate))
+  const testEmailTransport = buildTestEmailTransportSummary({
+    cadence: cadenceQuery.data,
+    emailAccounts: emailAccountsQuery.data?.accounts,
+    isCadenceLoading: cadenceQuery.isLoading,
+    isEmailAccountsLoading: emailAccountsQuery.isLoading,
+  })
   const availableAudioFiles = recentUploadedAudio
     ? [
         recentUploadedAudio,
@@ -444,6 +463,48 @@ export function StepEditorSidebar({
       onUpdate("audio_file_id", audioFile.id)
     },
     [onUpdate],
+  )
+
+  const handleSendTestEmail = useCallback(
+    (toEmail: string) => {
+      sendTestEmail.mutate(
+        {
+          cadenceId,
+          stepIndex: index,
+          to_email: toEmail,
+          leadId: selectedPreviewLeadId || previewLead?.id || null,
+          currentText: step.message_template,
+          currentSubject: step.subject_variants?.[0] ?? null,
+          currentEmailTemplateId: step.email_template_id ?? null,
+        },
+        {
+          onSuccess: (result) => {
+            setTestEmailOpen(false)
+            toast.success(
+              buildTestEmailSuccessMessage({
+                toEmail: result.to_email,
+                summary: testEmailTransport,
+                providerType: result.provider_type,
+              }),
+            )
+          },
+          onError: (error) => {
+            toast.error(error instanceof Error ? error.message : "Falha ao enviar teste")
+          },
+        },
+      )
+    },
+    [
+      cadenceId,
+      index,
+      previewLead?.id,
+      selectedPreviewLeadId,
+      sendTestEmail,
+      step.email_template_id,
+      step.message_template,
+      step.subject_variants,
+      testEmailTransport,
+    ],
   )
 
   return (
@@ -841,6 +902,30 @@ export function StepEditorSidebar({
                       </p>
                     )}
                   </div>
+
+                  {step.channel === "email" && (
+                    <div className="mt-3 space-y-2">
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setTestEmailOpen(true)}
+                          disabled={sendTestEmail.isPending}
+                          className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-medium text-blue-700 transition-colors hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {sendTestEmail.isPending ? (
+                            <Loader2 size={13} className="animate-spin" />
+                          ) : (
+                            <Mail size={13} />
+                          )}
+                          Enviar teste por e-mail
+                        </button>
+                      </div>
+                      <div className="rounded-md border border-blue-200 bg-white/70 px-2.5 py-2 text-[11px] text-blue-800">
+                        <p className="font-medium">Transporte do teste: {testEmailTransport.shortLabel}</p>
+                        <p className="mt-1 text-blue-700">{testEmailTransport.hint}</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </SidebarSection>
@@ -940,6 +1025,18 @@ export function StepEditorSidebar({
           </div>
         )}
       </div>
+
+      <SendTestEmailDialog
+        open={testEmailOpen}
+        onOpenChange={setTestEmailOpen}
+        onSubmit={handleSendTestEmail}
+        isPending={sendTestEmail.isPending}
+        contextLabel={`Passo ${index + 1}${previewQuery.data?.lead_name ? ` · ${previewQuery.data.lead_name}` : ""}`}
+        subjectPreview={previewQuery.data?.subject ?? null}
+        suggestedEmails={previewLead?.email_corporate ? [previewLead.email_corporate] : []}
+        transportLabel={testEmailTransport.label}
+        transportHint={testEmailTransport.hint}
+      />
     </motion.aside>
   )
 }

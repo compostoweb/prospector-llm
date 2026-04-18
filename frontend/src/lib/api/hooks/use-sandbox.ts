@@ -29,12 +29,35 @@ export interface SandboxCompositionContext {
   few_shot_method: string | null
   has_site_summary: boolean
   has_recent_posts: boolean
+  source_site_summary_preview?: string | null
+  source_company_news_preview?: string | null
+  source_recent_posts_preview?: string | null
+  editorial_validation?: {
+    step_key: string
+    ok: boolean
+    hard_failures: number
+    warnings: number
+    metrics: {
+      body_words: number
+      body_chars: number
+      subject_words: number
+      subject_chars: number
+    }
+    issues: Array<{
+      code: string
+      severity: "error" | "warning"
+      message: string
+    }>
+  } | null
 }
 
 export interface SandboxStep {
   id: string
   sandbox_run_id: string
   lead_id: string | null
+  lead_name: string
+  lead_company: string | null
+  lead_job_title: string | null
   fictitious_lead_data: FictitiousLeadData | null
   step_number: number
   channel: "linkedin_connect" | "linkedin_dm" | "email" | "manual_task"
@@ -99,6 +122,13 @@ export interface SandboxStartResult {
   cadence_id: string
   leads_enrolled: number
   steps_created: number
+}
+
+export interface SandboxTestEmailResult {
+  to_email: string
+  subject: string
+  provider_type: string
+  body_is_html: boolean
 }
 
 export interface PipedriveLeadPreview {
@@ -341,6 +371,32 @@ export function useSimulateReply() {
       void queryClient.invalidateQueries({
         queryKey: ["sandbox-run", step.sandbox_run_id],
       })
+    },
+  })
+}
+
+export function useSendSandboxStepTestEmail() {
+  const { data: session } = useSession()
+
+  return useMutation({
+    mutationFn: async ({
+      stepId,
+      to_email,
+    }: {
+      stepId: string
+      to_email: string
+    }): Promise<SandboxTestEmailResult> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.POST(
+        `/sandbox/steps/${stepId}/send-test-email` as never,
+        {
+          body: { to_email } as never,
+        },
+      )
+      if (error) {
+        throw new Error("Falha ao enviar e-mail de teste")
+      }
+      return data as SandboxTestEmailResult
     },
   })
 }

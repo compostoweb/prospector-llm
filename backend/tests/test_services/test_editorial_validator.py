@@ -46,3 +46,15 @@ def test_validate_editorial_output_accepts_relational_linkedin_followup() -> Non
 
     assert result.ok is True
     assert result.warning_count == 0
+
+
+def test_validate_editorial_output_flags_unattributed_external_proof() -> None:
+    result = validate_editorial_output(
+        "linkedin_dm_followup",
+        "Vi um estudo recente sobre acesso em saúde e pensei em te mandar um resumo. Isso entrou no radar de vocês?",
+    )
+
+    issue_codes = {issue.code for issue in result.issues}
+
+    assert result.ok is False
+    assert "unattributed_external_proof" in issue_codes

@@ -4,6 +4,25 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useSession } from "next-auth/react"
 import { createBrowserClient } from "@/lib/api/client"
 
+interface EmailAccountsQueryData {
+  accounts: EmailAccount[]
+  total: number
+}
+
+function mergeEmailAccountIntoCache(
+  current: EmailAccountsQueryData | undefined,
+  updated: EmailAccount,
+): EmailAccountsQueryData | undefined {
+  if (!current) return current
+
+  return {
+    ...current,
+    accounts: current.accounts.map((account) =>
+      account.id === updated.id ? updated : account,
+    ),
+  }
+}
+
 // ── Tipos ─────────────────────────────────────────────────────────────
 
 export interface EmailAccount {
@@ -199,7 +218,12 @@ export function useUpdateEmailAccount() {
       if (error) throw new Error("Falha ao atualizar conta")
       return data as EmailAccount
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["email-accounts"] }),
+    onSuccess: (updated) => {
+      qc.setQueryData<EmailAccountsQueryData | undefined>(["email-accounts"], (current) =>
+        mergeEmailAccountIntoCache(current, updated),
+      )
+      void qc.invalidateQueries({ queryKey: ["email-accounts"] })
+    },
   })
 }
 

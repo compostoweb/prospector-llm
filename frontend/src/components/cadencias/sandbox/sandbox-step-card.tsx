@@ -5,11 +5,15 @@ import {
   useRegenerateStep,
   useApproveStep,
   useRejectStep,
+  useSendSandboxStepTestEmail,
   useSimulateReply,
   type SandboxStep,
 } from "@/lib/api/hooks/use-sandbox"
+import type { TestEmailTransportSummary } from "@/lib/cadences/test-email-transport"
+import { buildTestEmailSuccessMessage } from "@/lib/cadences/test-email-transport"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { SendTestEmailDialog } from "@/components/cadencias/send-test-email-dialog"
 import {
   Check,
   X,
@@ -24,9 +28,11 @@ import {
   Send,
 } from "lucide-react"
 import { channelLabel, intentConfig } from "@/lib/utils"
+import { toast } from "sonner"
 
 interface SandboxStepCardProps {
   step: SandboxStep
+  emailTransportSummary: TestEmailTransportSummary
 }
 
 const STATUS_BADGE: Record<
@@ -65,14 +71,19 @@ const GENERATION_MODE_LABELS: Record<string, string> = {
   email_template: "Template salvo de e-mail",
 }
 
-export function SandboxStepCard({ step }: SandboxStepCardProps) {
+const UNATTRIBUTED_SOURCE_PATTERN =
+  /\b(um estudo recente|uma pesquisa recente|um levantamento recente|um relatório recente|dados recentes mostram|um estudo sobre|pesquisas recentes mostram|estudos recentes mostram)\b/i
+
+export function SandboxStepCard({ step, emailTransportSummary }: SandboxStepCardProps) {
   const regenerate = useRegenerateStep()
   const approve = useApproveStep()
   const reject = useRejectStep()
   const simulateReply = useSimulateReply()
+  const sendTestEmail = useSendSandboxStepTestEmail()
 
   const [replyMode, setReplyMode] = useState<"auto" | "manual" | null>(null)
   const [manualReply, setManualReply] = useState("")
+  const [testEmailOpen, setTestEmailOpen] = useState(false)
 
   const status = STATUS_BADGE[step.status as keyof typeof STATUS_BADGE] ?? {
     label: step.status,
@@ -80,9 +91,16 @@ export function SandboxStepCard({ step }: SandboxStepCardProps) {
   }
   const ChannelIcon = CHANNEL_ICON[step.channel] ?? Mail
   const compositionContext = step.composition_context
+  const editorialValidation = compositionContext?.editorial_validation
 
-  const leadName = step.fictitious_lead_data?.name ?? "Lead"
-  const leadCompany = step.fictitious_lead_data?.company ?? ""
+  const leadName = step.lead_name ?? step.fictitious_lead_data?.name ?? "Lead"
+  const leadCompany = step.lead_company ?? step.fictitious_lead_data?.company ?? ""
+  const leadJobTitle = step.lead_job_title ?? step.fictitious_lead_data?.job_title ?? ""
+  const hasClientSourceWarning = Boolean(
+    step.message_content &&
+      UNATTRIBUTED_SOURCE_PATTERN.test(step.message_content) &&
+      !compositionContext?.source_company_news_preview,
+  )
 
   function handleSimulateReply() {
     if (!replyMode) return
@@ -91,6 +109,30 @@ export function SandboxStepCard({ step }: SandboxStepCardProps) {
       mode: replyMode,
       ...(replyMode === "manual" ? { reply_text: manualReply } : {}),
     })
+  }
+
+  function handleSendTestEmail(toEmail: string) {
+    sendTestEmail.mutate(
+      {
+        stepId: step.id,
+        to_email: toEmail,
+      },
+      {
+        onSuccess: (result) => {
+          setTestEmailOpen(false)
+          toast.success(
+            buildTestEmailSuccessMessage({
+              toEmail: result.to_email,
+              summary: emailTransportSummary,
+              providerType: result.provider_type,
+            }),
+          )
+        },
+        onError: (error) => {
+          toast.error(error instanceof Error ? error.message : "Falha ao enviar teste")
+        },
+      },
+    )
   }
 
   return (
@@ -131,6 +173,7 @@ export function SandboxStepCard({ step }: SandboxStepCardProps) {
       <p className="mt-2 text-xs text-(--text-secondary)">
         Para: <span className="font-medium text-(--text-primary)">{leadName}</span>
         {leadCompany && <span className="text-(--text-tertiary)"> · {leadCompany}</span>}
+        {leadJobTitle && <span className="text-(--text-tertiary)"> · {leadJobTitle}</span>}
       </p>
 
       {/* Email subject */}
@@ -223,7 +266,32 @@ export function SandboxStepCard({ step }: SandboxStepCardProps) {
               Sinais: {compositionContext.has_site_summary ? "site/contexto externo" : "sem pesquisa externa"}
               {compositionContext.has_recent_posts ? " · posts recentes do lead" : " · sem posts recentes"}
             </p>
+            {compositionContext.source_site_summary_preview && (
+              <p>Pesquisa da empresa: {compositionContext.source_site_summary_preview}</p>
+            )}
+            {compositionContext.source_recent_posts_preview && (
+              <p>Posts usados: {compositionContext.source_recent_posts_preview}</p>
+            )}
+            {compositionContext.source_company_news_preview && (
+              <p>Fonte externa nomeada: {compositionContext.source_company_news_preview}</p>
+            )}
           </div>
+
+          {(editorialValidation?.issues.length || hasClientSourceWarning) && (
+            <div className="mt-3 rounded-md border border-(--warning-subtle-fg) bg-(--warning-subtle) px-3 py-2 text-xs text-(--warning-subtle-fg)">
+              <p className="font-medium">Atenção editorial</p>
+              {editorialValidation?.issues.map((issue) => (
+                <p key={`${step.id}-${issue.code}`} className="mt-1">
+                  {issue.message}
+                </p>
+              ))}
+              {!editorialValidation?.issues.length && hasClientSourceWarning && (
+                <p className="mt-1">
+                  O texto menciona estudo ou dado externo sem fonte explícita no contexto salvo deste step.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -256,50 +324,77 @@ export function SandboxStepCard({ step }: SandboxStepCardProps) {
       )}
 
       {/* Actions */}
-      {step.status === "generated" && (
+      {(step.status === "generated" || (step.channel === "email" && step.message_content)) && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => approve.mutate(step.id)}
-            disabled={approve.isPending}
-          >
-            <Check size={12} aria-hidden="true" />
-            Aprovar
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => reject.mutate(step.id)}
-            disabled={reject.isPending}
-          >
-            <X size={12} aria-hidden="true" />
-            Rejeitar
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => regenerate.mutate({ stepId: step.id })}
-            disabled={regenerate.isPending}
-          >
-            {regenerate.isPending ? (
-              <Loader2 size={12} className="animate-spin" aria-hidden="true" />
-            ) : (
-              <RefreshCw size={12} aria-hidden="true" />
-            )}
-            Regenerar
-          </Button>
+          {step.status === "generated" && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => approve.mutate(step.id)}
+                disabled={approve.isPending}
+              >
+                <Check size={12} aria-hidden="true" />
+                Aprovar
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => reject.mutate(step.id)}
+                disabled={reject.isPending}
+              >
+                <X size={12} aria-hidden="true" />
+                Rejeitar
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => regenerate.mutate({ stepId: step.id })}
+                disabled={regenerate.isPending}
+              >
+                {regenerate.isPending ? (
+                  <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+                ) : (
+                  <RefreshCw size={12} aria-hidden="true" />
+                )}
+                Regenerar
+              </Button>
 
-          {/* Reply simulation toggle */}
-          {!step.simulated_reply && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setReplyMode(replyMode ? null : "auto")}
-            >
-              <MessageSquareReply size={12} aria-hidden="true" />
-              Simular resposta
-            </Button>
+              {!step.simulated_reply && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setReplyMode(replyMode ? null : "auto")}
+                >
+                  <MessageSquareReply size={12} aria-hidden="true" />
+                  Simular resposta
+                </Button>
+              )}
+            </>
+          )}
+
+          {step.channel === "email" && step.message_content && (
+            <div className="space-y-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setTestEmailOpen(true)}
+                disabled={sendTestEmail.isPending}
+              >
+                {sendTestEmail.isPending ? (
+                  <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+                ) : (
+                  <Mail size={12} aria-hidden="true" />
+                )}
+                Enviar teste por e-mail
+              </Button>
+              <div className="rounded-md border border-(--border-subtle) bg-(--bg-overlay) px-3 py-2 text-[11px] text-(--text-secondary)">
+                <p className="font-medium text-(--text-primary)">
+                  Transporte do teste: {emailTransportSummary.shortLabel}
+                </p>
+                <p className="mt-1">{emailTransportSummary.hint}</p>
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -356,6 +451,18 @@ export function SandboxStepCard({ step }: SandboxStepCardProps) {
           </Button>
         </div>
       )}
+
+      <SendTestEmailDialog
+        open={testEmailOpen}
+        onOpenChange={setTestEmailOpen}
+        onSubmit={handleSendTestEmail}
+        isPending={sendTestEmail.isPending}
+        contextLabel={`Passo ${step.step_number} · ${leadName}`}
+        subjectPreview={step.email_subject}
+        suggestedEmails={step.fictitious_lead_data?.email ? [step.fictitious_lead_data.email] : []}
+        transportLabel={emailTransportSummary.label}
+        transportHint={emailTransportSummary.hint}
+      />
     </div>
   )
 }

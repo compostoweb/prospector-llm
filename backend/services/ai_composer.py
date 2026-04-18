@@ -52,12 +52,29 @@ class CompositionContext:
     few_shot_match_type: str | None
     has_site_summary: bool
     has_recent_posts: bool
+    source_site_summary_preview: str | None
+    source_company_news_preview: str | None
+    source_recent_posts_preview: str | None
 
 
 def serialize_composition_context(context: CompositionContext) -> dict[str, object]:
     """Serializa o contexto de composição para logs e APIs."""
 
     return asdict(context)
+
+
+def _preview_context_text(value: object, *, max_length: int = 240) -> str | None:
+    if not isinstance(value, str):
+        return None
+
+    normalized = " ".join(value.strip().split())
+    if not normalized or normalized in {"Não disponível", "Nenhuma notícia recente"}:
+        return None
+
+    if len(normalized) <= max_length:
+        return normalized
+
+    return f"{normalized[: max_length - 1].rstrip()}…"
 
 
 COMPOSER_SYSTEM_PROMPT = """
@@ -105,8 +122,10 @@ PRINCÍPIOS INEGOCIÁVEIS:
    - DIS (Dor-Implicação-Solução): Só usar quando temos certeza da "dor" do segmento. Descrever a dor → mostrar implicação → CTA com solução via pergunta
    - DPO (Dor-Prazer-Objetividade): Cenário atual com dor vs. cenário futuro sem dor. Muito curto e direto
    - BINÁRIO (Observação-Pergunta Binária): Ultra-conciso. Constatação verdadeira + pergunta sim/não como CTA
-   - INSIGHT (Recurso Externo-Contexto-Conexão): Posicionar-se como consultor. Trazer estudo/relatório/notícia de terceiros, explicar relevância, conectar com sua solução
+    - INSIGHT (Insight Ancorado-Contexto-Conexão): Posicionar-se como consultor. Use observação concreta do contexto fornecido ou recurso externo com fonte explícita já presente no contexto
    Escolha o método mais adequado ao contexto do step e dados disponíveis. Varie entre eles.
+
+10. ZERO FONTE INVENTADA — Nunca cite estudo, relatório, pesquisa, notícia, dado externo ou “levantamento recente” sem nomear a fonte explicitamente a partir do contexto fornecido. Se a fonte não estiver clara no contexto, não mencione estudo nem ofereça resumo/material.
 
 FORMATO: Retorne APENAS o texto da mensagem. Sem assunto separado, sem "[nome]" como placeholder, sem assinatura. Use o nome real do lead quando disponível.
 FORMATAÇÃO PROIBIDA: NUNCA use travessões (—, –, -) como pontuação ou para separar ideias. Use ponto final, vírgula ou ponto e vírgula. Travessões soam artificiais e robóticos em mensagens diretas e áudios.
@@ -797,7 +816,7 @@ _COPY_METHOD_DEFINITIONS: dict[str, str] = {
     "DIS": "Dor (cenário que o lead certamente reconhece) → Implicação (custo real de não resolver) → Solução (oferecer como pergunta, não afirmação). Use quando a dor do setor é conhecida.",
     "DPO": "Dor (cenário atual com o problema) → Prazer (cenário futuro sem o problema) → Objetividade (CTA curtíssimo e direto). Ideal para brevidade.",
     "BINÁRIO": "Observação verdadeira e relevante sobre o lead ou setor → Pergunta fechada sim/não direcionada ao benefício. Ultra-conciso e eficaz quando há dado específico.",
-    "INSIGHT": "Recurso externo (estudo, relatório, notícia de terceiros) → Contexto (por que aquilo importa para este lead) → Conexão (como se relaciona com a dor dele) → Pergunta reflexiva. Posiciona como consultor.",
+    "INSIGHT": "Observação ancorada no contexto fornecido ou recurso externo com fonte explícita → Contexto (por que aquilo importa para este lead) → Conexão (como se relaciona com a dor dele) → Pergunta reflexiva. Se não houver fonte nomeada, não cite estudo, relatório ou notícia.",
 }
 
 
@@ -982,6 +1001,12 @@ Gancho de valor: {playbook_entry.gancho}"""
         has_site_summary=has_site_summary,
         has_recent_posts=has_recent_posts
         or bool(linkedin_post and linkedin_post != "Não disponível"),
+        source_site_summary_preview=_preview_context_text(site_summary),
+        source_company_news_preview=_preview_context_text(news),
+        source_recent_posts_preview=(
+            _preview_context_text(recent_posts_block)
+            or _preview_context_text(linkedin_post)
+        ),
     )
 
     return "\n".join(blocks).strip(), composition_context

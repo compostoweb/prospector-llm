@@ -41,6 +41,8 @@ from schemas.cadence import (
     StepComposeResponse,
     StepPreviewRequest,
     StepPreviewResponse,
+    StepSendTestEmailRequest,
+    StepSendTestEmailResponse,
     TemplateVariableResponse,
 )
 from services.ai_composer import AIComposer
@@ -53,11 +55,13 @@ from services.cadence_manager import (
     serialize_steps_template,
 )
 from services.llm_config import resolve_tenant_llm_config
+from services.message_quality import build_fallback_email_subject
 from services.message_template_renderer import (
     get_template_variable_catalog,
     render_message_template,
     render_saved_email_template,
 )
+from services.test_email_service import send_test_email
 
 logger = structlog.get_logger()
 
@@ -296,78 +300,60 @@ async def preview_cadence_step(
 ) -> StepPreviewResponse:
     cadence = await _get_cadence_or_404(cadence_id, tenant_id, db)
 
-    if step_index < 0:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="step_index deve ser >= 0.",
-        )
+    preview_response, _preview_lead = await _render_step_preview_response(
+        cadence=cadence,
+        step_index=step_index,
+        body=body,
+        tenant_id=tenant_id,
+        db=db,
+    )
+    return preview_response
 
-    step_number = step_index + 1
-    template_step = get_template_step_config(cadence, step_number)
-    if template_step is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Passo não encontrado nesta cadência.",
-        )
 
-    channel = Channel(str(template_step.get("channel")))
-    if channel in {Channel.MANUAL_TASK, Channel.LINKEDIN_POST_REACTION}:
+@router.post(
+    "/{cadence_id}/steps/{step_index}/send-test-email",
+    response_model=StepSendTestEmailResponse,
+)
+async def send_cadence_step_test_email(
+    cadence_id: uuid.UUID,
+    step_index: int,
+    body: StepSendTestEmailRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> StepSendTestEmailResponse:
+    cadence = await _get_cadence_or_404(cadence_id, tenant_id, db)
+
+    preview_response, preview_lead = await _render_step_preview_response(
+        cadence=cadence,
+        step_index=step_index,
+        body=body,
+        tenant_id=tenant_id,
+        db=db,
+    )
+    if preview_response.channel != Channel.EMAIL:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Este canal não possui prévia textual na sidebar.",
+            detail="Envio de teste por e-mail disponível apenas para passos EMAIL.",
         )
 
-    preview_lead = await _resolve_preview_lead(body.lead_id, tenant_id, db, cadence)
-
-    configured_text = template_step.get("message_template") if template_step else None
-    configured_subjects = template_step.get("subject_variants") if template_step else None
-    configured_email_template_id = template_step.get("email_template_id") if template_step else None
-
-    preview_text = body.current_text if body.current_text is not None else configured_text
-    preview_subject = (
-        body.current_subject
-        if body.current_subject is not None
-        else _pick_first_subject_variant(configured_subjects)
+    subject = preview_response.subject or build_fallback_email_subject(
+        getattr(preview_lead, "company", None) or getattr(preview_lead, "name", None),
+        preview_response.step_number,
     )
-    preview_email_template_id = (
-        body.current_email_template_id
-        if body.current_email_template_id is not None
-        else configured_email_template_id
+    result = await send_test_email(
+        db=db,
+        cadence=cadence,
+        tenant_id=tenant_id,
+        to_email=str(body.to_email),
+        subject=subject,
+        body=preview_response.body,
+        body_is_html=preview_response.body_is_html,
     )
-
-    rendered_subject: str | None = None
-    rendered_body = ""
-    body_is_html = False
-    method = "manual_template"
-
-    if channel == Channel.EMAIL and preview_email_template_id:
-        email_template = await _get_email_template_or_404(
-            preview_email_template_id,
-            tenant_id,
-            db,
-        )
-        rendered_subject, rendered_body = render_saved_email_template(email_template, preview_lead)
-        body_is_html = True
-        method = "saved_email_template"
-    elif channel == Channel.LINKEDIN_INMAIL:
-        rendered_payload = render_message_template(preview_text, preview_lead) or ""
-        rendered_subject, rendered_body = _parse_inmail_preview(rendered_payload)
-        method = "linkedin_inmail_json"
-    else:
-        rendered_subject = render_message_template(preview_subject, preview_lead)
-        rendered_body = render_message_template(preview_text, preview_lead) or ""
-        method = "manual_template" if preview_text else "empty"
-
-    return StepPreviewResponse(
-        channel=channel,
-        step_number=step_number,
-        lead_id=getattr(preview_lead, "id", None),
-        lead_name=getattr(preview_lead, "name", None),
-        subject=rendered_subject,
-        body=rendered_body,
-        body_is_html=body_is_html,
-        variables=[item["token"] for item in get_template_variable_catalog()],
-        method=method,
+    return StepSendTestEmailResponse(
+        to_email=result.to_email,
+        subject=result.subject,
+        provider_type=result.provider_type,
+        body_is_html=result.body_is_html,
     )
 
 
@@ -578,6 +564,92 @@ async def _get_email_template_or_404(
             detail="Template de e-mail não encontrado.",
         )
     return template
+
+
+async def _render_step_preview_response(
+    *,
+    cadence: Cadence,
+    step_index: int,
+    body: StepPreviewRequest,
+    tenant_id: uuid.UUID,
+    db: AsyncSession,
+) -> tuple[StepPreviewResponse, Lead | SimpleNamespace]:
+    if step_index < 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="step_index deve ser >= 0.",
+        )
+
+    step_number = step_index + 1
+    template_step = get_template_step_config(cadence, step_number)
+    if template_step is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Passo não encontrado nesta cadência.",
+        )
+
+    channel = Channel(str(template_step.get("channel")))
+    if channel in {Channel.MANUAL_TASK, Channel.LINKEDIN_POST_REACTION}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Este canal não possui prévia textual na sidebar.",
+        )
+
+    preview_lead = await _resolve_preview_lead(body.lead_id, tenant_id, db, cadence)
+
+    configured_text = template_step.get("message_template") if template_step else None
+    configured_subjects = template_step.get("subject_variants") if template_step else None
+    configured_email_template_id = template_step.get("email_template_id") if template_step else None
+
+    preview_text = body.current_text if body.current_text is not None else configured_text
+    preview_subject = (
+        body.current_subject
+        if body.current_subject is not None
+        else _pick_first_subject_variant(configured_subjects)
+    )
+    preview_email_template_id = (
+        body.current_email_template_id
+        if body.current_email_template_id is not None
+        else configured_email_template_id
+    )
+
+    rendered_subject: str | None = None
+    rendered_body = ""
+    body_is_html = False
+    method = "manual_template"
+
+    if channel == Channel.EMAIL and preview_email_template_id:
+        email_template = await _get_email_template_or_404(
+            preview_email_template_id,
+            tenant_id,
+            db,
+        )
+        rendered_subject, rendered_body = render_saved_email_template(email_template, preview_lead)
+        body_is_html = True
+        method = "saved_email_template"
+    elif channel == Channel.LINKEDIN_INMAIL:
+        rendered_payload = render_message_template(preview_text, preview_lead) or ""
+        rendered_subject, rendered_body = _parse_inmail_preview(rendered_payload)
+        method = "linkedin_inmail_json"
+    else:
+        rendered_subject = render_message_template(preview_subject, preview_lead)
+        rendered_body = render_message_template(preview_text, preview_lead) or ""
+        method = "manual_template" if preview_text else "empty"
+
+    return (
+        StepPreviewResponse(
+            channel=channel,
+            step_number=step_number,
+            lead_id=getattr(preview_lead, "id", None),
+            lead_name=getattr(preview_lead, "name", None),
+            subject=rendered_subject,
+            body=rendered_body,
+            body_is_html=body_is_html,
+            variables=[item["token"] for item in get_template_variable_catalog()],
+            method=method,
+        ),
+        preview_lead,
+    )
 
 
 def _pick_first_subject_variant(subject_variants: object) -> str | None:

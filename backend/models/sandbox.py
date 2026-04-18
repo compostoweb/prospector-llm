@@ -189,3 +189,27 @@ class SandboxStep(Base, TenantMixin, TimestampMixin):
         "Lead",
         lazy="select",
     )
+
+    @property
+    def lead_name(self) -> str:
+        if self.lead and self.lead.name:
+            return self.lead.name
+        if self.fictitious_lead_data and self.fictitious_lead_data.get("name"):
+            return str(self.fictitious_lead_data["name"])
+        return "Lead"
+
+    @property
+    def lead_company(self) -> str | None:
+        if self.lead and self.lead.company:
+            return self.lead.company
+        if self.fictitious_lead_data and self.fictitious_lead_data.get("company"):
+            return str(self.fictitious_lead_data["company"])
+        return None
+
+    @property
+    def lead_job_title(self) -> str | None:
+        if self.lead and self.lead.job_title:
+            return self.lead.job_title
+        if self.fictitious_lead_data and self.fictitious_lead_data.get("job_title"):
+            return str(self.fictitious_lead_data["job_title"])
+        return None

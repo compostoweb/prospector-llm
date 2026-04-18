@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   Mail,
   Trash2,
@@ -143,6 +143,7 @@ function AccountSettingsModal({
   account: EmailAccount | null
   onClose: () => void
 }) {
+  const dialogContentRef = useRef<HTMLDivElement | null>(null)
   const [dailyLimit, setDailyLimit] = useState<number>(account?.daily_send_limit ?? 50)
   const [signature, setSignature] = useState<string>(account?.email_signature ?? "")
   const [fetchMsg, setFetchMsg] = useState<string | null>(null)
@@ -150,6 +151,13 @@ function AccountSettingsModal({
 
   const { mutate: update, isPending: saving } = useUpdateEmailAccount()
   const { mutate: fetchSig, isPending: fetchingSignature } = useFetchGmailSignature()
+
+  useEffect(() => {
+    setDailyLimit(account?.daily_send_limit ?? 50)
+    setSignature(account?.email_signature ?? "")
+    setFetchMsg(null)
+    setShowHtml(false)
+  }, [account])
 
   if (!account) return null
 
@@ -188,7 +196,14 @@ function AccountSettingsModal({
 
   return (
     <Dialog open={!!account} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent
+        ref={dialogContentRef}
+        className="max-w-2xl"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault()
+          dialogContentRef.current?.focus()
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Configurar conta</DialogTitle>
           <p className="text-sm text-(--text-secondary)">{currentAccount.email_address}</p>

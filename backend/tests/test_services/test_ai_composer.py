@@ -217,6 +217,10 @@ async def test_prepare_composer_messages_returns_observability_metadata() -> Non
     assert composition_context.few_shot_method == "DPO"
     assert composition_context.few_shot_match_type == "exact"
     assert composition_context.has_site_summary is True
+    assert composition_context.source_site_summary_preview == (
+        "Empresa com operação financeira distribuída."
+    )
+    assert composition_context.source_company_news_preview is None
 
 
 async def test_compose_attaches_composition_context_to_response_raw():
@@ -253,6 +257,9 @@ async def test_compose_attaches_composition_context_to_response_raw():
     assert composition_context["few_shot_key"] == "financeiro:cfo:email:first"
     assert composition_context["few_shot_match_type"] == "exact"
     assert composition_context["has_site_summary"] is True
+    assert composition_context["source_site_summary_preview"] == (
+        "Empresa com operação financeira distribuída."
+    )
 
 
 async def test_compose_attaches_editorial_validation_to_response_raw() -> None:
@@ -347,6 +354,7 @@ async def test_prepare_composer_messages_uses_relational_method_for_linkedin_ope
     assert "CONTRATO EDITORIAL INEGOCIÁVEL:" in user_prompt
     assert 'Nunca usar "Olá"' in user_prompt
     assert "não use dis neste estágio" in user_prompt.lower()
+    assert "Nunca cite estudo, relatório, pesquisa, notícia" in messages[0].content
 
 
 async def test_get_lead_playbook_match_ignores_sector_only_proxy() -> None:
