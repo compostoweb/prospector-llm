@@ -4,6 +4,8 @@ import random
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
+import structlog
+from redis import exceptions as redis_exceptions
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +16,8 @@ from models.email_account import EmailAccount
 from models.enums import Channel
 from models.linkedin_account import LinkedInAccount
 from models.tenant import TenantIntegration
+
+logger = structlog.get_logger()
 
 DEFAULT_CHANNEL_LIMITS: dict[Channel, int] = {
     Channel.LINKEDIN_CONNECT: 20,
@@ -153,17 +157,26 @@ async def get_or_create_daily_account_budget(
     redis: RedisClient = redis_client,
 ) -> int:
     budget_key = build_account_budget_key(scope_key, channel)
-    cached = await redis.get(budget_key)
-    if cached is not None:
-        return max(int(cached), 1)
+    try:
+        cached = await redis.get(budget_key)
+        if cached is not None:
+            return max(int(cached), 1)
 
-    drawn_budget = draw_daily_budget(limit, channel)
-    created = await redis.set_if_absent(budget_key, str(drawn_budget), ttl=86400)
-    if created:
-        return drawn_budget
+        drawn_budget = draw_daily_budget(limit, channel)
+        created = await redis.set_if_absent(budget_key, str(drawn_budget), ttl=86400)
+        if created:
+            return drawn_budget
 
-    cached_after_race = await redis.get(budget_key)
-    return max(int(cached_after_race or drawn_budget), 1)
+        cached_after_race = await redis.get(budget_key)
+        return max(int(cached_after_race or drawn_budget), 1)
+    except redis_exceptions.RedisError as exc:
+        logger.warning(
+            "delivery_budget.redis_unavailable",
+            channel=channel.value,
+            scope_key=scope_key,
+            error=str(exc),
+        )
+        return draw_daily_budget(limit, channel)
 
 
 async def get_current_account_usage(
@@ -172,8 +185,17 @@ async def get_current_account_usage(
     *,
     redis: RedisClient = redis_client,
 ) -> int:
-    current = await redis.get(build_account_rate_counter_key(scope_key, channel))
-    return max(int(current or 0), 0)
+    try:
+        current = await redis.get(build_account_rate_counter_key(scope_key, channel))
+        return max(int(current or 0), 0)
+    except redis_exceptions.RedisError as exc:
+        logger.warning(
+            "delivery_budget.usage_unavailable",
+            channel=channel.value,
+            scope_key=scope_key,
+            error=str(exc),
+        )
+        return 0
 
 
 async def build_cadence_delivery_budget_snapshots(

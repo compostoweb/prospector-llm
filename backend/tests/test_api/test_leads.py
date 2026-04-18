@@ -571,6 +571,63 @@ async def test_generate_import_merge_duplicates_updates_existing_lead_and_preser
     assert refreshed_emails["contato@acme.com"]["id"] == initial_emails["contato@acme.com"]["id"]
 
 
+async def test_add_members_to_linked_list_enrolls_lead_even_when_cadence_is_paused(
+    client: AsyncClient,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+):
+    created = (
+        await client.post(
+            "/leads",
+            json=_lead_payload(
+                linkedin_url="https://linkedin.com/in/linked-list-auto-enroll",
+                email_corporate="linked@acme.com",
+            ),
+        )
+    ).json()
+
+    lead_list = LeadList(tenant_id=tenant_id, name="Lista Vinculada")
+    db.add(lead_list)
+    await db.flush()
+
+    cadence = Cadence(
+        tenant_id=tenant_id,
+        name="Cadência com Lista",
+        is_active=False,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+        lead_list_id=lead_list.id,
+        steps_template=[
+            {
+                "step_number": 1,
+                "channel": "email",
+                "day_offset": 0,
+                "message_template": "Olá {first_name}",
+                "use_voice": False,
+                "audio_file_id": None,
+                "step_type": "email_first",
+            }
+        ],
+    )
+    db.add(cadence)
+    await db.commit()
+
+    resp = await client.post(
+        f"/lead-lists/{lead_list.id}/members",
+        json={"lead_ids": [created["id"]]},
+    )
+
+    assert resp.status_code == 204, resp.text
+
+    steps_result = await db.execute(select(CadenceStep).where(CadenceStep.cadence_id == cadence.id))
+    steps = steps_result.scalars().all()
+    assert len(steps) == 1
+
+    refreshed_lead = await db.get(Lead, uuid.UUID(created["id"]))
+    assert refreshed_lead is not None
+    assert refreshed_lead.status == LeadStatus.IN_CADENCE
+
+
 async def test_quick_create_lead_from_inbox_returns_loaded_email_collection(
     client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,

@@ -605,7 +605,9 @@ async def test_tick_uses_action_specific_limit_for_post_comment(
     integration_result = await db.execute(
         select(TenantIntegration).where(TenantIntegration.tenant_id == tenant_id)
     )
-    integration = integration_result.scalar_one_or_none()
+    integration = cast(TenantIntegration | None, integration_result.scalar_one_or_none())
+    if integration is None:
+        raise AssertionError("TenantIntegration deveria existir no fixture")
     integration.limit_linkedin_post_comment = 17
 
     mock_wsl = _mock_worker_session_local(db, [tenant])
@@ -694,6 +696,54 @@ async def test_tick_skips_post_comment_without_recent_post(
         patch("workers.cadence.get_worker_session") as mock_get_session,
         patch("workers.cadence.redis_client") as mock_redis,
         patch("services.cadence_step_eligibility._has_recent_post", new=AsyncMock(return_value=False)),
+        patch("workers.dispatch.dispatch_step") as mock_dispatch,
+    ):
+
+        async def _fake_session(_tid):
+            yield db
+
+        mock_get_session.side_effect = _fake_session
+        _configure_rate_limit_mocks(mock_redis)
+        mock_dispatch.delay = MagicMock()
+
+        result = await _tick_async()
+
+    assert result["dispatched"] == 0
+    assert result["skipped"] == 1
+    mock_dispatch.delay.assert_not_called()
+    mock_redis.check_and_increment.assert_not_called()
+    assert step.status == StepStatus.SKIPPED
+
+
+async def test_tick_skips_inmail_step_when_account_has_no_capability(
+    db: FakeAsyncSession,
+    tenant_id: uuid.UUID,
+    tenant: Tenant,
+) -> None:
+    from workers.cadence import _tick_async
+
+    lead = _make_lead(tenant_id)
+    cadence = _make_cadence(tenant_id)
+    cadence.linkedin_account_id = uuid.uuid4()
+    step = _make_step(tenant_id, lead.id, cadence.id, channel=Channel.LINKEDIN_INMAIL)
+    linkedin_account = LinkedInAccount(
+        id=cadence.linkedin_account_id,
+        tenant_id=tenant_id,
+        display_name="Conta LinkedIn sem InMail",
+        provider_type="unipile",
+        unipile_account_id="li-account-inmail-off",
+        is_active=True,
+        supports_inmail=False,
+    )
+    db.add_all([lead, cadence, step, linkedin_account])
+    await db.flush()
+
+    mock_wsl = _mock_worker_session_local(db, [tenant])
+
+    with (
+        patch("workers.cadence.WorkerSessionLocal", mock_wsl),
+        patch("workers.cadence.get_worker_session") as mock_get_session,
+        patch("workers.cadence.redis_client") as mock_redis,
         patch("workers.dispatch.dispatch_step") as mock_dispatch,
     ):
 

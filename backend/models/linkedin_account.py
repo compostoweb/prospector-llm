@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Boolean, String, DateTime
+from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -78,6 +78,12 @@ class LinkedInAccount(Base, TenantMixin, TimestampMixin):
         default=True,
         server_default="true",
         comment="False = conta pausada / desconectada",
+    )
+    supports_inmail: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        comment="True quando a conta emissora tem capability operacional para InMail",
     )
 
     # ── Polling state (provider nativo) ───────────────────────────────

@@ -44,13 +44,15 @@ function AccountCard({
   account,
   onDelete,
   onToggleActive,
+  onToggleInmail,
 }: {
   account: LinkedInAccount
   onDelete: (id: string) => void
   onToggleActive: (id: string, active: boolean) => void
+  onToggleInmail: (id: string, enabled: boolean) => void
 }) {
   return (
-    <div className="flex items-center justify-between rounded-xl border border-(--border-default) bg-(--bg-surface) px-3.5 py-3.5">
+    <div className="flex flex-col gap-4 rounded-xl border border-(--border-default) bg-(--bg-surface) px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
       <div className="flex min-w-0 items-center gap-3">
         <div
           className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs ${
@@ -73,23 +75,65 @@ function AccountCard({
           <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-(--bg-overlay) px-2 py-0.5 text-[11px] text-(--text-tertiary)">
             {PROVIDER_LABELS[account.provider_type] ?? account.provider_type}
           </span>
+          <span
+            className={`mt-1 ml-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ${
+              account.supports_inmail
+                ? "bg-(--success-subtle) text-(--success-subtle-fg)"
+                : "bg-(--bg-overlay) text-(--text-tertiary)"
+            }`}
+          >
+            {account.supports_inmail ? "InMail habilitado" : "Sem InMail"}
+          </span>
         </div>
       </div>
-      <div className="ml-4 flex shrink-0 items-center gap-2.5">
-        {account.is_active ? (
-          <CheckCircle2 size={15} className="text-(--success)" />
-        ) : (
-          <XCircle size={15} className="text-(--text-tertiary)" />
-        )}
-        <Switch
-          checked={account.is_active}
-          onCheckedChange={(v) => onToggleActive(account.id, v)}
-          aria-label={account.is_active ? "Desativar conta" : "Ativar conta"}
-        />
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-stretch lg:justify-end">
+        <div className="rounded-lg border border-(--border-subtle) bg-(--bg-overlay) px-4 py-3 lg:w-80 xl:w-88">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-(--text-tertiary)">
+                InMail Premium
+              </p>
+              <p className="text-xs text-(--text-secondary)">
+                Habilite apenas se essa conta realmente puder enviar InMail.
+              </p>
+            </div>
+            <Switch
+              checked={account.supports_inmail}
+              onCheckedChange={(value) => onToggleInmail(account.id, value)}
+              aria-label={account.supports_inmail ? "Desativar InMail" : "Ativar InMail"}
+            />
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-(--border-subtle) bg-(--bg-overlay) px-4 py-3 lg:w-80 xl:w-88">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-(--text-tertiary)">
+                Conta ativa
+              </p>
+              <p className="text-xs text-(--text-secondary)">
+                Desative para pausar uso operacional sem remover a conta.
+              </p>
+            </div>
+            <div className="flex items-center gap-2.5">
+              {account.is_active ? (
+                <CheckCircle2 size={15} className="text-(--success)" />
+              ) : (
+                <XCircle size={15} className="text-(--text-tertiary)" />
+              )}
+              <Switch
+                checked={account.is_active}
+                onCheckedChange={(v) => onToggleActive(account.id, v)}
+                aria-label={account.is_active ? "Desativar conta" : "Ativar conta"}
+              />
+            </div>
+          </div>
+        </div>
+
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8 text-(--text-tertiary) hover:text-(--danger)"
+          className="h-8 w-8 self-end text-(--text-tertiary) hover:text-(--danger) lg:self-center"
           onClick={() => onDelete(account.id)}
           aria-label="Remover conta"
         >
@@ -106,6 +150,7 @@ function UnipileModal({ open, onClose }: { open: boolean; onClose: () => void })
   const [form, setForm] = useState<CreateUnipileLinkedInAccountBody>({
     display_name: "",
     linkedin_username: "",
+    supports_inmail: false,
     unipile_account_id: "",
   })
   const [error, setError] = useState<string | null>(null)
@@ -116,7 +161,12 @@ function UnipileModal({ open, onClose }: { open: boolean; onClose: () => void })
     try {
       await create.mutateAsync(form)
       onClose()
-      setForm({ display_name: "", linkedin_username: "", unipile_account_id: "" })
+      setForm({
+        display_name: "",
+        linkedin_username: "",
+        supports_inmail: false,
+        unipile_account_id: "",
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro desconhecido")
     }
@@ -159,6 +209,27 @@ function UnipileModal({ open, onClose }: { open: boolean; onClose: () => void })
               placeholder="ID da conta no painel Unipile"
             />
           </div>
+          <div className="rounded-lg border border-(--border-subtle) bg-(--bg-overlay) px-3 py-3">
+            <div className="mb-3">
+              <p className="text-sm font-medium text-(--text-primary)">Capacidades operacionais</p>
+              <p className="text-xs text-(--text-secondary)">
+                Marque o que essa conta realmente suporta no runtime.
+              </p>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-(--text-primary)">InMail Premium</p>
+                <p className="text-xs text-(--text-secondary)">
+                  Ative quando a conta tiver Premium ou capability operacional para InMail.
+                </p>
+              </div>
+              <Switch
+                checked={form.supports_inmail ?? false}
+                onCheckedChange={(value) => setForm((f) => ({ ...f, supports_inmail: value }))}
+                aria-label="Conta com capability de InMail"
+              />
+            </div>
+          </div>
 
           {error && <p className="text-sm text-(--danger)">{error}</p>}
         </div>
@@ -188,6 +259,7 @@ function NativeModal({ open, onClose }: { open: boolean; onClose: () => void }) 
   const [form, setForm] = useState<CreateNativeLinkedInAccountBody>({
     display_name: "",
     linkedin_username: "",
+    supports_inmail: false,
     li_at_cookie: "",
   })
   const [error, setError] = useState<string | null>(null)
@@ -198,7 +270,12 @@ function NativeModal({ open, onClose }: { open: boolean; onClose: () => void }) 
     try {
       await create.mutateAsync(form)
       onClose()
-      setForm({ display_name: "", linkedin_username: "", li_at_cookie: "" })
+      setForm({
+        display_name: "",
+        linkedin_username: "",
+        supports_inmail: false,
+        li_at_cookie: "",
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro desconhecido")
     }
@@ -247,6 +324,27 @@ function NativeModal({ open, onClose }: { open: boolean; onClose: () => void }) 
               onChange={(e) => setForm((f) => ({ ...f, li_at_cookie: e.target.value }))}
               placeholder="Cole o valor do cookie li_at aqui"
             />
+          </div>
+          <div className="rounded-lg border border-(--border-subtle) bg-(--bg-overlay) px-3 py-3">
+            <div className="mb-3">
+              <p className="text-sm font-medium text-(--text-primary)">Capacidades operacionais</p>
+              <p className="text-xs text-(--text-secondary)">
+                Marque o que essa sessão nativa realmente suporta em produção.
+              </p>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-(--text-primary)">InMail Premium</p>
+                <p className="text-xs text-(--text-secondary)">
+                  Use quando essa sessão realmente puder enviar InMail no runtime.
+                </p>
+              </div>
+              <Switch
+                checked={form.supports_inmail ?? false}
+                onCheckedChange={(value) => setForm((f) => ({ ...f, supports_inmail: value }))}
+                aria-label="Conta com capability de InMail"
+              />
+            </div>
           </div>
 
           {error && <p className="text-sm text-(--danger)">{error}</p>}
@@ -300,6 +398,10 @@ export default function LinkedInAccountsPage() {
     await updateAccount.mutateAsync({ id, body: { is_active: active } })
   }
 
+  async function handleToggleInmail(id: string, enabled: boolean) {
+    await updateAccount.mutateAsync({ id, body: { supports_inmail: enabled } })
+  }
+
   return (
     <SettingsPageShell
       title="Contas LinkedIn"
@@ -344,6 +446,11 @@ export default function LinkedInAccountsPage() {
             </span>
           }
         >
+          <div className="mb-4 rounded-xl border border-(--border-subtle) bg-(--bg-overlay) px-4 py-3 text-sm text-(--text-secondary)">
+            A opção de InMail fica no bloco InMail Premium de cada conta e também aparece nos modais
+            Via Unipile e Via Cookie ao cadastrar uma nova conta.
+          </div>
+
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 size={20} className="animate-spin text-(--text-tertiary)" />
@@ -369,6 +476,7 @@ export default function LinkedInAccountsPage() {
                   account={account}
                   onDelete={handleDelete}
                   onToggleActive={handleToggleActive}
+                  onToggleInmail={handleToggleInmail}
                 />
               ))}
             </div>

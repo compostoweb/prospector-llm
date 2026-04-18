@@ -60,6 +60,10 @@ async def evaluate_step_eligibility(
         if provider is None:
             return StepEligibilityResult(dispatchable=False, reason="no_linkedin_account")
 
+        if step.channel == Channel.LINKEDIN_INMAIL:
+            if provider.account is not None and not provider.account.supports_inmail:
+                return StepEligibilityResult(dispatchable=False, reason="inmail_not_supported")
+
         if step.channel in {Channel.LINKEDIN_POST_REACTION, Channel.LINKEDIN_POST_COMMENT}:
             has_post = await _has_recent_post(provider, lead.linkedin_profile_id)
             if not has_post:

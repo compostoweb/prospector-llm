@@ -66,6 +66,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { resolvePostImageUrl, resolvePostVideoUrl } from "@/lib/content/post-media"
 
 const DAY_NAMES: Record<number, string> = {
   0: "Domingo",
@@ -426,7 +427,7 @@ export function CreatePostDialog({
 
     setImageDeleted(false)
     setLocalImage({
-      url: `/api/backend/api/content/posts/${ensuredPost.id}/image?t=${Date.now()}`,
+      url: resolvePostImageUrl(ensuredPost, { cacheBuster: Date.now() }) ?? "",
       prompt: result.image_prompt,
     })
     setLocalUploadedImage(null)
@@ -555,6 +556,9 @@ export function CreatePostDialog({
   const charCount = body.length
   const isOverLimit = charCount > 3000
   const isTooShort = charCount > 0 && charCount < 900
+  const persistedImageUrl = resolvePostImageUrl(draftPost)
+  const persistedVideoUrl = resolvePostVideoUrl(draftPost)
+  const isMediaPreviewOpen = lightboxOpen || videoLightboxOpen
   const isSaving = createPost.isPending || updatePost.isPending
   const isMediaPending =
     detectHook.isPending ||
@@ -582,6 +586,23 @@ export function CreatePostDialog({
     Boolean(draftPost?.image_s3_key) ||
     Boolean(draftPost?.video_s3_key)
 
+  function handleDialogInteractOutside(event: { preventDefault: () => void; target: EventTarget | null }) {
+    if (!hasUnsavedChanges) return
+    if (isMediaPreviewOpen) {
+      event.preventDefault()
+      return
+    }
+
+    const target = event.target
+    if (target instanceof HTMLElement && target.closest('[role="dialog"]')) {
+      event.preventDefault()
+      return
+    }
+
+    event.preventDefault()
+    setShowCloseConfirm(true)
+  }
+
   function requestClose() {
     if (!hasUnsavedChanges) {
       handleClose(false)
@@ -598,11 +619,7 @@ export function CreatePostDialog({
       >
         <DialogContent
           className="max-w-2xl max-h-[90vh] overflow-y-auto"
-          onInteractOutside={(event) => {
-            if (!hasUnsavedChanges) return
-            event.preventDefault()
-            setShowCloseConfirm(true)
-          }}
+          onInteractOutside={handleDialogInteractOutside}
           onEscapeKeyDown={(event) => {
             if (!hasUnsavedChanges) return
             event.preventDefault()
@@ -934,7 +951,7 @@ export function CreatePostDialog({
                 <span className="flex items-center gap-2">
                   <ImageIcon className="h-4 w-4 text-(--text-secondary)" />
                   Imagem
-                  {!imageDeleted && (localImage || localUploadedImage || draftPost?.image_url) && (
+                  {!imageDeleted && (localImage || localUploadedImage || persistedImageUrl) && (
                     <span className="rounded-full bg-(--accent)/15 px-1.5 py-0.5 text-xs text-(--accent)">
                       Adicionada
                     </span>
@@ -949,7 +966,7 @@ export function CreatePostDialog({
 
               {imageOpen && (
                 <div className="border-t border-(--border-subtle) p-3 flex flex-col gap-3">
-                  {!imageDeleted && (localImage || localUploadedImage || draftPost?.image_url) ? (
+                  {!imageDeleted && (localImage || localUploadedImage || persistedImageUrl) ? (
                     <div className="flex flex-col gap-2">
                       <button
                         type="button"
@@ -959,13 +976,7 @@ export function CreatePostDialog({
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={
-                            localImage?.url ??
-                            localUploadedImage?.url ??
-                            (draftPost?.image_s3_key
-                              ? `/api/backend/api/content/posts/${draftPost.id}/image`
-                              : undefined)
-                          }
+                          src={localImage?.url ?? localUploadedImage?.url ?? persistedImageUrl ?? undefined}
                           alt="Imagem do post"
                           className="w-full max-h-64 rounded object-contain bg-(--bg-subtle) hover:opacity-90 transition-opacity"
                         />
@@ -1227,7 +1238,7 @@ export function CreatePostDialog({
                 <span className="flex items-center gap-2">
                   <VideoIcon className="h-4 w-4 text-(--text-secondary)" />
                   Vídeo
-                  {!localVideoDeleted && (localVideoUrl || draftPost?.video_url) && (
+                  {!localVideoDeleted && (localVideoUrl || persistedVideoUrl) && (
                     <span className="rounded-full bg-(--accent)/15 px-1.5 py-0.5 text-xs text-(--accent)">
                       Adicionado
                     </span>
@@ -1242,16 +1253,11 @@ export function CreatePostDialog({
 
               {videoOpen && (
                 <div className="border-t border-(--border-subtle) p-3 flex flex-col gap-3">
-                  {!localVideoDeleted && (localVideoUrl || draftPost?.video_url) ? (
+                  {!localVideoDeleted && (localVideoUrl || persistedVideoUrl) ? (
                     <div className="flex flex-col gap-2">
                       <div className="relative w-full aspect-video">
                         <video
-                          src={
-                            localVideoUrl ??
-                            (draftPost?.video_s3_key
-                              ? `/api/backend/api/content/posts/${draftPost.id}/video`
-                              : undefined)
-                          }
+                          src={localVideoUrl ?? persistedVideoUrl ?? undefined}
                           controls
                           preload="metadata"
                           className="absolute inset-0 w-full h-full rounded-md bg-black object-contain"
@@ -1387,13 +1393,7 @@ export function CreatePostDialog({
           </DialogHeader>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={
-              localImage?.url ??
-              localUploadedImage?.url ??
-              (draftPost?.image_s3_key
-                ? `/api/backend/api/content/posts/${draftPost.id}/image`
-                : undefined)
-            }
+            src={localImage?.url ?? localUploadedImage?.url ?? persistedImageUrl ?? undefined}
             alt="Imagem do post"
             className="w-full max-h-[85vh] object-contain rounded"
           />
@@ -1407,12 +1407,7 @@ export function CreatePostDialog({
           </DialogHeader>
           <div className="w-full aspect-video">
             <video
-              src={
-                localVideoUrl ??
-                (draftPost?.video_s3_key
-                  ? `/api/backend/api/content/posts/${draftPost.id}/video`
-                  : undefined)
-              }
+              src={localVideoUrl ?? persistedVideoUrl ?? undefined}
               controls
               autoPlay
               className="w-full h-full rounded object-contain bg-black"

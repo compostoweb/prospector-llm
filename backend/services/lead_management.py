@@ -308,6 +308,14 @@ async def ensure_list_membership(
         .on_conflict_do_nothing()
     )
 
+    from services.cadence_manager import auto_enroll_linked_cadences_for_list
+
+    await auto_enroll_linked_cadences_for_list(
+        db,
+        list_id=list_id,
+        lead_ids=[lead_id],
+    )
+
 
 async def get_or_create_list(
     db: AsyncSession,

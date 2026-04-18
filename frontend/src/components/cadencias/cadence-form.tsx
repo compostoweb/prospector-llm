@@ -201,6 +201,7 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
     cadence?.linkedin_account_id ?? "",
   )
   const { data: linkedInAccountsData } = useLinkedInAccounts()
+  const linkedInAccounts = linkedInAccountsData?.accounts ?? []
   const [targetSegment, setTargetSegment] = useState(cadence?.target_segment ?? "")
   const [personaDescription, setPersonaDescription] = useState(cadence?.persona_description ?? "")
   const [offerDescription, setOfferDescription] = useState(cadence?.offer_description ?? "")
@@ -226,6 +227,9 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
 
   // Na edição, preserva os passos existentes da cadência (gerenciados pela aba Passos)
   const existingSteps: CadenceStep[] = cadence?.steps_template ?? []
+  const hasLinkedInInmailSteps = existingSteps.some((step) => step.channel === "linkedin_inmail")
+  const selectedLinkedInAccount =
+    linkedInAccounts.find((account) => account.id === linkedInAccountId) ?? null
 
   useEffect(() => {
     if (cadence) {
@@ -400,16 +404,23 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
                 aria-label="Conta LinkedIn"
               >
                 <option value="">Padrão — conta Unipile global</option>
-                {(linkedInAccountsData?.accounts ?? [])
+                {linkedInAccounts
                   .filter((a) => a.is_active)
                   .map((acc) => (
                     <option key={acc.id} value={acc.id}>
                       {acc.display_name}
                       {acc.linkedin_username ? ` (${acc.linkedin_username})` : ""} —{" "}
                       {acc.provider_type === "native" ? "Cookie li_at" : "Unipile"}
+                      {acc.supports_inmail ? " · InMail" : " · sem InMail"}
                     </option>
                   ))}
               </StyledSelect>
+              {hasLinkedInInmailSteps && selectedLinkedInAccount && !selectedLinkedInAccount.supports_inmail ? (
+                <p className="text-xs text-(--warning)">
+                  A conta selecionada não está marcada com suporte a InMail. Steps desse tipo serão
+                  pulados antes de consumir budget.
+                </p>
+              ) : null}
             </Field>
           )}
 

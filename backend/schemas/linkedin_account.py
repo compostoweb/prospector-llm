@@ -11,7 +11,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-
 # ── Criação: Unipile ──────────────────────────────────────────────────
 
 class LinkedInAccountUnipileCreateRequest(BaseModel):
@@ -19,6 +18,10 @@ class LinkedInAccountUnipileCreateRequest(BaseModel):
 
     display_name: str = Field(max_length=200)
     linkedin_username: str | None = Field(default=None, max_length=200)
+    supports_inmail: bool = Field(
+        default=False,
+        description="Marque true quando esta conta emissora puder enviar InMail.",
+    )
     unipile_account_id: str = Field(
         description="account_id da conta LinkedIn no Unipile",
     )
@@ -34,6 +37,10 @@ class LinkedInAccountNativeCreateRequest(BaseModel):
         max_length=200,
         description="Username do LinkedIn (parte final da URL do perfil)",
     )
+    supports_inmail: bool = Field(
+        default=False,
+        description="Marque true quando esta conta emissora puder enviar InMail.",
+    )
     li_at_cookie: str = Field(
         description="Cookie li_at extraído do browser (será criptografado)",
     )
@@ -45,6 +52,7 @@ class LinkedInAccountUpdateRequest(BaseModel):
     display_name: str | None = Field(default=None, max_length=200)
     linkedin_username: str | None = Field(default=None, max_length=200)
     is_active: bool | None = None
+    supports_inmail: bool | None = None
 
 
 # ── Response ──────────────────────────────────────────────────────────
@@ -58,6 +66,7 @@ class LinkedInAccountResponse(BaseModel):
     unipile_account_id: str | None
     # li_at_cookie NUNCA exposto na API
     is_active: bool
+    supports_inmail: bool
     last_polled_at: datetime | None
     created_at: datetime
     updated_at: datetime

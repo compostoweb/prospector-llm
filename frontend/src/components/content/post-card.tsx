@@ -22,6 +22,7 @@ import {
   TrendingUp,
   Bookmark,
 } from "lucide-react"
+import { resolvePostImageUrl } from "@/lib/content/post-media"
 import { cn } from "@/lib/utils"
 import { StatusBadge, PillarBadge } from "@/components/content/post-badges"
 import { NotionLogo } from "@/components/ui/notion-logo"
@@ -64,6 +65,7 @@ export function PostCard({ post }: PostCardProps) {
     cancelSchedule.isPending ||
     publishNow.isPending ||
     deletePost.isPending
+  const imageUrl = resolvePostImageUrl(post)
 
   return (
     <>
@@ -74,9 +76,9 @@ export function PostCard({ post }: PostCardProps) {
         )}
       >
         {/* Thumbnail da imagem, se existir */}
-        {post.image_url && (
+        {imageUrl && (
           <Image
-            src={post.image_url}
+            src={imageUrl}
             alt={post.title || "Imagem do post"}
             width={1200}
             height={256}

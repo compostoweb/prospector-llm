@@ -46,6 +46,7 @@ from schemas.cadence import (
 from services.ai_composer import AIComposer
 from services.cadence_delivery_budget import build_cadence_delivery_budget_snapshots
 from services.cadence_manager import (
+    CadenceManager,
     get_previous_template_channel,
     get_template_step_config,
     get_total_template_steps,
@@ -61,6 +62,7 @@ from services.message_template_renderer import (
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/cadences", tags=["Cadences"])
+_cadence_manager = CadenceManager()
 
 
 @router.get("/template-variables", response_model=list[TemplateVariableResponse])
@@ -380,6 +382,7 @@ async def update_cadence(
     db: AsyncSession = Depends(get_session_flexible),
 ) -> CadenceResponse:
     cadence = await _get_cadence_or_404(cadence_id, tenant_id, db)
+    previous_lead_list_id = cadence.lead_list_id
 
     updates = body.model_dump(
         exclude_unset=True,
@@ -449,9 +452,17 @@ async def update_cadence(
     if "cadence_type" in raw and body.cadence_type is not None:
         cadence.cadence_type = body.cadence_type
 
+    enrolled_from_list = 0
+    if cadence.lead_list_id and cadence.lead_list_id != previous_lead_list_id:
+        enrolled_from_list = await _cadence_manager.auto_enroll_list_members(cadence, db)
+
     await db.commit()
 
-    logger.info("cadence.updated", cadence_id=str(cadence_id))
+    logger.info(
+        "cadence.updated",
+        cadence_id=str(cadence_id),
+        enrolled_from_list=enrolled_from_list,
+    )
     return CadenceResponse.model_validate(cadence)
 
 

@@ -385,8 +385,18 @@ async def _dispatch_inner(
                     content_audio_url = audio_url
                 else:
                     if getattr(cadence, "linkedin_account_id", None):
+                        if linkedin_account is None:
+                            step.status = StepStatus.SKIPPED
+                            await db.commit()
+                            await _release_rate_limit_slot()
+                            return {
+                                "step_id": step_id,
+                                "status": "skipped",
+                                "reason": "linkedin_account_not_found",
+                            }
+                        account = linkedin_account
                         _li_result = await linkedin_registry.send_dm(
-                            account=linkedin_account,
+                            account=account,
                             linkedin_profile_id=lead.linkedin_profile_id or "",
                             message=message_text,
                         )
@@ -725,6 +735,16 @@ async def _dispatch_inner(
                         "step_id": step_id,
                         "status": "skipped",
                         "reason": "no_linkedin_profile_id",
+                    }
+
+                if linkedin_account is not None and not linkedin_account.supports_inmail:
+                    step.status = StepStatus.SKIPPED
+                    await db.commit()
+                    await _release_rate_limit_slot()
+                    return {
+                        "step_id": step_id,
+                        "status": "skipped",
+                        "reason": "inmail_not_supported",
                     }
 
                 # Composer retorna JSON: {"subject": "...", "body": "..."}

@@ -525,6 +525,10 @@ export function CadenceCreateWizard({
     () => linkedInAccounts.filter((account) => account.is_active),
     [linkedInAccounts],
   )
+  const inmailCapableLinkedInAccounts = useMemo(
+    () => activeLinkedInAccounts.filter((account) => account.supports_inmail),
+    [activeLinkedInAccounts],
+  )
   const activeEmailTemplates = emailTemplates ?? []
   const audioFiles = audioFilesData?.items ?? []
 
@@ -535,6 +539,7 @@ export function CadenceCreateWizard({
     linkedInAccounts.find((account) => account.id === linkedInAccountId) ?? null
   const hasEmailSteps = steps.some((step) => step.channel === "email")
   const hasLinkedInSteps = steps.some((step) => step.channel.startsWith("linkedin"))
+  const hasInmailSteps = steps.some((step) => step.channel === "linkedin_inmail")
   const hasVoiceSteps = steps.some((step) => step.use_voice)
   const isListsPending = status === "loading" || loadingLeadLists
   const allowedChannels = cadenceType === "email_only" ? (["email"] as CadenceChannel[]) : undefined
@@ -586,11 +591,15 @@ export function CadenceCreateWizard({
       title: "Contas LinkedIn",
       countLabel:
         activeLinkedInAccounts.length > 0
-          ? `${activeLinkedInAccounts.length} conta${activeLinkedInAccounts.length === 1 ? "" : "s"} ativa${activeLinkedInAccounts.length === 1 ? "" : "s"}`
+          ? hasInmailSteps
+            ? `${activeLinkedInAccounts.length} conta${activeLinkedInAccounts.length === 1 ? "" : "s"} ativa${activeLinkedInAccounts.length === 1 ? "" : "s"} · ${inmailCapableLinkedInAccounts.length} com InMail`
+            : `${activeLinkedInAccounts.length} conta${activeLinkedInAccounts.length === 1 ? "" : "s"} ativa${activeLinkedInAccounts.length === 1 ? "" : "s"}`
           : "Nenhuma conta ativa",
       description:
         cadenceType === "mixed"
-          ? "Usadas para connect, DM e ações no LinkedIn. Sem conta específica, a cadência usa o fallback global."
+          ? hasInmailSteps
+            ? "Usadas para connect, DM e ações no LinkedIn. InMail só roda em conta marcada como compatível; sem conta específica, a cadência usa o fallback global."
+            : "Usadas para connect, DM e ações no LinkedIn. Sem conta específica, a cadência usa o fallback global."
           : "Não são necessárias em campanhas só e-mail.",
       href: "/configuracoes/linkedin-accounts",
       icon: Linkedin,
@@ -642,6 +651,14 @@ export function CadenceCreateWizard({
     activeLinkedInAccounts.length === 0 &&
     !linkedInAccountId
       ? "Não há conta LinkedIn ativa selecionada. A cadência dependerá da configuração global do tenant."
+      : null,
+    hasInmailSteps &&
+    selectedLinkedInAccount !== null &&
+    !selectedLinkedInAccount.supports_inmail
+      ? "A conta LinkedIn selecionada não está marcada com suporte a InMail. Esses steps serão pulados antes de consumir budget."
+      : null,
+    hasInmailSteps && !linkedInAccountId && inmailCapableLinkedInAccounts.length === 0
+      ? "Há steps de InMail, mas nenhuma conta ativa foi marcada com essa capability. O fallback global continua sem sinalização explícita aqui."
       : null,
     hasVoiceSteps && !ttsConfig.tts_provider
       ? "Há steps com voz e nenhum provider TTS específico configurado. O sistema vai cair no provider global, se existir."
@@ -1166,6 +1183,7 @@ export function CadenceCreateWizard({
                             <option key={account.id} value={account.id}>
                               {account.display_name}
                               {account.linkedin_username ? ` (${account.linkedin_username})` : ""}
+                              {account.supports_inmail ? " · InMail" : " · sem InMail"}
                             </option>
                           ))}
                         </select>
@@ -1173,6 +1191,12 @@ export function CadenceCreateWizard({
                           Vale a pena quando você segmenta por persona comercial, perfil de SDR ou
                           quer separar limites de envio entre equipes.
                         </p>
+                        {hasInmailSteps && selectedLinkedInAccount && !selectedLinkedInAccount.supports_inmail ? (
+                          <p className="text-xs text-(--warning)">
+                            A conta selecionada não está habilitada para InMail. Se a cadência usar
+                            esse canal, o worker vai pular o step.
+                          </p>
+                        ) : null}
                       </div>
 
                       <div className="space-y-2 rounded-2xl border border-(--border-default) bg-(--bg-overlay) p-4 lg:min-w-65">
@@ -1461,7 +1485,7 @@ export function CadenceCreateWizard({
                             cadenceType === "email_only"
                               ? "Não se aplica"
                               : selectedLinkedInAccount
-                                ? selectedLinkedInAccount.display_name
+                                ? `${selectedLinkedInAccount.display_name}${selectedLinkedInAccount.supports_inmail ? " · InMail habilitado" : " · sem InMail"}`
                                 : "Fallback global"
                           }
                         />

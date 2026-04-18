@@ -6053,6 +6053,8 @@ export interface components {
        * @description Username do LinkedIn (parte final da URL do perfil)
        */
       linkedin_username: string
+      /** Supports Inmail */
+      supports_inmail?: boolean
       /**
        * Li At Cookie
        * @description Cookie li_at extraído do browser (será criptografado)
@@ -6081,6 +6083,8 @@ export interface components {
       unipile_account_id: string | null
       /** Is Active */
       is_active: boolean
+      /** Supports Inmail */
+      supports_inmail: boolean
       /** Last Polled At */
       last_polled_at: string | null
       /**
@@ -6119,6 +6123,8 @@ export interface components {
       display_name: string
       /** Linkedin Username */
       linkedin_username?: string | null
+      /** Supports Inmail */
+      supports_inmail?: boolean
       /**
        * Unipile Account Id
        * @description account_id da conta LinkedIn no Unipile
@@ -6133,6 +6139,8 @@ export interface components {
       linkedin_username?: string | null
       /** Is Active */
       is_active?: boolean | null
+      /** Supports Inmail */
+      supports_inmail?: boolean | null
     }
     /** LinkedInAuthUrl */
     LinkedInAuthUrl: {

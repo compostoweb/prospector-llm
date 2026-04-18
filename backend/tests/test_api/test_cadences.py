@@ -12,11 +12,14 @@ from datetime import UTC, datetime
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.routes import cadences as cadence_routes
+from models.cadence_step import CadenceStep
 from models.email_template import EmailTemplate
 from models.enums import LeadSource, LeadStatus
 from models.lead import Lead
+from models.lead_list import LeadList
 from models.tenant import TenantIntegration
 from services.ai_composer import AIComposer
 from services.cadence_delivery_budget import CadenceDeliveryBudgetSnapshot
@@ -564,6 +567,58 @@ async def test_update_cadence_deactivate(client: AsyncClient):
     resp = await client.patch(f"/cadences/{created['id']}", json={"is_active": False})
     assert resp.status_code == 200
     assert resp.json()["is_active"] is False
+
+
+async def test_update_cadence_linking_list_enrolls_existing_members(
+    client: AsyncClient,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+):
+    lead = Lead(
+        tenant_id=tenant_id,
+        name="Lead Lista",
+        first_name="Lead",
+        company="Acme",
+        linkedin_url="https://linkedin.com/in/lead-lista-cadencia",
+        email_corporate="lead@acme.com",
+        source=LeadSource.MANUAL,
+        status=LeadStatus.RAW,
+    )
+    lead_list = LeadList(tenant_id=tenant_id, name="Lista da Cadência")
+    lead_list.leads.append(lead)
+    db.add_all([lead, lead_list])
+    await db.commit()
+
+    created = await _create_cadence(
+        client,
+        steps_template=[
+            {
+                "channel": "email",
+                "day_offset": 0,
+                "message_template": "Olá {first_name}",
+                "use_voice": False,
+                "audio_file_id": None,
+                "step_type": "email_first",
+            }
+        ],
+    )
+
+    resp = await client.patch(
+        f"/cadences/{created['id']}",
+        json={"lead_list_id": str(lead_list.id)},
+    )
+
+    assert resp.status_code == 200, resp.text
+
+    steps_result = await db.execute(
+        select(CadenceStep).where(CadenceStep.cadence_id == uuid.UUID(created["id"]))
+    )
+    steps = steps_result.scalars().all()
+    assert len(steps) == 1
+
+    refreshed_lead = await db.get(Lead, lead.id)
+    assert refreshed_lead is not None
+    assert refreshed_lead.status == LeadStatus.IN_CADENCE
 
 
 # ── DELETE /cadences/{id} ─────────────────────────────────────────────

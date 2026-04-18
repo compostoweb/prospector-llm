@@ -45,6 +45,10 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
   const { data, isLoading, isError } = useCadenceAnalytics(cadence.id, days)
   const deliveryBudgetQuery = useCadenceDeliveryBudget(cadence.id)
   const abResults = useCadenceABTestResults(cadence.id, cadence.steps_template, days)
+  const deliveryBudgetItems = deliveryBudgetQuery.data?.items ?? []
+  const deliveryBudgetSummaries = summarizeBudgetByAction(deliveryBudgetItems).filter(
+    (item) => item.scope_count > 1,
+  )
 
   return (
     <div className="space-y-6">
@@ -106,10 +110,10 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
             <Gauge size={16} className="text-(--accent)" aria-hidden="true" />
             <div>
               <h2 className="text-sm font-semibold text-(--text-primary)">
-                Orçamento operacional de hoje
+                Limite operacional de hoje
               </h2>
               <p className="text-xs text-(--text-secondary)">
-                Budget diário por conta e por ação. Comentário, reação e InMail aparecem separados
+                Limite diário por conta e por ação. Comentário, reação e InMail aparecem separados
                 quando a cadência usa esses canais.
               </p>
             </div>
@@ -126,18 +130,21 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
         </div>
 
         {deliveryBudgetQuery.isLoading ? (
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
+          <div className="flex flex-wrap gap-3">
             {Array.from({ length: 3 }).map((_, index) => (
-              <div key={index} className="h-32 animate-pulse rounded-lg bg-(--bg-overlay)" />
+              <div key={index} className="h-32 w-full animate-pulse rounded-lg bg-(--bg-overlay) sm:w-80" />
             ))}
           </div>
         ) : deliveryBudgetQuery.isError ? (
           <div className="rounded-lg border border-(--warning-subtle-fg) bg-(--warning-subtle) px-4 py-3 text-sm text-(--warning)">
-            Não foi possível carregar o orçamento operacional agora.
+            Não foi possível carregar o limite operacional agora.
           </div>
-        ) : deliveryBudgetQuery.data && deliveryBudgetQuery.data.items.length > 0 ? (
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
-            {deliveryBudgetQuery.data.items.map((item) => (
+        ) : deliveryBudgetItems.length > 0 ? (
+          <div className="flex flex-wrap items-start gap-3">
+            {deliveryBudgetSummaries.map((item) => (
+              <OperationalBudgetSummaryCard key={item.channel} item={item} />
+            ))}
+            {deliveryBudgetItems.map((item) => (
               <OperationalBudgetCard key={`${item.channel}-${item.scope_label}`} item={item} />
             ))}
           </div>
@@ -401,14 +408,14 @@ function OperationalBudgetCard({ item }: { item: CadenceDeliveryBudgetItem }) {
           }
 
   return (
-    <div className="rounded-lg border border-(--border-subtle) bg-(--bg-overlay) p-4">
+    <div className="w-full rounded-lg border border-(--border-subtle) bg-(--bg-overlay) p-4 sm:w-80">
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-2">
           <BadgeChannel channel={item.channel} />
           <div>
             <p className="text-sm font-semibold text-(--text-primary)">{item.scope_label}</p>
             <p className="text-xs text-(--text-secondary)">
-              Limite configurado {item.configured_limit}/dia · escopo{" "}
+              Uso de {item.usage_pct}% · limite configurado {item.configured_limit}/dia · escopo{" "}
               {formatScopeType(item.scope_type)}
             </p>
           </div>
@@ -425,13 +432,87 @@ function OperationalBudgetCard({ item }: { item: CadenceDeliveryBudgetItem }) {
         />
       </div>
 
-      <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
+      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+        <MetricMini label="Config." value={item.configured_limit} />
         <MetricMini label="Usados" value={item.used_today} />
-        <MetricMini label="Budget" value={item.daily_budget} />
+        <MetricMini label="Limite" value={item.daily_budget} />
         <MetricMini label="Saldo" value={item.remaining_today} />
       </div>
     </div>
   )
+}
+
+interface OperationalBudgetActionSummary {
+  channel: string
+  scope_count: number
+  configured_limit: number
+  daily_budget: number
+  used_today: number
+  remaining_today: number
+  usage_pct: number
+}
+
+function OperationalBudgetSummaryCard({ item }: { item: OperationalBudgetActionSummary }) {
+  const tone =
+    item.remaining_today <= 0
+      ? "text-(--danger)"
+      : item.usage_pct >= 80
+        ? "text-(--warning)"
+        : "text-(--success)"
+
+  return (
+    <div className="w-full rounded-lg border border-(--border-subtle) bg-(--bg-overlay) p-4 sm:w-80">
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-2">
+          <BadgeChannel channel={item.channel} />
+          <p className="text-xs text-(--text-secondary)">
+            {item.scope_count} escopo{item.scope_count === 1 ? "" : "s"} com limite hoje
+          </p>
+        </div>
+        <span className={`text-sm font-semibold ${tone}`}>{item.remaining_today} livres</span>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+        <MetricMini label="Config." value={item.configured_limit} />
+        <MetricMini label="Limite" value={item.daily_budget} />
+        <MetricMini label="Usados" value={item.used_today} />
+        <MetricMini label="Saldo" value={item.remaining_today} />
+      </div>
+    </div>
+  )
+}
+
+function summarizeBudgetByAction(
+  items: CadenceDeliveryBudgetItem[],
+): OperationalBudgetActionSummary[] {
+  const grouped = new Map<string, OperationalBudgetActionSummary>()
+
+  for (const item of items) {
+    const current = grouped.get(item.channel)
+    if (current) {
+      current.scope_count += 1
+      current.configured_limit += item.configured_limit
+      current.daily_budget += item.daily_budget
+      current.used_today += item.used_today
+      current.remaining_today += item.remaining_today
+      current.usage_pct = current.daily_budget
+        ? Number(((current.used_today / current.daily_budget) * 100).toFixed(1))
+        : 0
+      continue
+    }
+
+    grouped.set(item.channel, {
+      channel: item.channel,
+      scope_count: 1,
+      configured_limit: item.configured_limit,
+      daily_budget: item.daily_budget,
+      used_today: item.used_today,
+      remaining_today: item.remaining_today,
+      usage_pct: item.daily_budget ? Number(((item.used_today / item.daily_budget) * 100).toFixed(1)) : 0,
+    })
+  }
+
+  return Array.from(grouped.values())
 }
 
 function formatScopeType(value: string) {

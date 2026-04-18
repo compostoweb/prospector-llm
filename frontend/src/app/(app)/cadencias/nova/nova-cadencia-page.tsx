@@ -532,6 +532,7 @@ function StepAudiencia({
               <option key={a.id} value={a.id}>
                 {a.display_name ?? a.id} ·{" "}
                 {a.provider_type === "unipile" ? "Unipile" : "Cookie li_at"}
+                {a.supports_inmail ? " · InMail" : " · sem InMail"}
               </option>
             ))}
           </select>
@@ -697,7 +698,7 @@ function StepRevisao({
           {cadenceType === "mixed" && linkedInAccount && (
             <SummaryRow
               label="LinkedIn"
-              value={`${linkedInAccount.display_name ?? linkedInAccount.id} · ${linkedInAccount.provider_type === "unipile" ? "Unipile" : "Cookie li_at"}`}
+              value={`${linkedInAccount.display_name ?? linkedInAccount.id} · ${linkedInAccount.provider_type === "unipile" ? "Unipile" : "Cookie li_at"}${linkedInAccount.supports_inmail ? " · InMail habilitado" : " · sem InMail"}`}
             />
           )}
           <SummaryRow

@@ -85,10 +85,10 @@ async def create_unipile_account(
         linkedin_username=body.linkedin_username,
         provider_type="unipile",
         unipile_account_id=body.unipile_account_id,
+        supports_inmail=body.supports_inmail,
     )
     db.add(account)
     await db.flush()
-    await db.refresh(account)
     logger.info(
         "linkedin_account.created",
         provider="unipile",
@@ -131,10 +131,10 @@ async def create_native_account(
         linkedin_username=body.linkedin_username,
         provider_type="native",
         li_at_cookie=encrypted_li_at,
+        supports_inmail=body.supports_inmail,
     )
     db.add(account)
     await db.flush()
-    await db.refresh(account)
     logger.info(
         "linkedin_account.created",
         provider="native",
@@ -174,7 +174,6 @@ async def update_linkedin_account(
         setattr(account, field, value)
 
     await db.flush()
-    await db.refresh(account)
     return LinkedInAccountResponse.model_validate(account)
 
 

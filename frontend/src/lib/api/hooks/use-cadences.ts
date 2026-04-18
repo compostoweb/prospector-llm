@@ -308,6 +308,7 @@ export function useUpdateCadence() {
     onSuccess: (cadence) => {
       void queryClient.invalidateQueries({ queryKey: ["cadences", cadence.id] })
       void queryClient.invalidateQueries({ queryKey: ["cadences"] })
+      void queryClient.invalidateQueries({ queryKey: ["analytics", "cadences"] })
     },
   })
 }
@@ -364,6 +365,7 @@ export function useToggleCadence() {
     onSuccess: (cadence) => {
       void queryClient.invalidateQueries({ queryKey: ["cadences", cadence.id] })
       void queryClient.invalidateQueries({ queryKey: ["cadences"] })
+      void queryClient.invalidateQueries({ queryKey: ["analytics", "cadences"] })
     },
   })
 }

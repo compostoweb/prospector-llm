@@ -175,7 +175,7 @@ export function useCadenceDeliveryBudget(cadenceId: string) {
     queryFn: async (): Promise<CadenceDeliveryBudget> => {
       const client = createBrowserClient(session?.accessToken)
       const { data, error } = await client.GET(`/cadences/${cadenceId}/delivery-budget` as never)
-      if (error) throw new Error("Falha ao carregar orçamento operacional da cadência")
+      if (error) throw new Error("Falha ao carregar limite operacional da cadência")
       return data as CadenceDeliveryBudget
     },
     staleTime: 60 * 1000,

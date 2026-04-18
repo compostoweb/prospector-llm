@@ -27,7 +27,7 @@ O template é expandido dinamicamente com base nos canais disponíveis para o le
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
@@ -38,8 +38,11 @@ from models.cadence import Cadence
 from models.cadence_step import CadenceStep
 from models.enums import Channel, LeadStatus, StepStatus
 from models.lead import Lead
+from models.lead_list import lead_list_members
 
 logger = structlog.get_logger()
+
+AUTO_ENROLLABLE_LEAD_STATUSES = (LeadStatus.RAW, LeadStatus.ENRICHED)
 
 # Template padrão de cadência multi-canal
 # Cada entry: (channel, day_offset, use_voice, audio_file_id, step_type)
@@ -53,7 +56,7 @@ _DEFAULT_TEMPLATE: list[tuple[Channel, int, bool, str | None, str | None]] = [
 
 
 def _utcnow() -> datetime:
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 class CadenceManager:
@@ -142,7 +145,7 @@ class CadenceManager:
                     scheduled_at = datetime(
                         local_date.year, local_date.month, local_date.day, 9, 0, 0,
                         tzinfo=tz,
-                    ).astimezone(timezone.utc)
+                    ).astimezone(UTC)
                 except Exception:
                     scheduled_at = base_date
             else:
@@ -208,6 +211,69 @@ class CadenceManager:
         )
         return list(result.scalars().all())
 
+    async def auto_enroll_list_members(
+        self,
+        cadence: Cadence,
+        db: AsyncSession,
+        *,
+        lead_ids: list[uuid.UUID] | None = None,
+        limit: int | None = None,
+    ) -> int:
+        """
+        Inscreve leads da lista vinculada que ainda não possuem steps nesta cadência.
+        """
+        if cadence.lead_list_id is None:
+            return 0
+
+        already_enrolled_subq = (
+            select(CadenceStep.lead_id).where(CadenceStep.cadence_id == cadence.id).scalar_subquery()
+        )
+
+        stmt = (
+            select(Lead)
+            .join(
+                lead_list_members,
+                (lead_list_members.c.lead_id == Lead.id)
+                & (lead_list_members.c.lead_list_id == cadence.lead_list_id),
+            )
+            .where(
+                Lead.tenant_id == cadence.tenant_id,
+                Lead.status.in_(AUTO_ENROLLABLE_LEAD_STATUSES),
+                Lead.id.not_in(already_enrolled_subq),
+            )
+        )
+
+        if lead_ids:
+            stmt = stmt.where(Lead.id.in_(lead_ids))
+        if limit is not None:
+            stmt = stmt.limit(limit)
+
+        result = await db.execute(stmt)
+        leads: list[Lead] = list(result.scalars().all())
+        enrolled_count = 0
+
+        for lead in leads:
+            try:
+                steps = await self.enroll(lead, cadence, db)
+                if not steps:
+                    continue
+                enrolled_count += 1
+                logger.info(
+                    "cadence_manager.list_member_enrolled",
+                    lead_id=str(lead.id),
+                    cadence_id=str(cadence.id),
+                    steps_created=len(steps),
+                )
+            except ValueError as exc:
+                logger.debug(
+                    "cadence_manager.list_member_skipped",
+                    lead_id=str(lead.id),
+                    cadence_id=str(cadence.id),
+                    reason=str(exc),
+                )
+
+        return enrolled_count
+
     async def mark_sent(
         self,
         step: CadenceStep,
@@ -258,6 +324,28 @@ def _resolve_template(cadence: Cadence) -> list[tuple[Channel, int, bool, str | 
         )
         for item in cadence.steps_template
     ]
+
+
+async def auto_enroll_linked_cadences_for_list(
+    db: AsyncSession,
+    *,
+    list_id: uuid.UUID,
+    lead_ids: list[uuid.UUID] | None = None,
+) -> int:
+    """Inscreve membros recém-adicionados em todas as cadências vinculadas à lista."""
+    result = await db.execute(select(Cadence).where(Cadence.lead_list_id == list_id))
+    cadences: list[Cadence] = list(result.scalars().all())
+    manager = CadenceManager()
+    enrolled_count = 0
+
+    for cadence in cadences:
+        enrolled_count += await manager.auto_enroll_list_members(
+            cadence,
+            db,
+            lead_ids=lead_ids,
+        )
+
+    return enrolled_count
 
 
 def serialize_steps_template(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

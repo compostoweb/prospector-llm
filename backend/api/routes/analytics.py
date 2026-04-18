@@ -29,10 +29,12 @@ from models.enums import Channel, InteractionDirection, LeadStatus, StepStatus
 from models.interaction import Interaction
 from models.lead import Lead
 from models.lead_email import LeadEmail
+from services.cadence_manager import CadenceManager
 
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
+_cadence_manager = CadenceManager()
 
 _EMAIL_ONLY_CADENCE_TYPE = "email_only"
 
@@ -580,8 +582,12 @@ async def get_cadences_overview(
     tenant_id: UUID = Depends(get_effective_tenant_id),
 ) -> list[CadenceOverviewItem]:
     """Retorna métricas-resumo por cadência para a listagem principal."""
-    cadences_q = await db.execute(select(Cadence.id).where(Cadence.tenant_id == tenant_id))
-    cadence_ids = [row.id for row in cadences_q.all()]
+    cadences_q = await db.execute(select(Cadence).where(Cadence.tenant_id == tenant_id))
+    cadences = list(cadences_q.scalars().all())
+    for cadence in cadences:
+        await _sync_cadence_list_members(cadence, db)
+
+    cadence_ids = [cadence.id for cadence in cadences]
     if not cadence_ids:
         return []
 
@@ -703,6 +709,8 @@ async def get_cadence_analytics(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Cadência não encontrada.",
         )
+
+    await _sync_cadence_list_members(cadence, db)
 
     lead_counts_q = await db.execute(
         select(func.count(func.distinct(CadenceStep.lead_id))).where(
@@ -890,6 +898,12 @@ async def get_cadence_analytics(
         channel_breakdown=channel_breakdown,
         step_breakdown=step_breakdown,
     )
+
+
+async def _sync_cadence_list_members(cadence: Cadence, db: AsyncSession) -> int:
+    if cadence.lead_list_id is None:
+        return 0
+    return await _cadence_manager.auto_enroll_list_members(cadence, db)
 
 
 # ── Email Analytics ───────────────────────────────────────────────────

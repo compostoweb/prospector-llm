@@ -10,11 +10,12 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from api.dependencies import get_current_tenant_flexible as get_current_tenant, get_session_flexible as get_session
+from api.dependencies import get_current_tenant_flexible as get_current_tenant
+from api.dependencies import get_session_flexible as get_session
 from models.lead_list import LeadList, lead_list_members
 from models.tenant import Tenant
 from schemas.lead_list import (
@@ -25,6 +26,7 @@ from schemas.lead_list import (
     LeadListResponse,
     LeadListUpdateRequest,
 )
+from services.cadence_manager import auto_enroll_linked_cadences_for_list
 
 logger = structlog.get_logger()
 
@@ -157,11 +159,18 @@ async def add_members(
             .on_conflict_do_nothing()
         )
         await db.execute(stmt)
+
+    enrolled_count = await auto_enroll_linked_cadences_for_list(
+        db,
+        list_id=list_id,
+        lead_ids=list(body.lead_ids),
+    )
     await db.commit()
     logger.info(
         "lead_list.members_added",
         list_id=str(list_id),
         count=len(body.lead_ids),
+        enrolled_in_cadences=enrolled_count,
         tenant_id=str(tenant.id),
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

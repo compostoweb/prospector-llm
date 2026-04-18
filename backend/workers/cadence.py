@@ -35,7 +35,6 @@ from models.cadence import Cadence
 from models.cadence_step import CadenceStep
 from models.enums import Channel, LeadStatus, StepStatus
 from models.lead import Lead
-from models.lead_list import lead_list_members
 from models.tenant import Tenant, TenantIntegration
 from services.cadence_delivery_budget import (
     DEFAULT_CHANNEL_LIMITS,
@@ -118,7 +117,7 @@ async def _tick_async() -> dict:
                     lead = lead_result.scalar_one_or_none()
                     lead_status = lead.status if lead is not None else None
 
-                    if lead_status != LeadStatus.IN_CADENCE:
+                    if lead is None or lead_status != LeadStatus.IN_CADENCE:
                         step.status = StepStatus.SKIPPED
                         skipped += 1
                         logger.info(
@@ -129,6 +128,7 @@ async def _tick_async() -> dict:
                         )
                         continue
 
+                    assert lead is not None
                     eligibility = await evaluate_step_eligibility(
                         db=db,
                         cadence=cadence,
@@ -249,8 +249,6 @@ async def _auto_enroll_list_members(db, tenant_id: uuid.UUID) -> int:
     status seja RAW ou ENRICHED, realiza o enrollment automático.
     Retorna o número de leads matriculados.
     """
-    from sqlalchemy import select
-
     from models.cadence import Cadence
     from services.cadence_manager import CadenceManager
 
@@ -268,47 +266,6 @@ async def _auto_enroll_list_members(db, tenant_id: uuid.UUID) -> int:
     cadences: list[Cadence] = list(cadences_result.scalars().all())
 
     for cadence in cadences:
-        # Leads da lista que ainda não têm nenhum step nesta cadência
-        already_enrolled_subq = (
-            select(CadenceStep.lead_id)
-            .where(CadenceStep.cadence_id == cadence.id)
-            .scalar_subquery()
-        )
-
-        leads_result = await db.execute(
-            select(Lead)
-            .join(
-                lead_list_members,
-                (lead_list_members.c.lead_id == Lead.id)
-                & (lead_list_members.c.lead_list_id == cadence.lead_list_id),
-            )
-            .where(
-                Lead.tenant_id == tenant_id,
-                Lead.status.in_([LeadStatus.RAW, LeadStatus.ENRICHED]),
-                Lead.id.not_in(already_enrolled_subq),
-            )
-            .limit(50)  # processa até 50 por tick para não sobrecarregar
-        )
-        leads: list[Lead] = list(leads_result.scalars().all())
-
-        for lead in leads:
-            try:
-                steps = await manager.enroll(lead, cadence, db)
-                if steps:
-                    enrolled_count += 1
-                    logger.info(
-                        "cadence_tick.auto_enrolled",
-                        lead_id=str(lead.id),
-                        cadence_id=str(cadence.id),
-                        steps_created=len(steps),
-                    )
-            except ValueError as exc:
-                # Lead sem canais disponíveis — apenas loga, não é erro crítico
-                logger.debug(
-                    "cadence_tick.auto_enroll_skipped",
-                    lead_id=str(lead.id),
-                    cadence_id=str(cadence.id),
-                    reason=str(exc),
-                )
+        enrolled_count += await manager.auto_enroll_list_members(cadence, db, limit=50)
 
     return enrolled_count

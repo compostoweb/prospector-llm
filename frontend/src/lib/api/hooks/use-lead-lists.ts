@@ -91,6 +91,9 @@ export function useCreateLeadList() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["lead-lists"] })
+      void queryClient.invalidateQueries({ queryKey: ["cadences"] })
+      void queryClient.invalidateQueries({ queryKey: ["analytics", "cadences"] })
+      void queryClient.invalidateQueries({ queryKey: ["leads"] })
     },
   })
 }
@@ -116,6 +119,9 @@ export function useUpdateLeadList() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["lead-lists"] })
+      void queryClient.invalidateQueries({ queryKey: ["cadences"] })
+      void queryClient.invalidateQueries({ queryKey: ["analytics", "cadences"] })
+      void queryClient.invalidateQueries({ queryKey: ["leads"] })
     },
   })
 }

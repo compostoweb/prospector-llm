@@ -54,6 +54,9 @@ class FakeResult:
     def all(self) -> list[object]:
         return self._all_values
 
+    def scalars(self) -> FakeResult:
+        return self
+
 
 class CompilableStatement(Protocol):
     def compile(self, *args: Any, **kwargs: Any) -> Any: ...
@@ -103,11 +106,13 @@ async def test_get_cadences_overview_returns_real_metrics() -> None:
     tenant_id = uuid.uuid4()
     cadence_id = uuid.uuid4()
     empty_cadence_id = uuid.uuid4()
+    cadence = _make_cadence(tenant_id, cadence_id)
+    empty_cadence = _make_cadence(tenant_id, empty_cadence_id)
     session = FakeAsyncSession(
         FakeResult(
             all_values=[
-                SimpleNamespace(id=cadence_id),
-                SimpleNamespace(id=empty_cadence_id),
+                cadence,
+                empty_cadence,
             ]
         ),
         FakeResult(
@@ -125,10 +130,15 @@ async def test_get_cadences_overview_returns_real_metrics() -> None:
         ),
     )
 
-    result = await analytics_routes.get_cadences_overview(
-        db=cast(AsyncSession, session),
-        tenant_id=tenant_id,
-    )
+    original_sync = analytics_routes._sync_cadence_list_members
+    analytics_routes._sync_cadence_list_members = _fake_sync_cadence_list_members
+    try:
+        result = await analytics_routes.get_cadences_overview(
+            db=cast(AsyncSession, session),
+            tenant_id=tenant_id,
+        )
+    finally:
+        analytics_routes._sync_cadence_list_members = original_sync
 
     by_id = {item.cadence_id: item for item in result}
     assert by_id[str(cadence_id)].total_leads == 2
@@ -153,6 +163,7 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
     marker_since = datetime(2026, 3, 28, tzinfo=UTC)
 
     monkeypatch.setattr(analytics_routes, "_utc_days_ago", lambda days: marker_since)
+    monkeypatch.setattr(analytics_routes, "_sync_cadence_list_members", _fake_sync_cadence_list_members)
 
     session = FakeAsyncSession(
         FakeResult(scalar_one_or_none_value=cadence),
@@ -267,6 +278,87 @@ async def test_get_cadence_analytics_raises_404_when_missing() -> None:
         )
 
     assert excinfo.value.status_code == 404
+
+
+async def test_get_cadence_analytics_syncs_legacy_list_members_before_counting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant_id = uuid.uuid4()
+    cadence = _make_cadence(tenant_id)
+    cadence.lead_list_id = uuid.uuid4()
+    synced: list[uuid.UUID] = []
+
+    async def _fake_sync(current_cadence: Cadence, db: AsyncSession) -> int:
+        synced.append(current_cadence.id)
+        return 1
+
+    monkeypatch.setattr(analytics_routes, "_sync_cadence_list_members", _fake_sync)
+
+    session = FakeAsyncSession(
+        FakeResult(scalar_one_or_none_value=cadence),
+        FakeResult(scalar_value=1),
+        FakeResult(scalar_value=1),
+        FakeResult(one_value=SimpleNamespace(sent=0, replied=0, pending=1, skipped=0, failed=0)),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+    )
+
+    result = await analytics_routes.get_cadence_analytics(
+        cadence_id=cadence.id,
+        days=30,
+        db=cast(AsyncSession, session),
+        tenant_id=tenant_id,
+    )
+
+    assert synced == [cadence.id]
+    assert result.total_leads == 1
+    assert result.leads_active == 1
+
+
+async def _fake_sync_cadence_list_members(cadence: Cadence, db: AsyncSession) -> int:
+    return 0
+
+
+async def test_get_cadences_overview_syncs_legacy_list_members_before_aggregating(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant_id = uuid.uuid4()
+    cadence_id = uuid.uuid4()
+    cadence = _make_cadence(tenant_id, cadence_id)
+    cadence.lead_list_id = uuid.uuid4()
+    synced: list[uuid.UUID] = []
+
+    async def _fake_sync(current_cadence: Cadence, db: AsyncSession) -> int:
+        synced.append(current_cadence.id)
+        return 1
+
+    monkeypatch.setattr(analytics_routes, "_sync_cadence_list_members", _fake_sync)
+
+    session = FakeAsyncSession(
+        FakeResult(all_values=[cadence]),
+        FakeResult(
+            all_values=[
+                SimpleNamespace(
+                    cadence_id=cadence_id,
+                    total_leads=1,
+                    leads_active=1,
+                    leads_converted=0,
+                    leads_finished=0,
+                    replies=0,
+                    leads_paused=0,
+                )
+            ]
+        ),
+    )
+
+    result = await analytics_routes.get_cadences_overview(
+        db=cast(AsyncSession, session),
+        tenant_id=tenant_id,
+    )
+
+    assert synced == [cadence_id]
+    assert result[0].cadence_id == str(cadence_id)
+    assert result[0].total_leads == 1
 
 
 async def test_get_email_ab_results_maps_open_rates_and_uses_days_filter(

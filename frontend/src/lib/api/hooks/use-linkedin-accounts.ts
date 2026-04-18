@@ -14,6 +14,7 @@ export interface LinkedInAccount {
   provider_type: "unipile" | "native"
   unipile_account_id: string | null
   is_active: boolean
+  supports_inmail: boolean
   last_polled_at: string | null
   created_at: string
   updated_at: string
@@ -22,12 +23,14 @@ export interface LinkedInAccount {
 export interface CreateUnipileLinkedInAccountBody {
   display_name: string
   linkedin_username?: string | null
+  supports_inmail?: boolean
   unipile_account_id: string
 }
 
 export interface CreateNativeLinkedInAccountBody {
   display_name: string
   linkedin_username: string
+  supports_inmail?: boolean
   li_at_cookie: string
 }
 
@@ -35,6 +38,7 @@ export interface UpdateLinkedInAccountBody {
   display_name?: string
   linkedin_username?: string | null
   is_active?: boolean
+  supports_inmail?: boolean
 }
 
 export interface LinkedInAccountStatus {
