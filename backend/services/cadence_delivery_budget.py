@@ -24,8 +24,14 @@ DEFAULT_CHANNEL_LIMITS: dict[Channel, int] = {
     Channel.EMAIL: 300,
 }
 
-LINKEDIN_BUDGET_FLOOR_RATIO = 0.85
-EMAIL_BUDGET_FLOOR_RATIO = 0.90
+CHANNEL_BUDGET_FLOOR_RATIOS: dict[Channel, float] = {
+    Channel.LINKEDIN_CONNECT: 0.60,
+    Channel.LINKEDIN_DM: 0.70,
+    Channel.LINKEDIN_POST_REACTION: 0.65,
+    Channel.LINKEDIN_POST_COMMENT: 0.65,
+    Channel.LINKEDIN_INMAIL: 0.70,
+    Channel.EMAIL: 0.90,
+}
 
 
 @dataclass(frozen=True)
@@ -58,11 +64,11 @@ def resolve_tenant_limits(integration: TenantIntegration | None) -> dict[Channel
         or DEFAULT_CHANNEL_LIMITS[Channel.LINKEDIN_CONNECT],
         Channel.LINKEDIN_DM: integration.limit_linkedin_dm
         or DEFAULT_CHANNEL_LIMITS[Channel.LINKEDIN_DM],
-        Channel.LINKEDIN_POST_REACTION: integration.limit_linkedin_dm
+        Channel.LINKEDIN_POST_REACTION: integration.limit_linkedin_post_reaction
         or DEFAULT_CHANNEL_LIMITS[Channel.LINKEDIN_POST_REACTION],
-        Channel.LINKEDIN_POST_COMMENT: integration.limit_linkedin_dm
+        Channel.LINKEDIN_POST_COMMENT: integration.limit_linkedin_post_comment
         or DEFAULT_CHANNEL_LIMITS[Channel.LINKEDIN_POST_COMMENT],
-        Channel.LINKEDIN_INMAIL: integration.limit_linkedin_dm
+        Channel.LINKEDIN_INMAIL: integration.limit_linkedin_inmail
         or DEFAULT_CHANNEL_LIMITS[Channel.LINKEDIN_INMAIL],
         Channel.EMAIL: integration.limit_email or DEFAULT_CHANNEL_LIMITS[Channel.EMAIL],
     }
@@ -243,9 +249,7 @@ def ordered_delivery_channels(cadence: Cadence) -> list[Channel]:
 
 
 def draw_daily_budget(limit: int, channel: Channel) -> int:
-    floor_ratio = (
-        EMAIL_BUDGET_FLOOR_RATIO if channel == Channel.EMAIL else LINKEDIN_BUDGET_FLOOR_RATIO
-    )
+    floor_ratio = CHANNEL_BUDGET_FLOOR_RATIOS.get(channel, 0.70)
     floor_value = max(1, int(limit * floor_ratio))
     if floor_value >= limit:
         return max(limit, 1)

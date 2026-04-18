@@ -40,6 +40,7 @@ from models.email_template import EmailTemplate
 from models.enums import Channel, LeadStatus, StepStatus
 from models.interaction import Interaction
 from models.lead import Lead
+from models.linkedin_account import LinkedInAccount
 from models.tenant import Tenant, TenantIntegration
 
 pytestmark = pytest.mark.asyncio
@@ -276,6 +277,7 @@ def _mock_redis() -> MagicMock:
     mock.get = AsyncMock(return_value=None)
     mock.increment_with_ttl = AsyncMock()
     mock.release_rate_limit = AsyncMock()
+    mock.release_rate_limit_key = AsyncMock()
     mock.check_and_increment = AsyncMock(return_value=True)
     return mock
 
@@ -414,6 +416,118 @@ async def test_dispatch_linkedin_dm_text(
     assert result["status"] == "sent"
     assert result["channel"] == "linkedin_dm"
 
+    await db.refresh(step)
+    assert step.status == StepStatus.SENT
+
+
+async def test_dispatch_linkedin_post_comment_uses_account_registry(
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    tenant,
+) -> None:
+    from workers.dispatch import _dispatch_async
+
+    lead = _make_lead(tenant_id)
+    cadence = _make_cadence(tenant_id)
+    linkedin_account = LinkedInAccount(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        display_name="SDR Ana",
+        provider_type="unipile",
+        unipile_account_id="li-provider-account",
+        is_active=True,
+    )
+    cadence.linkedin_account_id = linkedin_account.id
+    step = _make_step(tenant_id, lead.id, cadence.id, channel=Channel.LINKEDIN_POST_COMMENT)
+    db.add_all([lead, cadence, linkedin_account, step])
+    await db.flush()
+
+    with (
+        patch("workers.dispatch.get_worker_session", new=_mock_worker_session(db)),
+        patch("workers.dispatch.context_fetcher") as mock_ctx,
+        patch("workers.dispatch.AIComposer") as mock_composer_cls,
+        patch("workers.dispatch.unipile_client") as mock_unipile,
+        patch("workers.dispatch.LLMRegistry"),
+        patch("integrations.linkedin.LinkedInRegistry") as mock_li_registry_cls,
+        patch("workers.dispatch.redis_client", new=_mock_redis()),
+    ):
+        mock_ctx.fetch_from_website = AsyncMock(return_value=None)
+        mock_ctx.search_company = AsyncMock(return_value=None)
+
+        composer_instance = MagicMock()
+        composer_instance.compose = AsyncMock(return_value="Excelente ponto sobre a agenda de IA.")
+        mock_composer_cls.return_value = composer_instance
+
+        registry_instance = MagicMock()
+        registry_instance.comment_on_latest_post = AsyncMock(
+            return_value=MagicMock(success=True, message_id="comment_msg_1")
+        )
+        mock_li_registry_cls.return_value = registry_instance
+
+        task_mock = _make_task_mock()
+        result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
+
+    assert result["status"] == "sent"
+    assert result["channel"] == "linkedin_post_comment"
+    mock_unipile.comment_on_latest_post.assert_not_called()
+    registry_instance.comment_on_latest_post.assert_awaited_once()
+    await db.refresh(step)
+    assert step.status == StepStatus.SENT
+
+
+async def test_dispatch_linkedin_inmail_uses_account_registry(
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    tenant,
+) -> None:
+    from workers.dispatch import _dispatch_async
+
+    lead = _make_lead(tenant_id)
+    cadence = _make_cadence(tenant_id)
+    linkedin_account = LinkedInAccount(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        display_name="SDR Bia",
+        provider_type="unipile",
+        unipile_account_id="li-provider-account-2",
+        is_active=True,
+    )
+    cadence.linkedin_account_id = linkedin_account.id
+    step = _make_step(tenant_id, lead.id, cadence.id, channel=Channel.LINKEDIN_INMAIL)
+    db.add_all([lead, cadence, linkedin_account, step])
+    await db.flush()
+
+    with (
+        patch("workers.dispatch.get_worker_session", new=_mock_worker_session(db)),
+        patch("workers.dispatch.context_fetcher") as mock_ctx,
+        patch("workers.dispatch.AIComposer") as mock_composer_cls,
+        patch("workers.dispatch.unipile_client") as mock_unipile,
+        patch("workers.dispatch.LLMRegistry"),
+        patch("integrations.linkedin.LinkedInRegistry") as mock_li_registry_cls,
+        patch("workers.dispatch.redis_client", new=_mock_redis()),
+    ):
+        mock_ctx.fetch_from_website = AsyncMock(return_value=None)
+        mock_ctx.search_company = AsyncMock(return_value=None)
+
+        composer_instance = MagicMock()
+        composer_instance.compose = AsyncMock(
+            return_value='{"subject":"Convite para conversar","body":"Queria compartilhar uma ideia objetiva."}'
+        )
+        mock_composer_cls.return_value = composer_instance
+
+        registry_instance = MagicMock()
+        registry_instance.send_inmail = AsyncMock(
+            return_value=MagicMock(success=True, message_id="inmail_msg_1")
+        )
+        mock_li_registry_cls.return_value = registry_instance
+
+        task_mock = _make_task_mock()
+        result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
+
+    assert result["status"] == "sent"
+    assert result["channel"] == "linkedin_inmail"
+    mock_unipile.send_linkedin_inmail.assert_not_called()
+    registry_instance.send_inmail.assert_awaited_once()
     await db.refresh(step)
     assert step.status == StepStatus.SENT
 

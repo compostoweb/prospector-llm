@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from integrations.linkedin.base import (
-    LinkedInConversation,
     LinkedInMessage,
     LinkedInProfile,
     LinkedInProvider,
@@ -39,10 +38,10 @@ class LinkedInRegistry:
     Nunca importe UnipileClient ou NativeLinkedInProvider diretamente nos services.
     """
 
-    def __init__(self, settings: "Settings") -> None:
+    def __init__(self, settings: Settings) -> None:
         self._settings = settings
 
-    def _build_provider(self, account: "LinkedInAccount") -> LinkedInProvider:
+    def _build_provider(self, account: LinkedInAccount) -> LinkedInProvider:
         """
         Constrói o provider correto para a conta.
 
@@ -50,7 +49,9 @@ class LinkedInRegistry:
         provider_type = "native"  → NativeLinkedInProvider
         """
         if account.provider_type == "unipile":
-            from integrations.linkedin.unipile_provider import UnipileLinkedInProvider  # noqa: PLC0415
+            from integrations.linkedin.unipile_provider import (
+                UnipileLinkedInProvider,  # noqa: PLC0415
+            )
             from integrations.unipile_client import unipile_client  # noqa: PLC0415
             return UnipileLinkedInProvider(
                 client=unipile_client,
@@ -58,7 +59,9 @@ class LinkedInRegistry:
             )
 
         if account.provider_type == "native":
-            from integrations.linkedin.native_provider import NativeLinkedInProvider  # noqa: PLC0415
+            from integrations.linkedin.native_provider import (
+                NativeLinkedInProvider,  # noqa: PLC0415
+            )
             from services.linkedin_account_service import decrypt_credential  # noqa: PLC0415
             li_at = decrypt_credential(account.li_at_cookie or "", self._settings) if account.li_at_cookie else ""
             return NativeLinkedInProvider(
@@ -84,7 +87,7 @@ class LinkedInRegistry:
 
     async def send_connect(
         self,
-        account: "LinkedInAccount",
+        account: LinkedInAccount,
         linkedin_profile_id: str,
         message: str,
     ) -> LinkedInSendResult:
@@ -92,7 +95,7 @@ class LinkedInRegistry:
 
     async def send_dm(
         self,
-        account: "LinkedInAccount",
+        account: LinkedInAccount,
         linkedin_profile_id: str,
         message: str,
     ) -> LinkedInSendResult:
@@ -100,7 +103,7 @@ class LinkedInRegistry:
 
     async def send_voice_note(
         self,
-        account: "LinkedInAccount",
+        account: LinkedInAccount,
         linkedin_profile_id: str,
         audio_url: str,
     ) -> LinkedInSendResult:
@@ -108,7 +111,7 @@ class LinkedInRegistry:
 
     async def send_dm_with_attachments(
         self,
-        account: "LinkedInAccount",
+        account: LinkedInAccount,
         linkedin_profile_id: str,
         message: str,
         attachments: list[tuple[str, bytes, str]],
@@ -119,7 +122,7 @@ class LinkedInRegistry:
 
     async def send_inmail(
         self,
-        account: "LinkedInAccount",
+        account: LinkedInAccount,
         linkedin_profile_id: str,
         subject: str,
         body: str,
@@ -128,7 +131,7 @@ class LinkedInRegistry:
 
     async def react_to_latest_post(
         self,
-        account: "LinkedInAccount",
+        account: LinkedInAccount,
         linkedin_profile_id: str,
         reaction: str = "LIKE",
     ) -> LinkedInSendResult:
@@ -136,7 +139,7 @@ class LinkedInRegistry:
 
     async def comment_on_latest_post(
         self,
-        account: "LinkedInAccount",
+        account: LinkedInAccount,
         linkedin_profile_id: str,
         comment: str,
     ) -> LinkedInSendResult:
@@ -144,21 +147,29 @@ class LinkedInRegistry:
 
     async def get_profile(
         self,
-        account: "LinkedInAccount",
+        account: LinkedInAccount,
         linkedin_url: str,
     ) -> LinkedInProfile | None:
         return await self._build_provider(account).get_profile(linkedin_url)
 
+    async def get_lead_posts(
+        self,
+        account: LinkedInAccount,
+        linkedin_profile_id: str,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        return await self._build_provider(account).get_lead_posts(linkedin_profile_id, limit)
+
     async def get_relation_status(
         self,
-        account: "LinkedInAccount",
+        account: LinkedInAccount,
         linkedin_profile_id: str,
     ) -> str | None:
         return await self._build_provider(account).get_relation_status(linkedin_profile_id)
 
     async def list_conversations(
         self,
-        account: "LinkedInAccount",
+        account: LinkedInAccount,
         cursor: str | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
@@ -166,14 +177,14 @@ class LinkedInRegistry:
 
     async def get_messages(
         self,
-        account: "LinkedInAccount",
+        account: LinkedInAccount,
         conversation_id: str,
         limit: int = 50,
         cursor: str | None = None,
     ) -> list[LinkedInMessage]:
         return await self._build_provider(account).get_messages(conversation_id, limit, cursor)
 
-    async def ping(self, account: "LinkedInAccount") -> bool:
+    async def ping(self, account: LinkedInAccount) -> bool:
         return await self._build_provider(account).ping()
 
     # ── Fallback global (sem LinkedInAccount) ─────────────────────────
@@ -234,3 +245,49 @@ class LinkedInRegistry:
             account_id=account_id_override or self._settings.UNIPILE_ACCOUNT_ID_LINKEDIN or "",
         )
         return await prov.react_to_latest_post(linkedin_profile_id, reaction)
+
+    async def comment_global(
+        self,
+        linkedin_profile_id: str,
+        comment: str,
+        account_id_override: str | None = None,
+    ) -> LinkedInSendResult:
+        from integrations.linkedin.unipile_provider import UnipileLinkedInProvider  # noqa: PLC0415
+        from integrations.unipile_client import unipile_client  # noqa: PLC0415
+
+        prov = UnipileLinkedInProvider(
+            client=unipile_client,
+            account_id=account_id_override or self._settings.UNIPILE_ACCOUNT_ID_LINKEDIN or "",
+        )
+        return await prov.comment_on_latest_post(linkedin_profile_id, comment)
+
+    async def send_inmail_global(
+        self,
+        linkedin_profile_id: str,
+        subject: str,
+        body: str,
+        account_id_override: str | None = None,
+    ) -> LinkedInSendResult:
+        from integrations.linkedin.unipile_provider import UnipileLinkedInProvider  # noqa: PLC0415
+        from integrations.unipile_client import unipile_client  # noqa: PLC0415
+
+        prov = UnipileLinkedInProvider(
+            client=unipile_client,
+            account_id=account_id_override or self._settings.UNIPILE_ACCOUNT_ID_LINKEDIN or "",
+        )
+        return await prov.send_inmail(linkedin_profile_id, subject, body)
+
+    async def get_lead_posts_global(
+        self,
+        linkedin_profile_id: str,
+        limit: int = 5,
+        account_id_override: str | None = None,
+    ) -> list[dict[str, Any]]:
+        from integrations.linkedin.unipile_provider import UnipileLinkedInProvider  # noqa: PLC0415
+        from integrations.unipile_client import unipile_client  # noqa: PLC0415
+
+        prov = UnipileLinkedInProvider(
+            client=unipile_client,
+            account_id=account_id_override or self._settings.UNIPILE_ACCOUNT_ID_LINKEDIN or "",
+        )
+        return await prov.get_lead_posts(linkedin_profile_id, limit)

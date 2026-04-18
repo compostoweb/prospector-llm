@@ -6936,6 +6936,12 @@ export interface components {
       limit_linkedin_connect: number
       /** Limit Linkedin Dm */
       limit_linkedin_dm: number
+      /** Limit Linkedin Post Reaction */
+      limit_linkedin_post_reaction: number
+      /** Limit Linkedin Post Comment */
+      limit_linkedin_post_comment: number
+      /** Limit Linkedin Inmail */
+      limit_linkedin_inmail: number
       /** Limit Email */
       limit_email: number
       /** Llm Default Provider */
@@ -6992,6 +6998,12 @@ export interface components {
       limit_linkedin_connect?: number | null
       /** Limit Linkedin Dm */
       limit_linkedin_dm?: number | null
+      /** Limit Linkedin Post Reaction */
+      limit_linkedin_post_reaction?: number | null
+      /** Limit Linkedin Post Comment */
+      limit_linkedin_post_comment?: number | null
+      /** Limit Linkedin Inmail */
+      limit_linkedin_inmail?: number | null
       /** Limit Email */
       limit_email?: number | null
       /** Llm Default Provider */

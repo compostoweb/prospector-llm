@@ -21,6 +21,9 @@ export interface TenantIntegration {
   allow_personal_email: boolean
   limit_linkedin_connect: number
   limit_linkedin_dm: number
+  limit_linkedin_post_reaction: number
+  limit_linkedin_post_comment: number
+  limit_linkedin_inmail: number
   limit_email: number
   // LLM — padrão do sistema
   llm_default_provider: string
@@ -117,6 +120,9 @@ export interface UpdateIntegrationsBody {
   allow_personal_email?: boolean
   limit_linkedin_connect?: number
   limit_linkedin_dm?: number
+  limit_linkedin_post_reaction?: number
+  limit_linkedin_post_comment?: number
+  limit_linkedin_inmail?: number
   limit_email?: number
   // LLM — padrão do sistema
   llm_default_provider?: string

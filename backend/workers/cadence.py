@@ -44,6 +44,7 @@ from services.cadence_delivery_budget import (
     resolve_account_rate_scope,
     resolve_tenant_limits,
 )
+from services.cadence_step_eligibility import evaluate_step_eligibility
 from workers.celery_app import celery_app
 
 logger = structlog.get_logger()
@@ -113,10 +114,9 @@ async def _tick_async() -> dict:
                         continue
 
                     # Verifica se o lead ainda está em cadência
-                    lead_result = await db.execute(
-                        select(Lead.status).where(Lead.id == step.lead_id)
-                    )
-                    lead_status = lead_result.scalar_one_or_none()
+                    lead_result = await db.execute(select(Lead).where(Lead.id == step.lead_id))
+                    lead = lead_result.scalar_one_or_none()
+                    lead_status = lead.status if lead is not None else None
 
                     if lead_status != LeadStatus.IN_CADENCE:
                         step.status = StepStatus.SKIPPED
@@ -126,6 +126,24 @@ async def _tick_async() -> dict:
                             step_id=str(step.id),
                             reason="lead_not_in_cadence",
                             lead_status=str(lead_status),
+                        )
+                        continue
+
+                    eligibility = await evaluate_step_eligibility(
+                        db=db,
+                        cadence=cadence,
+                        step=step,
+                        lead=lead,
+                        integration=integration,
+                    )
+                    if not eligibility.dispatchable:
+                        step.status = StepStatus.SKIPPED
+                        skipped += 1
+                        logger.info(
+                            "cadence_tick.step_skipped",
+                            step_id=str(step.id),
+                            reason=eligibility.reason,
+                            channel=step.channel.value,
                         )
                         continue
 

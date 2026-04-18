@@ -211,6 +211,24 @@ async def _dispatch_inner(
             or settings.UNIPILE_ACCOUNT_ID_GMAIL
             or ""
         )
+        linkedin_account = None
+        from integrations.linkedin import LinkedInRegistry as _LIR  # noqa: PLC0415
+
+        linkedin_registry = _LIR(settings=settings)
+        if getattr(cadence, "linkedin_account_id", None):
+            from models.linkedin_account import LinkedInAccount as _LIA  # noqa: PLC0415
+
+            _li_acc_q = await db.execute(select(_LIA).where(_LIA.id == cadence.linkedin_account_id))
+            linkedin_account = _li_acc_q.scalar_one_or_none()
+            if linkedin_account is None:
+                step.status = StepStatus.SKIPPED
+                await db.commit()
+                await _release_rate_limit_slot()
+                return {
+                    "step_id": step_id,
+                    "status": "skipped",
+                    "reason": "linkedin_account_not_found",
+                }
 
         registry: LLMRegistry | None = None
         try:
@@ -300,27 +318,9 @@ async def _dispatch_inner(
             result: _DispatchResult
 
             if step.channel == Channel.LINKEDIN_CONNECT:
-                if getattr(cadence, "linkedin_account_id", None):
-                    # Usa LinkedInRegistry com conta configurada na cadência
-                    from integrations.linkedin import LinkedInRegistry as _LIR  # noqa: PLC0415
-                    from models.linkedin_account import LinkedInAccount as _LIA  # noqa: PLC0415
-
-                    _li_acc_q = await db.execute(
-                        select(_LIA).where(_LIA.id == cadence.linkedin_account_id)
-                    )
-                    _li_account = _li_acc_q.scalar_one_or_none()
-                    if _li_account is None:
-                        step.status = StepStatus.SKIPPED
-                        await db.commit()
-                        await _release_rate_limit_slot()
-                        return {
-                            "step_id": step_id,
-                            "status": "skipped",
-                            "reason": "linkedin_account_not_found",
-                        }
-                    _li_registry = _LIR(settings=settings)
-                    _li_result = await _li_registry.send_connect(
-                        account=_li_account,
+                if linkedin_account is not None and linkedin_registry is not None:
+                    _li_result = await linkedin_registry.send_connect(
+                        account=linkedin_account,
                         linkedin_profile_id=lead.linkedin_profile_id or "",
                         message=message_text,
                     )
@@ -385,25 +385,8 @@ async def _dispatch_inner(
                     content_audio_url = audio_url
                 else:
                     if getattr(cadence, "linkedin_account_id", None):
-                        from integrations.linkedin import LinkedInRegistry as _LIR  # noqa: PLC0415
-                        from models.linkedin_account import LinkedInAccount as _LIA  # noqa: PLC0415
-
-                        _li_acc_q = await db.execute(
-                            select(_LIA).where(_LIA.id == cadence.linkedin_account_id)
-                        )
-                        _li_account = _li_acc_q.scalar_one_or_none()
-                        if _li_account is None:
-                            step.status = StepStatus.SKIPPED
-                            await db.commit()
-                            await _release_rate_limit_slot()
-                            return {
-                                "step_id": step_id,
-                                "status": "skipped",
-                                "reason": "linkedin_account_not_found",
-                            }
-                        _li_registry = _LIR(settings=settings)
-                        _li_result = await _li_registry.send_dm(
-                            account=_li_account,
+                        _li_result = await linkedin_registry.send_dm(
+                            account=linkedin_account,
                             linkedin_profile_id=lead.linkedin_profile_id or "",
                             message=message_text,
                         )
@@ -664,12 +647,20 @@ async def _dispatch_inner(
                         "reason": "no_linkedin_profile_id",
                     }
 
-                reacted = await unipile_client.react_to_latest_post(
-                    account_id=linkedin_account_id,
-                    provider_id=lead.linkedin_profile_id,
-                    emoji="LIKE",
-                )
-                if not reacted:
+                if linkedin_account is not None and linkedin_registry is not None:
+                    reaction_result = await linkedin_registry.react_to_latest_post(
+                        account=linkedin_account,
+                        linkedin_profile_id=lead.linkedin_profile_id,
+                        reaction="LIKE",
+                    )
+                else:
+                    reaction_result = await linkedin_registry.react_global(
+                        linkedin_profile_id=lead.linkedin_profile_id,
+                        reaction="LIKE",
+                        account_id_override=linkedin_account_id,
+                    )
+
+                if not reaction_result.success:
                     step.status = StepStatus.SKIPPED
                     await db.commit()
                     await _release_rate_limit_slot()
@@ -684,7 +675,7 @@ async def _dispatch_inner(
                 # message_text fica vazio pois não é mensagem de texto
                 message_text = ""
 
-                result = _DispatchResult(success=True)
+                result = _DispatchResult(success=True, message_id=reaction_result.message_id)
 
             elif step.channel == Channel.LINKEDIN_POST_COMMENT:
                 if not lead.linkedin_profile_id:
@@ -698,12 +689,20 @@ async def _dispatch_inner(
                     }
 
                 # message_text já foi gerado pelo composer (deve ser o comentário)
-                commented = await unipile_client.comment_on_latest_post(
-                    account_id=linkedin_account_id,
-                    provider_id=lead.linkedin_profile_id,
-                    comment_text=message_text,
-                )
-                if not commented:
+                if linkedin_account is not None and linkedin_registry is not None:
+                    comment_result = await linkedin_registry.comment_on_latest_post(
+                        account=linkedin_account,
+                        linkedin_profile_id=lead.linkedin_profile_id,
+                        comment=message_text,
+                    )
+                else:
+                    comment_result = await linkedin_registry.comment_global(
+                        linkedin_profile_id=lead.linkedin_profile_id,
+                        comment=message_text,
+                        account_id_override=linkedin_account_id,
+                    )
+
+                if not comment_result.success:
                     step.status = StepStatus.SKIPPED
                     await db.commit()
                     await _release_rate_limit_slot()
@@ -715,7 +714,7 @@ async def _dispatch_inner(
                     )
                     return {"step_id": step_id, "status": "skipped", "reason": "no_recent_post"}
 
-                result = _DispatchResult(success=True)
+                result = _DispatchResult(success=True, message_id=comment_result.message_id)
 
             elif step.channel == Channel.LINKEDIN_INMAIL:
                 if not lead.linkedin_profile_id:
@@ -740,12 +739,20 @@ async def _dispatch_inner(
                     inmail_subject = ""
                     inmail_body = message_text
 
-                inmail_result = await unipile_client.send_linkedin_inmail(
-                    account_id=linkedin_account_id,
-                    linkedin_profile_id=lead.linkedin_profile_id,
-                    subject=inmail_subject,
-                    message=inmail_body,
-                )
+                if linkedin_account is not None and linkedin_registry is not None:
+                    inmail_result = await linkedin_registry.send_inmail(
+                        account=linkedin_account,
+                        linkedin_profile_id=lead.linkedin_profile_id,
+                        subject=inmail_subject,
+                        body=inmail_body,
+                    )
+                else:
+                    inmail_result = await linkedin_registry.send_inmail_global(
+                        linkedin_profile_id=lead.linkedin_profile_id,
+                        subject=inmail_subject,
+                        body=inmail_body,
+                        account_id_override=linkedin_account_id,
+                    )
                 result = _DispatchResult(
                     success=inmail_result.success,
                     message_id=inmail_result.message_id,

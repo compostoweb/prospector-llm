@@ -450,7 +450,6 @@ async def update_cadence(
         cadence.cadence_type = body.cadence_type
 
     await db.commit()
-    await db.refresh(cadence)
 
     logger.info("cadence.updated", cadence_id=str(cadence_id))
     return CadenceResponse.model_validate(cadence)

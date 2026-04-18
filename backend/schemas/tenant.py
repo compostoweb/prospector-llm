@@ -97,8 +97,11 @@ class TenantIntegrationUpdate(BaseModel):
 
     # Configurações de envio
     allow_personal_email: bool | None = None
-    limit_linkedin_connect: int | None = Field(default=None, ge=1, le=50)
-    limit_linkedin_dm: int | None = Field(default=None, ge=1, le=100)
+    limit_linkedin_connect: int | None = Field(default=None, ge=1, le=60)
+    limit_linkedin_dm: int | None = Field(default=None, ge=1, le=150)
+    limit_linkedin_post_reaction: int | None = Field(default=None, ge=1, le=150)
+    limit_linkedin_post_comment: int | None = Field(default=None, ge=1, le=150)
+    limit_linkedin_inmail: int | None = Field(default=None, ge=1, le=150)
     limit_email: int | None = Field(default=None, ge=1, le=500)
 
     # LLM — padrão do sistema
@@ -134,6 +137,9 @@ class TenantIntegrationResponse(BaseModel):
     allow_personal_email: bool
     limit_linkedin_connect: int
     limit_linkedin_dm: int
+    limit_linkedin_post_reaction: int
+    limit_linkedin_post_comment: int
+    limit_linkedin_inmail: int
     limit_email: int
     # LLM — padrão do sistema
     llm_default_provider: str

@@ -26,6 +26,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.sql import operators
 from sqlalchemy.sql.elements import BinaryExpression, BooleanClauseList
 
@@ -34,7 +35,8 @@ from models.cadence_step import CadenceStep
 from models.email_account import EmailAccount
 from models.enums import Channel, LeadStatus, StepStatus
 from models.lead import Lead
-from models.tenant import Tenant
+from models.linkedin_account import LinkedInAccount
+from models.tenant import Tenant, TenantIntegration
 
 pytestmark = pytest.mark.asyncio
 
@@ -180,6 +182,13 @@ def db() -> FakeAsyncSession:
 def tenant(db: FakeAsyncSession, tenant_id: uuid.UUID) -> Tenant:
     t = Tenant(id=tenant_id, name="Tenant Teste", slug="tenant-teste")
     db.add(t)
+    db.add(
+        TenantIntegration(
+            tenant_id=tenant_id,
+            unipile_linkedin_account_id="li-account-1",
+            unipile_gmail_account_id="gmail-account-1",
+        )
+    )
     return t
 
 
@@ -193,6 +202,8 @@ def _make_lead(tenant_id: uuid.UUID, status: LeadStatus = LeadStatus.IN_CADENCE)
         name="Lead Tick",
         company="Tick Corp",
         linkedin_url="https://linkedin.com/in/tick",
+        linkedin_profile_id="li_tick_profile",
+        email_corporate="lead@tickcorp.com",
         status=status,
         source="manual",
     )
@@ -444,14 +455,15 @@ async def test_tick_uses_tenant_specific_rate_limit(
         cadence.id,
         channel=Channel.EMAIL,
     )
-    integration = TenantIntegration(
-        id=uuid.uuid4(),
-        tenant_id=tenant_id,
-        limit_linkedin_connect=11,
-        limit_linkedin_dm=22,
-        limit_email=77,
+    integration_result = await db.execute(
+        select(TenantIntegration).where(TenantIntegration.tenant_id == tenant_id)
     )
-    db.add_all([lead, cadence, step, integration])
+    integration = integration_result.scalar_one_or_none()
+    assert integration is not None
+    integration.limit_linkedin_connect = 11
+    integration.limit_linkedin_dm = 22
+    integration.limit_email = 77
+    db.add_all([lead, cadence, step])
     await db.flush()
 
     mock_wsl = _mock_worker_session_local(db, [tenant])
@@ -512,7 +524,7 @@ async def test_tick_uses_account_daily_budget_for_email_account(
         patch("workers.cadence.WorkerSessionLocal", mock_wsl),
         patch("workers.cadence.get_worker_session") as mock_get_session,
         patch("workers.cadence.redis_client") as mock_redis,
-        patch("workers.cadence.random.randint", return_value=23),
+        patch("services.cadence_delivery_budget.random.randint", return_value=23),
         patch("workers.dispatch.dispatch_step") as mock_dispatch,
     ):
 
@@ -543,7 +555,15 @@ async def test_tick_releases_tenant_slot_when_account_budget_is_exhausted(
     cadence = _make_cadence(tenant_id)
     cadence.linkedin_account_id = uuid.uuid4()
     step = _make_step(tenant_id, lead.id, cadence.id, channel=Channel.LINKEDIN_DM)
-    db.add_all([lead, cadence, step])
+    linkedin_account = LinkedInAccount(
+        id=cadence.linkedin_account_id,
+        tenant_id=tenant_id,
+        display_name="Conta LinkedIn",
+        provider_type="unipile",
+        unipile_account_id="li-account-1",
+        is_active=True,
+    )
+    db.add_all([lead, cadence, step, linkedin_account])
     await db.flush()
 
     mock_wsl = _mock_worker_session_local(db, [tenant])
@@ -552,7 +572,7 @@ async def test_tick_releases_tenant_slot_when_account_budget_is_exhausted(
         patch("workers.cadence.WorkerSessionLocal", mock_wsl),
         patch("workers.cadence.get_worker_session") as mock_get_session,
         patch("workers.cadence.redis_client") as mock_redis,
-        patch("workers.cadence.random.randint", return_value=34),
+        patch("services.cadence_delivery_budget.random.randint", return_value=34),
         patch("workers.dispatch.dispatch_step") as mock_dispatch,
     ):
 
@@ -569,6 +589,128 @@ async def test_tick_releases_tenant_slot_when_account_budget_is_exhausted(
     mock_dispatch.delay.assert_not_called()
     mock_redis.release_rate_limit.assert_awaited_once_with(Channel.LINKEDIN_DM.value, tenant_id)
     assert step.status == StepStatus.PENDING
+
+
+async def test_tick_uses_action_specific_limit_for_post_comment(
+    db: FakeAsyncSession,
+    tenant_id: uuid.UUID,
+    tenant: Tenant,
+) -> None:
+    from workers.cadence import _tick_async
+
+    lead = _make_lead(tenant_id)
+    cadence = _make_cadence(tenant_id)
+    step = _make_step(tenant_id, lead.id, cadence.id, channel=Channel.LINKEDIN_POST_COMMENT)
+    db.add_all([lead, cadence, step])
+    integration_result = await db.execute(
+        select(TenantIntegration).where(TenantIntegration.tenant_id == tenant_id)
+    )
+    integration = integration_result.scalar_one_or_none()
+    integration.limit_linkedin_post_comment = 17
+
+    mock_wsl = _mock_worker_session_local(db, [tenant])
+
+    with (
+        patch("workers.cadence.WorkerSessionLocal", mock_wsl),
+        patch("workers.cadence.get_worker_session") as mock_get_session,
+        patch("workers.cadence.redis_client") as mock_redis,
+        patch("services.cadence_delivery_budget.random.randint", return_value=14),
+        patch("services.cadence_step_eligibility._has_recent_post", new=AsyncMock(return_value=True)),
+        patch("workers.dispatch.dispatch_step") as mock_dispatch,
+    ):
+
+        async def _fake_session(_tid):
+            yield db
+
+        mock_get_session.side_effect = _fake_session
+        _configure_rate_limit_mocks(mock_redis)
+        mock_dispatch.delay = MagicMock()
+
+        await _tick_async()
+
+    mock_redis.check_and_increment.assert_called_once_with(
+        channel=Channel.LINKEDIN_POST_COMMENT.value,
+        tenant_id=tenant_id,
+        limit=17,
+    )
+
+
+async def test_tick_skips_email_step_without_bound_email_account(
+    db: FakeAsyncSession,
+    tenant_id: uuid.UUID,
+    tenant: Tenant,
+) -> None:
+    from workers.cadence import _tick_async
+
+    lead = _make_lead(tenant_id)
+    cadence = _make_cadence(tenant_id)
+    cadence.email_account_id = uuid.uuid4()
+    step = _make_step(tenant_id, lead.id, cadence.id, channel=Channel.EMAIL)
+    db.add_all([lead, cadence, step])
+    await db.flush()
+
+    mock_wsl = _mock_worker_session_local(db, [tenant])
+
+    with (
+        patch("workers.cadence.WorkerSessionLocal", mock_wsl),
+        patch("workers.cadence.get_worker_session") as mock_get_session,
+        patch("workers.cadence.redis_client") as mock_redis,
+        patch("workers.dispatch.dispatch_step") as mock_dispatch,
+    ):
+
+        async def _fake_session(_tid):
+            yield db
+
+        mock_get_session.side_effect = _fake_session
+        _configure_rate_limit_mocks(mock_redis)
+        mock_dispatch.delay = MagicMock()
+
+        result = await _tick_async()
+
+    assert result["dispatched"] == 0
+    assert result["skipped"] == 1
+    mock_dispatch.delay.assert_not_called()
+    mock_redis.check_and_increment.assert_not_called()
+    assert step.status == StepStatus.SKIPPED
+
+
+async def test_tick_skips_post_comment_without_recent_post(
+    db: FakeAsyncSession,
+    tenant_id: uuid.UUID,
+    tenant: Tenant,
+) -> None:
+    from workers.cadence import _tick_async
+
+    lead = _make_lead(tenant_id)
+    cadence = _make_cadence(tenant_id)
+    step = _make_step(tenant_id, lead.id, cadence.id, channel=Channel.LINKEDIN_POST_COMMENT)
+    db.add_all([lead, cadence, step])
+    await db.flush()
+
+    mock_wsl = _mock_worker_session_local(db, [tenant])
+
+    with (
+        patch("workers.cadence.WorkerSessionLocal", mock_wsl),
+        patch("workers.cadence.get_worker_session") as mock_get_session,
+        patch("workers.cadence.redis_client") as mock_redis,
+        patch("services.cadence_step_eligibility._has_recent_post", new=AsyncMock(return_value=False)),
+        patch("workers.dispatch.dispatch_step") as mock_dispatch,
+    ):
+
+        async def _fake_session(_tid):
+            yield db
+
+        mock_get_session.side_effect = _fake_session
+        _configure_rate_limit_mocks(mock_redis)
+        mock_dispatch.delay = MagicMock()
+
+        result = await _tick_async()
+
+    assert result["dispatched"] == 0
+    assert result["skipped"] == 1
+    mock_dispatch.delay.assert_not_called()
+    mock_redis.check_and_increment.assert_not_called()
+    assert step.status == StepStatus.SKIPPED
 
 
 async def test_tick_returns_correct_counts(

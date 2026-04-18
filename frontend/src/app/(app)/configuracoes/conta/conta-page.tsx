@@ -55,6 +55,9 @@ export default function ContaPage() {
   const [allowPersonalEmail, setAllowPersonalEmail] = useState(false)
   const [limitLinkedinConnect, setLimitLinkedinConnect] = useState(20)
   const [limitLinkedinDm, setLimitLinkedinDm] = useState(40)
+  const [limitLinkedinReaction, setLimitLinkedinReaction] = useState(40)
+  const [limitLinkedinComment, setLimitLinkedinComment] = useState(40)
+  const [limitLinkedinInmail, setLimitLinkedinInmail] = useState(40)
   const [limitEmail, setLimitEmail] = useState(300)
 
   // Sincroniza o formulário quando os dados carregam
@@ -66,6 +69,9 @@ export default function ContaPage() {
     setAllowPersonalEmail(integration.allow_personal_email)
     setLimitLinkedinConnect(integration.limit_linkedin_connect)
     setLimitLinkedinDm(integration.limit_linkedin_dm)
+    setLimitLinkedinReaction(integration.limit_linkedin_post_reaction)
+    setLimitLinkedinComment(integration.limit_linkedin_post_comment)
+    setLimitLinkedinInmail(integration.limit_linkedin_inmail)
     setLimitEmail(integration.limit_email)
   }, [integration])
 
@@ -78,6 +84,9 @@ export default function ContaPage() {
       allow_personal_email: allowPersonalEmail,
       limit_linkedin_connect: limitLinkedinConnect,
       limit_linkedin_dm: limitLinkedinDm,
+      limit_linkedin_post_reaction: limitLinkedinReaction,
+      limit_linkedin_post_comment: limitLinkedinComment,
+      limit_linkedin_inmail: limitLinkedinInmail,
       limit_email: limitEmail,
     }
     saveIntegrations(body)
@@ -141,16 +150,16 @@ export default function ContaPage() {
 
           <SettingsPanel
             title="Limites diários por canal"
-            description="Máximo de disparos por dia para preservar a reputação da conta."
+            description="Máximo de ações por dia para preservar a reputação da conta e distribuir o volume com mais naturalidade."
           >
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
               <div className="space-y-1.5">
                 <Label htmlFor="limit-connect">LinkedIn Connect</Label>
                 <Input
                   id="limit-connect"
                   type="number"
                   min={1}
-                  max={50}
+                  max={60}
                   value={limitLinkedinConnect}
                   onChange={(e) => setLimitLinkedinConnect(Number(e.target.value))}
                 />
@@ -161,9 +170,42 @@ export default function ContaPage() {
                   id="limit-dm"
                   type="number"
                   min={1}
-                  max={100}
+                  max={150}
                   value={limitLinkedinDm}
                   onChange={(e) => setLimitLinkedinDm(Number(e.target.value))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="limit-reaction">LinkedIn Reação</Label>
+                <Input
+                  id="limit-reaction"
+                  type="number"
+                  min={1}
+                  max={150}
+                  value={limitLinkedinReaction}
+                  onChange={(e) => setLimitLinkedinReaction(Number(e.target.value))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="limit-comment">LinkedIn Comentário</Label>
+                <Input
+                  id="limit-comment"
+                  type="number"
+                  min={1}
+                  max={150}
+                  value={limitLinkedinComment}
+                  onChange={(e) => setLimitLinkedinComment(Number(e.target.value))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="limit-inmail">LinkedIn InMail</Label>
+                <Input
+                  id="limit-inmail"
+                  type="number"
+                  min={1}
+                  max={150}
+                  value={limitLinkedinInmail}
+                  onChange={(e) => setLimitLinkedinInmail(Number(e.target.value))}
                 />
               </div>
               <div className="space-y-1.5">

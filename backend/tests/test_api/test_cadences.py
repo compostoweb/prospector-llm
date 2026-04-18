@@ -445,6 +445,91 @@ async def test_preview_cadence_step_renders_saved_email_template(
     assert data["method"] == "saved_email_template"
 
 
+async def test_preview_cadence_step_renders_linkedin_comment_variables(
+    client: AsyncClient,
+    db,
+    tenant_id,
+):
+    lead = Lead(
+        tenant_id=tenant_id,
+        name="Paula Nogueira",
+        first_name="Paula",
+        company="Northwind",
+        city="Recife",
+        source=LeadSource.MANUAL,
+        status=LeadStatus.RAW,
+    )
+    db.add(lead)
+    await db.flush()
+
+    created = await _create_cadence(
+        client,
+        steps_template=[
+            {
+                "channel": "linkedin_post_comment",
+                "day_offset": 0,
+                "message_template": "Paula, achei forte o ponto sobre a evolução da {company} em {city}.",
+                "use_voice": False,
+                "audio_file_id": None,
+                "step_type": None,
+            }
+        ],
+    )
+
+    resp = await client.post(
+        f"/cadences/{created['id']}/steps/0/preview",
+        json={"lead_id": str(lead.id)},
+    )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["subject"] is None
+    assert data["body"] == "Paula, achei forte o ponto sobre a evolução da Northwind em Recife."
+    assert data["method"] == "manual_template"
+
+
+async def test_preview_cadence_step_renders_linkedin_inmail_json(
+    client: AsyncClient,
+    db,
+    tenant_id,
+):
+    lead = Lead(
+        tenant_id=tenant_id,
+        name="Fernanda Alves",
+        first_name="Fernanda",
+        company="Atlas Bio",
+        source=LeadSource.MANUAL,
+        status=LeadStatus.RAW,
+    )
+    db.add(lead)
+    await db.flush()
+
+    created = await _create_cadence(
+        client,
+        steps_template=[
+            {
+                "channel": "linkedin_inmail",
+                "day_offset": 0,
+                "message_template": '{"subject":"Ideia para {company}","body":"Fernanda, queria abrir uma conversa objetiva."}',
+                "use_voice": False,
+                "audio_file_id": None,
+                "step_type": None,
+            }
+        ],
+    )
+
+    resp = await client.post(
+        f"/cadences/{created['id']}/steps/0/preview",
+        json={"lead_id": str(lead.id)},
+    )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["subject"] == "Ideia para Atlas Bio"
+    assert data["body"] == "Fernanda, queria abrir uma conversa objetiva."
+    assert data["method"] == "linkedin_inmail_json"
+
+
 # ── PATCH /cadences/{id} ──────────────────────────────────────────────
 
 

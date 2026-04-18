@@ -536,15 +536,21 @@ async def test_update_integrations_rate_limits(
     resp = await client.put(
         "/tenants/me/integrations",
         json={
-            "limit_linkedin_connect": 15,
-            "limit_linkedin_dm": 30,
+            "limit_linkedin_connect": 60,
+            "limit_linkedin_dm": 150,
+            "limit_linkedin_post_reaction": 80,
+            "limit_linkedin_post_comment": 55,
+            "limit_linkedin_inmail": 25,
             "limit_email": 200,
         },
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["limit_linkedin_connect"] == 15
-    assert body["limit_linkedin_dm"] == 30
+    assert body["limit_linkedin_connect"] == 60
+    assert body["limit_linkedin_dm"] == 150
+    assert body["limit_linkedin_post_reaction"] == 80
+    assert body["limit_linkedin_post_comment"] == 55
+    assert body["limit_linkedin_inmail"] == 25
     assert body["limit_email"] == 200
 
 
@@ -577,7 +583,7 @@ async def test_update_integrations_limit_too_high_returns_422(
     """Limite acima do máximo permitido → 422."""
     resp = await client.put(
         "/tenants/me/integrations",
-        json={"limit_linkedin_connect": 999},
+        json={"limit_linkedin_connect": 61},
     )
     assert resp.status_code == 422
 

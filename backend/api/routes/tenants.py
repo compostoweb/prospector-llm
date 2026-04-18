@@ -631,7 +631,6 @@ async def update_integrations(
             cadence.llm_max_tokens = integration.cold_email_llm_max_tokens
 
     await db.commit()
-    await db.refresh(integration)
 
     logger.info(
         "tenant.integrations_updated", tenant_id=str(tenant_id), fields=list(updates.keys())

@@ -33,7 +33,7 @@ class UnipileLinkedInProvider(LinkedInProvider):
     O account_id (ID da conta LinkedIn no Unipile) é passado no construtor.
     """
 
-    def __init__(self, client: "UnipileClient", account_id: str) -> None:
+    def __init__(self, client: UnipileClient, account_id: str) -> None:
         self._client = client
         self._account_id = account_id
 
@@ -136,7 +136,7 @@ class UnipileLinkedInProvider(LinkedInProvider):
                 account_id=self._account_id,
                 linkedin_profile_id=linkedin_profile_id,
                 subject=subject,
-                body=body,
+                message=body,
             )
             return LinkedInSendResult(
                 success=result.success,
@@ -155,15 +155,15 @@ class UnipileLinkedInProvider(LinkedInProvider):
         reaction: str = "LIKE",
     ) -> LinkedInSendResult:
         try:
-            result = await self._client.react_to_latest_post(
+            reacted = await self._client.react_to_latest_post(
                 account_id=self._account_id,
                 provider_id=linkedin_profile_id,
-                reaction_type=reaction,
+                emoji=reaction,
             )
             return LinkedInSendResult(
-                success=result.success,
-                message_id=result.message_id,
+                success=reacted,
                 provider=self.provider_name,
+                error=None if reacted else "Nenhum post recente elegível para reação.",
             )
         except Exception as exc:
             logger.error("unipile_provider.react.error", error=str(exc))
@@ -175,15 +175,15 @@ class UnipileLinkedInProvider(LinkedInProvider):
         comment: str,
     ) -> LinkedInSendResult:
         try:
-            result = await self._client.comment_on_latest_post(
+            commented = await self._client.comment_on_latest_post(
                 account_id=self._account_id,
                 provider_id=linkedin_profile_id,
-                comment=comment,
+                comment_text=comment,
             )
             return LinkedInSendResult(
-                success=result.success,
-                message_id=result.message_id,
+                success=commented,
                 provider=self.provider_name,
+                error=None if commented else "Nenhum post recente elegível para comentário.",
             )
         except Exception as exc:
             logger.error("unipile_provider.comment.error", error=str(exc))

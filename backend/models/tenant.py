@@ -113,6 +113,17 @@ class TenantIntegration(Base):
     # ── Rate limits por canal (sobrescreve defaults globais) ──────────
     limit_linkedin_connect: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
     limit_linkedin_dm: Mapped[int] = mapped_column(Integer, default=40, nullable=False)
+    limit_linkedin_post_reaction: Mapped[int] = mapped_column(
+        Integer,
+        default=40,
+        nullable=False,
+    )
+    limit_linkedin_post_comment: Mapped[int] = mapped_column(
+        Integer,
+        default=40,
+        nullable=False,
+    )
+    limit_linkedin_inmail: Mapped[int] = mapped_column(Integer, default=40, nullable=False)
     limit_email: Mapped[int] = mapped_column(Integer, default=300, nullable=False)
 
     # ── LLM — padrão do sistema ───────────────────────────────────────
