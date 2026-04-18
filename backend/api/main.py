@@ -91,9 +91,10 @@ def _resolve_allowed_origins(origins: list[str]) -> list[str]:
     return expanded_origins
 
 
-def _apply_security_headers(response: Response) -> None:
+def _apply_security_headers(response: Response, request_path: str) -> None:
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "DENY")
+    if not request_path.startswith("/files/lm-pdfs/"):
+        response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault(
         "Permissions-Policy",
@@ -255,7 +256,7 @@ async def log_requests(
 ) -> Response:
     start = time.perf_counter()
     response: Response = await call_next(request)  # type: ignore[operator]
-    _apply_security_headers(response)
+    _apply_security_headers(response, request.url.path)
     duration_ms = round((time.perf_counter() - start) * 1000, 2)
     logger.info(
         "http.request",

@@ -15,13 +15,25 @@ Exemplos:
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 import structlog
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import Response
 
+from core.config import settings
+
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/files", tags=["Files — Proxy público"])
+
+
+def _build_pdf_embed_headers(filename: str) -> dict[str, str]:
+    frontend_origin = urlsplit(settings.FRONTEND_URL).scheme + "://" + urlsplit(settings.FRONTEND_URL).netloc
+    return {
+        "Content-Disposition": f'inline; filename="{filename}"',
+        "Content-Security-Policy": f"frame-ancestors 'self' {frontend_origin}",
+    }
 
 
 @router.get("/lm-pdfs/{tenant_id}/{filename}", include_in_schema=False)
@@ -42,7 +54,7 @@ async def proxy_lm_pdf(tenant_id: str, filename: str) -> Response:
     return Response(
         content=data,
         media_type=content_type or "application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+        headers=_build_pdf_embed_headers(filename),
     )
 
 

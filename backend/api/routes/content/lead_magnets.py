@@ -7,6 +7,7 @@ CRUD e gestão de lead magnets do subsistema inbound do Content Hub.
 from __future__ import annotations
 
 import uuid
+from urllib.parse import urlsplit
 
 import structlog
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -46,6 +47,29 @@ logger = structlog.get_logger()
 _MAX_PDF_SIZE = 50 * 1024 * 1024  # 50 MB
 
 router = APIRouter(prefix="/lead-magnets", tags=["Content Hub — Lead Magnets"])
+
+
+def _extract_storage_key_from_file_url(file_url: str) -> str | None:
+    normalized = (file_url or "").strip()
+    if not normalized:
+        return None
+
+    if normalized.startswith(("lm-pdfs/", "lm-images/", "audio/", "branding/")):
+        return normalized
+
+    parsed = urlsplit(normalized)
+    path = (parsed.path or "").lstrip("/")
+
+    if "files/" in path:
+        extracted = path.split("files/", 1)[1]
+        return extracted or None
+
+    bucket_marker = f"{settings.S3_BUCKET}/"
+    if bucket_marker in path:
+        extracted = path.split(bucket_marker, 1)[1]
+        return extracted or None
+
+    return None
 
 
 async def _get_lead_magnet_or_404(
@@ -284,16 +308,9 @@ async def get_pdf_preview_url(
     s3 = S3Client()
     file_url: str = lead_magnet.file_url
 
-    # URLs com formato mascarado já apontam para o proxy — retorna diretamente
-    proxy_base = f"{settings.API_PUBLIC_URL}/files/"
-    if file_url.startswith(proxy_base):
-        return {"url": file_url}
-
-    # URLs antigas (MinIO direto) — extrai a chave e converte para proxy URL
-    minio_prefix = f"{settings.S3_ENDPOINT_URL}/{settings.S3_BUCKET}/"
-    if file_url.startswith(minio_prefix):
-        key = file_url[len(minio_prefix):]
-        return {"url": s3.get_masked_url(key)}
+    extracted_key = _extract_storage_key_from_file_url(file_url)
+    if extracted_key:
+        return {"url": s3.get_masked_url(extracted_key)}
 
     # Fallback: gera presigned caso o formato seja desconhecido
     key_fallback = file_url.split(f"/{settings.S3_BUCKET}/", 1)[-1]
