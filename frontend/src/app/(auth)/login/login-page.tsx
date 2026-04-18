@@ -1,27 +1,21 @@
 ﻿import { auth } from "@/lib/auth/config"
 import { redirect } from "next/navigation"
 import { GoogleSignInButton } from "@/components/auth/google-sign-in-button"
+import { resolveAuthErrorState } from "@/lib/auth/auth-error-state"
 
 interface Props {
-  searchParams: Promise<{ error?: string }>
-}
-
-const ERROR_MESSAGES: Record<string, string> = {
-  auth_failed: "Falha na autenticação. Tente novamente.",
-  session_expired: "Sessão expirada. Faça login novamente.",
-  OAuthCallback: "Erro no callback OAuth. Tente novamente.",
-  default: "Ocorreu um erro. Tente novamente.",
+  searchParams: Promise<{ error?: string; message?: string }>
 }
 
 export default async function LoginPage({ searchParams }: Props) {
   const session = await auth()
-  const { error } = await searchParams
+  const { error, message } = await searchParams
 
   // Se a sessão existe mas o erro é session_expired, não redirecionar
   // (o token do backend expirou — o NextAuth pode ainda ter a sessão em cache)
   if (session && error !== "session_expired") redirect("/dashboard")
 
-  const errorMessage = error ? (ERROR_MESSAGES[error] ?? ERROR_MESSAGES.default) : null
+  const errorState = error ? resolveAuthErrorState(error, message) : null
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-(--bg-page) px-4">
@@ -33,12 +27,12 @@ export default async function LoginPage({ searchParams }: Props) {
         </div>
 
         {/* Mensagem de erro */}
-        {errorMessage && (
+        {errorState && (
           <div
             role="alert"
             className="mb-6 rounded-md bg-(--danger-subtle) px-4 py-3 text-sm text-(--danger-subtle-fg)"
           >
-            {errorMessage}
+            {errorState.banner}
           </div>
         )}
 

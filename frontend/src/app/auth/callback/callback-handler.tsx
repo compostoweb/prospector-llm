@@ -26,7 +26,7 @@ export function CallbackHandler({ token }: Props) {
     called.current = true
 
     if (!token) {
-      router.replace("/login?error=no_token")
+      router.replace("/auth/error?error=no_token")
       return
     }
 
@@ -36,14 +36,14 @@ export function CallbackHandler({ token }: Props) {
     })
       .then((result) => {
         if (!result || result.error) {
-          router.replace("/login?error=auth_failed")
+          router.replace("/auth/error?error=auth_failed")
         } else {
           // Força reload completo para hidratar a sessão no Server Component (layout)
           window.location.href = "/dashboard"
         }
       })
       .catch(() => {
-        router.replace("/login?error=auth_failed")
+        router.replace("/auth/error?error=auth_failed")
       })
   }, [token, router])
 

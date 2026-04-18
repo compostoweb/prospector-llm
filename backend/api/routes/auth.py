@@ -73,11 +73,32 @@ _OAUTH_STATE_TTL = 300
 _EXTENSION_OAUTH_STATE_PREFIX = "google_oauth_extension_state:"
 _EXTENSION_GRANT_PREFIX = "extension_auth_grant:"
 _EXTENSION_GRANT_TTL = 120
+_AUTH_ERROR_CODE_HEADER = "X-Auth-Error-Code"
 
 
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+def _google_auth_error(*, error_code: str, status_code: int, detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=status_code,
+        detail=detail,
+        headers={_AUTH_ERROR_CODE_HEADER: error_code},
+    )
+
+
+def _resolve_google_auth_error_code(exc: HTTPException) -> str:
+    headers = exc.headers or {}
+    return headers.get(_AUTH_ERROR_CODE_HEADER, "auth_failed")
+
+
+def _build_frontend_auth_error_url(*, error: str, message: str | None = None) -> str:
+    params: dict[str, str] = {"error": error}
+    if message:
+        params["message"] = message
+    return f"{settings.FRONTEND_URL}/auth/error?{urlencode(params)}"
 
 
 # ── Sessão sem RLS (usada internamente em auth) ───────────────────────
@@ -120,14 +141,16 @@ async def _exchange_google_code_for_access_token(*, code: str, redirect_uri: str
 
     if token_resp.status_code != 200:
         logger.error("auth.google_callback.token_exchange_failed", status=token_resp.status_code)
-        raise HTTPException(
+        raise _google_auth_error(
+            error_code="google_token_exchange_failed",
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Falha ao trocar o código com o Google. Tente novamente.",
         )
 
     access_token_google: str = token_resp.json().get("access_token", "")
     if not access_token_google:
-        raise HTTPException(
+        raise _google_auth_error(
+            error_code="google_token_exchange_failed",
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Google não retornou access_token.",
         )
@@ -144,7 +167,8 @@ async def _fetch_google_userinfo(access_token_google: str) -> dict[str, object]:
 
     if userinfo_resp.status_code != 200:
         logger.error("auth.google_callback.userinfo_failed", status=userinfo_resp.status_code)
-        raise HTTPException(
+        raise _google_auth_error(
+            error_code="google_profile_fetch_failed",
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Falha ao obter perfil do Google.",
         )
@@ -164,14 +188,16 @@ async def _resolve_active_user_from_google_profile(
     name = str(name_value) if isinstance(name_value, str) else None
 
     if not email:
-        raise HTTPException(
+        raise _google_auth_error(
+            error_code="google_email_missing",
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Google não retornou o email do usuário.",
         )
 
     if not email_verified:
         logger.warning("auth.google_callback.unverified_email", email=email)
-        raise HTTPException(
+        raise _google_auth_error(
+            error_code="google_unverified_email",
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Email não verificado pelo Google. Verifique sua conta e tente novamente.",
         )
@@ -181,14 +207,16 @@ async def _resolve_active_user_from_google_profile(
 
     if user is None:
         logger.warning("auth.google_callback.email_not_registered", email=email)
-        raise HTTPException(
+        raise _google_auth_error(
+            error_code="email_not_registered",
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Acesso negado. Seu email não está cadastrado no sistema.",
         )
 
     if not user.is_active:
         logger.warning("auth.google_callback.user_inactive", email=email)
-        raise HTTPException(
+        raise _google_auth_error(
+            error_code="user_inactive",
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Sua conta está inativa. Entre em contato com o administrador.",
         )
@@ -215,7 +243,8 @@ async def _build_user_access_context(
     tenant_id, tenant_role = await resolve_user_login_context(db, user)
     if not user.is_superuser and tenant_id is None:
         logger.warning("auth.user_without_tenant_membership", email=user.email)
-        raise HTTPException(
+        raise _google_auth_error(
+            error_code="user_without_tenant",
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Seu usuário não está vinculado a nenhum tenant ativo.",
         )
@@ -303,8 +332,10 @@ async def google_login() -> RedirectResponse:
 
 @router.get("/google/callback")
 async def google_callback(
-    code: str,
-    state: str,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
     db: AsyncSession = Depends(_get_raw_session),
 ) -> RedirectResponse:
     """
@@ -323,50 +354,102 @@ async def google_callback(
       - Email deve estar previamente cadastrado na tabela `users`
       - Usuário deve estar ativo (is_active=True)
     """
-    if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Google OAuth não configurado neste ambiente.",
+    if error:
+        logger.warning(
+            "auth.google_callback.google_error",
+            error=error,
+            error_description=error_description,
+        )
+        error_code = "oauth_access_denied" if error == "access_denied" else "auth_failed"
+        return RedirectResponse(
+            url=_build_frontend_auth_error_url(
+                error=error_code,
+                message=error_description or "A autenticação com Google foi interrompida.",
+            ),
+            status_code=status.HTTP_302_FOUND,
         )
 
-    # ── 1. Verificar state CSRF ───────────────────────────────────────
-    state_key = f"google_oauth_state:{state}"
-    state_valid = await redis_client.get(state_key)
-    if not state_valid:
-        logger.warning("auth.google_callback.invalid_state")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Parâmetro state inválido ou expirado. Reinicie o login.",
+    try:
+        if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
+            raise _google_auth_error(
+                error_code="google_oauth_unconfigured",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Google OAuth não configurado neste ambiente.",
+            )
+
+        if not state:
+            raise _google_auth_error(
+                error_code="invalid_state",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Parâmetro state inválido ou expirado. Reinicie o login.",
+            )
+
+        # ── 1. Verificar state CSRF ───────────────────────────────────
+        state_key = f"google_oauth_state:{state}"
+        state_valid = await redis_client.get(state_key)
+        if not state_valid:
+            logger.warning("auth.google_callback.invalid_state")
+            raise _google_auth_error(
+                error_code="invalid_state",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Parâmetro state inválido ou expirado. Reinicie o login.",
+            )
+        await redis_client.delete(state_key)
+
+        if not code:
+            raise _google_auth_error(
+                error_code="auth_failed",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Authorization code ausente.",
+            )
+
+        access_token_google = await _exchange_google_code_for_access_token(
+            code=code,
+            redirect_uri=settings.GOOGLE_REDIRECT_URI,
         )
-    await redis_client.delete(state_key)
+        userinfo = await _fetch_google_userinfo(access_token_google)
+        user = await _resolve_active_user_from_google_profile(db=db, userinfo=userinfo)
+        tenant_id, tenant_role = await _build_user_access_context(db=db, user=user)
 
-    access_token_google = await _exchange_google_code_for_access_token(
-        code=code,
-        redirect_uri=settings.GOOGLE_REDIRECT_URI,
-    )
-    userinfo = await _fetch_google_userinfo(access_token_google)
-    user = await _resolve_active_user_from_google_profile(db=db, userinfo=userinfo)
-    tenant_id, tenant_role = await _build_user_access_context(db=db, user=user)
+        jwt_token = create_user_token(
+            user_id=user.id,
+            email=user.email,
+            is_superuser=user.is_superuser,
+            name=user.name,
+            tenant_id=tenant_id,
+            tenant_role=tenant_role,
+        )
 
-    jwt_token = create_user_token(
-        user_id=user.id,
-        email=user.email,
-        is_superuser=user.is_superuser,
-        name=user.name,
-        tenant_id=tenant_id,
-        tenant_role=tenant_role,
-    )
+        logger.info(
+            "auth.google_callback.success",
+            email=user.email,
+            is_superuser=user.is_superuser,
+        )
 
-    logger.info(
-        "auth.google_callback.success",
-        email=user.email,
-        is_superuser=user.is_superuser,
-    )
-
-    return RedirectResponse(
-        url=f"{settings.FRONTEND_URL}/auth/callback?token={jwt_token}",
-        status_code=status.HTTP_302_FOUND,
-    )
+        return RedirectResponse(
+            url=f"{settings.FRONTEND_URL}/auth/callback?token={jwt_token}",
+            status_code=status.HTTP_302_FOUND,
+        )
+    except HTTPException as exc:
+        error_code = _resolve_google_auth_error_code(exc)
+        logger.warning(
+            "auth.google_callback.frontend_redirect",
+            error_code=error_code,
+            error_detail=str(exc.detail),
+        )
+        return RedirectResponse(
+            url=_build_frontend_auth_error_url(error=error_code, message=str(exc.detail)),
+            status_code=status.HTTP_302_FOUND,
+        )
+    except Exception as exc:
+        logger.exception("auth.google_callback.unexpected_error", error=str(exc))
+        return RedirectResponse(
+            url=_build_frontend_auth_error_url(
+                error="auth_failed",
+                message="Não foi possível concluir sua autenticação agora.",
+            ),
+            status_code=status.HTTP_302_FOUND,
+        )
 
 
 @router.post(

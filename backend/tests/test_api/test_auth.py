@@ -15,10 +15,10 @@ Cobre:
 from __future__ import annotations
 
 import uuid
-from datetime import timedelta
+from urllib.parse import parse_qs, urlparse
 
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.main import app
@@ -86,7 +86,6 @@ async def test_login_returns_bearer_token(
     db: AsyncSession,
 ) -> None:
     """Login válido retorna access_token e token_type=bearer."""
-    from api.dependencies import get_current_tenant_id, get_session
     from api.routes.auth import _get_raw_session
 
     # Override a session de auth para usar o db de teste
@@ -217,6 +216,121 @@ async def test_invalid_token_returns_401(raw_client: AsyncClient) -> None:
         headers={"Authorization": "Bearer token.invalido.aqui"},
     )
     assert resp.status_code == 401
+
+
+async def test_google_callback_redirects_unregistered_email_to_frontend_error(
+    raw_client: AsyncClient,
+    db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from api.routes import auth as auth_route
+
+    async def _fake_redis_get(key: str) -> str | None:
+        assert key == "google_oauth_state:state-123"
+        return "1"
+
+    async def _fake_redis_delete(key: str) -> None:
+        assert key == "google_oauth_state:state-123"
+
+    async def _fake_exchange_google_code_for_access_token(*, code: str, redirect_uri: str) -> str:
+        assert code == "code-123"
+        assert redirect_uri == auth_route.settings.GOOGLE_REDIRECT_URI
+        return "google-access-token"
+
+    async def _fake_fetch_google_userinfo(access_token_google: str) -> dict[str, object]:
+        assert access_token_google == "google-access-token"
+        return {
+            "email": "nao-cadastrado@composto.test",
+            "verified_email": True,
+            "id": "google-user-123",
+            "name": "Usuário Ausente",
+        }
+
+    app.dependency_overrides[auth_route._get_raw_session] = _make_db_override(db)
+    monkeypatch.setattr(auth_route.settings, "FRONTEND_URL", "http://frontend.test")
+    monkeypatch.setattr(auth_route.settings, "GOOGLE_CLIENT_ID", "google-client-id")
+    monkeypatch.setattr(auth_route.settings, "GOOGLE_CLIENT_SECRET", "google-client-secret")
+    monkeypatch.setattr(auth_route.redis_client, "get", _fake_redis_get)
+    monkeypatch.setattr(auth_route.redis_client, "delete", _fake_redis_delete)
+    monkeypatch.setattr(
+        auth_route,
+        "_exchange_google_code_for_access_token",
+        _fake_exchange_google_code_for_access_token,
+    )
+    monkeypatch.setattr(auth_route, "_fetch_google_userinfo", _fake_fetch_google_userinfo)
+
+    resp = await raw_client.get(
+        "/auth/google/callback",
+        params={"code": "code-123", "state": "state-123"},
+    )
+    app.dependency_overrides.pop(auth_route._get_raw_session, None)
+
+    assert resp.status_code == 302
+    location = resp.headers["location"]
+    parsed = urlparse(location)
+    query = parse_qs(parsed.query)
+    assert location.startswith("http://frontend.test/auth/error?")
+    assert query["error"] == ["email_not_registered"]
+    assert query["message"] == ["Acesso negado. Seu email não está cadastrado no sistema."]
+
+
+async def test_google_callback_redirects_invalid_state_to_frontend_error(
+    raw_client: AsyncClient,
+    db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from api.routes import auth as auth_route
+
+    async def _fake_redis_get(key: str) -> None:
+        assert key == "google_oauth_state:state-expired"
+        return None
+
+    app.dependency_overrides[auth_route._get_raw_session] = _make_db_override(db)
+    monkeypatch.setattr(auth_route.settings, "FRONTEND_URL", "http://frontend.test")
+    monkeypatch.setattr(auth_route.settings, "GOOGLE_CLIENT_ID", "google-client-id")
+    monkeypatch.setattr(auth_route.settings, "GOOGLE_CLIENT_SECRET", "google-client-secret")
+    monkeypatch.setattr(auth_route.redis_client, "get", _fake_redis_get)
+
+    resp = await raw_client.get(
+        "/auth/google/callback",
+        params={"code": "code-123", "state": "state-expired"},
+    )
+    app.dependency_overrides.pop(auth_route._get_raw_session, None)
+
+    assert resp.status_code == 302
+    location = resp.headers["location"]
+    parsed = urlparse(location)
+    query = parse_qs(parsed.query)
+    assert location.startswith("http://frontend.test/auth/error?")
+    assert query["error"] == ["invalid_state"]
+
+
+async def test_google_callback_redirects_google_access_denied_to_frontend_error(
+    raw_client: AsyncClient,
+    db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from api.routes import auth as auth_route
+
+    app.dependency_overrides[auth_route._get_raw_session] = _make_db_override(db)
+    monkeypatch.setattr(auth_route.settings, "FRONTEND_URL", "http://frontend.test")
+
+    resp = await raw_client.get(
+        "/auth/google/callback",
+        params={
+            "state": "state-123",
+            "error": "access_denied",
+            "error_description": "O usuario cancelou a autenticacao.",
+        },
+    )
+    app.dependency_overrides.pop(auth_route._get_raw_session, None)
+
+    assert resp.status_code == 302
+    location = resp.headers["location"]
+    parsed = urlparse(location)
+    query = parse_qs(parsed.query)
+    assert location.startswith("http://frontend.test/auth/error?")
+    assert query["error"] == ["oauth_access_denied"]
 
 
 # ── Helper ────────────────────────────────────────────────────────────
