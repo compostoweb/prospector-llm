@@ -109,7 +109,7 @@ def _make_cadence(tenant_id: uuid.UUID) -> Cadence:
         name="Cadência Manual",
         is_active=True,
         llm_provider="openai",
-        llm_model="gpt-4o-mini",
+        llm_model="gpt-5.4-mini",
         steps_template=[
             {"channel": "linkedin_connect", "step_number": 1},
             {"channel": "linkedin_dm", "step_number": 2},

@@ -68,6 +68,23 @@ export interface CadenceABStepResult {
   isError: boolean
 }
 
+export interface CadenceDeliveryBudgetItem {
+  channel: string
+  scope_type: string
+  scope_label: string
+  configured_limit: number
+  daily_budget: number
+  used_today: number
+  remaining_today: number
+  usage_pct: number
+}
+
+export interface CadenceDeliveryBudget {
+  cadence_id: string
+  generated_at: string
+  items: CadenceDeliveryBudgetItem[]
+}
+
 export function useCadenceAnalytics(cadenceId: string, days = 30) {
   const { data: session } = useSession()
 
@@ -147,5 +164,22 @@ export function useCadenceOverview() {
     },
     staleTime: 60 * 1000,
     enabled: !!session?.accessToken,
+  })
+}
+
+export function useCadenceDeliveryBudget(cadenceId: string) {
+  const { data: session } = useSession()
+
+  return useQuery({
+    queryKey: ["cadences", cadenceId, "delivery-budget"],
+    queryFn: async (): Promise<CadenceDeliveryBudget> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.GET(`/cadences/${cadenceId}/delivery-budget` as never)
+      if (error) throw new Error("Falha ao carregar orçamento operacional da cadência")
+      return data as CadenceDeliveryBudget
+    },
+    staleTime: 60 * 1000,
+    refetchInterval: 2 * 60 * 1000,
+    enabled: !!session?.accessToken && !!cadenceId,
   })
 }

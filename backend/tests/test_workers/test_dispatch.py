@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -122,9 +122,9 @@ def _matches_criterion(obj: object, criterion: object) -> bool:
     expected_value = getattr(criterion.right, "value", criterion.right)
 
     if criterion.operator is operators.eq:
-        return current_value == expected_value
+        return cast(bool, current_value == expected_value)
     if criterion.operator is operators.is_:
-        return current_value is expected_value or current_value == expected_value
+        return cast(bool, current_value is expected_value or current_value == expected_value)
 
     return True
 
@@ -210,7 +210,7 @@ def _make_cadence(tenant_id: uuid.UUID) -> Cadence:
         name="Cadência Teste",
         is_active=True,
         llm_provider="openai",
-        llm_model="gpt-4o-mini",
+        llm_model="gpt-5.4-mini",
         llm_temperature=0.7,
         llm_max_tokens=512,
     )
@@ -508,9 +508,54 @@ async def test_dispatch_email_manual_template_body_is_used(
     assert result["status"] == "sent"
     composer_instance.compose_email.assert_not_awaited()
     call_kwargs = mock_unipile.send_email.call_args.kwargs
-    assert call_kwargs["subject"].startswith("Uma ideia para")
-    assert "Olá João" in call_kwargs["body_html"]
+    assert call_kwargs["subject"] == "Acme Corp: processo manual ou automatizado?"
+    assert "Oi João" in call_kwargs["body_html"]
     assert "Acme Corp" in call_kwargs["body_html"]
+
+
+async def test_dispatch_email_plain_text_body_is_wrapped_as_html(
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    tenant,
+) -> None:
+    from workers.dispatch import _dispatch_async
+
+    lead = _make_lead(tenant_id, email_corporate="joao@acme.com")
+    cadence = _make_cadence(tenant_id)
+    step = _make_step(tenant_id, lead.id, cadence.id, channel=Channel.EMAIL)
+    db.add_all([lead, cadence, step])
+    await db.flush()
+
+    with (
+        patch("workers.dispatch.get_worker_session", new=_mock_worker_session(db)),
+        patch("workers.dispatch.context_fetcher") as mock_ctx,
+        patch("workers.dispatch.AIComposer") as mock_composer_cls,
+        patch("workers.dispatch.unipile_client") as mock_unipile,
+        patch("workers.dispatch.LLMRegistry"),
+        patch("workers.dispatch.redis_client", new=_mock_redis()),
+    ):
+        mock_ctx.fetch_from_website = AsyncMock(return_value=None)
+        mock_ctx.search_company = AsyncMock(return_value=None)
+
+        composer_instance = MagicMock()
+        composer_instance.compose_email = AsyncMock(
+            return_value=(
+                "Assunto gerado",
+                "Oi João,\n\nVi um ponto manual na operação.\nQueria sua leitura.",
+            )
+        )
+        mock_composer_cls.return_value = composer_instance
+
+        mock_unipile.send_email = AsyncMock(return_value=_send_result("email_msg_html"))
+
+        task_mock = _make_task_mock()
+        result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
+
+    assert result["status"] == "sent"
+    assert mock_unipile.send_email.call_args is not None
+    body_html = mock_unipile.send_email.call_args.kwargs["body_html"]
+    assert "<p>Oi João,</p>" in body_html
+    assert "<p>Vi um ponto manual na operação.<br />Queria sua leitura.</p>" in body_html
 
 
 async def test_dispatch_email_account_uses_from_name_and_signature(
@@ -560,7 +605,7 @@ async def test_dispatch_email_account_uses_from_name_and_signature(
         result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
 
     assert result["status"] == "sent"
-    call_kwargs = send_mock.await_args.kwargs
+    call_kwargs = cast(Any, send_mock.await_args).kwargs
     assert call_kwargs["from_name"] == "Adriano Valadao"
     assert "Assinatura importada" in call_kwargs["body_html"]
     assert "/track/open/" in call_kwargs["body_html"]

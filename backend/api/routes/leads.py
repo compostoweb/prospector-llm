@@ -17,6 +17,7 @@ Endpoints:
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from importlib import import_module
 from typing import Annotated, Any, cast
 
@@ -29,10 +30,11 @@ from sqlalchemy.orm import selectinload
 from api.dependencies import get_effective_tenant_id, get_session_flexible
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
-from models.enums import LeadSource, LeadStatus
+from models.enums import Channel, LeadSource, LeadStatus
 from models.interaction import Interaction
 from models.lead import Lead
 from models.lead_list import LeadList
+from models.manual_task import ManualTask
 from schemas.interaction import InteractionListResponse, InteractionResponse
 from schemas.lead import (
     LeadCreateRequest,
@@ -50,7 +52,7 @@ from schemas.lead import (
     LeadStepResponse,
     LeadUpdateRequest,
 )
-from services.cadence_manager import CadenceManager
+from services.cadence_manager import CadenceManager, get_template_step_config
 from services.lead_generation import preview_generated_leads
 from services.lead_management import (
     additional_lead_email_specs,
@@ -62,6 +64,7 @@ from services.lead_management import (
     get_lead_with_lists,
     get_or_create_list,
     merge_leads,
+    reload_lead_for_output,
     replace_lead_email_records,
     serialize_lead,
 )
@@ -216,9 +219,7 @@ async def create_lead(
         enrichment_task.delay(str(lead.id), str(tenant_id))
         logger.info("lead.enrich_queued", lead_id=str(lead.id))
 
-    lead_with_lists = await get_lead_with_lists(lead.id, tenant_id, db)
-    if lead_with_lists is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead não encontrado.")
+    lead_with_lists = await reload_lead_for_output(db, lead=lead)
     return serialize_lead(lead_with_lists)
 
 
@@ -382,7 +383,7 @@ async def update_lead(
         lead.score = float(lead_scorer.score(lead))
 
     await db.commit()
-    lead = await _get_lead_or_404(lead_id, tenant_id, db)
+    lead = await reload_lead_for_output(db, lead=lead)
 
     logger.info("lead.updated", lead_id=str(lead_id), fields=list(updates.keys()))
     return serialize_lead(lead)
@@ -564,9 +565,21 @@ async def list_lead_steps(
             CadenceStep.lead_id == lead_id,
             CadenceStep.tenant_id == tenant_id,
         )
-        .order_by(CadenceStep.step_number.asc())
+        .options(selectinload(CadenceStep.cadence))
+        .order_by(CadenceStep.scheduled_at.asc(), CadenceStep.step_number.asc())
     )
     steps = steps_result.scalars().all()
+
+    manual_tasks_result = await db.execute(
+        select(ManualTask)
+        .where(
+            ManualTask.lead_id == lead_id,
+            ManualTask.tenant_id == tenant_id,
+        )
+        .options(selectinload(ManualTask.cadence))
+        .order_by(ManualTask.created_at.asc())
+    )
+    manual_tasks = manual_tasks_result.scalars().all()
 
     # Busca interactions outbound/inbound para enriquecer os steps
     interactions_result = await db.execute(
@@ -586,12 +599,20 @@ async def list_lead_steps(
         bucket = outbound_by_channel if ix.direction.value == "outbound" else inbound_by_channel
         bucket.setdefault(ix.channel.value, []).append(ix)
 
-    result: list[LeadStepResponse] = []
+    timeline_items: list[tuple[datetime, LeadStepResponse]] = []
     outbound_idx: dict[str, int] = {}
     inbound_idx: dict[str, int] = {}
 
     for step in steps:
         ch = step.channel.value
+        cadence = step.cadence
+        step_config = get_template_step_config(cadence, step.step_number) if cadence else None
+        manual_task_type = _normalize_manual_task_type(
+            step_config.get("manual_task_type") if step_config else None
+        )
+        manual_task_detail = _normalize_manual_task_detail(
+            step_config.get("manual_task_detail") if step_config else None
+        )
         # Match outbound message to step (in order)
         ob_list = outbound_by_channel.get(ch, [])
         ob_i = outbound_idx.get(ch, 0)
@@ -612,25 +633,87 @@ async def list_lead_steps(
             intent = interaction_intent.value if interaction_intent is not None else None
             inbound_idx[ch] = ib_i + 1
 
-        result.append(
-            LeadStepResponse(
-                id=step.id,
-                lead_id=step.lead_id,
-                cadence_id=step.cadence_id,
-                step_number=step.step_number,
-                channel=ch,
-                status=step.status.value,
-                use_voice=step.use_voice,
-                day_offset=step.day_offset,
-                scheduled_at=step.scheduled_at,
-                sent_at=step.sent_at,
-                message_content=message_content,
-                reply_content=reply_content,
-                intent=intent,
+        if step.channel == Channel.MANUAL_TASK and not message_content:
+            message_content = manual_task_detail
+
+        timeline_items.append(
+            (
+                step.sent_at or step.scheduled_at,
+                LeadStepResponse(
+                    id=step.id,
+                    lead_id=step.lead_id,
+                    cadence_id=step.cadence_id,
+                    step_number=step.step_number,
+                    channel=ch,
+                    status=step.status.value,
+                    item_kind="manual_task"
+                    if step.channel == Channel.MANUAL_TASK
+                    else "cadence_step",
+                    use_voice=step.use_voice,
+                    day_offset=step.day_offset,
+                    scheduled_at=step.scheduled_at,
+                    sent_at=step.sent_at,
+                    message_content=message_content,
+                    reply_content=reply_content,
+                    intent=intent,
+                    manual_task_type=manual_task_type,
+                    manual_task_detail=manual_task_detail,
+                ),
             )
         )
 
-    return result
+    for task in manual_tasks:
+        cadence = task.cadence
+        step_config = get_template_step_config(cadence, task.step_number) if cadence else None
+        message_content = task.edited_text or task.generated_text or None
+        manual_task_detail = _normalize_manual_task_detail(
+            step_config.get("manual_task_detail") if step_config else None
+        )
+        if not message_content and manual_task_detail:
+            message_content = manual_task_detail
+
+        timeline_items.append(
+            (
+                task.sent_at or task.created_at,
+                LeadStepResponse(
+                    id=task.id,
+                    lead_id=task.lead_id,
+                    cadence_id=task.cadence_id,
+                    step_number=task.step_number,
+                    channel=task.channel.value,
+                    status=task.status.value,
+                    item_kind="manual_task",
+                    use_voice=bool(task.generated_audio_url),
+                    day_offset=0,
+                    scheduled_at=task.created_at,
+                    sent_at=task.sent_at,
+                    message_content=message_content,
+                    manual_task_id=task.id,
+                    manual_task_type=_normalize_manual_task_type(
+                        step_config.get("manual_task_type") if step_config else None
+                    ),
+                    manual_task_detail=manual_task_detail,
+                    notes=task.notes,
+                ),
+            )
+        )
+
+    timeline_items.sort(key=lambda item: item[0].timestamp())
+    return [entry for _, entry in timeline_items]
+
+
+def _normalize_manual_task_type(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _normalize_manual_task_detail(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 # ── Importação em lote ────────────────────────────────────────────────
@@ -669,9 +752,15 @@ async def import_leads(
     # Cria ou resolve a lista de destino
     target_list_id: uuid.UUID | None = None
     if body.list_name:
-        target_list = await get_or_create_list(db, tenant_id=tenant_id, list_name=body.list_name)
+        target_list = await get_or_create_list(
+            db,
+            tenant_id=tenant_id,
+            list_id=None,
+            create_list_name=body.list_name,
+        )
         await db.flush()
-        target_list_id = target_list.id
+        if target_list is not None:
+            target_list_id = target_list.id
     elif body.list_id:
         list_result = await db.execute(
             select(LeadList).where(

@@ -71,6 +71,7 @@ from services.email_finder import _PERSONAL_DOMAINS
 from services.lead_management import (
     build_lead_email_specs,
     preferred_lead_email,
+    reload_lead_for_output,
     replace_lead_email_records,
 )
 from services.llm_config import resolve_tenant_llm_config
@@ -580,7 +581,7 @@ async def quick_create_lead(
         ),
     )
     await db.commit()
-    await db.refresh(lead)
+    lead_with_emails = await reload_lead_for_output(db, lead=lead)
 
     logger.info(
         "inbox.lead_created",
@@ -590,15 +591,15 @@ async def quick_create_lead(
     )
     return ConversationLeadResponse(
         has_lead=True,
-        lead_id=lead.id,
-        name=lead.name,
-        company=lead.company,
-        job_title=lead.job_title,
-        linkedin_url=lead.linkedin_url,
-        email_corporate=lead.email_corporate,
-        email_personal=lead.email_personal,
-        emails=[LeadEmailSummary.model_validate(email) for email in lead.emails],
-        status=lead.status,
+        lead_id=lead_with_emails.id,
+        name=lead_with_emails.name,
+        company=lead_with_emails.company,
+        job_title=lead_with_emails.job_title,
+        linkedin_url=lead_with_emails.linkedin_url,
+        email_corporate=lead_with_emails.email_corporate,
+        email_personal=lead_with_emails.email_personal,
+        emails=[LeadEmailSummary.model_validate(email) for email in lead_with_emails.emails],
+        status=lead_with_emails.status,
         pending_tasks_count=0,
         attendee_name=first_att.name if first_att else None,
         attendee_profile_url=first_att.profile_url if first_att else None,

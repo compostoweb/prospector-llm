@@ -90,26 +90,16 @@ class RedisClient:
             await redis.expire(key, ttl)
         return int(current)
 
-    async def ping(self) -> bool:
-        try:
-            return await self._get_redis().ping()
-        except Exception:
-            return False
-
-    # ── Rate limiting ─────────────────────────────────────────────────
-
-    async def check_and_increment(
+    async def check_and_increment_key(
         self,
-        channel: str,
-        tenant_id: uuid.UUID,
+        key: str,
         limit: int,
+        ttl: int = 86400,
     ) -> bool:
         """
-        Incrementa o contador do canal para o tenant hoje.
-        Retorna True se ainda está abaixo do limite (envio permitido).
-        Retorna False se atingiu ou superou o limite (envio bloqueado).
+        Incrementa um contador arbitrário com teto e TTL.
+        Retorna True se a reserva foi aceita, False se o limite já foi atingido.
         """
-        key = f"ratelimit:{tenant_id}:{channel}:{date.today()}"
         redis = self._get_redis()
         current = await cast(
             Awaitable[Any],
@@ -135,27 +125,46 @@ class RedisClient:
                 1,
                 key,
                 str(limit),
-                "86400",
+                str(ttl),
             ),
         )
-        current = int(current)
-        allowed = current <= limit
+        return int(current) <= limit
+
+    async def ping(self) -> bool:
+        try:
+            return await self._get_redis().ping()
+        except Exception:
+            return False
+
+    # ── Rate limiting ─────────────────────────────────────────────────
+
+    async def check_and_increment(
+        self,
+        channel: str,
+        tenant_id: uuid.UUID,
+        limit: int,
+    ) -> bool:
+        """
+        Incrementa o contador do canal para o tenant hoje.
+        Retorna True se ainda está abaixo do limite (envio permitido).
+        Retorna False se atingiu ou superou o limite (envio bloqueado).
+        """
+        key = f"ratelimit:{tenant_id}:{channel}:{date.today()}"
+        allowed = await self.check_and_increment_key(key, limit=limit, ttl=86400)
         if not allowed:
             logger.warning(
                 "rate_limit.exceeded",
                 channel=channel,
                 tenant_id=str(tenant_id),
-                current=current,
                 limit=limit,
             )
         return allowed
 
-    async def release_rate_limit(self, channel: str, tenant_id: uuid.UUID) -> int:
+    async def release_rate_limit_key(self, key: str) -> int:
         """
-        Libera uma reserva de rate limit quando um envio enfileirado termina sem sucesso.
+        Libera uma reserva previamente criada para uma chave arbitrária.
         Nunca deixa o contador ficar negativo.
         """
-        key = f"ratelimit:{tenant_id}:{channel}:{date.today()}"
         redis = self._get_redis()
         current = await cast(
             Awaitable[Any],
@@ -180,6 +189,14 @@ class RedisClient:
             ),
         )
         return int(current)
+
+    async def release_rate_limit(self, channel: str, tenant_id: uuid.UUID) -> int:
+        """
+        Libera uma reserva de rate limit quando um envio enfileirado termina sem sucesso.
+        Nunca deixa o contador ficar negativo.
+        """
+        key = f"ratelimit:{tenant_id}:{channel}:{date.today()}"
+        return await self.release_rate_limit_key(key)
 
     # ── Cache genérico ────────────────────────────────────────────────
 

@@ -107,7 +107,7 @@ class Settings(BaseSettings):
 
     # ── LLM — OpenAI ──────────────────────────────────────────────────
     OPENAI_API_KEY: str | None = None
-    OPENAI_DEFAULT_MODEL: str = "gpt-4o-mini"
+    OPENAI_DEFAULT_MODEL: str = "gpt-5.4-mini"
 
     # ── LLM — Gemini ──────────────────────────────────────────────────
     GEMINI_API_KEY: str | None = None
@@ -122,7 +122,7 @@ class Settings(BaseSettings):
 
     # ── LLM — Reply parser (fallback legado de compatibilidade) ───────
     REPLY_PARSER_PROVIDER: str = "openai"
-    REPLY_PARSER_MODEL: str = "gpt-4o-mini"
+    REPLY_PARSER_MODEL: str = "gpt-5.4-mini"
 
     # ── LLM — Budget diário por tenant (proteção contra loop) ────────
     LLM_DAILY_BUDGET_TOKENS: int = 500_000
@@ -269,7 +269,7 @@ class Settings(BaseSettings):
         description="Provider LLM para geração de posts (openai | gemini).",
     )
     CONTENT_GEN_MODEL: str = Field(
-        default="gpt-4o-mini",
+        default="gpt-5.4-mini",
         description="Modelo LLM para geração de posts.",
     )
     CONTENT_PUBLIC_BASE_URL: str = Field(

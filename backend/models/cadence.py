@@ -3,7 +3,7 @@ models/cadence.py  (trecho relevante — campos LLM adicionados)
 
 Cada cadência agora carrega sua própria configuração de LLM:
   - llm_provider:  "openai" | "gemini"
-  - llm_model:     ID do modelo (ex: "gpt-4o-mini", "gemini-2.5-flash")
+    - llm_model:     ID do modelo (ex: "gpt-5.4-mini", "gemini-2.5-flash")
   - llm_temperature: float 0.0–1.0
   - llm_max_tokens:  int
 
@@ -23,7 +23,7 @@ from models.base import Base, TenantMixin, TimestampMixin
 
 # Defaults globais — usados quando cadência não sobrescreve
 DEFAULT_LLM_PROVIDER = "openai"
-DEFAULT_LLM_MODEL = "gpt-4o-mini"
+DEFAULT_LLM_MODEL = "gpt-5.4-mini"
 DEFAULT_TEMPERATURE = 0.7
 DEFAULT_MAX_TOKENS = 1024
 
@@ -65,7 +65,7 @@ class Cadence(Base, TenantMixin, TimestampMixin):
         String(100),
         default=DEFAULT_LLM_MODEL,
         server_default=DEFAULT_LLM_MODEL,
-        comment="ID do modelo (ex: gpt-4o-mini, gemini-2.5-flash)",
+        comment="ID do modelo (ex: gpt-5.4-mini, gemini-2.5-flash)",
     )
     llm_temperature: Mapped[float] = mapped_column(
         Float,

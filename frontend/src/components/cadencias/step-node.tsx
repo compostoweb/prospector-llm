@@ -26,6 +26,8 @@ export interface StepNodeData {
   stepType: StepType | null
   dayOffset: number
   messageTemplate: string
+  manualTaskType: string | null
+  manualTaskDetail: string | null
   audioFileId: string | null
   emailTemplateId: string | null
   useVoice: boolean
@@ -166,26 +168,33 @@ export const StepNode = memo(function StepNode({ data }: NodeProps) {
   const cfg = CHANNEL_CONFIG[d.channel] ?? CHANNEL_CONFIG.email
   const stepTypeLabel = d.stepType ? STEP_TYPE_LABELS[d.stepType] : null
   const hasManualText = d.messageTemplate.trim().length > 0
+  const hasManualTaskDetail = (d.manualTaskDetail ?? "").trim().length > 0
   const supportingLabel = d.useVoice
     ? d.audioFileId
       ? "Audio gravado selecionado"
       : hasManualText
         ? "Mensagem via TTS"
         : "Audio sera gerado automaticamente"
-    : d.emailTemplateId
-      ? "Template salvo"
-      : hasManualText
-        ? "Conteudo manual"
-        : "Conteudo automatico"
+    : d.channel === "manual_task"
+      ? d.manualTaskType
+        ? `Tarefa: ${d.manualTaskType}`
+        : "Tarefa manual"
+      : d.emailTemplateId
+        ? "Template salvo"
+        : hasManualText
+          ? "Conteudo manual"
+          : "Conteudo automatico"
 
   const previewText =
-    d.useVoice && d.audioFileId
-      ? "Audio gravado pronto para envio"
-      : d.messageTemplate
-        ? truncate(d.messageTemplate, 110)
-        : d.emailTemplateId
-          ? "Template salvo selecionado"
-          : null
+    d.channel === "manual_task"
+      ? d.manualTaskDetail || null
+      : d.useVoice && d.audioFileId
+        ? "Audio gravado pronto para envio"
+        : d.messageTemplate
+          ? truncate(d.messageTemplate, 110)
+          : d.emailTemplateId
+            ? "Template salvo selecionado"
+            : null
 
   const statusBadges = [
     d.channel.startsWith("linkedin")
@@ -209,25 +218,35 @@ export const StepNode = memo(function StepNode({ data }: NodeProps) {
       : null,
     d.useVoice && d.audioFileId
       ? null
-      : d.emailTemplateId
+      : d.channel === "manual_task" && d.manualTaskType
         ? {
-            key: "template",
-            label: "Template",
-            icon: <FileText size={10} />,
-            className: "border-emerald-200 bg-emerald-50 text-emerald-700",
-            title: "O conteudo deste passo vem de um template salvo.",
+            key: "manual-task-type",
+            label: d.manualTaskType,
+            icon: <ClipboardList size={10} />,
+            className: "border-amber-200 bg-amber-50 text-amber-700",
+            title: hasManualTaskDetail
+              ? (d.manualTaskDetail ?? undefined)
+              : "Tipo operacional desta tarefa manual.",
           }
-        : hasManualText
+        : d.emailTemplateId
           ? {
-              key: "texto",
-              label: "Texto",
+              key: "template",
+              label: "Template",
               icon: <FileText size={10} />,
-              className: "border-slate-200 bg-white text-slate-600",
-              title: d.useVoice
-                ? "Este texto sera usado como roteiro para gerar o audio via TTS."
-                : "Este passo usa texto configurado manualmente.",
+              className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+              title: "O conteudo deste passo vem de um template salvo.",
             }
-          : null,
+          : hasManualText
+            ? {
+                key: "texto",
+                label: "Texto",
+                icon: <FileText size={10} />,
+                className: "border-slate-200 bg-white text-slate-600",
+                title: d.useVoice
+                  ? "Este texto sera usado como roteiro para gerar o audio via TTS."
+                  : "Este passo usa texto configurado manualmente.",
+              }
+            : null,
     d.isInvalid
       ? {
           key: "alerta",

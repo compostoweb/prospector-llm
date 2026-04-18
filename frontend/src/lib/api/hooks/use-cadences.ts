@@ -45,6 +45,37 @@ export interface CadenceStep {
   subject_variants?: string[] | null
   email_template_id?: string | null
   layout?: CadenceStepLayout | null
+  manual_task_type?: "call" | "linkedin_post_comment" | "whatsapp" | "other" | null
+  manual_task_detail?: string | null
+}
+
+export interface CadenceTemplateVariable {
+  key: string
+  token: string
+  label: string
+}
+
+export interface ComposeCadenceStepResult {
+  action: "generate" | "improve"
+  channel: CadenceChannel
+  step_number: number
+  step_type: StepType | null
+  message_template: string
+  subject: string | null
+  variables: string[]
+  method: string
+}
+
+export interface CadenceStepPreviewResult {
+  channel: CadenceChannel
+  step_number: number
+  lead_id: string | null
+  lead_name: string | null
+  subject: string | null
+  body: string
+  body_is_html: boolean
+  variables: string[]
+  method: string
 }
 
 export interface Cadence {
@@ -162,6 +193,81 @@ export function useCadence(id: string) {
   })
 }
 
+export function useCadenceTemplateVariables() {
+  const { data: session } = useSession()
+
+  return useQuery({
+    queryKey: ["cadences", "template-variables"],
+    queryFn: async (): Promise<CadenceTemplateVariable[]> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.GET("/cadences/template-variables" as never)
+      if (error) throw new Error("Falha ao carregar variáveis do template")
+      return (data as CadenceTemplateVariable[]) ?? []
+    },
+    staleTime: 5 * 60 * 1000,
+    enabled: !!session?.accessToken,
+  })
+}
+
+export function useCadenceStepPreview({
+  cadenceId,
+  stepIndex,
+  channel,
+  leadId,
+  currentText,
+  currentSubject,
+  currentEmailTemplateId,
+}: {
+  cadenceId: string
+  stepIndex: number
+  channel: CadenceChannel
+  leadId?: string | null
+  currentText?: string | null
+  currentSubject?: string | null
+  currentEmailTemplateId?: string | null
+}) {
+  const { data: session } = useSession()
+
+  return useQuery({
+    queryKey: [
+      "cadences",
+      cadenceId,
+      "step-preview",
+      stepIndex,
+      channel,
+      leadId ?? "template",
+      currentText ?? "",
+      currentSubject ?? "",
+      currentEmailTemplateId ?? "",
+    ],
+    queryFn: async (): Promise<CadenceStepPreviewResult> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.POST(
+        `/cadences/${cadenceId}/steps/${stepIndex}/preview` as never,
+        {
+          body: {
+            lead_id: leadId ?? null,
+            current_text: currentText ?? null,
+            current_subject: currentSubject ?? null,
+            current_email_template_id: currentEmailTemplateId ?? null,
+          } as never,
+        },
+      )
+      if (error) {
+        throw new Error(extractApiErrorMessage(error, "Falha ao renderizar prévia do passo"))
+      }
+      return data as CadenceStepPreviewResult
+    },
+    enabled:
+      !!session?.accessToken &&
+      !!cadenceId &&
+      stepIndex >= 0 &&
+      channel !== "manual_task" &&
+      channel !== "linkedin_post_reaction",
+    staleTime: 0,
+  })
+}
+
 // ── Mutations ─────────────────────────────────────────────────────────
 
 export function useCreateCadence() {
@@ -202,6 +308,42 @@ export function useUpdateCadence() {
     onSuccess: (cadence) => {
       void queryClient.invalidateQueries({ queryKey: ["cadences", cadence.id] })
       void queryClient.invalidateQueries({ queryKey: ["cadences"] })
+    },
+  })
+}
+
+export function useComposeCadenceStep() {
+  const { data: session } = useSession()
+
+  return useMutation({
+    mutationFn: async ({
+      cadenceId,
+      stepIndex,
+      action,
+      currentText,
+      currentSubject,
+    }: {
+      cadenceId: string
+      stepIndex: number
+      action: "generate" | "improve"
+      currentText?: string | null
+      currentSubject?: string | null
+    }): Promise<ComposeCadenceStepResult> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.POST(
+        `/cadences/${cadenceId}/steps/${stepIndex}/compose` as never,
+        {
+          body: {
+            action,
+            current_text: currentText ?? null,
+            current_subject: currentSubject ?? null,
+          } as never,
+        },
+      )
+      if (error) {
+        throw new Error(extractApiErrorMessage(error, "Falha ao gerar conteúdo do passo"))
+      }
+      return data as ComposeCadenceStepResult
     },
   })
 }

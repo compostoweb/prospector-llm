@@ -2,7 +2,7 @@
 import { BadgeIntent } from "@/components/shared/badge-intent"
 import { BadgeChannel } from "@/components/shared/badge-channel"
 import { EmptyState } from "@/components/shared/empty-state"
-import { Clock } from "lucide-react"
+import { ClipboardList, Clock } from "lucide-react"
 import type { LeadStep } from "@/lib/api/hooks/use-leads"
 
 const stepStatusLabel: Record<LeadStep["status"], string> = {
@@ -11,6 +11,8 @@ const stepStatusLabel: Record<LeadStep["status"], string> = {
   replied: "Respondido",
   skipped: "Ignorado",
   failed: "Falhou",
+  content_generated: "Conteúdo gerado",
+  done_external: "Executado fora do sistema",
 }
 
 const stepStatusClass: Record<LeadStep["status"], string> = {
@@ -19,6 +21,15 @@ const stepStatusClass: Record<LeadStep["status"], string> = {
   replied: "bg-(--success-subtle) text-(--success-subtle-fg)",
   skipped: "bg-(--neutral-subtle) text-(--text-disabled)",
   failed: "bg-(--danger-subtle) text-(--danger-subtle-fg)",
+  content_generated: "bg-(--info-subtle) text-(--info-subtle-fg)",
+  done_external: "bg-(--success-subtle) text-(--success-subtle-fg)",
+}
+
+const manualTaskTypeLabel: Record<string, string> = {
+  call: "Ligação",
+  linkedin_post_comment: "Comentário em post",
+  whatsapp: "WhatsApp",
+  other: "Outro",
 }
 
 interface LeadTimelineProps {
@@ -64,15 +75,21 @@ export function LeadTimeline({ steps, isLoading }: LeadTimelineProps) {
             >
               {step.step_number}
             </div>
-            {index < steps.length - 1 && (
-              <div className="mt-1 h-full w-px bg-(--border-subtle)" />
-            )}
+            {index < steps.length - 1 && <div className="mt-1 h-full w-px bg-(--border-subtle)" />}
           </div>
 
           {/* Conteúdo */}
           <div className="min-w-0 flex-1 pb-4">
             <div className="flex flex-wrap items-center gap-2">
               <BadgeChannel channel={step.channel} />
+              {step.item_kind === "manual_task" && (
+                <span className="inline-flex items-center gap-1 rounded-(--radius-full) border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                  <ClipboardList size={11} aria-hidden="true" />
+                  {step.manual_task_type
+                    ? (manualTaskTypeLabel[step.manual_task_type] ?? step.manual_task_type)
+                    : "Tarefa manual"}
+                </span>
+              )}
               <span
                 className={`inline-flex rounded-(--radius-full) px-2 py-0.5 text-xs font-medium ${stepStatusClass[step.status]}`}
               >
@@ -87,8 +104,24 @@ export function LeadTimeline({ steps, isLoading }: LeadTimelineProps) {
 
             {step.message_content && (
               <div className="mt-2 rounded-md border border-(--border-subtle) bg-(--bg-overlay) px-3 py-2">
-                <p className="text-xs leading-relaxed text-(--text-secondary)">
+                {step.item_kind === "manual_task" && (
+                  <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-(--text-tertiary)">
+                    Descrição da tarefa
+                  </p>
+                )}
+                <p className="whitespace-pre-wrap text-xs leading-relaxed text-(--text-secondary)">
                   {step.message_content}
+                </p>
+              </div>
+            )}
+
+            {step.item_kind === "manual_task" && step.notes && (
+              <div className="mt-2 rounded-md border border-amber-100 bg-amber-50 px-3 py-2">
+                <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-amber-700">
+                  Observações da execução
+                </p>
+                <p className="whitespace-pre-wrap text-xs leading-relaxed text-amber-800">
+                  {step.notes}
                 </p>
               </div>
             )}
@@ -98,7 +131,7 @@ export function LeadTimeline({ steps, isLoading }: LeadTimelineProps) {
                 <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-(--success-subtle-fg)">
                   Resposta
                 </p>
-                <p className="text-xs leading-relaxed text-(--text-secondary)">
+                <p className="whitespace-pre-wrap text-xs leading-relaxed text-(--text-secondary)">
                   {step.reply_content}
                 </p>
                 {step.intent && (

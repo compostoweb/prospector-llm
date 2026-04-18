@@ -12,6 +12,30 @@ from __future__ import annotations
 
 from models.email_template import EmailTemplate
 
+TEMPLATE_VARIABLE_CATALOG: tuple[tuple[str, str], ...] = (
+    ("lead_name", "Nome completo"),
+    ("name", "Nome completo"),
+    ("first_name", "Primeiro nome"),
+    ("last_name", "Sobrenome"),
+    ("company", "Empresa"),
+    ("job_title", "Cargo"),
+    ("industry", "Setor"),
+    ("city", "Cidade"),
+    ("location", "Localização"),
+    ("segment", "Segmento"),
+    ("company_domain", "Domínio da empresa"),
+    ("website", "Website"),
+    ("email", "Email"),
+)
+
+
+def get_template_variable_catalog() -> list[dict[str, str]]:
+    """Retorna o catálogo serializável de placeholders permitidos."""
+    return [
+        {"key": key, "token": f"{{{key}}}", "label": label}
+        for key, label in TEMPLATE_VARIABLE_CATALOG
+    ]
+
 
 def build_lead_template_context(lead: object) -> dict[str, str]:
     """Monta contexto textual seguro para renderização de templates."""
@@ -32,7 +56,10 @@ def build_lead_template_context(lead: object) -> dict[str, str]:
         "segment": _get_attr(lead, "segment") or _get_attr(lead, "industry") or "Segmento",
         "company_domain": _get_attr(lead, "company_domain") or "empresa.com",
         "website": _get_attr(lead, "website") or "https://empresa.com",
-        "email": _get_attr(lead, "email_corporate") or _get_attr(lead, "email_personal") or _get_attr(lead, "email") or "",
+        "email": _get_attr(lead, "email_corporate")
+        or _get_attr(lead, "email_personal")
+        or _get_attr(lead, "email")
+        or "",
     }
 
 

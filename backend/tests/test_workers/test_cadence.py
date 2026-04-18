@@ -31,6 +31,7 @@ from sqlalchemy.sql.elements import BinaryExpression, BooleanClauseList
 
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
+from models.email_account import EmailAccount
 from models.enums import Channel, LeadStatus, StepStatus
 from models.lead import Lead
 from models.tenant import Tenant
@@ -135,15 +136,14 @@ def _matches_criterion(obj: object, criterion: object) -> bool:
     if not hasattr(obj, field_name):
         return True
 
-    current_value = cast(object, getattr(obj, field_name, None))
+    current_value: Any = getattr(obj, field_name, None)
     expected_value_raw = getattr(criterion.right, "value", criterion.right)
     expected_class_name = type(expected_value_raw).__name__
+    expected_value = cast(Any, expected_value_raw)
     if expected_class_name == "True_":
-        expected_value = True
+        expected_value = cast(Any, True)
     elif expected_class_name == "False_":
-        expected_value = False
-    else:
-        expected_value = cast(object, expected_value_raw)
+        expected_value = cast(Any, False)
 
     if criterion.operator is operators.eq:
         return current_value == expected_value  # type: ignore[return-value]
@@ -205,7 +205,7 @@ def _make_cadence(tenant_id: uuid.UUID) -> Cadence:
         name="Cadência Tick",
         is_active=True,
         llm_provider="openai",
-        llm_model="gpt-4o-mini",
+        llm_model="gpt-5.4-mini",
     )
 
 
@@ -253,6 +253,20 @@ def _mock_worker_session_local(db: FakeAsyncSession | None, tenants: list[Tenant
     return MagicMock(return_value=mock_root_session)
 
 
+def _configure_rate_limit_mocks(
+    mock_redis: MagicMock,
+    *,
+    tenant_allowed: bool = True,
+    account_allowed: bool = True,
+    budget_value: str | None = None,
+) -> None:
+    mock_redis.check_and_increment = AsyncMock(return_value=tenant_allowed)
+    mock_redis.get = AsyncMock(return_value=budget_value)
+    mock_redis.set_if_absent = AsyncMock(return_value=True)
+    mock_redis.check_and_increment_key = AsyncMock(return_value=account_allowed)
+    mock_redis.release_rate_limit = AsyncMock(return_value=0)
+
+
 # ── Testes ────────────────────────────────────────────────────────────
 
 
@@ -283,7 +297,7 @@ async def test_tick_dispatches_pending_steps(
             yield db
 
         mock_get_session.side_effect = _fake_session
-        mock_redis.check_and_increment = AsyncMock(return_value=True)
+        _configure_rate_limit_mocks(mock_redis)
         mock_dispatch.delay = MagicMock()
 
         result = await _tick_async()
@@ -320,7 +334,7 @@ async def test_tick_skips_lead_not_in_cadence(
             yield db
 
         mock_get_session.side_effect = _fake_session
-        mock_redis.check_and_increment = AsyncMock(return_value=True)
+        _configure_rate_limit_mocks(mock_redis)
         mock_dispatch.delay = MagicMock()
 
         result = await _tick_async()
@@ -364,7 +378,7 @@ async def test_tick_does_not_dispatch_future_steps(
             yield db
 
         mock_get_session.side_effect = _fake_session
-        mock_redis.check_and_increment = AsyncMock(return_value=True)
+        _configure_rate_limit_mocks(mock_redis)
         mock_dispatch.delay = MagicMock()
 
         result = await _tick_async()
@@ -400,8 +414,7 @@ async def test_tick_rate_limited_step_not_dispatched(
             yield db
 
         mock_get_session.side_effect = _fake_session
-        # Rate limit esgotado para este canal
-        mock_redis.check_and_increment = AsyncMock(return_value=False)
+        _configure_rate_limit_mocks(mock_redis, tenant_allowed=False)
         mock_dispatch.delay = MagicMock()
 
         result = await _tick_async()
@@ -454,7 +467,7 @@ async def test_tick_uses_tenant_specific_rate_limit(
             yield db
 
         mock_get_session.side_effect = _fake_session
-        mock_redis.check_and_increment = AsyncMock(return_value=True)
+        _configure_rate_limit_mocks(mock_redis)
         mock_dispatch.delay = MagicMock()
 
         await _tick_async()
@@ -464,6 +477,98 @@ async def test_tick_uses_tenant_specific_rate_limit(
         tenant_id=tenant_id,
         limit=77,
     )
+
+
+async def test_tick_uses_account_daily_budget_for_email_account(
+    db: FakeAsyncSession,
+    tenant_id: uuid.UUID,
+    tenant: Tenant,
+) -> None:
+    from workers.cadence import _tick_async
+
+    lead = _make_lead(tenant_id)
+    cadence = _make_cadence(tenant_id)
+    cadence.email_account_id = uuid.uuid4()
+    step = _make_step(
+        tenant_id,
+        lead.id,
+        cadence.id,
+        channel=Channel.EMAIL,
+    )
+    email_account = EmailAccount(
+        id=cadence.email_account_id,
+        tenant_id=tenant_id,
+        display_name="Conta principal",
+        email_address="sender@example.com",
+        provider_type="smtp",
+        daily_send_limit=25,
+    )
+    db.add_all([lead, cadence, step, email_account])
+    await db.flush()
+
+    mock_wsl = _mock_worker_session_local(db, [tenant])
+
+    with (
+        patch("workers.cadence.WorkerSessionLocal", mock_wsl),
+        patch("workers.cadence.get_worker_session") as mock_get_session,
+        patch("workers.cadence.redis_client") as mock_redis,
+        patch("workers.cadence.random.randint", return_value=23),
+        patch("workers.dispatch.dispatch_step") as mock_dispatch,
+    ):
+
+        async def _fake_session(_tid):
+            yield db
+
+        mock_get_session.side_effect = _fake_session
+        _configure_rate_limit_mocks(mock_redis, budget_value=None)
+        mock_dispatch.delay = MagicMock()
+
+        result = await _tick_async()
+
+    assert result["dispatched"] == 1
+    mock_redis.check_and_increment_key.assert_called_once()
+    _, kwargs = mock_redis.check_and_increment_key.call_args
+    assert kwargs["limit"] == 23
+    assert str(cadence.email_account_id) in mock_redis.check_and_increment_key.call_args.args[0]
+
+
+async def test_tick_releases_tenant_slot_when_account_budget_is_exhausted(
+    db: FakeAsyncSession,
+    tenant_id: uuid.UUID,
+    tenant: Tenant,
+) -> None:
+    from workers.cadence import _tick_async
+
+    lead = _make_lead(tenant_id)
+    cadence = _make_cadence(tenant_id)
+    cadence.linkedin_account_id = uuid.uuid4()
+    step = _make_step(tenant_id, lead.id, cadence.id, channel=Channel.LINKEDIN_DM)
+    db.add_all([lead, cadence, step])
+    await db.flush()
+
+    mock_wsl = _mock_worker_session_local(db, [tenant])
+
+    with (
+        patch("workers.cadence.WorkerSessionLocal", mock_wsl),
+        patch("workers.cadence.get_worker_session") as mock_get_session,
+        patch("workers.cadence.redis_client") as mock_redis,
+        patch("workers.cadence.random.randint", return_value=34),
+        patch("workers.dispatch.dispatch_step") as mock_dispatch,
+    ):
+
+        async def _fake_session(_tid):
+            yield db
+
+        mock_get_session.side_effect = _fake_session
+        _configure_rate_limit_mocks(mock_redis, account_allowed=False, budget_value=None)
+        mock_dispatch.delay = MagicMock()
+
+        result = await _tick_async()
+
+    assert result["dispatched"] == 0
+    mock_dispatch.delay.assert_not_called()
+    mock_redis.release_rate_limit.assert_awaited_once_with(Channel.LINKEDIN_DM.value, tenant_id)
+    assert step.status == StepStatus.PENDING
 
 
 async def test_tick_returns_correct_counts(
@@ -497,7 +602,7 @@ async def test_tick_returns_correct_counts(
             yield db
 
         mock_get_session.side_effect = _fake_session
-        mock_redis.check_and_increment = AsyncMock(return_value=True)
+        _configure_rate_limit_mocks(mock_redis)
         mock_dispatch.delay = MagicMock()
 
         result = await _tick_async()

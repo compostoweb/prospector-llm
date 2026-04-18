@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useDeferredValue, useEffect, useRef, useState } from "react"
 import { motion } from "framer-motion"
 import {
   X,
@@ -13,8 +13,17 @@ import {
   Play,
   Loader2,
   Music,
+  Sparkles,
+  Wand2,
 } from "lucide-react"
-import type { CadenceChannel, CadenceStep, StepType } from "@/lib/api/hooks/use-cadences"
+import {
+  useCadenceTemplateVariables,
+  useCadenceStepPreview,
+  useComposeCadenceStep,
+  type CadenceChannel,
+  type CadenceStep,
+  type StepType,
+} from "@/lib/api/hooks/use-cadences"
 import type { AudioFile } from "@/lib/api/hooks/use-audio-files"
 import type { EmailTemplate } from "@/lib/api/hooks/use-email-templates"
 import type { LeadListLeadItem } from "@/lib/api/hooks/use-lead-lists"
@@ -25,6 +34,7 @@ import { cn } from "@/lib/utils"
 // ─── Tipos ────────────────────────────────────────────────────────────
 
 interface StepEditorSidebarProps {
+  cadenceId: string
   step: CadenceStep
   index: number
   onUpdate: (field: keyof CadenceStep, value: unknown) => void
@@ -111,7 +121,8 @@ const STEP_TYPE_OPTIONS: Record<string, { value: StepType; label: string }[]> = 
 }
 
 const TEMPLATE_VARIABLES = [
-  { token: "{lead_name}", label: "Nome" },
+  { token: "{lead_name}", label: "Nome completo" },
+  { token: "{name}", label: "Nome completo" },
   { token: "{first_name}", label: "Primeiro nome" },
   { token: "{last_name}", label: "Sobrenome" },
   { token: "{company}", label: "Empresa" },
@@ -120,29 +131,38 @@ const TEMPLATE_VARIABLES = [
   { token: "{city}", label: "Cidade" },
   { token: "{location}", label: "Localização" },
   { token: "{segment}", label: "Segmento" },
+  { token: "{company_domain}", label: "Domínio" },
+  { token: "{website}", label: "Website" },
+  { token: "{email}", label: "Email" },
 ] as const
 
-function resolveTemplate(template: string, lead?: LeadListLeadItem): string {
-  if (!lead) return template
-  const nameParts = (lead.name ?? "").split(" ")
-  const replacements: Record<string, string> = {
-    "{lead_name}": lead.name ?? "Lead",
-    "{first_name}": nameParts[0] ?? "Lead",
-    "{last_name}": nameParts.slice(1).join(" ") || "Sobrenome",
-    "{company}": lead.company ?? "Empresa",
-    "{job_title}": lead.job_title ?? "Cargo",
-    "{industry}": "Tecnologia",
-    "{city}": "São Paulo",
-    "{location}": "Brasil",
-    "{segment}": "B2B",
-    "{company_domain}": "empresa.com",
-    "{website}": "https://empresa.com",
-  }
-  let resolved = template
-  for (const [token, value] of Object.entries(replacements)) {
-    resolved = resolved.replaceAll(token, value)
-  }
-  return resolved
+const MANUAL_TASK_OPTIONS = [
+  { value: "call", label: "Ligação" },
+  { value: "linkedin_post_comment", label: "Comentário em post" },
+  { value: "whatsapp", label: "WhatsApp" },
+  { value: "other", label: "Outro" },
+] as const
+
+type ComposerCopy = {
+  sectionTitle: string
+  fieldLabel: string
+  fieldHint: string
+  placeholder: string
+  generateLabel: string
+  improveLabel: string
+  progressLabel: string
+  previewBodyLabel: string
+  advisory?: string
+}
+
+function findUnknownTokens(template: string, validTokens: Set<string>): string[] {
+  const matches = template.match(/\{[a-z_]+\}/gi) ?? []
+  return [...new Set(matches.filter((token) => !validTokens.has(token)))]
+}
+
+function labelForManualTaskType(value: string | null | undefined): string | null {
+  const match = MANUAL_TASK_OPTIONS.find((item) => item.value === value)
+  return match?.label ?? value ?? null
 }
 
 function serializeSubjectVariants(variants?: string[] | null): string {
@@ -155,6 +175,68 @@ function parseSubjectVariants(value: string): string[] | null {
     .map((s) => s.trim())
     .filter(Boolean)
   return items.length > 0 ? items : null
+}
+
+function getComposerCopy(channel: CadenceChannel, hasEmailTemplate: boolean): ComposerCopy {
+  if (channel === "linkedin_post_comment") {
+    return {
+      sectionTitle: "Comentário do post",
+      fieldLabel: "Rascunho do comentário",
+      fieldHint:
+        "Use um comentário curto, contextual e sem pitch direto. O ideal é soar como interação natural com o post.",
+      placeholder:
+        "Excelente ponto sobre distribuição. Curti especialmente a parte de priorizar clareza antes de escalar.",
+      generateLabel: "Gerar comentário",
+      improveLabel: "Lapidar comentário",
+      progressLabel: "Gerando comentário com IA…",
+      previewBodyLabel: "Comentário",
+      advisory:
+        "A prévia abaixo reflete o comentário já renderizado para o lead escolhido. Mantenha 1 a 2 frases e evite CTA agressivo.",
+    }
+  }
+
+  if (channel === "linkedin_inmail") {
+    return {
+      sectionTitle: "InMail",
+      fieldLabel: "Rascunho do InMail",
+      fieldHint:
+        "A IA gera assunto e corpo. Se você escrever manualmente, mantenha a abertura curta e uma única proposta de valor.",
+      placeholder:
+        "Assunto: Ideia rápida para a equipe da {company}\n\nOlá {first_name}, vi seu contexto na {company} e pensei em uma abordagem simples para...",
+      generateLabel: "Gerar InMail",
+      improveLabel: "Lapidar InMail",
+      progressLabel: "Gerando InMail com IA…",
+      previewBodyLabel: "Corpo do InMail",
+      advisory:
+        "Para InMail, o preview mostra assunto e corpo separados quando a IA devolve a estrutura completa do canal.",
+    }
+  }
+
+  if (channel === "email") {
+    return {
+      sectionTitle: "Mensagem",
+      fieldLabel: hasEmailTemplate ? "Corpo manual (fallback)" : "Template da mensagem",
+      fieldHint: hasEmailTemplate
+        ? "Usado se o template salvo for removido"
+        : "Se preencher, o backend usa este corpo e pula a geração por IA",
+      placeholder: "Olá {first_name}, vi que você trabalha na {company}…",
+      generateLabel: "Gerar com IA",
+      improveLabel: "Melhorar texto",
+      progressLabel: "Gerando assunto e corpo com IA…",
+      previewBodyLabel: "Corpo",
+    }
+  }
+
+  return {
+    sectionTitle: "Mensagem",
+    fieldLabel: "Template da mensagem",
+    fieldHint: "Se preencher, substitui a geração por IA",
+    placeholder: "Olá {first_name}, vi que você trabalha na {company}…",
+    generateLabel: "Gerar com IA",
+    improveLabel: "Melhorar texto",
+    progressLabel: "Gerando texto com IA…",
+    previewBodyLabel: "Corpo",
+  }
 }
 
 // ─── Componentes de suporte ───────────────────────────────────────────
@@ -189,6 +271,7 @@ function SidebarField({
 // ─── Componente principal ─────────────────────────────────────────────
 
 export function StepEditorSidebar({
+  cadenceId,
   step,
   index,
   onUpdate,
@@ -205,18 +288,57 @@ export function StepEditorSidebar({
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [isPreviewing, setIsPreviewing] = useState(false)
   const [recentUploadedAudio, setRecentUploadedAudio] = useState<AudioFile | null>(null)
+  const [selectedPreviewLeadId, setSelectedPreviewLeadId] = useState<string>("")
   const testTTS = useTestTTS()
+  const composeStep = useComposeCadenceStep()
+  const templateVariablesQuery = useCadenceTemplateVariables()
 
   const stepTypeOptions = STEP_TYPE_OPTIONS[step.channel] ?? []
-  const previewLead = leads?.[0]
-  const resolvedPreview = step.message_template
-    ? resolveTemplate(step.message_template, previewLead)
-    : ""
+  const templateVariables =
+    templateVariablesQuery.data && templateVariablesQuery.data.length > 0
+      ? templateVariablesQuery.data
+      : TEMPLATE_VARIABLES
+  const validTemplateTokens = new Set(templateVariables.map((item) => item.token))
+  const unknownTokens = step.message_template
+    ? findUnknownTokens(step.message_template, validTemplateTokens)
+    : []
+  const isComposableChannel =
+    step.channel !== "manual_task" && step.channel !== "linkedin_post_reaction"
+  const previewLead = leads?.find((lead) => lead.id === selectedPreviewLeadId) ?? leads?.[0] ?? null
+  const deferredPreviewLeadId = useDeferredValue(selectedPreviewLeadId || previewLead?.id || "")
+  const deferredMessageTemplate = useDeferredValue(step.message_template)
+  const deferredPreviewSubject = useDeferredValue(step.subject_variants?.[0] ?? null)
+  const deferredEmailTemplateId = useDeferredValue(step.email_template_id ?? null)
+
+  useEffect(() => {
+    if (!leads || leads.length === 0) {
+      if (selectedPreviewLeadId) {
+        setSelectedPreviewLeadId("")
+      }
+      return
+    }
+
+    const stillExists = leads.some((lead) => lead.id === selectedPreviewLeadId)
+    if (!selectedPreviewLeadId || !stillExists) {
+      setSelectedPreviewLeadId(leads[0]?.id ?? "")
+    }
+  }, [leads, selectedPreviewLeadId])
+
+  const previewQuery = useCadenceStepPreview({
+    cadenceId,
+    stepIndex: index,
+    channel: step.channel,
+    leadId: deferredPreviewLeadId || null,
+    currentText: deferredMessageTemplate,
+    currentSubject: deferredPreviewSubject,
+    currentEmailTemplateId: deferredEmailTemplateId,
+  })
 
   const selectedEmailTemplate =
     step.channel === "email"
       ? (emailTemplates.find((t) => t.id === step.email_template_id) ?? null)
       : null
+  const composerCopy = getComposerCopy(step.channel, Boolean(selectedEmailTemplate))
   const availableAudioFiles = recentUploadedAudio
     ? [
         recentUploadedAudio,
@@ -256,15 +378,43 @@ export function StepEditorSidebar({
     }
   }
 
+  const handleCompose = useCallback(
+    async (action: "generate" | "improve") => {
+      const result = await composeStep.mutateAsync({
+        cadenceId,
+        stepIndex: index,
+        action,
+        currentText: step.message_template,
+        currentSubject: step.subject_variants?.[0] ?? null,
+      })
+
+      onUpdate("message_template", result.message_template)
+      if (step.channel === "email") {
+        onUpdate("email_template_id", null)
+        onUpdate("subject_variants", result.subject ? [result.subject] : null)
+      }
+    },
+    [
+      cadenceId,
+      composeStep,
+      index,
+      onUpdate,
+      step.channel,
+      step.message_template,
+      step.subject_variants,
+    ],
+  )
+
   const handlePreviewTTS = useCallback(async () => {
-    if (!step.message_template || !ttsProvider || !ttsVoiceId) return
+    if (!ttsProvider || !ttsVoiceId) return
+    const previewText = previewQuery.data?.body || step.message_template
+    if (!previewText) return
     setIsPreviewing(true)
     try {
-      const resolved = resolveTemplate(step.message_template, previewLead)
       const blob = await testTTS.mutateAsync({
         provider: ttsProvider,
         voice_id: ttsVoiceId,
-        text: resolved,
+        text: previewText,
         speed: ttsSpeed ?? 1.0,
         pitch: ttsPitch ?? 0.0,
       })
@@ -277,7 +427,15 @@ export function StepEditorSidebar({
     } finally {
       setIsPreviewing(false)
     }
-  }, [step.message_template, ttsProvider, ttsVoiceId, ttsSpeed, ttsPitch, previewLead, testTTS])
+  }, [
+    previewQuery.data?.body,
+    step.message_template,
+    ttsProvider,
+    ttsVoiceId,
+    ttsSpeed,
+    ttsPitch,
+    testTTS,
+  ])
 
   const handleRecordedAudioUploaded = useCallback(
     (audioFile: AudioFile) => {
@@ -463,41 +621,146 @@ export function StepEditorSidebar({
                   className="w-full resize-none rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-[--text-primary] placeholder:text-gray-400 transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
                 />
               </SidebarField>
+
+              {composeStep.isPending && step.channel === "email" && (
+                <p className="text-[11px] text-blue-600">{composerCopy.progressLabel}</p>
+              )}
+            </SidebarSection>
+          </div>
+        )}
+
+        {step.channel === "manual_task" && (
+          <div className="space-y-4 px-4 py-4">
+            <SidebarSection title="Tarefa manual">
+              <SidebarField
+                label="Tipo da tarefa"
+                hint="Esse tipo aparece no canvas e no histórico do lead após a execução"
+              >
+                <select
+                  value={step.manual_task_type ?? ""}
+                  onChange={(e) => onUpdate("manual_task_type", e.target.value || null)}
+                  aria-label="Tipo da tarefa manual"
+                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-[--text-primary] transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                >
+                  <option value="">Selecione um tipo</option>
+                  {MANUAL_TASK_OPTIONS.map(({ value, label }) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </SidebarField>
+
+              <SidebarField
+                label="Detalhamento"
+                hint="Instruções operacionais para quem vai executar esse passo"
+              >
+                <textarea
+                  value={step.manual_task_detail ?? ""}
+                  onChange={(e) => onUpdate("manual_task_detail", e.target.value || null)}
+                  rows={4}
+                  placeholder="Ex.: ligar entre 10h e 12h, citar o último post do lead e convidar para conversar."
+                  className="w-full resize-none rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-[--text-primary] placeholder:text-gray-400 transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                />
+              </SidebarField>
+
+              {(step.manual_task_type || step.manual_task_detail) && (
+                <div className="rounded-lg border border-amber-100 bg-amber-50 p-3 text-[11px] text-amber-800">
+                  <p className="font-semibold">
+                    {labelForManualTaskType(step.manual_task_type) ?? "Tarefa manual"}
+                  </p>
+                  {step.manual_task_detail && (
+                    <p className="mt-1 whitespace-pre-wrap text-amber-700">
+                      {step.manual_task_detail}
+                    </p>
+                  )}
+                </div>
+              )}
             </SidebarSection>
           </div>
         )}
 
         {/* ── Seção: Mensagem ── */}
-        {step.channel !== "manual_task" && (
+        {step.channel === "linkedin_post_reaction" && (
           <div className="space-y-4 px-4 py-4">
-            <SidebarSection title="Mensagem">
-              <SidebarField
-                label={
-                  step.channel === "email" && selectedEmailTemplate
-                    ? "Corpo manual (fallback)"
-                    : "Template da mensagem"
-                }
-                hint={
-                  step.channel === "email"
-                    ? selectedEmailTemplate
-                      ? "Usado se o template salvo for removido"
-                      : "Se preencher, o backend usa este corpo e pula a geração por IA"
-                    : "Se preencher, substitui a geração por IA"
-                }
-              >
+            <SidebarSection title="Reação em post">
+              <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-[11px] text-blue-800">
+                <p className="font-semibold">Este passo não gera texto.</p>
+                <p className="mt-1 text-blue-700">
+                  O dispatch só registra a reação no post recente do lead. Use comentário ou InMail
+                  quando precisar de copy editorial neste ponto da cadência.
+                </p>
+              </div>
+            </SidebarSection>
+          </div>
+        )}
+
+        {step.channel !== "manual_task" && step.channel !== "linkedin_post_reaction" && (
+          <div className="space-y-4 px-4 py-4">
+            <SidebarSection title={composerCopy.sectionTitle}>
+              {composerCopy.advisory && (
+                <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-[11px] text-blue-800">
+                  {composerCopy.advisory}
+                </div>
+              )}
+
+              <SidebarField label={composerCopy.fieldLabel} hint={composerCopy.fieldHint}>
                 <textarea
                   ref={textareaRef}
                   value={step.message_template}
                   onChange={(e) => onUpdate("message_template", e.target.value)}
                   rows={5}
-                  placeholder="Olá {first_name}, vi que você trabalha na {company}…"
+                  placeholder={composerCopy.placeholder}
                   className="w-full resize-none rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-[--text-primary] placeholder:text-gray-400 transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
                 />
               </SidebarField>
 
+              {isComposableChannel && (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleCompose("generate")}
+                    disabled={composeStep.isPending}
+                    className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700 transition-colors hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {composeStep.isPending ? (
+                      <Loader2 size={13} className="animate-spin" />
+                    ) : (
+                      <Sparkles size={13} />
+                    )}
+                    {composerCopy.generateLabel}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => void handleCompose("improve")}
+                    disabled={composeStep.isPending || !step.message_template.trim()}
+                    className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 transition-colors hover:border-blue-300 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {composeStep.isPending ? (
+                      <Loader2 size={13} className="animate-spin" />
+                    ) : (
+                      <Wand2 size={13} />
+                    )}
+                    {composerCopy.improveLabel}
+                  </button>
+                </div>
+              )}
+
+              {step.channel === "email" && selectedEmailTemplate && (
+                <p className="text-[11px] text-amber-600">
+                  Gerar com IA remove o template salvo deste passo e passa a usar o texto manual
+                  gerado.
+                </p>
+              )}
+
+              {composeStep.error instanceof Error && (
+                <p className="text-[11px] text-rose-600">{composeStep.error.message}</p>
+              )}
+
               {/* Pills de variáveis */}
               <div className="flex flex-wrap gap-1">
-                {TEMPLATE_VARIABLES.map(({ token, label }) => (
+                {templateVariables.map(({ token, label }) => (
                   <button
                     key={token}
                     type="button"
@@ -509,13 +772,75 @@ export function StepEditorSidebar({
                 ))}
               </div>
 
-              {/* Preview resolvido */}
-              {resolvedPreview && previewLead && (
+              {unknownTokens.length > 0 && (
+                <div className="rounded-lg border border-rose-100 bg-rose-50 p-3 text-[11px] text-rose-700">
+                  <p className="font-semibold">Variáveis não reconhecidas</p>
+                  <p className="mt-1">{unknownTokens.join(", ")}</p>
+                </div>
+              )}
+
+              <SidebarField
+                label="Lead da prévia"
+                hint="A prévia agora é renderizada pelo backend com o mesmo motor usado no envio"
+              >
+                <select
+                  value={selectedPreviewLeadId}
+                  onChange={(e) => setSelectedPreviewLeadId(e.target.value)}
+                  aria-label="Lead usado na prévia do passo"
+                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-[--text-primary] transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                >
+                  {leads && leads.length > 0 ? (
+                    leads.map((lead) => (
+                      <option key={lead.id} value={lead.id}>
+                        {lead.name} {lead.company ? `· ${lead.company}` : ""}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">Lead de exemplo do sistema</option>
+                  )}
+                </select>
+              </SidebarField>
+
+              {previewQuery.isPending && (
+                <p className="text-[11px] text-blue-600">Renderizando prévia real…</p>
+              )}
+
+              {previewQuery.error instanceof Error && (
+                <p className="text-[11px] text-rose-600">{previewQuery.error.message}</p>
+              )}
+
+              {previewQuery.data && (previewQuery.data.body || previewQuery.data.subject) && (
                 <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-[11px]">
                   <p className="font-semibold text-blue-800">
-                    Prévia com {previewLead.name ?? "lead de exemplo"}
+                    Prévia real com {previewQuery.data.lead_name ?? "lead de exemplo"}
                   </p>
-                  <p className="mt-1.5 whitespace-pre-wrap text-blue-700">{resolvedPreview}</p>
+
+                  {previewQuery.data.subject && (
+                    <div className="mt-2 rounded-md border border-blue-200 bg-white/70 px-2.5 py-2 text-blue-900">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-500">
+                        Assunto
+                      </p>
+                      <p className="mt-1 whitespace-pre-wrap font-medium">
+                        {previewQuery.data.subject}
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="mt-2 rounded-md border border-blue-200 bg-white/70 px-2.5 py-2 text-blue-800">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-500">
+                      {composerCopy.previewBodyLabel}
+                    </p>
+                    {previewQuery.data.body_is_html ? (
+                      <div
+                        className="prose prose-sm mt-1 max-w-none text-blue-800"
+                        dangerouslySetInnerHTML={{ __html: previewQuery.data.body }}
+                      />
+                    ) : (
+                      <p className="mt-1 whitespace-pre-wrap text-blue-700">
+                        {previewQuery.data.body}
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
             </SidebarSection>
@@ -592,9 +917,10 @@ export function StepEditorSidebar({
                             <>
                               <Play size={13} />
                               Testar TTS
-                              {previewLead && (
+                              {(previewQuery.data?.lead_name || previewLead?.name) && (
                                 <span className="text-gray-400">
-                                  (com {previewLead.name ?? "lead"})
+                                  (com {previewQuery.data?.lead_name ?? previewLead?.name ?? "lead"}
+                                  )
                                 </span>
                               )}
                             </>

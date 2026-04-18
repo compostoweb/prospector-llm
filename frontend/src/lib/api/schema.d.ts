@@ -5518,8 +5518,8 @@ export interface components {
       provider: string
       /**
        * Model
-       * @description ID do modelo. Ex: gpt-4o-mini, gemini-2.5-flash, claude-haiku-4-5
-       * @default gpt-4o-mini
+       * @description ID do modelo. Ex: gpt-5.4-mini, gemini-2.5-flash, claude-haiku-4-5
+       * @default gpt-5.4-mini
        */
       model: string
       /**

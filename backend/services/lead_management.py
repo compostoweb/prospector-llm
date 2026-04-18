@@ -99,9 +99,17 @@ async def get_lead_with_lists(
     result = await db.execute(
         select(Lead)
         .where(Lead.id == lead_id, Lead.tenant_id == tenant_id)
+        .execution_options(populate_existing=True)
         .options(selectinload(Lead.lists), selectinload(Lead.emails))  # type: ignore[arg-type]
     )
     return result.scalar_one_or_none()
+
+
+async def reload_lead_for_output(db: AsyncSession, *, lead: Lead) -> Lead:
+    refreshed = await get_lead_with_lists(lead.id, lead.tenant_id, db)
+    if refreshed is None:
+        raise RuntimeError(f"Lead {lead.id} não encontrado após recarga para output.")
+    return refreshed
 
 
 async def find_existing_lead(
@@ -123,6 +131,7 @@ async def find_existing_lead(
         result = await db.execute(
             select(Lead)
             .where(getattr(Lead, field_name) == value, Lead.tenant_id == tenant_id)
+            .execution_options(populate_existing=True)
             .options(selectinload(Lead.lists), selectinload(Lead.emails))  # type: ignore[arg-type]
             .limit(1)
         )
@@ -139,6 +148,7 @@ async def find_existing_lead(
                 Lead.tenant_id == tenant_id,
                 LeadEmail.email == email,
             )
+            .execution_options(populate_existing=True)
             .options(selectinload(Lead.lists), selectinload(Lead.emails))  # type: ignore[arg-type]
             .limit(1)
         )
@@ -235,23 +245,40 @@ async def replace_lead_email_records(
     normalized_specs = _dedupe_email_specs(list(specs))
     _sync_primary_email_fields(lead, normalized_specs)
 
-    await db.execute(delete(LeadEmail).where(LeadEmail.lead_id == lead.id))
+    existing_result = await db.execute(
+        select(LeadEmail)
+        .where(LeadEmail.lead_id == lead.id)
+        .execution_options(populate_existing=True)
+    )
+    existing_records = existing_result.scalars().all()
+    existing_by_email = {record.email.casefold(): record for record in existing_records}
 
-    new_records: list[LeadEmail] = []
     for spec in normalized_specs:
-        record = LeadEmail(
-            tenant_id=lead.tenant_id,
-            lead_id=lead.id,
-            email=spec["email"],
-            email_type=spec["email_type"],
-            source=spec["source"],
-            verified=spec["verified"],
-            is_primary=spec["is_primary"],
-        )
-        db.add(record)
-        new_records.append(record)
+        email_key = spec["email"].casefold()
+        record = existing_by_email.pop(email_key, None)
+        if record is None:
+            db.add(
+                LeadEmail(
+                    tenant_id=lead.tenant_id,
+                    lead_id=lead.id,
+                    email=spec["email"],
+                    email_type=spec["email_type"],
+                    source=spec["source"],
+                    verified=spec["verified"],
+                    is_primary=spec["is_primary"],
+                )
+            )
+            continue
 
-    lead.emails = new_records
+        record.tenant_id = lead.tenant_id
+        record.lead_id = lead.id
+        record.email_type = spec["email_type"]
+        record.source = spec["source"]
+        record.verified = spec["verified"]
+        record.is_primary = spec["is_primary"]
+
+    for stale_record in existing_by_email.values():
+        await db.delete(stale_record)
 
 
 def preferred_lead_email(lead: Lead | None) -> str | None:
@@ -369,10 +396,7 @@ async def merge_leads(
         await db.delete(secondary)
 
     await db.commit()
-    refreshed = await get_lead_with_lists(primary.id, tenant_id, db)
-    if refreshed is None:
-        raise RuntimeError("Lead principal não encontrado após merge.")
-    return refreshed
+    return await reload_lead_for_output(db, lead=primary)
 
 
 def candidate_origin_label(source: str) -> str:

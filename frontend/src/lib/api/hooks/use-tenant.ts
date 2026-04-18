@@ -139,14 +139,14 @@ export interface TenantLLMConfig {
 
 export const DEFAULT_SYSTEM_LLM_CONFIG: TenantLLMConfig = {
   llm_provider: "openai",
-  llm_model: "gpt-4o-mini",
+  llm_model: "gpt-5.4-mini",
   llm_temperature: 0.7,
   llm_max_tokens: 1024,
 }
 
 export const DEFAULT_COLD_EMAIL_LLM_CONFIG: TenantLLMConfig = {
   llm_provider: "openai",
-  llm_model: "gpt-4o-mini",
+  llm_model: "gpt-5.4-mini",
   llm_temperature: 0.7,
   llm_max_tokens: 512,
 }

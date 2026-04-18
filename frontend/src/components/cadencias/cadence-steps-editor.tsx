@@ -55,6 +55,8 @@ export function CadenceStepsEditor({ cadence }: CadenceStepsEditorProps) {
         subject_variants: null,
         email_template_id: null,
         layout: null,
+        manual_task_type: null,
+        manual_task_detail: null,
       }
       const updated = [...steps, newStep]
       setSteps(updated)
@@ -75,6 +77,8 @@ export function CadenceStepsEditor({ cadence }: CadenceStepsEditorProps) {
         subject_variants: null,
         email_template_id: null,
         layout: null,
+        manual_task_type: null,
+        manual_task_detail: null,
       }
       const updated = [...steps.slice(0, afterIndex + 1), newStep, ...steps.slice(afterIndex + 1)]
       setSteps(updated)
@@ -150,6 +154,10 @@ export function CadenceStepsEditor({ cadence }: CadenceStepsEditorProps) {
             if (value !== "email") {
               next.email_template_id = null
               next.subject_variants = null
+            }
+            if (value !== "manual_task") {
+              next.manual_task_type = null
+              next.manual_task_detail = null
             }
             next.step_type = null
           }
@@ -295,6 +303,7 @@ export function CadenceStepsEditor({ cadence }: CadenceStepsEditorProps) {
           {selectedStep !== null && selectedIndex !== null && (
             <StepEditorSidebar
               key={`sidebar-${selectedIndex}`}
+              cadenceId={cadence.id}
               step={selectedStep}
               index={selectedIndex}
               onUpdate={handleUpdateStep}

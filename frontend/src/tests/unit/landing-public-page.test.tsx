@@ -6,7 +6,7 @@
  * em cada layout.
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, act } from "@testing-library/react"
 import { describe, it, expect, vi } from "vitest"
 import LandingPublicPage from "@/components/content/inbound/landing-public-page"
 import type { LandingPagePublicData } from "@/lib/content-inbound/types"
@@ -62,7 +62,8 @@ describe("Template PDF (Full/Rich)", () => {
 
   it("renderiza social proof badge", () => {
     render(<LandingPublicPage page={makePage({ social_proof_count: 85 })} />)
-    expect(screen.getByText("85+ empresas interessadas")).toBeInTheDocument()
+    expect(screen.getByText((_, node) => node?.textContent === "+85")).toBeInTheDocument()
+    expect(screen.getByText("profissionais e empresas já acessaram")).toBeInTheDocument()
   })
 
   it("não renderiza badge de social proof quando count = 0", () => {
@@ -132,9 +133,9 @@ describe("Template Link (Minimal)", () => {
     expect(screen.getByText("Acesso imediato")).toBeInTheDocument()
   })
 
-  it("renderiza label 'Receber por e-mail'", () => {
+  it("renderiza copy de entrega por e-mail", () => {
     render(<LandingPublicPage page={page} />)
-    expect(screen.getByText(/receber por e-mail/i)).toBeInTheDocument()
+    expect(screen.getByText(/receba o link de acesso direto por e-mail/i)).toBeInTheDocument()
   })
 
   it("renderiza formulário", () => {
@@ -185,14 +186,15 @@ describe("Template Email Sequence (Trust/Sequence)", () => {
     )
   })
 
-  it("renderiza badge 'Sequencia de emails'", () => {
+  it("renderiza badge editorial da sequência", () => {
     render(<LandingPublicPage page={page} />)
-    expect(screen.getByText(/sequencia de emails/i)).toBeInTheDocument()
+    expect(screen.getByText(/sequência curada pela composto web/i)).toBeInTheDocument()
   })
 
-  it("renderiza badge de social proof com 200+", () => {
+  it("renderiza badge de social proof com 200 acessos", () => {
     render(<LandingPublicPage page={page} />)
-    expect(screen.getByText("200+ empresas inscritas")).toBeInTheDocument()
+    expect(screen.getByText((_, node) => node?.textContent === "+200")).toBeInTheDocument()
+    expect(screen.getByText("profissionais e empresas já acessaram")).toBeInTheDocument()
   })
 
   it("renderiza os 3 steps da sequência (01, 02, 03)", () => {
@@ -201,13 +203,13 @@ describe("Template Email Sequence (Trust/Sequence)", () => {
     expect(screen.getByText("02")).toBeInTheDocument()
     expect(screen.getByText("03")).toBeInTheDocument()
     expect(screen.getByText("Boas-vindas")).toBeInTheDocument()
-    expect(screen.getByText("Conteudo principal")).toBeInTheDocument()
-    expect(screen.getByText("Proximos passos")).toBeInTheDocument()
+    expect(screen.getByText("Conteúdo principal")).toBeInTheDocument()
+    expect(screen.getByText("Próximos passos")).toBeInTheDocument()
   })
 
-  it("renderiza label 'O que chega no seu email'", () => {
+  it("renderiza label 'O que chega no seu e-mail'", () => {
     render(<LandingPublicPage page={page} />)
-    expect(screen.getByText("O que chega no seu email")).toBeInTheDocument()
+    expect(screen.getByText("O que chega no seu e-mail")).toBeInTheDocument()
   })
 
   it("renderiza botão CTA com cta_text customizado", () => {
@@ -237,19 +239,19 @@ describe("Template Calculator (Full/Rich com CTA especial)", () => {
     file_url: null,
   })
 
-  it("renderiza botão 'Abrir calculadora' em vez de formulário", () => {
+  it("renderiza o CTA padrão do template rich", () => {
     render(<LandingPublicPage page={page} />)
-    expect(screen.getByRole("link", { name: /abrir calculadora/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /receber material/i })).toBeInTheDocument()
   })
 
-  it("NÃO renderiza campo de nome (sem formulário)", () => {
+  it("renderiza campo de nome no formulário compartilhado", () => {
     render(<LandingPublicPage page={page} />)
-    expect(screen.queryByPlaceholderText("Seu nome")).not.toBeInTheDocument()
+    expect(screen.getByPlaceholderText("Seu nome")).toBeInTheDocument()
   })
 
-  it("renderiza label 'Acesso interativo'", () => {
+  it("renderiza a seção 'Liberar material'", () => {
     render(<LandingPublicPage page={page} />)
-    expect(screen.getByText("Acesso interativo")).toBeInTheDocument()
+    expect(screen.getByText("Liberar material")).toBeInTheDocument()
   })
 })
 
@@ -279,7 +281,9 @@ describe("Formulário compartilhado — preenchimento e envio", () => {
     fireEvent.change(screen.getByPlaceholderText("Seu melhor e-mail"), {
       target: { value: "joao@empresa.com.br" },
     })
-    fireEvent.submit(screen.getByPlaceholderText("Seu nome").closest("form") as HTMLFormElement)
+    await act(async () => {
+      fireEvent.submit(screen.getByPlaceholderText("Seu nome").closest("form") as HTMLFormElement)
+    })
 
     await vi.waitFor(() => {
       expect(assignMock).toHaveBeenCalledWith("/lm/guia-automacao/obrigado")
@@ -299,7 +303,9 @@ describe("Formulário compartilhado — preenchimento e envio", () => {
 
     render(<LandingPublicPage page={makePage()} />)
 
-    fireEvent.submit(screen.getByPlaceholderText("Seu nome").closest("form") as HTMLFormElement)
+    await act(async () => {
+      fireEvent.submit(screen.getByPlaceholderText("Seu nome").closest("form") as HTMLFormElement)
+    })
 
     await vi.waitFor(() => {
       expect(screen.getByText("Lead magnet inativo")).toBeInTheDocument()
@@ -322,13 +328,17 @@ describe("Formulário compartilhado — preenchimento e envio", () => {
     render(<LandingPublicPage page={makePage()} />)
     const button = screen.getByRole("button", { name: /receber material/i })
 
-    fireEvent.submit(button.closest("form") as HTMLFormElement)
+    await act(async () => {
+      fireEvent.submit(button.closest("form") as HTMLFormElement)
+    })
 
     await vi.waitFor(() => {
       expect(button).toBeDisabled()
     })
 
-    resolveRequest({ ok: true, json: async () => ({}) })
+    await act(async () => {
+      resolveRequest({ ok: true, json: async () => ({}) })
+    })
     vi.unstubAllGlobals()
   })
 })

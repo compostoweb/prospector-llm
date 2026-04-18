@@ -16,6 +16,7 @@ Responsabilidades:
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -45,6 +46,11 @@ from models.sandbox import SandboxRun, SandboxStep
 from models.tenant import TenantIntegration
 from services.ai_composer import prepare_composer_messages, serialize_composition_context
 from services.cadence_manager import _resolve_template, cadence_manager, get_template_step_config
+from services.editorial_validator import (
+    serialize_editorial_validation,
+    validate_editorial_output,
+)
+from services.message_quality import normalize_email_subject, normalize_generated_text
 from services.message_template_renderer import render_message_template, render_saved_email_template
 from services.reply_parser import ReplyParser
 
@@ -73,6 +79,11 @@ def _build_sandbox_usage_context(
         secondary_entity_id=str(step_id) if run_id and step_id else None,
         metadata=metadata or {},
     )
+
+
+def _strip_html(content: str) -> str:
+    return " ".join(part for part in re.split(r"<[^>]+>", content) if part).strip()
+
 
 # ── Rate limits por canal ─────────────────────────────────────────────
 
@@ -338,7 +349,10 @@ class SandboxService:
                 step.llm_model = llm_info.get("model")
                 step.tokens_in = llm_info.get("tokens_in")
                 step.tokens_out = llm_info.get("tokens_out")
-                step.composition_context = llm_info.get("composition_context")
+                step.composition_context = {
+                    **cast(dict[str, Any], llm_info.get("composition_context") or {}),
+                    "editorial_validation": llm_info.get("editorial_validation"),
+                }
 
                 # Subject extraído do JSON LLM em _compose_step (evita segunda chamada LLM)
                 if step.channel == Channel.EMAIL:
@@ -432,7 +446,10 @@ class SandboxService:
             step.llm_model = llm_info.get("model")
             step.tokens_in = llm_info.get("tokens_in")
             step.tokens_out = llm_info.get("tokens_out")
-            step.composition_context = llm_info.get("composition_context")
+            step.composition_context = {
+                **cast(dict[str, Any], llm_info.get("composition_context") or {}),
+                "editorial_validation": llm_info.get("editorial_validation"),
+            }
 
             # Subject extraído do JSON LLM em _compose_step (evita segunda chamada LLM)
             if step.channel == Channel.EMAIL:
@@ -525,8 +542,7 @@ class SandboxService:
 
         if run.status != SandboxRunStatus.APPROVED:
             raise ValueError(
-                f"Sandbox run deve estar 'approved' para iniciar. "
-                f"Status atual: {run.status.value}"
+                f"Sandbox run deve estar 'approved' para iniciar. Status atual: {run.status.value}"
             )
 
         cadence = await db.get(Cadence, run.cadence_id)
@@ -1063,6 +1079,7 @@ class SandboxService:
             "tokens_in": None,
             "tokens_out": None,
             "composition_context": None,
+            "editorial_validation": None,
         }
 
         # Rastreia company/name para fallback do parser de email
@@ -1134,6 +1151,8 @@ class SandboxService:
             template_step.get("message_template") if template_step else None,
             lead_proxy,
         )
+        if configured_message:
+            configured_message = normalize_generated_text(configured_message)
         subject_variants = (
             cast(list[object], template_step.get("subject_variants") or []) if template_step else []
         )
@@ -1163,10 +1182,18 @@ class SandboxService:
                 ]
                 if cleaned_variants:
                     subject = cleaned_variants[0]
+                subject = normalize_email_subject(subject)
                 llm_bypassed_info["composition_context"] = {
                     **composition_context_data,
                     "generation_mode": "email_template",
                 }
+                llm_bypassed_info["editorial_validation"] = serialize_editorial_validation(
+                    validate_editorial_output(
+                        composition_context.step_key,
+                        _strip_html(body),
+                        subject=subject,
+                    )
+                )
                 return body, subject, llm_bypassed_info
 
         if configured_message:
@@ -1176,11 +1203,18 @@ class SandboxService:
                     str(item).strip() for item in subject_variants if str(item).strip()
                 ]
                 if cleaned_variants:
-                    email_subject = cleaned_variants[0]
+                    email_subject = normalize_email_subject(cleaned_variants[0])
             llm_bypassed_info["composition_context"] = {
                 **composition_context_data,
                 "generation_mode": "message_template",
             }
+            llm_bypassed_info["editorial_validation"] = serialize_editorial_validation(
+                validate_editorial_output(
+                    composition_context.step_key,
+                    configured_message,
+                    subject=email_subject,
+                )
+            )
             return configured_message, email_subject, llm_bypassed_info
 
         from integrations.llm import LLMResponse
@@ -1207,21 +1241,34 @@ class SandboxService:
             "tokens_in": response.input_tokens,
             "tokens_out": response.output_tokens,
             "composition_context": composition_context_data,
+            "editorial_validation": None,
         }
 
         # Para EMAIL: instrução já pede JSON {subject, body} — extrai aqui para evitar segunda chamada LLM
         if step.channel == Channel.EMAIL:
             from types import SimpleNamespace
 
-            from services.ai_composer import _parse_email_json
+            from services.ai_composer import parse_email_json
 
             _lead_proxy = SimpleNamespace(company=_company, name=_name)
-            email_subject, email_body = _parse_email_json(
+            email_subject, email_body = parse_email_json(
                 response.text.strip(), _lead_proxy, step.step_number
             )
-            return email_body, email_subject, llm_info
+            normalized_email_body = normalize_generated_text(email_body)
+            llm_info["editorial_validation"] = serialize_editorial_validation(
+                validate_editorial_output(
+                    composition_context.step_key,
+                    normalized_email_body,
+                    subject=email_subject,
+                )
+            )
+            return normalized_email_body, email_subject, llm_info
 
-        return response.text.strip(), None, llm_info
+        normalized_text = normalize_generated_text(response.text)
+        llm_info["editorial_validation"] = serialize_editorial_validation(
+            validate_editorial_output(composition_context.step_key, normalized_text)
+        )
+        return normalized_text, None, llm_info
 
     async def _generate_tts_preview(
         self,

@@ -19,7 +19,7 @@ def _manual_task_cadence_payload(**overrides) -> dict:
         "description": "Cadência criada pausada para testar sandbox",
         "llm": {
             "provider": "openai",
-            "model": "gpt-4o-mini",
+            "model": "gpt-5.4-mini",
             "temperature": 0.7,
             "max_tokens": 256,
         },

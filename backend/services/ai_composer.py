@@ -18,7 +18,16 @@ import structlog
 from integrations.llm import LLMMessage, LLMRegistry, LLMResponse, LLMUsageContext
 from models.cadence import Cadence
 from models.lead import Lead
-from services.outreach_playbook import PlaybookEntry, get_lead_playbook
+from services.editorial_validator import (
+    serialize_editorial_validation,
+    validate_editorial_output,
+)
+from services.message_quality import (
+    build_fallback_email_subject,
+    normalize_email_subject,
+    normalize_generated_text,
+)
+from services.outreach_playbook import PlaybookEntry, get_lead_playbook_match
 from services.sector_templates import get_few_shot_example, get_few_shot_match
 
 logger = structlog.get_logger()
@@ -35,10 +44,12 @@ class CompositionContext:
     copy_method: str | None
     playbook_sector: str | None
     playbook_role: str | None
+    playbook_match_type: str | None
     matched_role: str | None
     few_shot_applied: bool
     few_shot_key: str | None
     few_shot_method: str | None
+    few_shot_match_type: str | None
     has_site_summary: bool
     has_recent_posts: bool
 
@@ -47,6 +58,7 @@ def serialize_composition_context(context: CompositionContext) -> dict[str, obje
     """Serializa o contexto de composição para logs e APIs."""
 
     return asdict(context)
+
 
 COMPOSER_SYSTEM_PROMPT = """
 Você é um profissional sênior de desenvolvimento de negócios que atua em prospecção consultiva B2B de alto nível.
@@ -121,7 +133,6 @@ Bons exemplos de estilo:
 - "[Nome], temos [tema] como interesse em comum, gostaria de fazer parte da sua rede."
 - "[Nome], faço parte do mesmo universo de [setor]. Quero trocar informações e experiências."
 """.strip(),
-
     "linkedin_dm_first": """
 TIPO: Primeira DM LinkedIn (sem conexão prévia ou conexão antiga)
 OBJETIVO: Abrir diálogo genuíno, gerar curiosidade. Use a ABORDAGEM OBJETIVA RELACIONAL.
@@ -140,7 +151,6 @@ Regras:
 Bom exemplo de estilo:
 "[Nome], vi que a [empresa] abriu [filial/vaga/evento] recentemente. Seria útil [benefício específico] sem [dor conhecida]?"
 """.strip(),
-
     "linkedin_dm_post_connect": """
 TIPO: Primeira DM logo após convite de conexão aceito
 OBJETIVO: Agradecer e criar primeira interação de valor. Use ABORDAGEM OBJETIVA RELACIONAL ou FATIADA.
@@ -159,7 +169,6 @@ Regras:
 - PROIBIDO: vender, apresentar serviço, pedir call, discurso corporativo
 - Tom: grato mas não bajulador, curioso, de networking profissional
 """.strip(),
-
     "linkedin_dm_post_connect_voice": """
 TIPO: Áudio de boas-vindas após conexão aceita (será convertido em TTS)
 OBJETIVO: Causar impacto pessoal e memorável com formato diferenciado.
@@ -177,7 +186,6 @@ Regras:
 Exemplo de tom:
 "[Nome], valeu por conectar! Vi que a [empresa] tá fazendo um trabalho muito legal em [setor]... queria trocar uma ideia sobre [tema]. Fica à vontade pra me responder quando puder!"
 """.strip(),
-
     "linkedin_dm_voice": """
 TIPO: DM LinkedIn com áudio (será convertido em TTS)
 OBJETIVO: Gerar proximidade e se destacar pelo formato de áudio.
@@ -192,7 +200,6 @@ Regras:
 - PROIBIDO: pedir reunião, mencionar produto diretamente, se apresentar formalmente
 - Tom: próximo, executivo mas humano, como um áudio profissional entre pares
 """.strip(),
-
     "linkedin_dm_followup": """
 TIPO: Follow-up LinkedIn DM (lead não respondeu)
 OBJETIVO: Reengajar sem parecer insistente, trazendo valor novo. Use técnica FATIADA — sem pressa.
@@ -210,7 +217,6 @@ Regras:
 - PROIBIDO: "só passando para...", "voltando ao assunto", tom de cobrança, "tudo bem?"
 - Tom: útil, estratégico, como quem compartilha algo interessante com um colega
 """.strip(),
-
     "linkedin_dm_breakup": """
 TIPO: Mensagem de despedida / último contato LinkedIn
 OBJETIVO: Última tentativa elegante, porta aberta para o futuro. Use tom de NETWORKING, não de vendas.
@@ -225,7 +231,6 @@ Regras:
 - PROIBIDO: tom de culpa, manipulação, "último e-mail", urgência falsa, "estou desistindo"
 - Tom: maduro, respeitoso, como encerrar uma tentativa de networking que pode ser retomada no futuro
 """.strip(),
-
     "email_first": """
 TIPO: Primeiro email frio (cold mail)
 OBJETIVO: Captar atenção em 5 segundos, abrir conversa. A PRIMEIRA FRASE É TÃO IMPORTANTE QUANTO O ASSUNTO.
@@ -273,7 +278,6 @@ Exemplo de método BINÁRIO:
 Exemplo de método INSIGHT:
 "[Nome], a [fonte respeitada] publicou um estudo sobre [tema relevante]. Como a [empresa] tem investido forte em [área], achei que gostaria de ver. Vocês já estão mapeando [métrica] x [resultado]?"
 """.strip(),
-
     "email_followup": """
 TIPO: Follow-up por email (lead não respondeu o primeiro)
 OBJETIVO: Reengajar com conteúdo novo, demonstrar persistência inteligente. Use método DIFERENTE do anterior.
@@ -303,7 +307,6 @@ Regras:
 - Tom: consultivo, como quem compartilha inteligência de mercado entre pares
 - Use técnica de NUTRIÇÃO: informações, dados, estudos que agreguem valor real
 """.strip(),
-
     "email_breakup": """
 TIPO: Email de despedida / último contato
 OBJETIVO: Última tentativa respeitosa, criar senso de fechamento. Pode ser o método DPO ou BINÁRIO pela brevidade.
@@ -328,7 +331,6 @@ Regras:
 Exemplo de estilo:
 "[Nome], sei que [tema] talvez não seja prioridade agora. Deixo a porta aberta — quando quiser trocar uma ideia sobre [benefício real], estou por aqui. Um abraço."
 """.strip(),
-
     "linkedin_post_comment": """
 TIPO: Comentário em post recente do lead no LinkedIn
 OBJETIVO: Gerar reciprocidade e visibilidade — aparecer de forma positiva no radar do lead antes da abordagem direta.
@@ -347,7 +349,6 @@ Bons exemplos de estilo:
 "Dado importante esse sobre [X]. Na prática tenho visto [empresas do setor] adotando [Y] com resultados interessantes — curioso saber como vocês encaram isso."
 "Esse ponto sobre [tema] ressoa bastante. Exatamente o que os times de [cargo] mais sentem quando [situação]. Boa observação."
 """.strip(),
-
     "linkedin_inmail": """
 TIPO: InMail LinkedIn (mensagem para não-conexão, requer Premium)
 OBJETIVO: Primeira abordagem direta a alguém fora da rede — objetivo é iniciar diálogo genuíno.
@@ -374,18 +375,105 @@ Regras do CORPO (body):
 """.strip(),
 }
 
+_COMMON_EDITORIAL_RULES: tuple[str, ...] = (
+    'Nunca usar "Olá". Use "Oi", "Fala", "Bom dia" ou nenhum cumprimento.',
+    "Nunca usar travessão como recurso de estilo.",
+    "Nunca se apresentar no início da mensagem.",
+    "A primeira frase deve ser sobre o lead, a empresa ou o problema.",
+)
+
+_STEP_EDITORIAL_RULES: dict[str, tuple[str, ...]] = {
+    "linkedin_connect": (
+        "Trate como T1 da skill de LinkedIn: conexão e networking, sem pitch.",
+        "Máximo 170 caracteres e sem CTA comercial.",
+        "Mencione só um sinal real do contexto do lead.",
+    ),
+    "linkedin_dm_first": (
+        "Trate como abertura relacional de LinkedIn: curiosidade e conversa, não venda.",
+        "Prefira BINÁRIO ou INSIGHT; não use DIS neste estágio.",
+        "CTA obrigatoriamente de baixo atrito, sem reunião.",
+    ),
+    "linkedin_dm_post_connect": (
+        "Trate como T2 da skill: agradeça brevemente e abra conversa de valor.",
+        "Use tom relacional ou fatiado; não transforme a mensagem em pitch.",
+        "Não peça reunião nem apresente a solução diretamente.",
+    ),
+    "linkedin_dm_post_connect_voice": (
+        "Soe como fala natural e curta, sem estrutura de texto escrito.",
+        "Agradeça rápido, cite um ponto específico e encerre com convite leve.",
+    ),
+    "linkedin_dm_voice": (
+        "Priorize fluidez oral e proximidade profissional.",
+        "Evite qualquer estrutura que pareça email lido em voz alta.",
+    ),
+    "linkedin_dm_followup": (
+        "Trate como T4: novo ângulo, sem repetir a mensagem anterior.",
+        "Não use fórmulas como 'só passando' ou 'retomando o assunto'.",
+        "Traga dado, insight, notícia ou observação nova antes do CTA.",
+    ),
+    "linkedin_dm_breakup": (
+        "Trate como fechamento elegante do ciclo, sem culpa ou pressão.",
+        "Reconheça timing e deixe a porta aberta para o futuro.",
+    ),
+    "email_first": (
+        "Trate como cold mail T3: assunto até 8 palavras e primeira frase altamente personalizada.",
+        "Não use dor genérica se o match de playbook não for forte.",
+        "Corpo em 2 ou 3 parágrafos curtos, sem pitch de produto.",
+    ),
+    "email_followup": (
+        "Trate como follow-up com ângulo novo e método diferente do primeiro contato.",
+        "O assunto deve mudar e o corpo deve trazer informação nova.",
+    ),
+    "email_breakup": (
+        "Trate como breakup curto e maduro, sem passivo-agressividade.",
+        "Feche o ciclo com respeito e possibilidade de retomada futura.",
+    ),
+    "linkedin_inmail": (
+        "Trate como cold email premium dentro do LinkedIn, com hook específico.",
+        "Sem pitch direto e sem CTA de reunião.",
+    ),
+}
+
+_STEP_SELF_REVIEW: dict[str, tuple[str, ...]] = {
+    "linkedin_connect": (
+        "A nota cabe em 170 caracteres e não parece pitch?",
+        "O texto serviria apenas para abrir a rede, não para vender?",
+    ),
+    "linkedin_dm_first": (
+        "A mensagem abre conversa e não apresenta solução cedo demais?",
+        "O CTA é uma pergunta leve, não um pedido de reunião?",
+    ),
+    "linkedin_dm_post_connect": (
+        "O agradecimento é curto e a mensagem já entrega valor?",
+        "O texto soa networking profissional e não follow-up comercial?",
+    ),
+    "linkedin_dm_followup": (
+        "Existe um ângulo novo em vez de repetição?",
+        "A mensagem evita cobrar resposta ou parecer insistente?",
+    ),
+    "linkedin_dm_breakup": ("O fechamento é respeitoso e sem manipulação?",),
+    "email_first": (
+        "O assunto tem no máximo 8 palavras e evita clichês?",
+        "A primeira frase prova pesquisa real sobre o lead?",
+    ),
+    "email_followup": (
+        "O assunto e o corpo trazem um ângulo diferente do email anterior?",
+        "A mensagem agrega dado novo antes do CTA?",
+    ),
+    "email_breakup": ("O encerramento deixa a porta aberta sem dramatizar?",),
+}
+
 
 class AIComposer:
-
     def __init__(self, registry: LLMRegistry) -> None:
         self._registry = registry
 
     async def compose(
         self,
         lead: Lead,
-        channel: str,               # "linkedin_connect" | "linkedin_dm" | "email"
+        channel: str,  # "linkedin_connect" | "linkedin_dm" | "email"
         step_number: int,
-        context: PromptContext,     # vindo de context_fetcher
+        context: PromptContext,  # vindo de context_fetcher
         cadence: Cadence,
         total_steps: int = 1,
         use_voice: bool = False,
@@ -427,6 +515,12 @@ class AIComposer:
             ),
         )
         response.raw["composition_context"] = serialize_composition_context(composition_context)
+        normalized_text = normalize_generated_text(response.text)
+        editorial_validation = validate_editorial_output(
+            composition_context.step_key,
+            normalized_text,
+        )
+        response.raw["editorial_validation"] = serialize_editorial_validation(editorial_validation)
 
         logger.info(
             "ai_composer.composed",
@@ -442,12 +536,17 @@ class AIComposer:
             copy_method=composition_context.copy_method,
             playbook_sector=composition_context.playbook_sector,
             playbook_role=composition_context.playbook_role,
+            playbook_match_type=composition_context.playbook_match_type,
             matched_role=composition_context.matched_role,
             few_shot_applied=composition_context.few_shot_applied,
             few_shot_key=composition_context.few_shot_key,
+            few_shot_match_type=composition_context.few_shot_match_type,
+            editorial_ok=editorial_validation.ok,
+            editorial_hard_failures=editorial_validation.hard_failure_count,
+            editorial_warnings=editorial_validation.warning_count,
         )
 
-        return response.text.strip()
+        return normalized_text
 
     async def compose_email(
         self,
@@ -498,7 +597,13 @@ class AIComposer:
         raw = response.text.strip()
 
         # Parse JSON gerado pelo LLM
-        subject, body = _parse_email_json(raw, lead=lead, step_number=step_number)
+        subject, body = parse_email_json(raw, lead=lead, step_number=step_number)
+        editorial_validation = validate_editorial_output(
+            composition_context.step_key,
+            body,
+            subject=subject,
+        )
+        response.raw["editorial_validation"] = serialize_editorial_validation(editorial_validation)
 
         logger.info(
             "ai_composer.compose_email",
@@ -514,9 +619,14 @@ class AIComposer:
             copy_method=composition_context.copy_method,
             playbook_sector=composition_context.playbook_sector,
             playbook_role=composition_context.playbook_role,
+            playbook_match_type=composition_context.playbook_match_type,
             matched_role=composition_context.matched_role,
             few_shot_applied=composition_context.few_shot_applied,
             few_shot_key=composition_context.few_shot_key,
+            few_shot_match_type=composition_context.few_shot_match_type,
+            editorial_ok=editorial_validation.ok,
+            editorial_hard_failures=editorial_validation.hard_failure_count,
+            editorial_warnings=editorial_validation.warning_count,
         )
 
         return subject, body
@@ -555,7 +665,7 @@ def prepare_composer_messages(
     return messages, composition_context
 
 
-def _parse_email_json(raw: str, lead: object, step_number: int) -> tuple[str, str]:
+def parse_email_json(raw: str, lead: object, step_number: int) -> tuple[str, str]:
     """Extrai (subject, body) do JSON retornado pelo LLM.
 
     Resiliente: se o parse falhar, retorna um subject de fallback simples
@@ -570,8 +680,8 @@ def _parse_email_json(raw: str, lead: object, step_number: int) -> tuple[str, st
 
     try:
         data = json.loads(text)
-        subject = str(data.get("subject", "")).strip()
-        body = str(data.get("body", "")).strip()
+        subject = normalize_email_subject(str(data.get("subject", "")).strip())
+        body = normalize_generated_text(str(data.get("body", "")).strip())
         if subject and body:
             return subject, body
     except (json.JSONDecodeError, ValueError):
@@ -579,14 +689,20 @@ def _parse_email_json(raw: str, lead: object, step_number: int) -> tuple[str, st
 
     # Fallback: o LLM gerou texto puro (sem JSON). Usa texto como body.
     company = getattr(lead, "company", None) or getattr(lead, "name", "você")
-    fallback_subject = f"Uma ideia para {company}" if step_number == 1 else f"Re: Uma ideia para {company}"
-    return fallback_subject, raw
+    fallback_subject = build_fallback_email_subject(str(company), step_number)
+    return fallback_subject, normalize_generated_text(raw)
+
+
+def _parse_email_json(raw: str, lead: object, step_number: int) -> tuple[str, str]:
+    """Compatibilidade retroativa para chamadas internas antigas."""
+    return parse_email_json(raw, lead=lead, step_number=step_number)
 
 
 def _select_copy_method(
     step_key: str,
     lead: Any,
     playbook_entry: PlaybookEntry | None,
+    playbook_match_type: str | None,
     context: PromptContext,
     step_number: int = 1,
     total_steps: int = 1,
@@ -597,7 +713,13 @@ def _select_copy_method(
     ou None quando o step não usa método de copy (ex: linkedin_connect).
     """
     # Steps que não usam método de copy estruturado
-    if step_key in ("linkedin_connect", "linkedin_post_comment", "linkedin_dm_post_connect_voice"):
+    if step_key in (
+        "linkedin_connect",
+        "linkedin_post_comment",
+        "linkedin_dm_post_connect_voice",
+        "linkedin_dm_voice",
+        "linkedin_inmail",
+    ):
         return None
 
     # Breakup → DPO (brevidade máxima)
@@ -608,9 +730,15 @@ def _select_copy_method(
     has_posts = bool(getattr(lead, "linkedin_recent_posts_json", None))
     has_site = bool(context.get("site_summary") and context.get("site_summary") != "Não disponível")
 
+    if step_key in ("linkedin_dm_first", "linkedin_dm_post_connect"):
+        if has_posts:
+            return "BINÁRIO"
+        if has_site:
+            return "INSIGHT"
+        return "BINÁRIO"
+
     # Follow-ups com posts → BINÁRIO; com site/notícias → INSIGHT
-    is_followup = step_key in ("email_followup", "linkedin_dm_followup")
-    if is_followup:
+    if step_key in ("email_followup", "linkedin_dm_followup"):
         if has_posts:
             return "BINÁRIO"
         if has_site:
@@ -618,15 +746,50 @@ def _select_copy_method(
         return "DPO"
 
     # Primeiro contato: dor confirmada pelo playbook → DIS
-    if playbook_entry and step_number <= 2:
+    if (
+        step_key == "email_first"
+        and playbook_entry
+        and playbook_match_type
+        in {
+            "exact",
+            "role_sector_fallback",
+            "role_only",
+        }
+    ):
         return "DIS"
 
     # Posts disponíveis no primeiro contato → BINÁRIO
-    if has_posts and step_number <= 2:
+    if step_key == "email_first" and has_posts and step_number <= 2:
         return "BINÁRIO"
+
+    if step_key == "email_first" and has_site:
+        return "INSIGHT"
 
     # Default para primeiro contato sem dados extras
     return "AIRE"
+
+
+def _build_editorial_contract(step_key: str) -> str:
+    lines = ["CONTRATO EDITORIAL INEGOCIÁVEL:"]
+    lines.extend(f"- {rule}" for rule in _COMMON_EDITORIAL_RULES)
+
+    for rule in _STEP_EDITORIAL_RULES.get(step_key, ()):
+        lines.append(f"- {rule}")
+
+    return "\n".join(lines)
+
+
+def _build_silent_self_review(step_key: str) -> str:
+    checks = _STEP_SELF_REVIEW.get(step_key)
+    if not checks:
+        return ""
+
+    lines = [
+        "AUTOVERIFICAÇÃO SILENCIOSA ANTES DE RESPONDER:",
+        "Não mostre esta lista na resposta final.",
+    ]
+    lines.extend(f"- {check}" for check in checks)
+    return "\n".join(lines)
 
 
 _COPY_METHOD_DEFINITIONS: dict[str, str] = {
@@ -670,6 +833,7 @@ def _build_user_prompt(
     if recent_posts_json:
         try:
             import json as _json  # noqa: PLC0415
+
             posts_data = _json.loads(recent_posts_json)
             if posts_data:
                 has_recent_posts = True
@@ -678,13 +842,20 @@ def _build_user_prompt(
                     content = (p.get("content") or "").strip()
                     published = p.get("published_at", "")
                     if content:
-                        lines.append(f"Post {idx} ({published[:10] if published else 'data desconhecida'}): {content[:400]}")
+                        lines.append(
+                            f"Post {idx} ({published[:10] if published else 'data desconhecida'}): {content[:400]}"
+                        )
                 recent_posts_block = "\n".join(lines)
         except (ValueError, TypeError):
             pass
 
     step_key = resolve_step_key(
-        channel, step, total_steps, use_voice, previous_channel, step_type=step_type,
+        channel,
+        step,
+        total_steps,
+        use_voice,
+        previous_channel,
+        step_type=step_type,
     )
     step_instruction = STEP_INSTRUCTIONS.get(step_key, "")
 
@@ -702,7 +873,8 @@ def _build_user_prompt(
         lead_lines.append(f"LinkedIn: {lead_linkedin_url}")
 
     # ── Playbook estratégico do setor/cargo ───────────────────────────────────
-    playbook_entry: PlaybookEntry | None = get_lead_playbook(lead)
+    playbook_match = get_lead_playbook_match(lead)
+    playbook_entry: PlaybookEntry | None = playbook_match.entry if playbook_match else None
     playbook_block = ""
     if playbook_entry:
         playbook_block = f"""PLAYBOOK DO SETOR E CARGO (use para calibrar a abordagem):
@@ -713,7 +885,11 @@ Gancho de valor: {playbook_entry.gancho}"""
 
     # ── Método de copy selecionado ────────────────────────────────────────────
     copy_method = _select_copy_method(
-        step_key, lead, playbook_entry, context,
+        step_key,
+        lead,
+        playbook_entry,
+        playbook_match.match_type if playbook_match else None,
+        context,
         step_number=step,
         total_steps=total_steps,
     )
@@ -721,6 +897,9 @@ Gancho de valor: {playbook_entry.gancho}"""
     if copy_method:
         definition = _COPY_METHOD_DEFINITIONS.get(copy_method, "")
         copy_method_block = f"MÉTODO OBRIGATÓRIO PARA ESTE STEP: {copy_method}\n{definition}"
+
+    editorial_contract = _build_editorial_contract(step_key)
+    self_review_block = _build_silent_self_review(step_key)
 
     # ── Contexto da cadência (segmento-alvo, persona, oferta) ─────────────────
     cadence_context_lines: list[str] = []
@@ -730,14 +909,22 @@ Gancho de valor: {playbook_entry.gancho}"""
         if cadence.persona_description:
             cadence_context_lines.append(f"Persona ideal: {cadence.persona_description}")
         if cadence.offer_description:
-            cadence_context_lines.append(f"O que oferecemos (use com sutileza, SÓ em steps avançados): {cadence.offer_description}")
+            cadence_context_lines.append(
+                f"O que oferecemos (use com sutileza, SÓ em steps avançados): {cadence.offer_description}"
+            )
         if cadence.tone_instructions:
             cadence_context_lines.append(f"Instruções extras de tom: {cadence.tone_instructions}")
 
     cadence_block = "\n".join(cadence_context_lines) if cadence_context_lines else "Não configurado"
 
     # Monta o prompt final
-    blocks: list[str] = [step_instruction, "---", "DADOS DO LEAD:", chr(10).join(lead_lines)]
+    blocks: list[str] = [
+        step_instruction,
+        "---",
+        editorial_contract,
+        "DADOS DO LEAD:",
+        chr(10).join(lead_lines),
+    ]
 
     if playbook_block:
         blocks.append(f"\n{playbook_block}")
@@ -772,14 +959,17 @@ Gancho de valor: {playbook_entry.gancho}"""
 
     blocks.append(f"\nNOTÍCIAS RECENTES DA EMPRESA/SETOR:\n{news}")
     blocks.append(f"\nPOSIÇÃO NA CADÊNCIA: Step {step} de {total_steps}.")
+    if self_review_block:
+        blocks.append(f"\n{self_review_block}")
     blocks.append("\nEscreva a mensagem agora:")
 
     composition_context = CompositionContext(
         generation_mode="llm",
         step_key=step_key,
         copy_method=copy_method,
-        playbook_sector=playbook_entry.sector if playbook_entry else None,
-        playbook_role=playbook_entry.role if playbook_entry else None,
+        playbook_sector=playbook_match.sector if playbook_match else None,
+        playbook_role=playbook_match.matched_role if playbook_match else None,
+        playbook_match_type=playbook_match.match_type if playbook_match else None,
         matched_role=few_shot_match.matched_role if few_shot_match else None,
         few_shot_applied=few_shot_match is not None,
         few_shot_key=(
@@ -788,8 +978,10 @@ Gancho de valor: {playbook_entry.gancho}"""
             else None
         ),
         few_shot_method=few_shot_match.example.method if few_shot_match else None,
+        few_shot_match_type=few_shot_match.match_type if few_shot_match else None,
         has_site_summary=has_site_summary,
-        has_recent_posts=has_recent_posts or bool(linkedin_post and linkedin_post != "Não disponível"),
+        has_recent_posts=has_recent_posts
+        or bool(linkedin_post and linkedin_post != "Não disponível"),
     )
 
     return "\n".join(blocks).strip(), composition_context

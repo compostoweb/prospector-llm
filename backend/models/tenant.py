@@ -124,7 +124,7 @@ class TenantIntegration(Base):
     )
     llm_default_model: Mapped[str] = mapped_column(
         String(100),
-        default="gpt-4o-mini",
+        default="gpt-5.4-mini",
         nullable=False,
         comment="Modelo LLM padrão ao criar novas cadências",
     )
@@ -150,7 +150,7 @@ class TenantIntegration(Base):
     )
     cold_email_llm_model: Mapped[str] = mapped_column(
         String(100),
-        default="gpt-4o-mini",
+        default="gpt-5.4-mini",
         nullable=False,
         comment="Modelo LLM padrão para campanhas de cold email",
     )

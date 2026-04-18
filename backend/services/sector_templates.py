@@ -6,7 +6,6 @@ Usados como bloco "EXEMPLO DE REFERÊNCIA" injetado no user prompt do AIComposer
 orientando o LLM em tom, estrutura e ângulo de dor sem restringir a personalização.
 
 Fonte: docs/composto-web-skills/03-prospeccao-linkedin/ + 04-coldmail/
-Cobertura: 9 setores × até 2 cargos × 2 canais (linkedin / email)
 
 Injeção no prompt via:
     from services.sector_templates import get_few_shot_example
@@ -24,10 +23,10 @@ from dataclasses import dataclass
 class FewShotExample:
     sector: str
     role: str
-    channel: str           # "linkedin" | "email"
-    step_type: str         # "first" | "followup" | "breakup"
-    method: str            # AIRE | DIS | DPO | BINÁRIO | INSIGHT
-    subject: str           # email only — vazio para linkedin
+    channel: str  # "linkedin" | "email"
+    step_type: str  # "first" | "followup" | "breakup"
+    method: str  # AIRE | DIS | DPO | BINÁRIO | INSIGHT
+    subject: str  # email only — vazio para linkedin
     message: str
 
 
@@ -38,6 +37,7 @@ class FewShotMatch:
     sector: str
     requested_role: str | None
     matched_role: str
+    match_type: str
     channel: str
     step_type: str
     example: FewShotExample
@@ -48,14 +48,15 @@ class FewShotMatch:
 # role pode ser genérico (ex: "ceo") para abranger variações de cargo detectadas
 
 _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
-
     # ══════════════════════════════════════════════════════════════════════════
     # SAÚDE / CLÍNICAS
     # ══════════════════════════════════════════════════════════════════════════
-
     ("saude", "diretor_clinica", "email", "first"): FewShotExample(
-        sector="saude", role="diretor_clinica",
-        channel="email", step_type="first", method="DIS",
+        sector="saude",
+        role="diretor_clinica",
+        channel="email",
+        step_type="first",
+        method="DIS",
         subject="Sua recepção ainda agenda manualmente?",
         message=(
             "Oi [Nome],\n\n"
@@ -72,10 +73,12 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "[Nome], isso resolve um problema real na [Clínica] hoje?"
         ),
     ),
-
     ("saude", "diretor_clinica", "linkedin", "first"): FewShotExample(
-        sector="saude", role="diretor_clinica",
-        channel="linkedin", step_type="first", method="DIS",
+        sector="saude",
+        role="diretor_clinica",
+        channel="linkedin",
+        step_type="first",
+        method="DIS",
         subject="",
         message=(
             "Fala, [Nome]. Trabalho com automação de atendimento para clínicas via "
@@ -83,10 +86,12 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "compartilhar."
         ),
     ),
-
     ("saude", "diretor_clinica", "linkedin", "followup"): FewShotExample(
-        sector="saude", role="diretor_clinica",
-        channel="linkedin", step_type="followup", method="BINÁRIO",
+        sector="saude",
+        role="diretor_clinica",
+        channel="linkedin",
+        step_type="followup",
+        method="BINÁRIO",
         subject="",
         message=(
             "Fala [Nome], só um ângulo diferente. Além do agendamento, nossos agentes "
@@ -95,10 +100,12 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "integrado ao que vocês já usam, sem trocar sistema. Vale uma conversa rápida?"
         ),
     ),
-
     ("saude", "gerente_administrativo", "email", "first"): FewShotExample(
-        sector="saude", role="gerente_administrativo",
-        channel="email", step_type="first", method="DPO",
+        sector="saude",
+        role="gerente_administrativo",
+        channel="email",
+        step_type="first",
+        method="DPO",
         subject="Recepção sobrecarregada ou atendimento 24h sem contratar mais ninguém",
         message=(
             "Oi [Nome],\n\n"
@@ -112,10 +119,12 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "Posso te mostrar como isso funcionou na prática em uma clínica que atendemos?"
         ),
     ),
-
     ("saude", "gerente_administrativo", "linkedin", "followup"): FewShotExample(
-        sector="saude", role="gerente_administrativo",
-        channel="linkedin", step_type="followup", method="INSIGHT",
+        sector="saude",
+        role="gerente_administrativo",
+        channel="linkedin",
+        step_type="followup",
+        method="INSIGHT",
         subject="",
         message=(
             "Fala [Nome], clínicas sem confirmação automática de consulta têm índice de "
@@ -125,14 +134,15 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "Vocês já tentaram resolver o no-show de alguma forma?"
         ),
     ),
-
     # ══════════════════════════════════════════════════════════════════════════
     # JURÍDICO / ADVOCACIA
     # ══════════════════════════════════════════════════════════════════════════
-
     ("juridico", "socio_advocacia", "email", "first"): FewShotExample(
-        sector="juridico", role="socio_advocacia",
-        channel="email", step_type="first", method="AIRE",
+        sector="juridico",
+        role="socio_advocacia",
+        channel="email",
+        step_type="first",
+        method="AIRE",
         subject="IA jurídica que não envia dados para fora do escritório",
         message=(
             "Oi [Nome],\n\n"
@@ -150,20 +160,24 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "Isso resolve uma preocupação real no [Escritório] hoje?"
         ),
     ),
-
     ("juridico", "socio_advocacia", "linkedin", "first"): FewShotExample(
-        sector="juridico", role="socio_advocacia",
-        channel="linkedin", step_type="first", method="DIS",
+        sector="juridico",
+        role="socio_advocacia",
+        channel="linkedin",
+        step_type="first",
+        method="DIS",
         subject="",
         message=(
             "Fala, [Nome]. Trabalho com engenharia de soluções para escritórios de "
             "advocacia, IA privada e automação de documentos. Vi seu perfil no [Escritório]."
         ),
     ),
-
     ("juridico", "diretor_juridico", "email", "first"): FewShotExample(
-        sector="juridico", role="diretor_juridico",
-        channel="email", step_type="first", method="DIS",
+        sector="juridico",
+        role="diretor_juridico",
+        channel="email",
+        step_type="first",
+        method="DIS",
         subject="Contratos críticos da [Empresa] sem controle centralizado",
         message=(
             "Oi [Nome],\n\n"
@@ -180,14 +194,15 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "Isso resolve uma dor real no jurídico de vocês hoje?"
         ),
     ),
-
     # ══════════════════════════════════════════════════════════════════════════
     # FINANCEIRO / CONTABILIDADE
     # ══════════════════════════════════════════════════════════════════════════
-
     ("financeiro", "cfo", "email", "first"): FewShotExample(
-        sector="financeiro", role="cfo",
-        channel="email", step_type="first", method="DPO",
+        sector="financeiro",
+        role="cfo",
+        channel="email",
+        step_type="first",
+        method="DPO",
         subject="Fechamento mensal da [Empresa]: de dias para horas sem trocar o ERP",
         message=(
             "Oi [Nome],\n\n"
@@ -202,20 +217,24 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "Posso te mostrar como isso funciona na prática?"
         ),
     ),
-
     ("financeiro", "cfo", "linkedin", "first"): FewShotExample(
-        sector="financeiro", role="cfo",
-        channel="linkedin", step_type="first", method="DIS",
+        sector="financeiro",
+        role="cfo",
+        channel="linkedin",
+        step_type="first",
+        method="DIS",
         subject="",
         message=(
             "Fala, [Nome]. Trabalho com automação de processos financeiros e integração "
             "de sistemas para empresas em crescimento. Vi seu perfil na [Empresa]."
         ),
     ),
-
     ("financeiro", "cfo", "linkedin", "followup"): FewShotExample(
-        sector="financeiro", role="cfo",
-        channel="linkedin", step_type="followup", method="BINÁRIO",
+        sector="financeiro",
+        role="cfo",
+        channel="linkedin",
+        step_type="followup",
+        method="BINÁRIO",
         subject="",
         message=(
             "Oi [Nome], seria útil ter visibilidade do fluxo de caixa em tempo real, "
@@ -223,10 +242,12 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "manual do analista?"
         ),
     ),
-
     ("financeiro", "coo", "email", "first"): FewShotExample(
-        sector="financeiro", role="coo",
-        channel="email", step_type="first", method="AIRE",
+        sector="financeiro",
+        role="coo",
+        channel="email",
+        step_type="first",
+        method="AIRE",
         subject="Operação que cresceu mas a eficiência não acompanhou",
         message=(
             "Oi [Nome],\n\n"
@@ -243,10 +264,12 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "Isso se aplica a algum ponto que está travando a operação de vocês hoje?"
         ),
     ),
-
     ("financeiro", "contador", "email", "first"): FewShotExample(
-        sector="financeiro", role="contador",
-        channel="email", step_type="first", method="DIS",
+        sector="financeiro",
+        role="contador",
+        channel="email",
+        step_type="first",
+        method="DIS",
         subject="Obrigações acessórias manuais: o risco que cresce com a carteira",
         message=(
             "Oi [Nome],\n\n"
@@ -264,14 +287,15 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "Isso resolve um gargalo real no [Escritório] hoje?"
         ),
     ),
-
     # ══════════════════════════════════════════════════════════════════════════
     # EMPRESAS DE TI
     # ══════════════════════════════════════════════════════════════════════════
-
     ("ti", "ceo_cto_ti", "email", "first"): FewShotExample(
-        sector="ti", role="ceo_cto_ti",
-        channel="email", step_type="first", method="DIS",
+        sector="ti",
+        role="ceo_cto_ti",
+        channel="email",
+        step_type="first",
+        method="DIS",
         subject="Engenheiro sênior resolvendo ticket de suporte: o custo invisível",
         message=(
             "Oi [Nome],\n\n"
@@ -287,20 +311,24 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "Isso se aplica ao momento da [Empresa] hoje?"
         ),
     ),
-
     ("ti", "ceo_cto_ti", "linkedin", "first"): FewShotExample(
-        sector="ti", role="ceo_cto_ti",
-        channel="linkedin", step_type="first", method="DIS",
+        sector="ti",
+        role="ceo_cto_ti",
+        channel="linkedin",
+        step_type="first",
+        method="DIS",
         subject="",
         message=(
             "Fala, [Nome]. Trabalho com engenharia de soluções e automação para "
             "empresas de tecnologia. Vi seu perfil na [Empresa] e tenho algo relevante."
         ),
     ),
-
     ("ti", "ceo_cto_ti", "linkedin", "followup"): FewShotExample(
-        sector="ti", role="ceo_cto_ti",
-        channel="linkedin", step_type="followup", method="BINÁRIO",
+        sector="ti",
+        role="ceo_cto_ti",
+        channel="linkedin",
+        step_type="followup",
+        method="BINÁRIO",
         subject="",
         message=(
             "Fala [Nome], além da capacidade de produto, outro ponto que aparece muito "
@@ -310,14 +338,15 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "a equipe. Isso é relevante para o estágio da [Empresa] agora?"
         ),
     ),
-
     # ══════════════════════════════════════════════════════════════════════════
     # INDÚSTRIA / LOGÍSTICA
     # ══════════════════════════════════════════════════════════════════════════
-
     ("industria", "diretor_industrial", "linkedin", "first"): FewShotExample(
-        sector="industria", role="diretor_industrial",
-        channel="linkedin", step_type="first", method="DIS",
+        sector="industria",
+        role="diretor_industrial",
+        channel="linkedin",
+        step_type="first",
+        method="DIS",
         subject="",
         message=(
             "Fala, [Nome]. Trabalho com engenharia de soluções para operações "
@@ -325,10 +354,12 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "em tempo real. Vi seu perfil na [Empresa]."
         ),
     ),
-
     ("industria", "diretor_industrial", "linkedin", "followup"): FewShotExample(
-        sector="industria", role="diretor_industrial",
-        channel="linkedin", step_type="followup", method="INSIGHT",
+        sector="industria",
+        role="diretor_industrial",
+        channel="linkedin",
+        step_type="followup",
+        method="INSIGHT",
         subject="",
         message=(
             "Fala [Nome], além da visibilidade operacional, outro ponto crítico em "
@@ -338,10 +369,12 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "estoque e capacidade atualizados ao minuto. Isso é relevante para vocês?"
         ),
     ),
-
     ("industria", "diretor_industrial", "email", "first"): FewShotExample(
-        sector="industria", role="diretor_industrial",
-        channel="email", step_type="first", method="DIS",
+        sector="industria",
+        role="diretor_industrial",
+        channel="email",
+        step_type="first",
+        method="DIS",
         subject="Chão de fábrica sem visibilidade em tempo real",
         message=(
             "Oi [Nome],\n\n"
@@ -356,14 +389,15 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "Isso resolve um problema real na [Empresa] hoje?"
         ),
     ),
-
     # ══════════════════════════════════════════════════════════════════════════
     # AGÊNCIAS DE MARKETING
     # ══════════════════════════════════════════════════════════════════════════
-
     ("agencia", "ceo_agencia", "email", "first"): FewShotExample(
-        sector="agencia", role="ceo_agencia",
-        channel="email", step_type="first", method="DPO",
+        sector="agencia",
+        role="ceo_agencia",
+        channel="email",
+        step_type="first",
+        method="DPO",
         subject="Sua agência cresce, mas a margem não acompanha?",
         message=(
             "Oi [Nome],\n\n"
@@ -378,10 +412,12 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "Posso te mostrar como isso funciona na prática?"
         ),
     ),
-
     ("agencia", "ceo_agencia", "linkedin", "first"): FewShotExample(
-        sector="agencia", role="ceo_agencia",
-        channel="linkedin", step_type="first", method="DPO",
+        sector="agencia",
+        role="ceo_agencia",
+        channel="linkedin",
+        step_type="first",
+        method="DPO",
         subject="",
         message=(
             "Fala, [Nome]. Trabalho com automação de processos operacionais para "
@@ -389,10 +425,12 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "[Agência]."
         ),
     ),
-
     ("agencia", "ceo_agencia", "linkedin", "followup"): FewShotExample(
-        sector="agencia", role="ceo_agencia",
-        channel="linkedin", step_type="followup", method="DPO",
+        sector="agencia",
+        role="ceo_agencia",
+        channel="linkedin",
+        step_type="followup",
+        method="DPO",
         subject="",
         message=(
             "Fala [Nome], agências que crescem em clientes geralmente veem a margem "
@@ -403,14 +441,15 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "[Agência] hoje?"
         ),
     ),
-
     # ══════════════════════════════════════════════════════════════════════════
     # MARKETING INTERNO (DEPTOS DE MARKETING)
     # ══════════════════════════════════════════════════════════════════════════
-
     ("marketing", "cmo", "email", "first"): FewShotExample(
-        sector="marketing", role="cmo",
-        channel="email", step_type="first", method="AIRE",
+        sector="marketing",
+        role="cmo",
+        channel="email",
+        step_type="first",
+        method="AIRE",
         subject="Os dados de clientes da [Empresa] chegam tarde para as campanhas?",
         message=(
             "Oi [Nome],\n\n"
@@ -430,10 +469,12 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "Isso resolve um problema real no marketing da [Empresa] hoje?"
         ),
     ),
-
     ("marketing", "gerente_marketing", "email", "first"): FewShotExample(
-        sector="marketing", role="gerente_marketing",
-        channel="email", step_type="first", method="DIS",
+        sector="marketing",
+        role="gerente_marketing",
+        channel="email",
+        step_type="first",
+        method="DIS",
         subject="CRM que se alimenta sozinho na [Empresa]",
         message=(
             "Oi [Nome],\n\n"
@@ -449,14 +490,366 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "Isso resolve um gargalo real no marketing da [Empresa] hoje?"
         ),
     ),
-
+    # ══════════════════════════════════════════════════════════════════════════
+    # VAREJO / E-COMMERCE
+    # ══════════════════════════════════════════════════════════════════════════
+    ("varejo", "ceo_ecommerce", "email", "first"): FewShotExample(
+        sector="varejo",
+        role="ceo_ecommerce",
+        channel="email",
+        step_type="first",
+        method="DIS",
+        subject="Margem some no pico de pedidos?",
+        message=(
+            "Oi [Nome],\n\n"
+            "Operações de e-commerce costumam travar quando pedido, estoque e atendimento "
+            "rodam em silos. O volume sobe, mas a margem não acompanha porque cada pico "
+            "traz mais retrabalho, mais exceção e mais gente no operacional.\n\n"
+            "Quando a visibilidade chega tarde, devolução, ruptura e SAC viram custo fixo "
+            "escondido. Foi o padrão que vimos em operações omnichannel antes de integrar "
+            "ERP, marketplace e atendimento numa camada única.\n\n"
+            "Na [Empresa], hoje o gargalo está mais em estoque, expedição ou atendimento?"
+        ),
+    ),
+    ("varejo", "ceo_ecommerce", "email", "followup"): FewShotExample(
+        sector="varejo",
+        role="ceo_ecommerce",
+        channel="email",
+        step_type="followup",
+        method="INSIGHT",
+        subject="Outro ângulo sobre omnichannel",
+        message=(
+            "Oi [Nome],\n\n"
+            "Um dado que voltou a aparecer em operações de varejo: quando o SAC responde "
+            "sem contexto de pedido e estoque, o custo do ticket sobe e o cliente compra menos "
+            "na recorrência.\n\n"
+            "Por isso muita operação está puxando atendimento, ERP e logística para a mesma "
+            "camada de dados antes de discutir mais mídia ou mais headcount.\n\n"
+            "Vocês já conseguem ver pedido, estoque e histórico do cliente no mesmo fluxo?"
+        ),
+    ),
+    ("varejo", "ceo_ecommerce", "linkedin", "first"): FewShotExample(
+        sector="varejo",
+        role="ceo_ecommerce",
+        channel="linkedin",
+        step_type="first",
+        method="BINÁRIO",
+        subject="",
+        message=(
+            "[Nome], vi a [Empresa] acelerando o omnichannel. Quando o volume sobe, o gargalo "
+            "costuma aparecer mais em estoque ou no pós-venda?"
+        ),
+    ),
+    ("varejo", "ceo_ecommerce", "linkedin", "followup"): FewShotExample(
+        sector="varejo",
+        role="ceo_ecommerce",
+        channel="linkedin",
+        step_type="followup",
+        method="INSIGHT",
+        subject="",
+        message=(
+            "[Nome], vi uma leitura interessante sobre varejo: a operação perde margem quando "
+            "pedido, atendimento e estoque andam em ritmos diferentes. Vocês já conseguem medir "
+            "esse atraso na [Empresa] ou ainda fica espalhado entre times?"
+        ),
+    ),
+    # ══════════════════════════════════════════════════════════════════════════
+    # EDUCAÇÃO / EDTECH
+    # ══════════════════════════════════════════════════════════════════════════
+    ("educacao", "diretor_academico", "email", "first"): FewShotExample(
+        sector="educacao",
+        role="diretor_academico",
+        channel="email",
+        step_type="first",
+        method="DIS",
+        subject="Evasão aparece tarde demais?",
+        message=(
+            "Oi [Nome],\n\n"
+            "Em operações educacionais maiores, a evasão quase nunca começa quando o aluno "
+            "cancela. Ela aparece antes, em queda de acesso, atraso de atividade e silêncio do tutor, "
+            "mas esse sinal costuma ficar espalhado no LMS e em planilhas.\n\n"
+            "Quando o time enxerga tarde, a intervenção vira contingência e o CAC daquele aluno já foi. "
+            "Foi justamente esse ponto que vimos em instituições que precisavam reagir antes da rematrícula.\n\n"
+            "Hoje vocês conseguem identificar risco de evasão antes do aluno esfriar?"
+        ),
+    ),
+    ("educacao", "diretor_academico", "email", "followup"): FewShotExample(
+        sector="educacao",
+        role="diretor_academico",
+        channel="email",
+        step_type="followup",
+        method="INSIGHT",
+        subject="Um dado sobre permanência",
+        message=(
+            "Oi [Nome],\n\n"
+            "Outro ângulo que chamou atenção em EdTech: rematrícula melhora quando o time "
+            "acadêmico cruza engajamento, financeiro e histórico de suporte, em vez de olhar cada base isolada.\n\n"
+            "Esse tipo de leitura costuma mostrar quais alunos ainda estão recuperáveis e onde o tutor precisa agir primeiro.\n\n"
+            "Na [Empresa], esse radar hoje já existe ou depende de leitura manual do time?"
+        ),
+    ),
+    ("educacao", "diretor_academico", "linkedin", "first"): FewShotExample(
+        sector="educacao",
+        role="diretor_academico",
+        channel="linkedin",
+        step_type="first",
+        method="INSIGHT",
+        subject="",
+        message=(
+            "[Nome], vi o foco da [Empresa] em escala acadêmica. Vocês já conseguem ver risco "
+            "de evasão cedo o bastante para agir, ou o dado ainda chega quando o aluno já saiu?"
+        ),
+    ),
+    ("educacao", "diretor_academico", "linkedin", "followup"): FewShotExample(
+        sector="educacao",
+        role="diretor_academico",
+        channel="linkedin",
+        step_type="followup",
+        method="BINÁRIO",
+        subject="",
+        message=(
+            "[Nome], outro ponto que tenho visto no setor: rematrícula cai quando tutor, financeiro "
+            "e LMS enxergam o aluno em telas separadas. Vocês já unificaram essa leitura na [Empresa]?"
+        ),
+    ),
+    # ══════════════════════════════════════════════════════════════════════════
+    # IMOBILIÁRIO / CONSTRUTORAS
+    # ══════════════════════════════════════════════════════════════════════════
+    ("imobiliario", "diretor_comercial", "email", "first"): FewShotExample(
+        sector="imobiliario",
+        role="diretor_comercial",
+        channel="email",
+        step_type="first",
+        method="DIS",
+        subject="Lead some antes da visita?",
+        message=(
+            "Oi [Nome],\n\n"
+            "Operações comerciais de incorporação costumam perder velocidade quando portal, "
+            "WhatsApp e CRM não contam a mesma história. O lead demonstra interesse, mas o follow-up "
+            "fica dependente da disciplina individual do corretor.\n\n"
+            "A implicação é pesada em lançamento: verba entra, visita não acontece e o funil parece pior "
+            "do que realmente é porque o dado nasceu fragmentado.\n\n"
+            "Hoje a [Empresa] já consegue registrar cada interação sem depender do corretor alimentar tudo?"
+        ),
+    ),
+    ("imobiliario", "diretor_comercial", "email", "followup"): FewShotExample(
+        sector="imobiliario",
+        role="diretor_comercial",
+        channel="email",
+        step_type="followup",
+        method="BINÁRIO",
+        subject="Outro ponto do funil",
+        message=(
+            "Oi [Nome],\n\n"
+            "Um ângulo que temos visto em construtoras: quando atendimento e CRM não capturam tudo, "
+            "o time investe mais em captação sem saber onde a visita realmente se perde.\n\n"
+            "Faria sentido para você ter essa leitura em tempo real, sem depender de atualização manual?"
+        ),
+    ),
+    ("imobiliario", "diretor_comercial", "linkedin", "first"): FewShotExample(
+        sector="imobiliario",
+        role="diretor_comercial",
+        channel="linkedin",
+        step_type="first",
+        method="BINÁRIO",
+        subject="",
+        message=(
+            "[Nome], vi a [Empresa] em fase forte de captação. Hoje o gargalo aparece mais em follow-up "
+            "de corretor ou em visibilidade do funil?"
+        ),
+    ),
+    ("imobiliario", "diretor_comercial", "linkedin", "followup"): FewShotExample(
+        sector="imobiliario",
+        role="diretor_comercial",
+        channel="linkedin",
+        step_type="followup",
+        method="INSIGHT",
+        subject="",
+        message=(
+            "[Nome], outro ponto que vi no mercado: quando portal, WhatsApp e CRM não registram a mesma "
+            "jornada, o time investe mais sem ganhar previsibilidade. Vocês já enxergam isso bem na [Empresa]?"
+        ),
+    ),
+    # ══════════════════════════════════════════════════════════════════════════
+    # SEGUROS / FINTECHS
+    # ══════════════════════════════════════════════════════════════════════════
+    ("seguros", "ceo_fintech", "email", "first"): FewShotExample(
+        sector="seguros",
+        role="ceo_fintech",
+        channel="email",
+        step_type="first",
+        method="DIS",
+        subject="Onboarding ainda leva dias?",
+        message=(
+            "Oi [Nome],\n\n"
+            "Em fintechs e operações reguladas, o onboarding costuma travar quando documento, consulta externa "
+            "e aprovação humana andam em filas diferentes. O cliente entra pronto para contratar e esfria no meio da jornada.\n\n"
+            "O custo não é só conversão perdida. O processo demorado ainda pressiona compliance e operação com análise repetitiva.\n\n"
+            "Na [Empresa], hoje o maior atraso está na coleta, na análise ou na aprovação final?"
+        ),
+    ),
+    ("seguros", "ceo_fintech", "email", "followup"): FewShotExample(
+        sector="seguros",
+        role="ceo_fintech",
+        channel="email",
+        step_type="followup",
+        method="INSIGHT",
+        subject="Outro ângulo sobre onboarding",
+        message=(
+            "Oi [Nome],\n\n"
+            "Outro dado que tem aparecido em fintechs: quando a trilha de auditoria nasce junto do fluxo, "
+            "compliance deixa de ser gargalo e passa a proteger a escala.\n\n"
+            "Por isso muitos times estão revisando o processo inteiro, não só a etapa de aprovação.\n\n"
+            "Vocês já conseguem automatizar sem perder rastreabilidade regulatória?"
+        ),
+    ),
+    ("seguros", "ceo_fintech", "linkedin", "first"): FewShotExample(
+        sector="seguros",
+        role="ceo_fintech",
+        channel="linkedin",
+        step_type="first",
+        method="BINÁRIO",
+        subject="",
+        message=(
+            "[Nome], vi a [Empresa] acelerando onboarding. Hoje o atrito maior aparece mais em compliance "
+            "ou na operação que valida tudo?"
+        ),
+    ),
+    ("seguros", "ceo_fintech", "linkedin", "followup"): FewShotExample(
+        sector="seguros",
+        role="ceo_fintech",
+        channel="linkedin",
+        step_type="followup",
+        method="INSIGHT",
+        subject="",
+        message=(
+            "[Nome], um padrão que tenho visto em fintech: trilha regulatória boa não precisa alongar a jornada "
+            "do cliente. Vocês já conseguiram equilibrar velocidade e auditoria na [Empresa]?"
+        ),
+    ),
+    # ══════════════════════════════════════════════════════════════════════════
+    # AGRO / AGROINDÚSTRIA
+    # ══════════════════════════════════════════════════════════════════════════
+    ("agro", "diretor_agro", "email", "first"): FewShotExample(
+        sector="agro",
+        role="diretor_agro",
+        channel="email",
+        step_type="first",
+        method="DIS",
+        subject="Decisão ainda chega com atraso?",
+        message=(
+            "Oi [Nome],\n\n"
+            "No agro, o gargalo costuma aparecer quando clima, campo e comercial geram dado em ritmos diferentes. "
+            "A decisão precisa ser tomada na semana, mas a leitura consolidada chega tarde e em formatos dispersos.\n\n"
+            "Quando isso acontece, erro de plantio, custo de insumo e rastreabilidade viram risco de safra, não só ajuste operacional.\n\n"
+            "Hoje a [Empresa] já consegue juntar essa leitura em tempo útil para decidir?"
+        ),
+    ),
+    ("agro", "diretor_agro", "email", "followup"): FewShotExample(
+        sector="agro",
+        role="diretor_agro",
+        channel="email",
+        step_type="followup",
+        method="INSIGHT",
+        subject="Outro ponto crítico da safra",
+        message=(
+            "Oi [Nome],\n\n"
+            "Outro ângulo que tenho visto em agroindústria: rastreabilidade e tomada de decisão melhoram muito "
+            "quando o time não depende de planilha ou WhatsApp para consolidar o que aconteceu no campo.\n\n"
+            "Isso costuma destravar tanto certificação quanto resposta mais rápida ao escritório.\n\n"
+            "Na [Empresa], esse fluxo ainda depende de leitura manual?"
+        ),
+    ),
+    ("agro", "diretor_agro", "linkedin", "first"): FewShotExample(
+        sector="agro",
+        role="diretor_agro",
+        channel="linkedin",
+        step_type="first",
+        method="BINÁRIO",
+        subject="",
+        message=(
+            "[Nome], vi a [Empresa] crescendo em operação agroindustrial. Hoje a decisão crítica ainda depende mais de "
+            "planilha ou o time já enxerga campo e escritório no mesmo painel?"
+        ),
+    ),
+    ("agro", "diretor_agro", "linkedin", "followup"): FewShotExample(
+        sector="agro",
+        role="diretor_agro",
+        channel="linkedin",
+        step_type="followup",
+        method="INSIGHT",
+        subject="",
+        message=(
+            "[Nome], outro ponto que tenho visto no agro: rastreabilidade perde velocidade quando cada unidade reporta de um jeito. "
+            "Vocês já conseguiram padronizar isso na [Empresa] sem pesar no campo?"
+        ),
+    ),
+    # ══════════════════════════════════════════════════════════════════════════
+    # RH / GESTÃO DE PESSOAS
+    # ══════════════════════════════════════════════════════════════════════════
+    ("rh", "chro", "email", "first"): FewShotExample(
+        sector="rh",
+        role="chro",
+        channel="email",
+        step_type="first",
+        method="AIRE",
+        subject="Dados de people chegam tarde?",
+        message=(
+            "Oi [Nome],\n\n"
+            "Times de RH mais estratégicos travam quando turnover, absenteísmo, recrutamento e performance vivem em bases separadas. "
+            "A reunião com o C-Level pede leitura executiva, mas o time ainda precisa montar tudo na mão.\n\n"
+            "Isso costuma atrasar decisão e enfraquecer o discurso de ROI de people, mesmo quando o RH está fazendo um bom trabalho.\n\n"
+            "Hoje vocês já conseguem traduzir esses dados em linguagem de negócio sem corrida de planilha?"
+        ),
+    ),
+    ("rh", "chro", "email", "followup"): FewShotExample(
+        sector="rh",
+        role="chro",
+        channel="email",
+        step_type="followup",
+        method="INSIGHT",
+        subject="Outro ângulo para people analytics",
+        message=(
+            "Oi [Nome],\n\n"
+            "Outro ponto que tenho visto: quando o RH consegue cruzar recrutamento, desligamento e performance numa leitura única, "
+            "a conversa com o board muda de tom porque o dado deixa de ser operacional.\n\n"
+            "Muita empresa já tem HRIS, mas ainda não tem a visão executiva pronta.\n\n"
+            "Na [Empresa], isso hoje sai fácil ou ainda depende de consolidação manual?"
+        ),
+    ),
+    ("rh", "chro", "linkedin", "first"): FewShotExample(
+        sector="rh",
+        role="chro",
+        channel="linkedin",
+        step_type="first",
+        method="BINÁRIO",
+        subject="",
+        message=(
+            "[Nome], vi a pauta de people ganhando peso nas empresas maiores. Hoje o dado mais difícil para o RH de vocês "
+            "é turnover, performance ou recrutamento?"
+        ),
+    ),
+    ("rh", "chro", "linkedin", "followup"): FewShotExample(
+        sector="rh",
+        role="chro",
+        channel="linkedin",
+        step_type="followup",
+        method="INSIGHT",
+        subject="",
+        message=(
+            "[Nome], outro padrão que tenho visto: quando people analytics sai da planilha, o RH ganha muito mais força com o board. "
+            "Vocês já conseguem ler isso em tempo real na [Empresa]?"
+        ),
+    ),
     # ══════════════════════════════════════════════════════════════════════════
     # MENSAGENS DE BREAKUP (cross-setor — tom padrão da Composto Web)
     # ══════════════════════════════════════════════════════════════════════════
-
     ("saude", "diretor_clinica", "linkedin", "breakup"): FewShotExample(
-        sector="saude", role="diretor_clinica",
-        channel="linkedin", step_type="breakup", method="DPO",
+        sector="saude",
+        role="diretor_clinica",
+        channel="linkedin",
+        step_type="breakup",
+        method="DPO",
         subject="",
         message=(
             "Oi [Nome], entendo que pode não ser o momento. Não vou mais entrar em contato. "
@@ -464,10 +857,12 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "compostoweb.com.br ou me chame. Abraço, Adriano"
         ),
     ),
-
     ("financeiro", "cfo", "linkedin", "breakup"): FewShotExample(
-        sector="financeiro", role="cfo",
-        channel="linkedin", step_type="breakup", method="DPO",
+        sector="financeiro",
+        role="cfo",
+        channel="linkedin",
+        step_type="breakup",
+        method="DPO",
         subject="",
         message=(
             "Oi [Nome], entendo que pode não ser o momento. Não vou mais entrar em contato. "
@@ -475,20 +870,24 @@ _EXAMPLES: dict[tuple[str, str, str, str], FewShotExample] = {
             "Abraço, Adriano"
         ),
     ),
-
     ("ti", "ceo_cto_ti", "linkedin", "breakup"): FewShotExample(
-        sector="ti", role="ceo_cto_ti",
-        channel="linkedin", step_type="breakup", method="DPO",
+        sector="ti",
+        role="ceo_cto_ti",
+        channel="linkedin",
+        step_type="breakup",
+        method="DPO",
         subject="",
         message=(
             "Oi [Nome], não vou mais entrar em contato. Se a pauta de automação ou "
             "capacidade técnica surgir, compostoweb.com.br ou me chame. Abraço, Adriano"
         ),
     ),
-
     ("agencia", "ceo_agencia", "linkedin", "breakup"): FewShotExample(
-        sector="agencia", role="ceo_agencia",
-        channel="linkedin", step_type="breakup", method="DPO",
+        sector="agencia",
+        role="ceo_agencia",
+        channel="linkedin",
+        step_type="breakup",
+        method="DPO",
         subject="",
         message=(
             "Oi [Nome], entendo que pode não ser o momento. Se a pauta de automação "
@@ -524,21 +923,32 @@ _ROLE_FALLBACK: dict[str, list[str]] = {
     # Agência
     "conteudo_agencia": ["ceo_agencia"],
     # Marketing
-    "gerente_crm": ["gerente_marketing", "cmo"],
-    # RH (sem templates específicos — usa None)
-    "chro": [],
-    "recrutamento": [],
-    "dp": [],
-    "td": [],
-    # Varejo (sem templates específicos — usa None)
-    "ceo_ecommerce": [],
-    "gerente_operacoes": [],
-    "gerente_crm": [],
-    "sac": [],
-    # Educação (sem templates específicos — usa None)
-    "diretor_academico": [],
-    "financeiro_educacao": [],
-    "coordenador_pedagogico": [],
+    "gerente_crm": ["ceo_ecommerce", "gerente_marketing", "cmo"],
+    # RH
+    "chro": ["chro"],
+    "recrutamento": ["chro"],
+    "dp": ["chro"],
+    "td": ["chro"],
+    # Varejo
+    "ceo_ecommerce": ["ceo_ecommerce"],
+    "gerente_operacoes": ["ceo_ecommerce"],
+    "sac": ["ceo_ecommerce"],
+    # Educação
+    "diretor_academico": ["diretor_academico"],
+    "financeiro_educacao": ["diretor_academico"],
+    "coordenador_pedagogico": ["diretor_academico"],
+    # Imobiliário
+    "diretor_comercial": ["diretor_comercial"],
+    "gerente_obras": ["diretor_comercial"],
+    "pos_venda": ["diretor_comercial"],
+    # Seguros
+    "ceo_fintech": ["ceo_fintech"],
+    "analise_credito": ["ceo_fintech"],
+    "compliance": ["ceo_fintech"],
+    # Agro
+    "diretor_agro": ["diretor_agro"],
+    "financeiro_agro": ["diretor_agro"],
+    "rastreabilidade": ["diretor_agro"],
 }
 
 
@@ -628,6 +1038,7 @@ def _find_example_match(
                 sector=sector,
                 requested_role=role,
                 matched_role=role,
+                match_type="exact",
                 channel=channel,
                 step_type=step_type,
                 example=_EXAMPLES[key],
@@ -641,22 +1052,11 @@ def _find_example_match(
                     sector=sector,
                     requested_role=role,
                     matched_role=fallback_role,
+                    match_type="role_fallback",
                     channel=channel,
                     step_type=step_type,
                     example=_EXAMPLES[key],
                 )
-
-    # Tenta qualquer cargo do setor (primeiro match no dict)
-    for (s, r, c, t), ex in _EXAMPLES.items():
-        if s == sector and c == channel and t == step_type:
-            return FewShotMatch(
-                sector=sector,
-                requested_role=role,
-                matched_role=r,
-                channel=channel,
-                step_type=step_type,
-                example=ex,
-            )
 
     return None
 
@@ -665,6 +1065,7 @@ def _format_example(example: FewShotExample) -> str:
     """Formata o exemplo como bloco de texto para injeção no prompt."""
     lines = [
         "EXEMPLO DE REFERÊNCIA (tom e estrutura da Composto Web — adapt para este lead):",
+        "Se algum trecho do exemplo conflitar com o contrato editorial acima, siga o contrato editorial.",
         f"  Método: {example.method}",
     ]
     if example.subject:

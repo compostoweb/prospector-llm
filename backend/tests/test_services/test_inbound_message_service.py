@@ -138,7 +138,7 @@ async def test_process_inbound_reply_marks_connect_step_replied_for_linkedin_dm(
         name="Cadência Teste",
         is_active=True,
         llm_provider="openai",
-        llm_model="gpt-4o-mini",
+        llm_model="gpt-5.4-mini",
         llm_temperature=0.7,
         llm_max_tokens=256,
     )
@@ -169,7 +169,7 @@ async def test_process_inbound_reply_marks_connect_step_replied_for_linkedin_dm(
     with (
         patch(
             "services.inbound_message_service.resolve_tenant_llm_config",
-            new=AsyncMock(return_value=SimpleNamespace(provider="openai", model="gpt-4o-mini")),
+            new=AsyncMock(return_value=SimpleNamespace(provider="openai", model="gpt-5.4-mini")),
         ),
         patch("services.inbound_message_service.ReplyParser", return_value=parser_instance),
         patch("services.notification.send_reply_notification", new=AsyncMock()),

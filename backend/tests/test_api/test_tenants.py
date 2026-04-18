@@ -302,7 +302,9 @@ async def test_get_unipile_webhook_status_reports_ready_state(
         ]
 
     monkeypatch.setattr(tenants_route, "_probe_unipile_webhook_endpoint", _fake_probe)
-    monkeypatch.setattr(tenants_route.unipile_client, "get_webhooks_by_url", _fake_get_webhooks_by_url)
+    monkeypatch.setattr(
+        tenants_route.unipile_client, "get_webhooks_by_url", _fake_get_webhooks_by_url
+    )
     monkeypatch.setattr(app_settings, "API_PUBLIC_URL", "https://api.prospector.compostoweb.com.br")
     monkeypatch.setattr(app_settings, "UNIPILE_WEBHOOK_SECRET", "secret-123")
     monkeypatch.setattr(app_settings, "UNIPILE_API_KEY", "api-key-123")
@@ -610,7 +612,7 @@ async def test_update_integrations_propagates_llm_defaults_to_existing_cadences(
         is_active=True,
         cadence_type="mixed",
         llm_provider="openai",
-        llm_model="gpt-4o-mini",
+        llm_model="gpt-5.4-mini",
         llm_temperature=0.7,
         llm_max_tokens=512,
     )
@@ -621,7 +623,7 @@ async def test_update_integrations_propagates_llm_defaults_to_existing_cadences(
         is_active=True,
         cadence_type="email_only",
         llm_provider="openai",
-        llm_model="gpt-4o-mini",
+        llm_model="gpt-5.4-mini",
         llm_temperature=0.7,
         llm_max_tokens=512,
     )

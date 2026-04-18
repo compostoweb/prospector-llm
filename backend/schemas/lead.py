@@ -181,6 +181,7 @@ class LeadStepResponse(BaseModel):
     step_number: int
     channel: str
     status: str
+    item_kind: str = "cadence_step"
     use_voice: bool
     day_offset: int
     scheduled_at: datetime
@@ -188,6 +189,10 @@ class LeadStepResponse(BaseModel):
     message_content: str | None = None
     reply_content: str | None = None
     intent: str | None = None
+    manual_task_id: uuid.UUID | None = None
+    manual_task_type: str | None = None
+    manual_task_detail: str | None = None
+    notes: str | None = None
 
 
 class LeadImportItem(BaseModel):

@@ -83,7 +83,7 @@ def _make_cadence(tenant_id: uuid.UUID, cadence_id: uuid.UUID | None = None) -> 
         cadence_type="mixed",
         mode="automatic",
         llm_provider="openai",
-        llm_model="gpt-4o-mini",
+        llm_model="gpt-5.4-mini",
         llm_temperature=0.7,
         llm_max_tokens=512,
     )

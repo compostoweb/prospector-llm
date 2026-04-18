@@ -2,12 +2,17 @@
 
 import type { Route } from "next"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { AlertTriangle, Clock3, MessageSquare, Send, Users } from "lucide-react"
+import { AlertTriangle, Clock3, Gauge, MessageSquare, Send, Users } from "lucide-react"
 import { PeriodFilter } from "@/components/dashboard/period-filter"
 import { StatCard } from "@/components/dashboard/stat-card"
 import { BadgeChannel } from "@/components/shared/badge-channel"
 import type { Cadence } from "@/lib/api/hooks/use-cadences"
-import { useCadenceABTestResults, useCadenceAnalytics } from "@/lib/api/hooks/use-cadence-analytics"
+import {
+  useCadenceABTestResults,
+  useCadenceAnalytics,
+  useCadenceDeliveryBudget,
+  type CadenceDeliveryBudgetItem,
+} from "@/lib/api/hooks/use-cadence-analytics"
 
 interface CadenceDetailAnalyticsProps {
   cadence: Cadence
@@ -38,6 +43,7 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
   }
 
   const { data, isLoading, isError } = useCadenceAnalytics(cadence.id, days)
+  const deliveryBudgetQuery = useCadenceDeliveryBudget(cadence.id)
   const abResults = useCadenceABTestResults(cadence.id, cadence.steps_template, days)
 
   return (
@@ -93,6 +99,54 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
           }
         />
       </div>
+
+      <section className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-5 shadow-(--shadow-sm)">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Gauge size={16} className="text-(--accent)" aria-hidden="true" />
+            <div>
+              <h2 className="text-sm font-semibold text-(--text-primary)">
+                Orçamento operacional de hoje
+              </h2>
+              <p className="text-xs text-(--text-secondary)">
+                Budget diário por conta e por ação. Comentário, reação e InMail aparecem separados
+                quando a cadência usa esses canais.
+              </p>
+            </div>
+          </div>
+          {deliveryBudgetQuery.data?.generated_at ? (
+            <span className="text-[11px] text-(--text-tertiary)">
+              Atualizado às{" "}
+              {new Date(deliveryBudgetQuery.data.generated_at).toLocaleTimeString("pt-BR", {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
+          ) : null}
+        </div>
+
+        {deliveryBudgetQuery.isLoading ? (
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div key={index} className="h-32 animate-pulse rounded-lg bg-(--bg-overlay)" />
+            ))}
+          </div>
+        ) : deliveryBudgetQuery.isError ? (
+          <div className="rounded-lg border border-(--warning-subtle-fg) bg-(--warning-subtle) px-4 py-3 text-sm text-(--warning)">
+            Não foi possível carregar o orçamento operacional agora.
+          </div>
+        ) : deliveryBudgetQuery.data && deliveryBudgetQuery.data.items.length > 0 ? (
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
+            {deliveryBudgetQuery.data.items.map((item) => (
+              <OperationalBudgetCard key={`${item.channel}-${item.scope_label}`} item={item} />
+            ))}
+          </div>
+        ) : (
+          <p className="py-6 text-sm text-(--text-tertiary)">
+            Esta cadência ainda não tem canais elegíveis para budget operacional diário.
+          </p>
+        )}
+      </section>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
         <section className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-5 shadow-(--shadow-sm)">
@@ -324,4 +378,69 @@ function MetricMini({ label, value }: { label: string; value: number }) {
       <p className="mt-1 text-lg font-semibold tabular-nums text-(--text-primary)">{value}</p>
     </div>
   )
+}
+
+function OperationalBudgetCard({ item }: { item: CadenceDeliveryBudgetItem }) {
+  const tone =
+    item.remaining_today <= 0
+      ? {
+          badge: "bg-(--danger-subtle) text-(--danger-subtle-fg)",
+          label: "Esgotado",
+          bar: "var(--danger)",
+        }
+      : item.usage_pct >= 80
+        ? {
+            badge: "bg-(--warning-subtle) text-(--warning-subtle-fg)",
+            label: "No limite",
+            bar: "var(--warning)",
+          }
+        : {
+            badge: "bg-(--success-subtle) text-(--success-subtle-fg)",
+            label: "Saudável",
+            bar: "var(--success)",
+          }
+
+  return (
+    <div className="rounded-lg border border-(--border-subtle) bg-(--bg-overlay) p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-2">
+          <BadgeChannel channel={item.channel} />
+          <div>
+            <p className="text-sm font-semibold text-(--text-primary)">{item.scope_label}</p>
+            <p className="text-xs text-(--text-secondary)">
+              Limite configurado {item.configured_limit}/dia · escopo{" "}
+              {formatScopeType(item.scope_type)}
+            </p>
+          </div>
+        </div>
+        <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${tone.badge}`}>
+          {tone.label}
+        </span>
+      </div>
+
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-(--bg-surface)">
+        <div
+          className="h-full rounded-full transition-[width]"
+          style={{ width: `${Math.min(item.usage_pct, 100)}%`, backgroundColor: tone.bar }}
+        />
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
+        <MetricMini label="Usados" value={item.used_today} />
+        <MetricMini label="Budget" value={item.daily_budget} />
+        <MetricMini label="Saldo" value={item.remaining_today} />
+      </div>
+    </div>
+  )
+}
+
+function formatScopeType(value: string) {
+  switch (value) {
+    case "email_account":
+      return "conta de e-mail"
+    case "linkedin_account":
+      return "conta LinkedIn"
+    default:
+      return "fallback do tenant"
+  }
 }

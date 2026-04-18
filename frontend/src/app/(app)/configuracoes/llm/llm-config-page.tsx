@@ -48,14 +48,14 @@ function getProviderLabel(provider: string): string {
 
 const DEFAULT_LLM = {
   llm_provider: "openai" as const,
-  llm_model: "gpt-4o-mini",
+  llm_model: "gpt-5.4-mini",
   llm_temperature: 0.7,
   llm_max_tokens: 1024,
 }
 
 const DEFAULT_COLD_EMAIL_LLM = {
   llm_provider: "openai" as const,
-  llm_model: "gpt-4o-mini",
+  llm_model: "gpt-5.4-mini",
   llm_temperature: 0.7,
   llm_max_tokens: 512,
 }

@@ -43,6 +43,13 @@ function positionsMatch(a: { x: number; y: number }, b: { x: number; y: number }
 }
 
 function getStepInvalidReason(step: CadenceStep): string | null {
+  if (step.channel === "manual_task") {
+    if (!(step.manual_task_type ?? "").trim() && !(step.manual_task_detail ?? "").trim()) {
+      return "Defina ao menos o tipo ou o detalhamento da tarefa manual para que ela faça sentido no histórico do lead."
+    }
+    return null
+  }
+
   const hasManualText = step.message_template.trim().length > 0
 
   if (step.use_voice && step.audio_file_id) {
@@ -198,6 +205,8 @@ export function CadenceFlowCanvas({
         stepType: step.step_type ?? null,
         dayOffset: step.day_offset,
         messageTemplate: step.message_template,
+        manualTaskType: step.manual_task_type ?? null,
+        manualTaskDetail: step.manual_task_detail ?? null,
         audioFileId: step.audio_file_id ?? null,
         emailTemplateId: step.email_template_id ?? null,
         useVoice: step.use_voice,

@@ -77,14 +77,26 @@ export interface LeadStep {
   cadence_id: string
   step_number: number
   channel: string
-  status: "pending" | "sent" | "replied" | "skipped" | "failed"
+  status:
+    | "pending"
+    | "sent"
+    | "replied"
+    | "skipped"
+    | "failed"
+    | "content_generated"
+    | "done_external"
   use_voice: boolean
+  item_kind?: "cadence_step" | "manual_task"
   day_offset: number
   scheduled_at: string
   sent_at: string | null
   message_content: string | null
   reply_content: string | null
   intent: string | null
+  manual_task_id?: string | null
+  manual_task_type?: string | null
+  manual_task_detail?: string | null
+  notes?: string | null
 }
 
 export interface CreateLeadBody {

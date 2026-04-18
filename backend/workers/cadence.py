@@ -37,16 +37,16 @@ from models.enums import Channel, LeadStatus, StepStatus
 from models.lead import Lead
 from models.lead_list import lead_list_members
 from models.tenant import Tenant, TenantIntegration
+from services.cadence_delivery_budget import (
+    DEFAULT_CHANNEL_LIMITS,
+    build_account_rate_counter_key,
+    get_or_create_daily_account_budget,
+    resolve_account_rate_scope,
+    resolve_tenant_limits,
+)
 from workers.celery_app import celery_app
 
 logger = structlog.get_logger()
-
-# Limites padrão caso o tenant não tenha configuração própria
-_DEFAULT_LIMITS: dict[Channel, int] = {
-    Channel.LINKEDIN_CONNECT: 20,
-    Channel.LINKEDIN_DM: 40,
-    Channel.EMAIL: 300,
-}
 
 
 @celery_app.task(
@@ -81,7 +81,7 @@ async def _tick_async() -> dict:
                     select(TenantIntegration).where(TenantIntegration.tenant_id == tid)
                 )
                 integration = integration_result.scalar_one_or_none()
-                tenant_limits = _resolve_tenant_limits(integration)
+                tenant_limits = resolve_tenant_limits(integration)
 
                 # Busca steps pendentes e vencidos deste tenant
                 # Só despacha steps de cadências ativas
@@ -100,6 +100,18 @@ async def _tick_async() -> dict:
                 steps: list[CadenceStep] = list(steps_result.scalars().all())
 
                 for step in steps:
+                    cadence_result = await db.execute(
+                        select(Cadence).where(Cadence.id == step.cadence_id)
+                    )
+                    cadence = cadence_result.scalar_one_or_none()
+                    if cadence is None:
+                        logger.warning(
+                            "cadence_tick.cadence_not_found",
+                            step_id=str(step.id),
+                            cadence_id=str(step.cadence_id),
+                        )
+                        continue
+
                     # Verifica se o lead ainda está em cadência
                     lead_result = await db.execute(
                         select(Lead.status).where(Lead.id == step.lead_id)
@@ -117,23 +129,15 @@ async def _tick_async() -> dict:
                         )
                         continue
 
-                    # Verifica rate limit
-                    limit = tenant_limits.get(step.channel, _DEFAULT_LIMITS.get(step.channel, 40))
-                    today = datetime.now(tz=UTC).strftime("%Y-%m-%d")
-                    rate_key = f"ratelimit:{tid}:{step.channel.value}:{today}"
-
-                    allowed = await redis_client.check_and_increment(
-                        channel=step.channel.value,
+                    allowed = await _reserve_step_rate_limits(
+                        db=db,
                         tenant_id=tid,
-                        limit=limit,
+                        cadence=cadence,
+                        step=step,
+                        integration=integration,
+                        tenant_limits=tenant_limits,
                     )
                     if not allowed:
-                        logger.info(
-                            "cadence_tick.rate_limited",
-                            tenant_id=str(tid),
-                            channel=step.channel.value,
-                            rate_key=rate_key,
-                        )
                         continue
 
                     # Enfileira o dispatch
@@ -167,15 +171,57 @@ async def _tick_async() -> dict:
     return {"dispatched": dispatched, "skipped": skipped}
 
 
-def _resolve_tenant_limits(integration: TenantIntegration | None) -> dict[Channel, int]:
-    if integration is None:
-        return dict(_DEFAULT_LIMITS)
+async def _reserve_step_rate_limits(
+    db,
+    tenant_id: uuid.UUID,
+    cadence: Cadence,
+    step: CadenceStep,
+    integration: TenantIntegration | None,
+    tenant_limits: dict[Channel, int],
+) -> bool:
+    tenant_limit = tenant_limits.get(step.channel, DEFAULT_CHANNEL_LIMITS.get(step.channel, 40))
+    tenant_allowed = await redis_client.check_and_increment(
+        channel=step.channel.value,
+        tenant_id=tenant_id,
+        limit=tenant_limit,
+    )
+    if not tenant_allowed:
+        logger.info(
+            "cadence_tick.rate_limited",
+            tenant_id=str(tenant_id),
+            channel=step.channel.value,
+            scope="tenant",
+        )
+        return False
 
-    return {
-        Channel.LINKEDIN_CONNECT: integration.limit_linkedin_connect or _DEFAULT_LIMITS[Channel.LINKEDIN_CONNECT],
-        Channel.LINKEDIN_DM: integration.limit_linkedin_dm or _DEFAULT_LIMITS[Channel.LINKEDIN_DM],
-        Channel.EMAIL: integration.limit_email or _DEFAULT_LIMITS[Channel.EMAIL],
-    }
+    account_scope = await resolve_account_rate_scope(
+        db=db,
+        cadence=cadence,
+        channel=step.channel,
+        integration=integration,
+        tenant_limit=tenant_limit,
+    )
+    if account_scope is None:
+        return True
+
+    budget = await get_or_create_daily_account_budget(
+        account_scope.scope_key, step.channel, account_scope.limit
+    )
+    account_counter_key = build_account_rate_counter_key(account_scope.scope_key, step.channel)
+    account_allowed = await redis_client.check_and_increment_key(account_counter_key, limit=budget)
+    if account_allowed:
+        return True
+
+    await redis_client.release_rate_limit(step.channel.value, tenant_id)
+    logger.info(
+        "cadence_tick.rate_limited",
+        tenant_id=str(tenant_id),
+        channel=step.channel.value,
+        scope="account",
+        account_scope=account_scope.scope_key,
+        budget=budget,
+    )
+    return False
 
 
 async def _auto_enroll_list_members(db, tenant_id: uuid.UUID) -> int:

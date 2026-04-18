@@ -7,6 +7,8 @@ Testes de integração para GET/POST/PATCH/DELETE /leads e sub-rotas.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -15,9 +17,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.cadence import Cadence
-from models.enums import LeadStatus
+from models.cadence_step import CadenceStep
+from models.enums import Channel, LeadStatus, ManualTaskStatus, StepStatus
 from models.lead import Lead
 from models.lead_list import LeadList
+from models.manual_task import ManualTask
 
 pytestmark = pytest.mark.asyncio
 
@@ -35,6 +39,10 @@ def _lead_payload(**overrides: Any) -> dict[str, Any]:
     }
     base.update(overrides)
     return base
+
+
+def _email_by_address(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {item["email"]: item for item in data["emails"]}
 
 
 # ── POST /leads ───────────────────────────────────────────────────────
@@ -199,6 +207,37 @@ async def test_update_lead_replaces_email_collection(client: AsyncClient):
     }
 
 
+async def test_update_lead_primary_emails_only_keeps_secondary_and_preserves_ids(
+    client: AsyncClient,
+):
+    created = (
+        await client.post(
+            "/leads",
+            json=_lead_payload(
+                linkedin_url="https://linkedin.com/in/primary-only-update",
+                email_corporate="contato@acme.com",
+                emails=[{"email": "ops@acme.com", "email_type": "corporate"}],
+            ),
+        )
+    ).json()
+    initial_emails = _email_by_address(created)
+
+    resp = await client.patch(
+        f"/leads/{created['id']}",
+        json={
+            "email_corporate": "novo@acme.com",
+            "email_personal": "joao@gmail.com",
+        },
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    emails = _email_by_address(data)
+    assert set(emails) == {"novo@acme.com", "joao@gmail.com", "ops@acme.com"}
+    assert emails["ops@acme.com"]["id"] == initial_emails["ops@acme.com"]["id"]
+    assert "contato@acme.com" not in emails
+
+
 # ── DELETE /leads/{id} ────────────────────────────────────────────────
 
 
@@ -259,6 +298,88 @@ async def test_list_interactions_empty(client: AsyncClient):
     resp = await client.get(f"/leads/{created['id']}/interactions")
     assert resp.status_code == 200
     assert resp.json()["total"] == 0
+
+
+async def test_list_lead_steps_includes_manual_task_metadata_and_manual_task_history(
+    client: AsyncClient,
+    db: AsyncSession,
+):
+    created = (
+        await client.post(
+            "/leads",
+            json=_lead_payload(linkedin_url="https://linkedin.com/in/manual-task-history"),
+        )
+    ).json()
+
+    lead_id = uuid.UUID(created["id"])
+    tenant_id = uuid.UUID(created["tenant_id"])
+
+    cadence = Cadence(
+        tenant_id=tenant_id,
+        name="Cadência Manual Timeline",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+        steps_template=[
+            {
+                "step_number": 1,
+                "channel": "manual_task",
+                "day_offset": 0,
+                "message_template": None,
+                "use_voice": False,
+                "audio_file_id": None,
+                "step_type": None,
+                "manual_task_type": "call",
+                "manual_task_detail": "Ligar para validar interesse e agendar conversa.",
+            }
+        ],
+    )
+    db.add(cadence)
+    await db.flush()
+
+    cadence_step = CadenceStep(
+        tenant_id=tenant_id,
+        cadence_id=cadence.id,
+        lead_id=lead_id,
+        channel=Channel.MANUAL_TASK,
+        step_number=1,
+        day_offset=0,
+        use_voice=False,
+        status=StepStatus.SENT,
+        scheduled_at=datetime.now(tz=UTC),
+        sent_at=datetime.now(tz=UTC),
+    )
+    db.add(cadence_step)
+
+    manual_task = ManualTask(
+        tenant_id=tenant_id,
+        cadence_id=cadence.id,
+        lead_id=lead_id,
+        channel=Channel.EMAIL,
+        step_number=2,
+        status=ManualTaskStatus.DONE_EXTERNAL,
+        notes="Operador enviou email manualmente e registrou follow-up.",
+    )
+    db.add(manual_task)
+    await db.flush()
+
+    resp = await client.get(f"/leads/{created['id']}/steps")
+
+    assert resp.status_code == 200, resp.text
+    items = resp.json()
+    assert any(
+        item["item_kind"] == "manual_task"
+        and item["channel"] == "manual_task"
+        and item["manual_task_type"] == "call"
+        and item["manual_task_detail"] == "Ligar para validar interesse e agendar conversa."
+        for item in items
+    )
+    assert any(
+        item["item_kind"] == "manual_task"
+        and item["status"] == "done_external"
+        and item["notes"] == "Operador enviou email manualmente e registrou follow-up."
+        for item in items
+    )
 
 
 async def test_list_leads_accepts_score_min_alias(client: AsyncClient):
@@ -331,7 +452,7 @@ async def test_list_leads_filters_by_cadence_id(client: AsyncClient, db: AsyncSe
         name="Cadência Filtro",
         is_active=True,
         llm_provider="openai",
-        llm_model="gpt-4o-mini",
+        llm_model="gpt-5.4-mini",
     )
     db.add(cadence)
     await db.flush()
@@ -400,3 +521,104 @@ async def test_list_leads_filters_by_list_id(client: AsyncClient, db: AsyncSessi
     items = resp.json()["items"]
     assert len(items) == 1
     assert items[0]["id"] == created["id"]
+
+
+async def test_generate_import_merge_duplicates_updates_existing_lead_and_preserves_email_id(
+    client: AsyncClient,
+):
+    created = (
+        await client.post(
+            "/leads",
+            json=_lead_payload(
+                linkedin_url="https://linkedin.com/in/import-duplicate-match",
+                email_corporate="contato@acme.com",
+            ),
+        )
+    ).json()
+    initial_emails = _email_by_address(created)
+
+    resp = await client.post(
+        "/leads/generate-import",
+        json={
+            "source": "google_maps",
+            "merge_duplicates": True,
+            "items": [
+                {
+                    "preview_id": "preview-1",
+                    "name": "João Silva",
+                    "company": "Acme Corp",
+                    "linkedin_url": "https://linkedin.com/in/import-duplicate-match",
+                    "email_corporate": "contato@acme.com",
+                    "email_personal": "joao@gmail.com",
+                    "source": "manual",
+                    "origin_key": "google_maps",
+                    "origin_label": "Google Maps (Apify)",
+                }
+            ],
+        },
+    )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["created"] == 0
+    assert data["updated"] == 1
+    assert data["duplicates"] == 1
+    assert data["lead_ids"] == [created["id"]]
+
+    refreshed = (await client.get(f"/leads/{created['id']}")).json()
+    refreshed_emails = _email_by_address(refreshed)
+    assert set(refreshed_emails) == {"contato@acme.com", "joao@gmail.com"}
+    assert refreshed_emails["contato@acme.com"]["id"] == initial_emails["contato@acme.com"]["id"]
+
+
+async def test_quick_create_lead_from_inbox_returns_loaded_email_collection(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from api.routes import inbox as inbox_route
+
+    attendee = SimpleNamespace(
+        id="attendee-123",
+        name="Maria Silva",
+        profile_url="https://linkedin.com/in/mariasilva",
+        profile_picture_url="https://cdn.example.com/maria.png",
+        headline="CEO",
+        company="Acme Corp",
+        websites=["https://acme.com"],
+        email="maria@acme.com",
+    )
+    chat = SimpleNamespace(attendees=[attendee])
+
+    async def _fake_get_chat(chat_id: str) -> SimpleNamespace:
+        assert chat_id == "chat-123"
+        return chat
+
+    async def _fake_find_lead_by_attendees(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(inbox_route.unipile_client, "get_chat", _fake_get_chat)
+    monkeypatch.setattr(inbox_route, "_find_lead_by_attendees", _fake_find_lead_by_attendees)
+
+    resp = await client.post(
+        "/inbox/conversations/chat-123/create-lead",
+        json={
+            "name": "Maria Silva",
+            "linkedin_url": "https://linkedin.com/in/mariasilva",
+            "linkedin_profile_id": "attendee-123",
+        },
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["has_lead"] is True
+    assert data["email_corporate"] == "maria@acme.com"
+    assert data["emails"] == [
+        {
+            "id": data["emails"][0]["id"],
+            "email": "maria@acme.com",
+            "email_type": "corporate",
+            "source": "unipile",
+            "verified": False,
+            "is_primary": True,
+        }
+    ]

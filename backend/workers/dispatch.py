@@ -41,14 +41,22 @@ from integrations.context_fetcher import context_fetcher
 from integrations.llm import LLMRegistry
 from integrations.llm.base import LLMNonRetryableError, close_async_resource
 from integrations.unipile_client import UnipileNonRetryableError, unipile_client
-from services.ai_composer import AIComposer
+from services.ai_composer import AIComposer, resolve_step_key
+from services.cadence_delivery_budget import build_account_rate_limit_key
 from services.cadence_manager import (
     get_previous_template_channel,
     get_template_step_config,
     get_total_template_steps,
 )
+from services.editorial_validator import validate_editorial_output
 from services.email_account_service import resolve_outbound_email_account
 from services.email_event_service import build_outbound_email_delivery_observation
+from services.message_quality import (
+    build_fallback_email_subject,
+    normalize_email_subject,
+    normalize_generated_text,
+    plain_text_email_to_html,
+)
 from services.message_template_renderer import (
     render_message_template,
     render_saved_email_template,
@@ -132,24 +140,13 @@ async def _dispatch_inner(
             )
             return {"step_id": step_id, "status": step.status.value}
 
-        async def _release_rate_limit_slot() -> None:
-            await redis_client.release_rate_limit(step.channel.value, tid)
+        step_channel = step.channel
+        account_rate_limit_key: str | None = None
 
-        # ── Circuit breaker — muitas falhas seguidas pausam o tenant ──
-        cb_key = f"dispatch:failures:{tenant_id}"
-        cb_count = await redis_client.get(cb_key)
-        if cb_count and int(cb_count) >= 5:
-            # Reverter para PENDING para re-tentar depois da pausa
-            step.status = StepStatus.PENDING
-            await db.commit()
-            await _release_rate_limit_slot()
-            logger.warning(
-                "dispatch.circuit_breaker_open",
-                step_id=step_id,
-                tenant_id=tenant_id,
-                failure_count=int(cb_count),
-            )
-            return {"step_id": step_id, "status": "circuit_breaker"}
+        async def _release_rate_limit_slot() -> None:
+            await redis_client.release_rate_limit(step_channel.value, tid)
+            if account_rate_limit_key:
+                await redis_client.release_rate_limit_key(account_rate_limit_key)
 
         # ── Carrega Lead e Cadence ────────────────────────────────────
         lead_result = await db.execute(select(Lead).where(Lead.id == step.lead_id))
@@ -182,6 +179,28 @@ async def _dispatch_inner(
             select(TenantIntegration).where(TenantIntegration.tenant_id == tid)
         )
         integration = integ_result.scalar_one_or_none()
+        account_rate_limit_key = build_account_rate_limit_key(
+            cadence=cadence,
+            integration=integration,
+            channel=step.channel,
+        )
+
+        # ── Circuit breaker — muitas falhas seguidas pausam o tenant ──
+        cb_key = f"dispatch:failures:{tenant_id}"
+        cb_count = await redis_client.get(cb_key)
+        if cb_count and int(cb_count) >= 5:
+            # Reverter para PENDING para re-tentar depois da pausa
+            step.status = StepStatus.PENDING
+            await db.commit()
+            await _release_rate_limit_slot()
+            logger.warning(
+                "dispatch.circuit_breaker_open",
+                step_id=step_id,
+                tenant_id=tenant_id,
+                failure_count=int(cb_count),
+            )
+            return {"step_id": step_id, "status": "circuit_breaker"}
+
         linkedin_account_id = (
             (integration and integration.unipile_linkedin_account_id)
             or settings.UNIPILE_ACCOUNT_ID_LINKEDIN
@@ -221,6 +240,8 @@ async def _dispatch_inner(
                 template_step.get("message_template") if template_step else None,
                 lead,
             )
+            if configured_message:
+                configured_message = normalize_generated_text(configured_message)
             if step.channel not in (Channel.LINKEDIN_POST_REACTION, Channel.EMAIL):
                 if configured_message:
                     message_text = configured_message
@@ -246,6 +267,28 @@ async def _dispatch_inner(
             else:
                 message_text = ""
 
+            step_key = resolve_step_key(
+                step.channel.value,
+                step.step_number,
+                total_steps,
+                use_voice=step.use_voice,
+                previous_channel=previous_channel,
+                step_type=configured_step_type,
+            )
+
+            if step.channel not in (Channel.EMAIL, Channel.LINKEDIN_POST_REACTION):
+                editorial_validation = validate_editorial_output(step_key, message_text)
+                if not editorial_validation.ok or editorial_validation.warning_count:
+                    logger.warning(
+                        "dispatch.editorial_validation",
+                        step_id=step_id,
+                        channel=step.channel.value,
+                        step_key=step_key,
+                        hard_failures=editorial_validation.hard_failure_count,
+                        warnings=editorial_validation.warning_count,
+                        issues=[issue.code for issue in editorial_validation.issues],
+                    )
+
             # ── Envio via canal LinkedIn / Email ──────────────────────
             content_audio_url: str | None = None
             # Interaction pré-criada pelo canal EMAIL (necessário antes do envio para o pixel)
@@ -269,6 +312,7 @@ async def _dispatch_inner(
                     if _li_account is None:
                         step.status = StepStatus.SKIPPED
                         await db.commit()
+                        await _release_rate_limit_slot()
                         return {
                             "step_id": step_id,
                             "status": "skipped",
@@ -419,6 +463,7 @@ async def _dispatch_inner(
 
                 if configured_email_template_id:
                     email_template: EmailTemplate | None = None
+                    email_body_is_html = False
                     try:
                         template_uuid = uuid.UUID(str(configured_email_template_id))
                         template_result = await db.execute(
@@ -434,6 +479,8 @@ async def _dispatch_inner(
 
                     if email_template is not None:
                         subject, message_text = render_saved_email_template(email_template, lead)
+                        subject = normalize_email_subject(subject)
+                        email_body_is_html = True
                     else:
                         logger.warning(
                             "dispatch.email_template_not_found",
@@ -444,6 +491,7 @@ async def _dispatch_inner(
                         configured_email_template_id = None
 
                 if not configured_email_template_id:
+                    email_body_is_html = False
                     if configured_message:
                         subject = _build_email_subject(lead, step.step_number)
                         message_text = configured_message
@@ -474,7 +522,23 @@ async def _dispatch_inner(
                         str(item).strip() for item in subject_variants if str(item).strip()
                     ]
                     if cleaned_variants:
-                        subject = _random.choice(cleaned_variants)
+                        subject = normalize_email_subject(_random.choice(cleaned_variants))
+                subject = normalize_email_subject(subject)
+                email_editorial_validation = validate_editorial_output(
+                    step_key,
+                    message_text,
+                    subject=subject,
+                )
+                if not email_editorial_validation.ok or email_editorial_validation.warning_count:
+                    logger.warning(
+                        "dispatch.editorial_validation",
+                        step_id=step_id,
+                        channel=step.channel.value,
+                        step_key=step_key,
+                        hard_failures=email_editorial_validation.hard_failure_count,
+                        warnings=email_editorial_validation.warning_count,
+                        issues=[issue.code for issue in email_editorial_validation.issues],
+                    )
                 # Persiste subject para analytics de open-rate
                 step.subject_used = subject
 
@@ -521,7 +585,9 @@ async def _dispatch_inner(
 
                 # Injeta pixel de abertura e rodapé de descadastro
                 tracked_html = inject_tracking(
-                    body_html=message_text,
+                    body_html=message_text
+                    if email_body_is_html
+                    else plain_text_email_to_html(message_text),
                     interaction_id=email_interaction.id,
                     tenant_id=tid,
                     email=email_to,
@@ -799,9 +865,7 @@ async def _dispatch_inner(
 def _build_email_subject(lead: Lead, step_number: int) -> str:
     """Gera assunto do e-mail baseado na empresa e número do step."""
     company = lead.company or lead.name
-    if step_number == 1:
-        return f"Uma ideia para {company}"
-    return f"Re: Uma ideia para {company}"
+    return build_fallback_email_subject(company, step_number)
 
 
 async def _generate_tts_audio(

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -25,6 +26,13 @@ _PROVIDER_MODEL_PREFIXES: dict[str, tuple[str, ...]] = {
     "openrouter": (),  # OpenRouter aceita qualquer modelo — validação dinâmica
 }
 
+_MANUAL_TASK_TYPES = {
+    "call",
+    "linkedin_post_comment",
+    "whatsapp",
+    "other",
+}
+
 
 class LLMConfigSchema(BaseModel):
     """Configuração de LLM para uma cadência."""
@@ -34,8 +42,8 @@ class LLMConfigSchema(BaseModel):
         description="Provedor LLM: openai | gemini | anthropic",
     )
     model: str = Field(
-        default="gpt-4o-mini",
-        description="ID do modelo. Ex: gpt-4o-mini, gemini-2.5-flash, claude-haiku-4-5",
+        default="gpt-5.4-mini",
+        description="ID do modelo. Ex: gpt-5.4-mini, gemini-2.5-flash, claude-haiku-4-5",
     )
     temperature: float = Field(
         default=0.7,
@@ -110,6 +118,18 @@ class StepTemplateItem(BaseModel):
         default=None,
         description="Posição visual persistida do step no editor ReactFlow.",
     )
+    manual_task_type: str | None = Field(
+        default=None,
+        description=(
+            "Tipo operacional da tarefa manual: call | linkedin_post_comment | whatsapp | other. "
+            "Só para channel=manual_task."
+        ),
+    )
+    manual_task_detail: str | None = Field(
+        default=None,
+        max_length=1000,
+        description="Detalhamento/instruções da tarefa manual. Só para channel=manual_task.",
+    )
 
     @model_validator(mode="after")
     def voice_only_for_dm(self) -> StepTemplateItem:
@@ -149,6 +169,17 @@ class StepTemplateItem(BaseModel):
                 f"step_type '{self.step_type.value}' não é compatível com canal '{self.channel.value}'. "
                 f"Opções válidas: {allowed_names}"
             )
+        return self
+
+    @model_validator(mode="after")
+    def manual_task_fields_match_channel(self) -> StepTemplateItem:
+        if self.manual_task_type and self.channel != Channel.MANUAL_TASK:
+            raise ValueError("manual_task_type só é permitido para channel=manual_task")
+        if self.manual_task_detail and self.channel != Channel.MANUAL_TASK:
+            raise ValueError("manual_task_detail só é permitido para channel=manual_task")
+        if self.manual_task_type and self.manual_task_type not in _MANUAL_TASK_TYPES:
+            allowed = sorted(_MANUAL_TASK_TYPES)
+            raise ValueError(f"manual_task_type '{self.manual_task_type}' inválido. Use: {allowed}")
         return self
 
 
@@ -291,3 +322,83 @@ class CadenceResponse(BaseModel):
     steps_template: list[dict] | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class TemplateVariableResponse(BaseModel):
+    key: str
+    token: str
+    label: str
+
+
+class StepComposeRequest(BaseModel):
+    action: Literal["generate", "improve"] = Field(
+        ...,
+        description="Ação desejada no editor: gerar um template novo ou melhorar um rascunho atual.",
+    )
+    current_text: str | None = Field(
+        default=None,
+        description="Rascunho atual do corpo/template para ação improve.",
+    )
+    current_subject: str | None = Field(
+        default=None,
+        description="Assunto atual do email para ação improve.",
+    )
+
+
+class StepPreviewRequest(BaseModel):
+    lead_id: uuid.UUID | None = Field(
+        default=None,
+        description="Lead usado na prévia. NULL = lead de exemplo do sistema.",
+    )
+    current_text: str | None = Field(
+        default=None,
+        description="Texto atual do editor ainda não salvo.",
+    )
+    current_subject: str | None = Field(
+        default=None,
+        description="Assunto atual do editor ainda não salvo.",
+    )
+    current_email_template_id: str | None = Field(
+        default=None,
+        description="Template salvo atualmente selecionado no editor.",
+    )
+
+
+class StepComposeResponse(BaseModel):
+    action: Literal["generate", "improve"]
+    channel: Channel
+    step_number: int
+    step_type: StepType | None = None
+    message_template: str
+    subject: str | None = None
+    variables: list[str] = Field(default_factory=list)
+    method: str = Field(default="llm_template")
+
+
+class StepPreviewResponse(BaseModel):
+    channel: Channel
+    step_number: int
+    lead_id: uuid.UUID | None = None
+    lead_name: str | None = None
+    subject: str | None = None
+    body: str = ""
+    body_is_html: bool = False
+    variables: list[str] = Field(default_factory=list)
+    method: str = Field(default="manual_template")
+
+
+class CadenceDeliveryBudgetItemResponse(BaseModel):
+    channel: Channel
+    scope_type: str
+    scope_label: str
+    configured_limit: int
+    daily_budget: int
+    used_today: int
+    remaining_today: int
+    usage_pct: float
+
+
+class CadenceDeliveryBudgetResponse(BaseModel):
+    cadence_id: uuid.UUID
+    generated_at: datetime
+    items: list[CadenceDeliveryBudgetItemResponse] = Field(default_factory=list)
