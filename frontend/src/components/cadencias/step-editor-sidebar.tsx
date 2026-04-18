@@ -904,8 +904,8 @@ export function StepEditorSidebar({
                   </div>
 
                   {step.channel === "email" && (
-                    <div className="mt-3 space-y-2">
-                      <div className="flex justify-end">
+                    <div className="mt-3 flex items-start gap-2">
+                      <div className="shrink-0">
                         <button
                           type="button"
                           onClick={() => setTestEmailOpen(true)}
@@ -920,7 +920,7 @@ export function StepEditorSidebar({
                           Enviar teste por e-mail
                         </button>
                       </div>
-                      <div className="rounded-md border border-blue-200 bg-white/70 px-2.5 py-2 text-[11px] text-blue-800">
+                      <div className="min-w-0 flex-1 rounded-md border border-blue-200 bg-white/70 px-2.5 py-2 text-[11px] text-blue-800">
                         <p className="font-medium">Transporte do teste: {testEmailTransport.shortLabel}</p>
                         <p className="mt-1 text-blue-700">{testEmailTransport.hint}</p>
                       </div>

@@ -8,6 +8,21 @@ _ASCII_DASH_RE = re.compile(r"(?<=\S)\s-\s(?=\S)")
 _WHITESPACE_RE = re.compile(r"[ \t]+")
 _MULTI_NEWLINE_RE = re.compile(r"\n{3,}")
 _OPENING_OLA_RE = re.compile(r"^(olá)(?=[\s,!.:;]|$)", re.IGNORECASE)
+_SENTENCE_RE = re.compile(r"[^.!?]+[.!?]", re.DOTALL)
+_CTA_CLOSING_RE = re.compile(
+    r"\b("
+    r"quando fizer sentido|"
+    r"se fizer sentido|"
+    r"fico a disposi[cç][aã]o|"
+    r"fico por aqui|"
+    r"podemos continuar por aqui|"
+    r"me avise|"
+    r"vale explorar|"
+    r"faz sentido retomar|"
+    r"deixo a porta aberta"
+    r")\b",
+    re.IGNORECASE,
+)
 
 
 def normalize_generated_text(text: str) -> str:
@@ -24,6 +39,7 @@ def normalize_generated_text(text: str) -> str:
     normalized = re.sub(r"\s+([,.;!?])", r"\1", normalized)
     normalized = re.sub(r"([,.;!?])(\S)", r"\1 \2", normalized)
     normalized = _OPENING_OLA_RE.sub("Oi", normalized, count=1)
+    normalized = _split_final_cta_into_paragraph(normalized)
     normalized = _MULTI_NEWLINE_RE.sub("\n\n", normalized)
     return normalized.strip()
 
@@ -65,3 +81,38 @@ def plain_text_email_to_html(text: str) -> str:
         html_parts.append(f"<p>{'<br />'.join(lines)}</p>")
 
     return "\n".join(html_parts) if html_parts else "<p></p>"
+
+
+def _split_final_cta_into_paragraph(text: str) -> str:
+    paragraphs = [paragraph.strip() for paragraph in text.split("\n\n") if paragraph.strip()]
+    if not paragraphs:
+        return text
+
+    last_paragraph = paragraphs[-1]
+    sentences = _extract_sentences(last_paragraph)
+    if len(sentences) < 2:
+        return "\n\n".join(paragraphs)
+
+    final_sentence = sentences[-1]
+    if not _looks_like_final_cta(final_sentence):
+        return "\n\n".join(paragraphs)
+
+    paragraphs[-1] = " ".join(sentences[:-1]).strip()
+    paragraphs.append(final_sentence)
+    return "\n\n".join(paragraph for paragraph in paragraphs if paragraph)
+
+
+def _extract_sentences(paragraph: str) -> list[str]:
+    matches = [match.group(0).strip() for match in _SENTENCE_RE.finditer(paragraph)]
+    consumed = sum(len(match.group(0)) for match in _SENTENCE_RE.finditer(paragraph))
+    remainder = paragraph[consumed:].strip()
+    if remainder:
+        matches.append(remainder)
+    return [sentence for sentence in matches if sentence]
+
+
+def _looks_like_final_cta(sentence: str) -> bool:
+    normalized = sentence.strip()
+    if not normalized:
+        return False
+    return normalized.endswith("?") or bool(_CTA_CLOSING_RE.search(normalized))

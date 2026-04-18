@@ -98,8 +98,8 @@ export function SandboxStepCard({ step, emailTransportSummary }: SandboxStepCard
   const leadJobTitle = step.lead_job_title ?? step.fictitious_lead_data?.job_title ?? ""
   const hasClientSourceWarning = Boolean(
     step.message_content &&
-      UNATTRIBUTED_SOURCE_PATTERN.test(step.message_content) &&
-      !compositionContext?.source_company_news_preview,
+    UNATTRIBUTED_SOURCE_PATTERN.test(step.message_content) &&
+    !compositionContext?.source_company_news_preview,
   )
 
   function handleSimulateReply() {
@@ -239,7 +239,8 @@ export function SandboxStepCard({ step, emailTransportSummary }: SandboxStepCard
               Composição
             </span>
             <Badge variant="info">
-              {GENERATION_MODE_LABELS[compositionContext.generation_mode] ?? compositionContext.generation_mode}
+              {GENERATION_MODE_LABELS[compositionContext.generation_mode] ??
+                compositionContext.generation_mode}
             </Badge>
             {compositionContext.copy_method && (
               <Badge variant="default">Método {compositionContext.copy_method}</Badge>
@@ -259,12 +260,19 @@ export function SandboxStepCard({ step, emailTransportSummary }: SandboxStepCard
             {compositionContext.matched_role && (
               <p>
                 Cargo usado no few-shot: {compositionContext.matched_role}
-                {compositionContext.few_shot_method ? ` · ${compositionContext.few_shot_method}` : ""}
+                {compositionContext.few_shot_method
+                  ? ` · ${compositionContext.few_shot_method}`
+                  : ""}
               </p>
             )}
             <p>
-              Sinais: {compositionContext.has_site_summary ? "site/contexto externo" : "sem pesquisa externa"}
-              {compositionContext.has_recent_posts ? " · posts recentes do lead" : " · sem posts recentes"}
+              Sinais:{" "}
+              {compositionContext.has_site_summary
+                ? "site/contexto externo"
+                : "sem pesquisa externa"}
+              {compositionContext.has_recent_posts
+                ? " · posts recentes do lead"
+                : " · sem posts recentes"}
             </p>
             {compositionContext.source_site_summary_preview && (
               <p>Pesquisa da empresa: {compositionContext.source_site_summary_preview}</p>
@@ -287,7 +295,8 @@ export function SandboxStepCard({ step, emailTransportSummary }: SandboxStepCard
               ))}
               {!editorialValidation?.issues.length && hasClientSourceWarning && (
                 <p className="mt-1">
-                  O texto menciona estudo ou dado externo sem fonte explícita no contexto salvo deste step.
+                  O texto menciona estudo ou dado externo sem fonte explícita no contexto salvo
+                  deste step.
                 </p>
               )}
             </div>
@@ -374,12 +383,13 @@ export function SandboxStepCard({ step, emailTransportSummary }: SandboxStepCard
           )}
 
           {step.channel === "email" && step.message_content && (
-            <div className="space-y-2">
+            <div className="flex items-center gap-2">
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => setTestEmailOpen(true)}
                 disabled={sendTestEmail.isPending}
+                className="shrink-0"
               >
                 {sendTestEmail.isPending ? (
                   <Loader2 size={12} className="animate-spin" aria-hidden="true" />
@@ -388,12 +398,15 @@ export function SandboxStepCard({ step, emailTransportSummary }: SandboxStepCard
                 )}
                 Enviar teste por e-mail
               </Button>
-              <div className="rounded-md border border-(--border-subtle) bg-(--bg-overlay) px-3 py-2 text-[11px] text-(--text-secondary)">
+
+              {/* Badge informativo ao lado do botão enviar teste por e-mail
+              
+              <div className="min-w-0 flex-1 rounded-md border border-(--border-subtle) bg-(--bg-overlay) px-3 py-2 text-[11px] text-(--text-secondary)">
                 <p className="font-medium text-(--text-primary)">
-                  Transporte do teste: {emailTransportSummary.shortLabel}
+                  Conta do teste: {emailTransportSummary.shortLabel}
                 </p>
                 <p className="mt-1">{emailTransportSummary.hint}</p>
-              </div>
+              </div> */}
             </div>
           )}
         </div>

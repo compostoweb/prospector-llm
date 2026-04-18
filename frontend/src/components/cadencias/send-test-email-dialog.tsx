@@ -45,9 +45,7 @@ export function SendTestEmailDialog({
   useEffect(() => {
     if (!open) {
       setEmail("")
-      return
     }
-    setEmail((current) => current || suggestedEmails[0] || "")
   }, [open, suggestedEmails])
 
   const uniqueSuggestions = [...new Set(suggestedEmails.map((item) => item.trim()).filter(Boolean))]
@@ -62,46 +60,50 @@ export function SendTestEmailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent
+        className="max-w-md"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault()
+        }}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Mail size={16} aria-hidden="true" />
             {title}
           </DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
+          <DialogDescription className="mb-2">{description}</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-3">
           {contextLabel && (
-            <div className="rounded-md border border-(--border-subtle) bg-(--bg-overlay) px-3 py-2 text-xs text-(--text-secondary)">
+            <div className="rounded-md border border-(--border-subtle) bg-(--bg-overlay) px-3 py-2 text-sm font-bold text-(--accent)">
               Conteúdo: <span className="font-medium text-(--text-primary)">{contextLabel}</span>
             </div>
           )}
 
           {subjectPreview && (
-            <div className="rounded-md border border-(--border-subtle) bg-(--bg-overlay) px-3 py-2 text-xs text-(--text-secondary)">
+            <div className="rounded-md border border-(--border-subtle) bg-(--bg-overlay) px-3 py-2 text-sm font-bold text-(--accent)">
               Assunto previsto:{" "}
               <span className="font-medium text-(--text-primary)">{subjectPreview}</span>
             </div>
           )}
 
           {(transportLabel || transportHint) && (
-            <div className="rounded-md border border-(--border-subtle) bg-(--bg-overlay) px-3 py-2 text-xs text-(--text-secondary)">
+            <div className="rounded-md border border-(--border-subtle) bg-(--bg-overlay) px-3 py-2 text-sm  font-bold text-(--accent)">
               <p>
-                Transporte do teste:{" "}
+                Conta do teste:{" "}
                 {transportLabel ? (
                   <span className="font-medium text-(--text-primary)">{transportLabel}</span>
                 ) : null}
               </p>
-              {transportHint && <p className="mt-1 text-(--text-tertiary)">{transportHint}</p>}
+              {transportHint && (
+                <p className="mt-1 font-normal text-xs text-(--text-primary)">{transportHint}</p>
+              )}
             </div>
           )}
 
-          <div className="space-y-2">
-            <label
-              className="text-xs font-medium text-(--text-secondary)"
-              htmlFor="test-email-input"
-            >
+          <div className="space-y-2 pb-1">
+            <label className="text-sm font-bold text-(--text-secondary)" htmlFor="test-email-input">
               Endereço de destino
             </label>
             <Input
@@ -134,7 +136,7 @@ export function SendTestEmailDialog({
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="pt-2">
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
