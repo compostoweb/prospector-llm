@@ -48,6 +48,7 @@ from services.cadence_manager import (
     get_template_step_config,
     get_total_template_steps,
 )
+from services.cadence_step_eligibility import evaluate_step_eligibility
 from services.editorial_validator import validate_editorial_output
 from services.email_account_service import resolve_outbound_email_account
 from services.email_event_service import build_outbound_email_delivery_observation
@@ -67,6 +68,10 @@ if TYPE_CHECKING:
     from models.lead import Lead
 
 logger = structlog.get_logger()
+
+
+def _build_outbound_email_message_id(step_id: uuid.UUID) -> str:
+    return f"<cadence-step-{step_id}@prospector.local>"
 
 
 @dataclass
@@ -184,6 +189,29 @@ async def _dispatch_inner(
             integration=integration,
             channel=step.channel,
         )
+
+        eligibility = await evaluate_step_eligibility(
+            db=db,
+            cadence=cadence,
+            step=step,
+            lead=lead,
+            integration=integration,
+        )
+        if not eligibility.dispatchable:
+            step.status = StepStatus.SKIPPED
+            await db.commit()
+            await _release_rate_limit_slot()
+            logger.info(
+                "dispatch.step_skipped",
+                step_id=step_id,
+                reason=eligibility.reason,
+                channel=step.channel.value,
+            )
+            return {
+                "step_id": step_id,
+                "status": "skipped",
+                "reason": eligibility.reason,
+            }
 
         # ── Circuit breaker — muitas falhas seguidas pausam o tenant ──
         cb_key = f"dispatch:failures:{tenant_id}"
@@ -561,10 +589,12 @@ async def _dispatch_inner(
 
                 # Pré-cria Interaction antes do envio para ter o ID para o pixel de rastreamento
                 now_pre = datetime.now(tz=UTC)
+                outbound_email_message_id = _build_outbound_email_message_id(step.id)
                 email_interaction = Interaction(
                     id=uuid.uuid4(),
                     tenant_id=tid,
                     lead_id=lead.id,
+                    cadence_step_id=step.id,
                     channel=Channel.EMAIL,
                     direction=InteractionDirection.OUTBOUND,
                     content_text=message_text,
@@ -608,12 +638,17 @@ async def _dispatch_inner(
                             subject=subject,
                             body_html=tracked_html,
                             from_name=account_for_send.from_name or account_for_send.display_name,
+                            headers={"Message-ID": outbound_email_message_id},
                         ),
                     )
                     result = _DispatchResult(
                         success=_send_result.success,
                         message_id=_send_result.message_id,
                     )
+                    email_interaction.email_message_id = outbound_email_message_id
+                    raw_thread_id = _send_result.raw.get("threadId")
+                    if raw_thread_id:
+                        email_interaction.provider_thread_id = str(raw_thread_id)
                 else:
                     # Fallback: usa Unipile global (comportamento anterior)
                     email_provider_type = "unipile_gmail"
@@ -797,6 +832,7 @@ async def _dispatch_inner(
                     id=uuid.uuid4(),
                     tenant_id=tid,
                     lead_id=lead.id,
+                    cadence_step_id=step.id,
                     channel=step.channel,
                     direction=InteractionDirection.OUTBOUND,
                     content_text=message_text,

@@ -10,7 +10,7 @@ from integrations.linkedin.registry import LinkedInRegistry
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
 from models.email_account import EmailAccount
-from models.enums import Channel
+from models.enums import Channel, StepStatus
 from models.lead import Lead
 from models.linkedin_account import LinkedInAccount
 from models.tenant import TenantIntegration
@@ -29,6 +29,9 @@ async def evaluate_step_eligibility(
     lead: Lead,
     integration: TenantIntegration | None,
 ) -> StepEligibilityResult:
+    if await _lead_has_replied_in_cadence(db, lead.id, cadence.id, step.tenant_id):
+        return StepEligibilityResult(dispatchable=False, reason="lead_replied")
+
     if step.channel == Channel.EMAIL:
         if not (lead.email_corporate or lead.email_personal):
             return StepEligibilityResult(dispatchable=False, reason="no_email")
@@ -119,3 +122,22 @@ async def resolve_linkedin_delivery_provider(
 async def _has_recent_post(provider: LinkedInDeliveryProvider, linkedin_profile_id: str) -> bool:
     posts = await provider.get_lead_posts(linkedin_profile_id, limit=1)
     return bool(posts)
+
+
+async def _lead_has_replied_in_cadence(
+    db: AsyncSession,
+    lead_id,
+    cadence_id,
+    tenant_id,
+) -> bool:
+    result = await db.execute(
+        select(CadenceStep.id)
+        .where(
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.lead_id == lead_id,
+            CadenceStep.cadence_id == cadence_id,
+            CadenceStep.status == StepStatus.REPLIED,
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None

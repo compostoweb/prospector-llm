@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
+from models.interaction import Interaction
 from models.enums import Channel, LeadStatus, ManualTaskStatus, StepStatus
 from models.lead import Lead
 from models.lead_list import LeadList
@@ -298,6 +299,130 @@ async def test_list_interactions_empty(client: AsyncClient):
     resp = await client.get(f"/leads/{created['id']}/interactions")
     assert resp.status_code == 200
     assert resp.json()["total"] == 0
+
+
+async def test_list_interactions_includes_reply_audit_fields(
+    client: AsyncClient,
+    db: AsyncSession,
+):
+    created = (
+        await client.post(
+            "/leads", json=_lead_payload(linkedin_url="https://linkedin.com/in/interactions-audit")
+        )
+    ).json()
+
+    interaction = Interaction(
+        tenant_id=uuid.UUID(created["tenant_id"]),
+        lead_id=uuid.UUID(created["id"]),
+        channel=Channel.EMAIL,
+        direction="inbound",
+        content_text="Recebi aqui, mas não sei a qual cadência pertence.",
+        reply_match_status="ambiguous",
+        reply_match_sent_cadence_count=2,
+    )
+    db.add(interaction)
+    await db.commit()
+
+    resp = await client.get(f"/leads/{created['id']}/interactions")
+
+    assert resp.status_code == 200, resp.text
+    item = resp.json()["items"][0]
+    assert item["reply_match_status"] == "ambiguous"
+    assert item["reply_match_sent_cadence_count"] == 2
+
+
+async def test_list_lead_steps_matches_interactions_by_cadence_step_id(
+    client: AsyncClient,
+    db: AsyncSession,
+):
+    created = (
+        await client.post(
+            "/leads",
+            json=_lead_payload(linkedin_url="https://linkedin.com/in/step-correlation-history"),
+        )
+    ).json()
+
+    lead_id = uuid.UUID(created["id"])
+    tenant_id = uuid.UUID(created["tenant_id"])
+
+    cadence = Cadence(
+        tenant_id=tenant_id,
+        name="Cadência Correlação Timeline",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    db.add(cadence)
+    await db.flush()
+
+    first_step = CadenceStep(
+        tenant_id=tenant_id,
+        cadence_id=cadence.id,
+        lead_id=lead_id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        use_voice=False,
+        status=StepStatus.SENT,
+        scheduled_at=datetime.now(tz=UTC),
+        sent_at=datetime.now(tz=UTC),
+    )
+    second_step = CadenceStep(
+        tenant_id=tenant_id,
+        cadence_id=cadence.id,
+        lead_id=lead_id,
+        channel=Channel.EMAIL,
+        step_number=2,
+        day_offset=1,
+        use_voice=False,
+        status=StepStatus.SENT,
+        scheduled_at=datetime.now(tz=UTC),
+        sent_at=datetime.now(tz=UTC),
+    )
+    db.add_all([first_step, second_step])
+    await db.flush()
+
+    db.add_all(
+        [
+            Interaction(
+                tenant_id=tenant_id,
+                lead_id=lead_id,
+                cadence_step_id=second_step.id,
+                channel=Channel.EMAIL,
+                direction="outbound",
+                content_text="Segundo email enviado",
+            ),
+            Interaction(
+                tenant_id=tenant_id,
+                lead_id=lead_id,
+                cadence_step_id=first_step.id,
+                channel=Channel.EMAIL,
+                direction="outbound",
+                content_text="Primeiro email enviado",
+            ),
+            Interaction(
+                tenant_id=tenant_id,
+                lead_id=lead_id,
+                cadence_step_id=second_step.id,
+                channel=Channel.EMAIL,
+                direction="inbound",
+                content_text="Resposta do segundo step",
+            ),
+        ]
+    )
+    await db.commit()
+
+    resp = await client.get(f"/leads/{created['id']}/steps")
+
+    assert resp.status_code == 200, resp.text
+    items = resp.json()
+    first_item = next(item for item in items if item["step_number"] == 1)
+    second_item = next(item for item in items if item["step_number"] == 2)
+
+    assert first_item["message_content"] == "Primeiro email enviado"
+    assert first_item["reply_content"] is None
+    assert second_item["message_content"] == "Segundo email enviado"
+    assert second_item["reply_content"] == "Resposta do segundo step"
 
 
 async def test_list_lead_steps_includes_manual_task_metadata_and_manual_task_history(

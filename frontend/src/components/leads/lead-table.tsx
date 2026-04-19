@@ -1,7 +1,7 @@
 ﻿"use client"
 
 import Link from "next/link"
-import { Archive, Mail, Phone, Sparkles, Users } from "lucide-react"
+import { AlertTriangle, Archive, Mail, Phone, Sparkles, Users } from "lucide-react"
 import { toast } from "sonner"
 import { useArchiveLead, useEnrichLead, type Lead } from "@/lib/api/hooks/use-leads"
 import { Button } from "@/components/ui/button"
@@ -136,6 +136,15 @@ export function LeadTable({
                   <p className="font-medium text-(--text-primary)">{lead.name}</p>
                   {lead.job_title && (
                     <p className="text-xs text-(--text-tertiary)">{truncate(lead.job_title, 40)}</p>
+                  )}
+                  {lead.has_multiple_active_cadences && (
+                    <div
+                      className="mt-2 inline-flex max-w-56 items-center gap-1.5 rounded-(--radius-full) bg-(--warning-subtle) px-2.5 py-1 text-[11px] font-medium text-(--warning-subtle-fg)"
+                      title={lead.active_cadences.map((cadence) => cadence.name).join(" • ")}
+                    >
+                      <AlertTriangle size={12} aria-hidden="true" />
+                      <span>{lead.active_cadence_count} cadências ativas</span>
+                    </div>
                   )}
                 </Link>
               </td>

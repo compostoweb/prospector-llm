@@ -23,6 +23,13 @@ class LeadListSummary(BaseModel):
     name: str
 
 
+class LeadActiveCadenceSummary(BaseModel):
+    """Resumo de cadência ativa associada ao lead."""
+
+    id: uuid.UUID
+    name: str
+
+
 class LeadEmailInput(BaseModel):
     email: str = Field(..., min_length=3, max_length=254)
     email_type: EmailType = EmailType.UNKNOWN
@@ -141,15 +148,18 @@ class LeadResponse(BaseModel):
     email_corporate_verified: bool
     email_personal: str | None
     email_personal_source: str | None
-    emails: list[LeadEmailResponse] = []
+    emails: list[LeadEmailResponse] = Field(default_factory=list)
     phone: str | None
     enriched_at: datetime | None
     notes: str | None
     capture_query: str | None = None
-    lead_lists: list[LeadListSummary] = []
+    lead_lists: list[LeadListSummary] = Field(default_factory=list)
     origin_key: str = "manual"
     origin_label: str = "Manual"
     origin_detail: str | None = None
+    active_cadence_count: int = 0
+    active_cadences: list[LeadActiveCadenceSummary] = Field(default_factory=list)
+    has_multiple_active_cadences: bool = False
     created_at: datetime
     updated_at: datetime
 

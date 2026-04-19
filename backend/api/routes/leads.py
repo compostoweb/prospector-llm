@@ -63,6 +63,7 @@ from services.lead_management import (
     find_existing_lead,
     get_lead_with_lists,
     get_or_create_list,
+    load_active_cadences_for_leads,
     merge_leads,
     reload_lead_for_output,
     replace_lead_email_records,
@@ -143,9 +144,17 @@ async def list_leads(
         query.order_by(Lead.created_at.desc()).offset(offset).limit(page_size)
     )
     leads = result.scalars().all()
+    active_cadences_by_lead = await load_active_cadences_for_leads(
+        db,
+        tenant_id=tenant_id,
+        lead_ids=[lead.id for lead in leads],
+    )
 
     return LeadListResponse(
-        items=[serialize_lead(lead) for lead in leads],
+        items=[
+            serialize_lead(lead, active_cadences_by_lead=active_cadences_by_lead)
+            for lead in leads
+        ],
         total=total,
         page=page,
         page_size=page_size,
@@ -220,7 +229,12 @@ async def create_lead(
         logger.info("lead.enrich_queued", lead_id=str(lead.id))
 
     lead_with_lists = await reload_lead_for_output(db, lead=lead)
-    return serialize_lead(lead_with_lists)
+    active_cadences_by_lead = await load_active_cadences_for_leads(
+        db,
+        tenant_id=tenant_id,
+        lead_ids=[lead_with_lists.id],
+    )
+    return serialize_lead(lead_with_lists, active_cadences_by_lead=active_cadences_by_lead)
 
 
 # ── LinkedIn search params (DEVE vir antes de /{lead_id}) ────────────
@@ -332,7 +346,12 @@ async def get_lead(
     db: AsyncSession = Depends(get_session_flexible),
 ) -> LeadResponse:
     lead = await _get_lead_or_404(lead_id, tenant_id, db)
-    return serialize_lead(lead)
+    active_cadences_by_lead = await load_active_cadences_for_leads(
+        db,
+        tenant_id=tenant_id,
+        lead_ids=[lead.id],
+    )
+    return serialize_lead(lead, active_cadences_by_lead=active_cadences_by_lead)
 
 
 # ── Atualização parcial ───────────────────────────────────────────────
@@ -384,9 +403,14 @@ async def update_lead(
 
     await db.commit()
     lead = await reload_lead_for_output(db, lead=lead)
+    active_cadences_by_lead = await load_active_cadences_for_leads(
+        db,
+        tenant_id=tenant_id,
+        lead_ids=[lead.id],
+    )
 
     logger.info("lead.updated", lead_id=str(lead_id), fields=list(updates.keys()))
-    return serialize_lead(lead)
+    return serialize_lead(lead, active_cadences_by_lead=active_cadences_by_lead)
 
 
 @router.post("/{lead_id}/enrich")
@@ -459,7 +483,14 @@ async def merge_selected_leads(
         tenant_id=str(tenant_id),
     )
     return LeadMergeResponse(
-        lead=serialize_lead(merged_lead),
+        lead=serialize_lead(
+            merged_lead,
+            active_cadences_by_lead=await load_active_cadences_for_leads(
+                db,
+                tenant_id=tenant_id,
+                lead_ids=[merged_lead.id],
+            ),
+        ),
         merged_lead_ids=body.secondary_lead_ids,
     )
 
@@ -592,16 +623,18 @@ async def list_lead_steps(
     )
     interactions = interactions_result.scalars().all()
 
-    # Mapear interactions por channel+direction para cada step
-    outbound_by_channel: dict[str, list[Interaction]] = {}
-    inbound_by_channel: dict[str, list[Interaction]] = {}
+    # Usa cadence_step_id para evitar casar replies apenas por ordem/canal.
+    outbound_by_step_id: dict[uuid.UUID, Interaction] = {}
+    inbound_by_step_id: dict[uuid.UUID, Interaction] = {}
     for ix in interactions:
-        bucket = outbound_by_channel if ix.direction.value == "outbound" else inbound_by_channel
-        bucket.setdefault(ix.channel.value, []).append(ix)
+        if ix.cadence_step_id is None:
+            continue
+        if ix.direction.value == "outbound":
+            outbound_by_step_id[ix.cadence_step_id] = ix
+        else:
+            inbound_by_step_id[ix.cadence_step_id] = ix
 
     timeline_items: list[tuple[datetime, LeadStepResponse]] = []
-    outbound_idx: dict[str, int] = {}
-    inbound_idx: dict[str, int] = {}
 
     for step in steps:
         ch = step.channel.value
@@ -613,25 +646,13 @@ async def list_lead_steps(
         manual_task_detail = _normalize_manual_task_detail(
             step_config.get("manual_task_detail") if step_config else None
         )
-        # Match outbound message to step (in order)
-        ob_list = outbound_by_channel.get(ch, [])
-        ob_i = outbound_idx.get(ch, 0)
-        message_content: str | None = None
-        if ob_i < len(ob_list):
-            message_content = ob_list[ob_i].content_text
-            outbound_idx[ch] = ob_i + 1
+        outbound_interaction = outbound_by_step_id.get(step.id)
+        message_content = outbound_interaction.content_text if outbound_interaction else None
 
-        # Match inbound reply
-        ib_list = inbound_by_channel.get(ch, [])
-        ib_i = inbound_idx.get(ch, 0)
-        reply_content: str | None = None
-        intent: str | None = None
-        if ib_i < len(ib_list):
-            current_interaction = ib_list[ib_i]
-            reply_content = current_interaction.content_text
-            interaction_intent = current_interaction.intent
-            intent = interaction_intent.value if interaction_intent is not None else None
-            inbound_idx[ch] = ib_i + 1
+        inbound_interaction = inbound_by_step_id.get(step.id)
+        reply_content = inbound_interaction.content_text if inbound_interaction else None
+        interaction_intent = inbound_interaction.intent if inbound_interaction is not None else None
+        intent: str | None = interaction_intent.value if interaction_intent is not None else None
 
         if step.channel == Channel.MANUAL_TASK and not message_content:
             message_content = manual_task_detail

@@ -357,6 +357,59 @@ async def test_tick_skips_lead_not_in_cadence(
     assert step.status == StepStatus.SKIPPED
 
 
+async def test_tick_skips_pending_steps_after_lead_reply(
+    db: FakeAsyncSession,
+    tenant_id: uuid.UUID,
+    tenant: Tenant,
+) -> None:
+    """Se o lead já respondeu em qualquer step da cadência, os próximos steps não disparam."""
+    from workers.cadence import _tick_async
+
+    lead = _make_lead(tenant_id)
+    cadence = _make_cadence(tenant_id)
+    replied_step = _make_step(
+        tenant_id,
+        lead.id,
+        cadence.id,
+        channel=Channel.EMAIL,
+        status=StepStatus.REPLIED,
+    )
+    pending_step = _make_step(
+        tenant_id,
+        lead.id,
+        cadence.id,
+        channel=Channel.LINKEDIN_DM,
+        status=StepStatus.PENDING,
+    )
+    pending_step.step_number = 2
+    db.add_all([lead, cadence, replied_step, pending_step])
+    await db.flush()
+
+    mock_wsl = _mock_worker_session_local(db, [tenant])
+
+    with (
+        patch("workers.cadence.WorkerSessionLocal", mock_wsl),
+        patch("workers.cadence.get_worker_session") as mock_get_session,
+        patch("workers.cadence.redis_client") as mock_redis,
+        patch("workers.dispatch.dispatch_step") as mock_dispatch,
+    ):
+
+        async def _fake_session(_tid):
+            yield db
+
+        mock_get_session.side_effect = _fake_session
+        _configure_rate_limit_mocks(mock_redis)
+        mock_dispatch.delay = MagicMock()
+
+        result = await _tick_async()
+
+    assert result["skipped"] >= 1
+    mock_dispatch.delay.assert_not_called()
+
+    await db.refresh(pending_step)
+    assert pending_step.status == StepStatus.SKIPPED
+
+
 async def test_tick_does_not_dispatch_future_steps(
     db: FakeAsyncSession,
     tenant_id: uuid.UUID,

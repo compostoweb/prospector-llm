@@ -11,6 +11,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
+from schemas.lead import LeadActiveCadenceSummary
+
 
 class LeadListCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
@@ -45,6 +47,9 @@ class LeadListLeadItem(BaseModel):
     email_corporate: str | None = None
     linkedin_url: str | None = None
     status: str = "raw"
+    active_cadence_count: int = 0
+    active_cadences: list[LeadActiveCadenceSummary] = Field(default_factory=list)
+    has_multiple_active_cadences: bool = False
 
 
 class LeadListDetailResponse(BaseModel):
@@ -56,7 +61,7 @@ class LeadListDetailResponse(BaseModel):
     name: str
     description: str | None
     lead_count: int = 0
-    leads: list[LeadListLeadItem] = []
+    leads: list[LeadListLeadItem] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

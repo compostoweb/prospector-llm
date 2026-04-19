@@ -27,6 +27,7 @@ from schemas.lead_list import (
     LeadListUpdateRequest,
 )
 from services.cadence_manager import auto_enroll_linked_cadences_for_list
+from services.lead_management import load_active_cadences_for_leads
 
 logger = structlog.get_logger()
 
@@ -86,7 +87,21 @@ async def get_lead_list(
     ll = result.scalar_one_or_none()
     if not ll:
         raise HTTPException(status_code=404, detail="Lista não encontrada")
-    leads_items = [LeadListLeadItem.model_validate(lead) for lead in (ll.leads or [])]
+    active_cadences_by_lead = await load_active_cadences_for_leads(
+        db,
+        tenant_id=tenant.id,
+        lead_ids=[lead.id for lead in (ll.leads or [])],
+    )
+    leads_items: list[LeadListLeadItem] = []
+    for lead in ll.leads or []:
+        item_data = LeadListLeadItem.model_validate(lead).model_dump()
+        active_cadences = active_cadences_by_lead.get(lead.id, [])
+        item_data["active_cadence_count"] = len(active_cadences)
+        item_data["active_cadences"] = [
+            {"id": cadence.id, "name": cadence.name} for cadence in active_cadences
+        ]
+        item_data["has_multiple_active_cadences"] = len(active_cadences) > 1
+        leads_items.append(LeadListLeadItem(**item_data))
     data = LeadListDetailResponse.model_validate(ll, from_attributes=True)
     data.lead_count = len(leads_items)
     data.leads = leads_items

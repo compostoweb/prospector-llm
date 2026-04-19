@@ -23,6 +23,7 @@ import Link from "next/link"
 import { toast } from "sonner"
 import {
   useLead,
+  useLeadInteractions,
   useLeadSteps,
   useArchiveLead,
   useEnrollLead,
@@ -31,6 +32,7 @@ import {
 import { useCadences } from "@/lib/api/hooks/use-cadences"
 import { LeadDeleteDialog } from "@/components/leads/lead-delete-dialog"
 import { LeadEditDialog } from "@/components/leads/lead-edit-dialog"
+import { LeadReplyAudit } from "@/components/leads/lead-reply-audit"
 import { LeadTimeline } from "@/components/leads/lead-timeline"
 import { LeadScore } from "@/components/leads/lead-score"
 import { Button } from "@/components/ui/button"
@@ -59,6 +61,7 @@ export default function LeadDetailPage() {
 
   const { data: lead, isLoading } = useLead(leadId)
   const { data: steps, isLoading: loadingSteps } = useLeadSteps(leadId)
+  const { data: interactions, isLoading: loadingInteractions } = useLeadInteractions(leadId)
   const { data: cadences } = useCadences()
   const { mutate: archiveLead, isPending: archiving } = useArchiveLead()
   const { mutate: enrollLead, isPending: enrolling } = useEnrollLead()
@@ -315,14 +318,28 @@ export default function LeadDetailPage() {
 
         {/* Right: timeline */}
         <div className="lg:col-span-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Timeline da cadência</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <LeadTimeline steps={steps ?? []} isLoading={loadingSteps} />
-            </CardContent>
-          </Card>
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Timeline da cadência</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <LeadTimeline steps={steps ?? []} isLoading={loadingSteps} />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Auditoria de replies</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <LeadReplyAudit
+                  interactions={interactions?.items ?? []}
+                  isLoading={loadingInteractions}
+                />
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
     </div>

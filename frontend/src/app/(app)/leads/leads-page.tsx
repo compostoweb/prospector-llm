@@ -9,7 +9,7 @@ import { LeadTable } from "@/components/leads/lead-table"
 import { LeadCreateDialog } from "@/components/leads/lead-create-dialog"
 import { LeadImportDialog } from "@/components/leads/lead-import-dialog"
 import { LeadMergeDialog } from "@/components/leads/lead-merge-dialog"
-import { Search, X, Linkedin, GitMerge } from "lucide-react"
+import { Search, X, Linkedin, GitMerge, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -61,6 +61,9 @@ export default function LeadsPage() {
     activeFilters.score_max != null ||
     !!search
   const selectedLeads = (data?.items ?? []).filter((lead) => selectedLeadIds.includes(lead.id))
+  const overlappingCadenceLeads = (data?.items ?? []).filter(
+    (lead) => lead.has_multiple_active_cadences,
+  )
 
   function handleSearch(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -231,6 +234,19 @@ export default function LeadsPage() {
       </div>
 
       {/* Tabela */}
+      {overlappingCadenceLeads.length > 0 && (
+        <div className="flex items-start gap-3 rounded-lg border border-(--warning) bg-(--warning-subtle) px-4 py-3 text-sm text-(--warning-subtle-fg)">
+          <AlertTriangle size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <div>
+            <p className="font-medium">Há leads em múltiplas cadências ativas nesta página.</p>
+            <p className="mt-1 text-xs text-(--warning-subtle-fg)">
+              Esses casos ficam sinalizados na tabela para evitar interpretar reply em uma cadência
+              errada.
+            </p>
+          </div>
+        </div>
+      )}
+
       <LeadTable
         leads={data?.items ?? []}
         isLoading={isLoading}

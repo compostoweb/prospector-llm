@@ -147,22 +147,36 @@ async def mark_latest_step_replied(
     channel: Channel,
     db: AsyncSession,
 ) -> CadenceStep | None:
-    step_channels = _step_channels_for_inbound_channel(channel)
-    result = await db.execute(
-        select(CadenceStep)
-        .where(
-            CadenceStep.lead_id == lead_id,
-            CadenceStep.tenant_id == tenant_id,
-            CadenceStep.channel.in_(step_channels),
-            CadenceStep.status == StepStatus.SENT,
-        )
-        .order_by(CadenceStep.sent_at.desc().nulls_last(), CadenceStep.scheduled_at.desc())
-        .limit(1)
+    resolution = await _resolve_fallback_step_for_reply(
+        lead_id=lead_id,
+        tenant_id=tenant_id,
+        channel=channel,
+        db=db,
     )
-    latest_step = result.scalar_one_or_none()
-    if latest_step is not None:
-        latest_step.status = StepStatus.REPLIED
-    return latest_step
+    return resolution.step
+
+
+async def pause_remaining_cadence_steps_after_reply(
+    *,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    lead_id: uuid.UUID,
+    cadence_id: uuid.UUID,
+    replied_step_id: uuid.UUID,
+) -> int:
+    result = await db.execute(
+        select(CadenceStep).where(
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.lead_id == lead_id,
+            CadenceStep.cadence_id == cadence_id,
+            CadenceStep.id != replied_step_id,
+            CadenceStep.status.in_((StepStatus.PENDING, StepStatus.DISPATCHING)),
+        )
+    )
+    remaining_steps = list(result.scalars().all())
+    for remaining_step in remaining_steps:
+        remaining_step.status = StepStatus.SKIPPED
+    return len(remaining_steps)
 
 
 async def process_inbound_reply(
@@ -174,6 +188,8 @@ async def process_inbound_reply(
     channel: Channel,
     reply_text: str,
     external_message_id: str | None,
+    reply_to_message_ids: list[str] | None = None,
+    provider_thread_id: str | None = None,
 ) -> InboundReplyResult:
     llm_config = await resolve_tenant_llm_config(db, lead.tenant_id)
     parser = ReplyParser(
@@ -195,27 +211,47 @@ async def process_inbound_reply(
     except KeyError:
         intent = Intent.NEUTRAL
 
+    reply_resolution = await resolve_replied_step_for_inbound_message(
+        db=db,
+        tenant_id=tenant_id,
+        lead_id=lead.id,
+        channel=channel,
+        reply_to_message_ids=reply_to_message_ids or [],
+        provider_thread_id=provider_thread_id,
+    )
+    replied_step = reply_resolution.step
+
     interaction = Interaction(
         tenant_id=tenant_id,
         lead_id=lead.id,
+        cadence_step_id=replied_step.id if replied_step is not None else None,
         channel=channel,
         direction=InteractionDirection.INBOUND,
         content_text=reply_text,
         intent=intent,
         unipile_message_id=external_message_id,
+        provider_thread_id=provider_thread_id,
+        reply_match_status=reply_resolution.match_status,
+        reply_match_source=reply_resolution.matched_via,
+        reply_match_sent_cadence_count=(
+            reply_resolution.sent_cadence_count if reply_resolution.sent_cadence_count > 0 else None
+        ),
     )
     db.add(interaction)
 
-    await mark_latest_step_replied(
-        lead_id=lead.id,
-        tenant_id=tenant_id,
-        channel=channel,
-        db=db,
-    )
+    paused_steps = 0
+    if replied_step is not None:
+        paused_steps = await pause_remaining_cadence_steps_after_reply(
+            db=db,
+            tenant_id=tenant_id,
+            lead_id=lead.id,
+            cadence_id=replied_step.cadence_id,
+            replied_step_id=replied_step.id,
+        )
 
-    if intent == Intent.INTEREST:
+    if replied_step is not None and intent == Intent.INTEREST:
         lead.status = LeadStatus.CONVERTED
-    elif intent == Intent.NOT_INTERESTED:
+    elif replied_step is not None and intent == Intent.NOT_INTERESTED:
         lead.status = LeadStatus.ARCHIVED
 
     await db.commit()
@@ -245,16 +281,233 @@ async def process_inbound_reply(
         },
     )
 
+    if reply_resolution.ambiguous:
+        await broadcast_event(
+            str(tenant_id),
+            {
+                "type": "inbound.reply_ambiguous",
+                "lead_id": str(lead.id),
+                "lead_name": lead.name,
+                "channel": channel.value,
+                "sent_cadence_count": reply_resolution.sent_cadence_count,
+            },
+        )
+
     logger.info(
         "inbound.reply.processed",
         lead_id=str(lead.id),
         tenant_id=str(tenant_id),
         channel=channel.value,
         intent=intent.value,
+        paused_steps=paused_steps,
+        matched_step_id=str(replied_step.id) if replied_step is not None else None,
+        reply_match_status=reply_resolution.match_status,
+        reply_match_source=reply_resolution.matched_via,
         confidence=classification.get("confidence"),
         summary=classification.get("summary"),
     )
     return InboundReplyResult(intent=intent, classification=classification)
+
+
+@dataclass(frozen=True, slots=True)
+class RepliedStepResolution:
+    step: CadenceStep | None
+    ambiguous: bool = False
+    sent_cadence_count: int = 0
+    match_status: str = "unmatched"
+    matched_via: str | None = None
+
+
+async def resolve_replied_step_for_inbound_message(
+    *,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    lead_id: uuid.UUID,
+    channel: Channel,
+    reply_to_message_ids: list[str],
+    provider_thread_id: str | None,
+) -> RepliedStepResolution:
+    matched_step, matched_via = await _resolve_step_from_outbound_interaction(
+        db=db,
+        tenant_id=tenant_id,
+        lead_id=lead_id,
+        channel=channel,
+        reply_to_message_ids=reply_to_message_ids,
+        provider_thread_id=provider_thread_id,
+    )
+    if matched_step is not None:
+        if matched_step.status == StepStatus.SENT:
+            matched_step.status = StepStatus.REPLIED
+        return RepliedStepResolution(
+            step=matched_step,
+            match_status="matched",
+            matched_via=matched_via,
+        )
+
+    return await _resolve_fallback_step_for_reply(
+        lead_id=lead_id,
+        tenant_id=tenant_id,
+        channel=channel,
+        db=db,
+    )
+
+
+async def _resolve_step_from_outbound_interaction(
+    *,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    lead_id: uuid.UUID,
+    channel: Channel,
+    reply_to_message_ids: list[str],
+    provider_thread_id: str | None,
+) -> tuple[CadenceStep | None, str | None]:
+    step_channels = _step_channels_for_inbound_channel(channel)
+    normalized_email_message_ids = [_normalize_email_message_id(value) for value in reply_to_message_ids]
+    normalized_email_message_ids = [value for value in normalized_email_message_ids if value]
+    email_message_lookup_ids = list(
+        dict.fromkeys(
+            [value.strip().lower() for value in reply_to_message_ids if value and value.strip()]
+            + normalized_email_message_ids
+            + [f"<{value}>" for value in normalized_email_message_ids]
+        )
+    )
+    raw_message_ids = [value.strip() for value in reply_to_message_ids if value and value.strip()]
+
+    if email_message_lookup_ids:
+        result = await db.execute(
+            select(Interaction)
+            .where(
+                Interaction.tenant_id == tenant_id,
+                Interaction.lead_id == lead_id,
+                Interaction.direction == InteractionDirection.OUTBOUND,
+                Interaction.channel.in_(step_channels),
+                Interaction.cadence_step_id.is_not(None),
+                func.lower(Interaction.email_message_id).in_(email_message_lookup_ids),
+            )
+            .order_by(Interaction.created_at.desc())
+            .limit(1)
+        )
+        interaction = result.scalar_one_or_none()
+        if interaction is not None and interaction.cadence_step_id is not None:
+            return (
+                await _load_step_by_id(db, interaction.cadence_step_id, tenant_id, lead_id),
+                "email_message_id",
+            )
+
+    if raw_message_ids:
+        result = await db.execute(
+            select(Interaction)
+            .where(
+                Interaction.tenant_id == tenant_id,
+                Interaction.lead_id == lead_id,
+                Interaction.direction == InteractionDirection.OUTBOUND,
+                Interaction.channel.in_(step_channels),
+                Interaction.cadence_step_id.is_not(None),
+                Interaction.unipile_message_id.in_(raw_message_ids),
+            )
+            .order_by(Interaction.created_at.desc())
+            .limit(1)
+        )
+        interaction = result.scalar_one_or_none()
+        if interaction is not None and interaction.cadence_step_id is not None:
+            return (
+                await _load_step_by_id(db, interaction.cadence_step_id, tenant_id, lead_id),
+                "unipile_message_id",
+            )
+
+    normalized_thread_id = (provider_thread_id or "").strip()
+    if normalized_thread_id:
+        result = await db.execute(
+            select(Interaction)
+            .where(
+                Interaction.tenant_id == tenant_id,
+                Interaction.lead_id == lead_id,
+                Interaction.direction == InteractionDirection.OUTBOUND,
+                Interaction.channel.in_(step_channels),
+                Interaction.cadence_step_id.is_not(None),
+                Interaction.provider_thread_id == normalized_thread_id,
+            )
+            .order_by(Interaction.created_at.desc())
+            .limit(1)
+        )
+        interaction = result.scalar_one_or_none()
+        if interaction is not None and interaction.cadence_step_id is not None:
+            return (
+                await _load_step_by_id(db, interaction.cadence_step_id, tenant_id, lead_id),
+                "provider_thread_id",
+            )
+
+    return None, None
+
+
+async def _load_step_by_id(
+    db: AsyncSession,
+    cadence_step_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    lead_id: uuid.UUID,
+) -> CadenceStep | None:
+    result = await db.execute(
+        select(CadenceStep).where(
+            CadenceStep.id == cadence_step_id,
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.lead_id == lead_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def _resolve_fallback_step_for_reply(
+    *,
+    lead_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    channel: Channel,
+    db: AsyncSession,
+) -> RepliedStepResolution:
+    step_channels = _step_channels_for_inbound_channel(channel)
+    result = await db.execute(
+        select(CadenceStep)
+        .where(
+            CadenceStep.lead_id == lead_id,
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.channel.in_(step_channels),
+            CadenceStep.status == StepStatus.SENT,
+        )
+        .order_by(CadenceStep.sent_at.desc().nulls_last(), CadenceStep.scheduled_at.desc())
+    )
+    sent_steps = list(result.scalars().all())
+    if not sent_steps:
+        return RepliedStepResolution(step=None, match_status="unmatched")
+
+    cadence_ids = {step.cadence_id for step in sent_steps}
+    if len(cadence_ids) > 1:
+        logger.warning(
+            "inbound.reply.cadence_ambiguous",
+            tenant_id=str(tenant_id),
+            lead_id=str(lead_id),
+            channel=channel.value,
+            sent_cadence_count=len(cadence_ids),
+        )
+        return RepliedStepResolution(
+            step=None,
+            ambiguous=True,
+            sent_cadence_count=len(cadence_ids),
+            match_status="ambiguous",
+        )
+
+    latest_step = sent_steps[0]
+    latest_step.status = StepStatus.REPLIED
+    return RepliedStepResolution(
+        step=latest_step,
+        match_status="matched",
+        matched_via="fallback_single_cadence",
+    )
+
+
+def _normalize_email_message_id(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized.startswith("<") and normalized.endswith(">"):
+        normalized = normalized[1:-1].strip()
+    return normalized
 
 
 async def _load_unipile_account_matches(

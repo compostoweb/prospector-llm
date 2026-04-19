@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any, TypedDict
 
 from sqlalchemy import delete, select, update
@@ -9,10 +10,11 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from models.cadence import Cadence
 from models.cadence_step import CadenceStep
 from models.content_calculator_result import ContentCalculatorResult
 from models.content_lm_lead import ContentLMLead
-from models.enums import EmailType, LeadSource, LeadStatus
+from models.enums import EmailType, LeadSource, LeadStatus, StepStatus
 from models.interaction import Interaction
 from models.lead import Lead
 from models.lead_email import LeadEmail
@@ -23,6 +25,7 @@ from models.sandbox import SandboxStep
 from schemas.lead import (
     LeadEmailInput,
     LeadEmailResponse,
+    LeadActiveCadenceSummary,
     LeadGeneratedPreviewItem,
     LeadListSummary,
     LeadResponse,
@@ -35,6 +38,18 @@ STATUS_RANK: dict[LeadStatus, int] = {
     LeadStatus.IN_CADENCE: 3,
     LeadStatus.CONVERTED: 4,
 }
+
+_ACTIVE_CADENCE_STEP_STATUSES = (
+    StepStatus.PENDING,
+    StepStatus.DISPATCHING,
+    StepStatus.SENT,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveCadenceInfo:
+    id: uuid.UUID
+    name: str
 
 
 class LeadEmailSpec(TypedDict):
@@ -75,7 +90,11 @@ def infer_lead_origin(lead: Lead) -> tuple[str, str, str | None]:
     return "manual", "Manual", note_detail
 
 
-def serialize_lead(lead: Lead) -> LeadResponse:
+def serialize_lead(
+    lead: Lead,
+    *,
+    active_cadences_by_lead: dict[uuid.UUID, list[ActiveCadenceInfo]] | None = None,
+) -> LeadResponse:
     base = LeadResponse.model_validate(lead).model_dump()
     origin_key, origin_label, origin_detail = infer_lead_origin(lead)
     lead_lists = lead.lists or []
@@ -83,12 +102,48 @@ def serialize_lead(lead: Lead) -> LeadResponse:
         lead.emails or [],
         key=lambda item: (not item.is_primary, item.email_type.value, item.email),
     )
+    active_cadences = (active_cadences_by_lead or {}).get(lead.id, [])
     base["lead_lists"] = [LeadListSummary(id=ll.id, name=ll.name) for ll in lead_lists]
     base["emails"] = [LeadEmailResponse.model_validate(email) for email in lead_emails]
     base["origin_key"] = origin_key
     base["origin_label"] = origin_label
     base["origin_detail"] = origin_detail
+    base["active_cadence_count"] = len(active_cadences)
+    base["active_cadences"] = [
+        LeadActiveCadenceSummary(id=item.id, name=item.name) for item in active_cadences
+    ]
+    base["has_multiple_active_cadences"] = len(active_cadences) > 1
     return LeadResponse(**base)
+
+
+async def load_active_cadences_for_leads(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    lead_ids: Iterable[uuid.UUID],
+) -> dict[uuid.UUID, list[ActiveCadenceInfo]]:
+    ordered_lead_ids = list(dict.fromkeys(lead_ids))
+    if not ordered_lead_ids:
+        return {}
+
+    result = await db.execute(
+        select(CadenceStep.lead_id, Cadence.id, Cadence.name)
+        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
+        .where(
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.lead_id.in_(ordered_lead_ids),
+            CadenceStep.status.in_(_ACTIVE_CADENCE_STEP_STATUSES),
+            Cadence.is_active.is_(True),
+        )
+        .distinct()
+        .order_by(CadenceStep.lead_id, Cadence.name)
+    )
+
+    mapped: dict[uuid.UUID, list[ActiveCadenceInfo]] = {lead_id: [] for lead_id in ordered_lead_ids}
+    for lead_id, cadence_id, cadence_name in result.all():
+        mapped.setdefault(lead_id, []).append(ActiveCadenceInfo(id=cadence_id, name=cadence_name))
+
+    return mapped
 
 
 async def get_lead_with_lists(

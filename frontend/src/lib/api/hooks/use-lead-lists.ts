@@ -14,6 +14,12 @@ export interface LeadListLeadItem {
   email_corporate: string | null
   linkedin_url: string | null
   status: string
+  active_cadence_count: number
+  active_cadences: Array<{
+    id: string
+    name: string
+  }>
+  has_multiple_active_cadences: boolean
 }
 
 export interface LeadList {

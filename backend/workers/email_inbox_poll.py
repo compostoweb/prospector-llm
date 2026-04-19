@@ -162,6 +162,11 @@ async def _poll_gmail_oauth(
         sender_email = _extract_gmail_sender(msg_data)
         body = _extract_gmail_body(msg_data)
         subject = _extract_gmail_subject(msg_data)
+        reply_reference_ids = _extract_reply_reference_ids(
+            _extract_gmail_header_values(msg_data, "In-Reply-To")
+            + _extract_gmail_header_values(msg_data, "References")
+        )
+        provider_thread_id = str(msg_data.get("threadId") or "").strip() or None
 
         if not sender_email or sender_email.lower() == account.email_address.lower():
             continue  # ignora mensagens próprias
@@ -172,6 +177,8 @@ async def _poll_gmail_oauth(
             body=body,
             message_id=msg_id,
             subject=subject,
+            reply_reference_ids=reply_reference_ids,
+            provider_thread_id=provider_thread_id,
             session_factory=session_factory,
         )
         processed += 1
@@ -327,6 +334,34 @@ def _extract_gmail_subject(msg_data: dict) -> str:
     return next((h["value"] for h in headers if h["name"].lower() == "subject"), "")
 
 
+def _extract_gmail_header_values(msg_data: dict, header_name: str) -> list[str]:
+    headers = msg_data.get("payload", {}).get("headers", [])
+    normalized_name = header_name.lower()
+    values: list[str] = []
+    for header in headers:
+        name = str(header.get("name") or "").lower()
+        if name != normalized_name:
+            continue
+        value = str(header.get("value") or "").strip()
+        if value:
+            values.append(value)
+    return values
+
+
+def _extract_reply_reference_ids(values: list[str]) -> list[str]:
+    references: list[str] = []
+    for value in values:
+        matches = re.findall(r"<[^>]+>", value)
+        if matches:
+            references.extend(matches)
+            continue
+        for token in value.split():
+            cleaned = token.strip()
+            if cleaned:
+                references.append(cleaned)
+    return list(dict.fromkeys(references))
+
+
 def _extract_gmail_body(msg_data: dict) -> str:
     """Extrai corpo de texto da mensagem Gmail (text/plain prioritário)."""
     import base64  # noqa: PLC0415
@@ -416,6 +451,8 @@ async def _poll_smtp_imap(
         body = msg_data.get("body", "")
         uid = msg_data.get("uid", "")
         subject = msg_data.get("subject", "")
+        reply_reference_ids = list(msg_data.get("reply_reference_ids") or [])
+        provider_thread_id = str(msg_data.get("provider_thread_id") or "").strip() or None
 
         if not sender_email or sender_email == account.email_address.lower():
             continue
@@ -426,6 +463,8 @@ async def _poll_smtp_imap(
             body=body,
             message_id=f"imap:{account.id}:{uid}",
             subject=subject,
+            reply_reference_ids=reply_reference_ids,
+            provider_thread_id=provider_thread_id,
             session_factory=session_factory,
         )
         new_last_uid = uid
@@ -506,6 +545,10 @@ def _imap_fetch_messages(
 
             # Extrai assunto
             subject = msg.get("Subject", "")
+            reply_reference_ids = _extract_reply_reference_ids(
+                [str(msg.get("In-Reply-To") or ""), str(msg.get("References") or "")]
+            )
+            provider_thread_id = str(msg.get("Thread-Index") or "").strip()
 
             # Extrai corpo texto
             body = ""
@@ -527,7 +570,16 @@ def _imap_fetch_messages(
                 except Exception:
                     pass
 
-            messages.append({"uid": uid, "from": from_email, "body": body, "subject": subject})
+            messages.append(
+                {
+                    "uid": uid,
+                    "from": from_email,
+                    "body": body,
+                    "subject": subject,
+                    "reply_reference_ids": reply_reference_ids,
+                    "provider_thread_id": provider_thread_id or None,
+                }
+            )
 
         return messages
     finally:
@@ -547,6 +599,8 @@ async def _process_email_reply(
     message_id: str,
     session_factory: Any,
     subject: str = "",
+    reply_reference_ids: list[str] | None = None,
+    provider_thread_id: str | None = None,
 ) -> None:
     """
     Processa uma resposta de e-mail recebida:
@@ -562,8 +616,7 @@ async def _process_email_reply(
     from core.config import settings  # noqa: PLC0415
     from core.redis_client import redis_client  # noqa: PLC0415
     from integrations.llm import LLMRegistry  # noqa: PLC0415
-    from models.cadence_step import CadenceStep  # noqa: PLC0415
-    from models.enums import Channel, StepStatus  # noqa: PLC0415
+    from models.enums import Channel  # noqa: PLC0415
     from models.interaction import Interaction  # noqa: PLC0415
     from services.email_event_service import (  # noqa: PLC0415
         classify_inbound_email_event,
@@ -620,23 +673,6 @@ async def _process_email_reply(
             )
             return
 
-        # Verifica se há step EMAIL enviado para este lead (confirmação que enviamos)
-        step_result = await db.execute(
-            select(CadenceStep)
-            .where(
-                CadenceStep.lead_id == lead.id,
-                CadenceStep.tenant_id == tenant_id,
-                CadenceStep.channel == Channel.EMAIL,
-                CadenceStep.status == StepStatus.SENT,
-            )
-            .order_by(CadenceStep.sent_at.desc())
-            .limit(1)
-        )
-        latest_step = step_result.scalar_one_or_none()
-        if not latest_step:
-            # Não enviamos e-mail para este lead — ignorar
-            return
-
         registry = LLMRegistry(settings=settings, redis=redis_client)
         try:
             result = await process_inbound_reply(
@@ -647,6 +683,8 @@ async def _process_email_reply(
                 channel=Channel.EMAIL,
                 reply_text=body,
                 external_message_id=message_id,
+                reply_to_message_ids=reply_reference_ids or [],
+                provider_thread_id=provider_thread_id,
             )
         finally:
             from integrations.llm.base import close_async_resource

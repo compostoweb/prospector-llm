@@ -86,6 +86,9 @@ export default function ListaDetailPage() {
       return haystack.includes(query)
     })
   }, [list?.leads, memberSearch])
+  const overlappingCadenceLeads = filteredMembers.filter(
+    (lead) => lead.has_multiple_active_cadences,
+  )
 
   function toggleSelected(id: string) {
     setSelected((prev) => {
@@ -258,6 +261,21 @@ export default function ListaDetailPage() {
               className="pl-9"
             />
           </div>
+
+          {overlappingCadenceLeads.length > 0 && (
+            <div className="flex items-start gap-3 rounded-lg border border-(--warning) bg-(--warning-subtle) px-4 py-3 text-sm text-(--warning-subtle-fg)">
+              <AlertTriangle size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
+              <div>
+                <p className="font-medium">
+                  Esta lista contém leads em múltiplas cadências ativas.
+                </p>
+                <p className="mt-1 text-xs text-(--warning-subtle-fg)">
+                  Use o alerta por linha para revisar esses casos antes de interpretar replies
+                  automáticos.
+                </p>
+              </div>
+            </div>
+          )}
         </CardHeader>
 
         <CardContent className="p-0">
@@ -328,6 +346,17 @@ export default function ListaDetailPage() {
                           <p className="mt-1 text-xs text-(--text-tertiary)">
                             {lead.job_title ?? "Sem cargo"}
                           </p>
+                          {lead.has_multiple_active_cadences && (
+                            <div
+                              className="mt-2 inline-flex max-w-56 items-center gap-1.5 rounded-(--radius-full) bg-(--warning-subtle) px-2.5 py-1 text-[11px] font-medium text-(--warning-subtle-fg)"
+                              title={lead.active_cadences
+                                .map((cadence) => cadence.name)
+                                .join(" • ")}
+                            >
+                              <AlertTriangle size={12} aria-hidden="true" />
+                              <span>{lead.active_cadence_count} cadências ativas</span>
+                            </div>
+                          )}
                         </button>
                       </td>
                       <td className="px-4 py-3 text-(--text-secondary)">{lead.company ?? "—"}</td>

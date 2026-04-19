@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback } from "react"
 import { useSession } from "next-auth/react"
 import { useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { useNotificationsStore } from "@/store/notifications-store"
 import { env } from "@/env"
 
@@ -18,6 +19,7 @@ export type WSEventType =
   | "connection.accepted"
   | "inbox.new_message"
   | "inbox.chat_read"
+  | "inbound.reply_ambiguous"
   | "ping"
 
 export interface WSEvent {
@@ -64,9 +66,7 @@ const INVALIDATION_MAP: Partial<Record<WSEventType, string[][]>> = {
     ["inbox", "conversations"],
     ["inbox", "messages"],
   ],
-  "inbox.chat_read": [
-    ["inbox", "conversations"],
-  ],
+  "inbox.chat_read": [["inbox", "conversations"]],
 }
 
 // ── Hook principal ────────────────────────────────────────────────────
@@ -94,6 +94,10 @@ export function useEvents() {
       // Empurra notificação para eventos de interesse do usuário
       if (event.type === "lead.replied") {
         const lead = event.data as { name?: string; lead_id?: string }
+        if (lead.lead_id) {
+          void queryClient.invalidateQueries({ queryKey: ["leads", lead.lead_id, "steps"] })
+          void queryClient.invalidateQueries({ queryKey: ["leads", lead.lead_id, "interactions"] })
+        }
         push({
           kind: "lead.replied",
           title: "Nova resposta de lead",
@@ -127,6 +131,34 @@ export function useEvents() {
           title: "Nova mensagem",
           ...(msg.sender_name ? { body: `${msg.sender_name} enviou uma mensagem` } : {}),
         })
+      }
+
+      if (event.type === "inbound.reply_ambiguous") {
+        const data = event.data as {
+          lead_id?: string
+          lead_name?: string
+          channel?: string
+          sent_cadence_count?: number
+        }
+        const channelLabel = data.channel === "email" ? "email" : "LinkedIn"
+        const leadLabel = data.lead_name || "Um lead"
+        const cadenceLabel = data.sent_cadence_count
+          ? `${data.sent_cadence_count} cadências ativas possíveis`
+          : "mais de uma cadência possível"
+        const body = `${leadLabel} respondeu por ${channelLabel}, mas o sistema não vinculou automaticamente porque há ${cadenceLabel}.`
+
+        if (data.lead_id) {
+          void queryClient.invalidateQueries({ queryKey: ["leads", data.lead_id, "steps"] })
+          void queryClient.invalidateQueries({ queryKey: ["leads", data.lead_id, "interactions"] })
+        }
+
+        push({
+          kind: "system",
+          title: "Reply ambíguo detectado",
+          body,
+          ...(data.lead_id ? { lead_id: data.lead_id } : {}),
+        })
+        toast.warning("Reply ambíguo detectado", { description: body })
       }
 
       if (event.type === "inbox.chat_read") {

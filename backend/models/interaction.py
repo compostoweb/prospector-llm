@@ -16,7 +16,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base, TenantMixin
@@ -47,6 +47,11 @@ class Interaction(Base, TenantMixin):
         nullable=False,
         index=True,
     )
+    cadence_step_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("cadence_steps.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     # ── Canal e direção ───────────────────────────────────────────────
     channel: Mapped[Channel] = mapped_column(
@@ -71,6 +76,11 @@ class Interaction(Base, TenantMixin):
 
     # ── Metadados de canal ────────────────────────────────────────────
     unipile_message_id: Mapped[str | None] = mapped_column(String(200), index=True)
+    email_message_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    provider_thread_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    reply_match_status: Mapped[str | None] = mapped_column(String(30), index=True)
+    reply_match_source: Mapped[str | None] = mapped_column(String(50))
+    reply_match_sent_cadence_count: Mapped[int | None] = mapped_column(Integer)
     opened: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     opened_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),

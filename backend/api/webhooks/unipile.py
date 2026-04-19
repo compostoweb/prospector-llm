@@ -33,13 +33,15 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import uuid
 from datetime import UTC, datetime
+from email.utils import parseaddr
 from typing import Any, cast
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_llm_registry, get_session_no_auth
@@ -47,6 +49,7 @@ from core.config import settings
 from integrations.llm import LLMRegistry
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
+from models.email_account import EmailAccount
 from models.enums import Intent
 from models.interaction import Interaction
 from models.lead import Lead
@@ -308,6 +311,8 @@ async def _handle_message_received(
     subject = _extract_subject(message, payload)
     account_id = _extract_message_account_id(payload, message)
     account_type = _extract_account_type(message, payload)
+    reply_to_message_ids = _extract_reply_reference_ids(message, payload)
+    provider_thread_id = _extract_provider_thread_id(message, payload)
 
     if _is_outbound_message_event(payload):
         logger.debug(
@@ -353,6 +358,21 @@ async def _handle_message_received(
         return
     tenant_id = account_context.tenant_id
 
+    if await _is_outbound_email_event(
+        payload,
+        db,
+        tenant_id=tenant_id,
+        sender_id=sender_id,
+    ):
+        logger.debug(
+            "webhook.unipile.outbound_mail_ignored",
+            tenant_id=str(tenant_id),
+            sender_id=sender_id or None,
+            message_id=unipile_message_id or None,
+            account_id=account_id or None,
+        )
+        return
+
     if account_context.channel.value == "email":
         inbound_email_event = classify_inbound_email_event(
             from_email=sender_id,
@@ -397,6 +417,8 @@ async def _handle_message_received(
         channel=account_context.channel,
         reply_text=text_content,
         external_message_id=unipile_message_id or None,
+        reply_to_message_ids=reply_to_message_ids,
+        provider_thread_id=provider_thread_id,
     )
 
     if result.intent == Intent.NOT_INTERESTED:
@@ -566,6 +588,65 @@ def _extract_account_type(*payloads: dict) -> str:
     return ""
 
 
+def _extract_reply_reference_ids(message: dict, payload: dict) -> list[str]:
+    values: list[str] = []
+    for candidate in (
+        message.get("reply_to_message_id"),
+        payload.get("reply_to_message_id"),
+        message.get("in_reply_to"),
+        payload.get("in_reply_to"),
+        message.get("references"),
+        payload.get("references"),
+    ):
+        if isinstance(candidate, str) and candidate.strip():
+            values.append(candidate.strip())
+
+    headers = message.get("headers") or payload.get("headers") or []
+    if isinstance(headers, dict):
+        headers = [headers]
+    if isinstance(headers, list):
+        for header in headers:
+            if not isinstance(header, dict):
+                continue
+            name = str(header.get("name") or header.get("key") or "").strip().lower()
+            value = str(header.get("value") or "").strip()
+            if not value:
+                continue
+            if name in {"in-reply-to", "references"}:
+                values.append(value)
+
+    references: list[str] = []
+    for value in values:
+        matches = re.findall(r"<[^>]+>", value)
+        if matches:
+            references.extend(matches)
+            continue
+        for token in value.split():
+            cleaned = token.strip()
+            if cleaned:
+                references.append(cleaned)
+
+    return list(dict.fromkeys(references))
+
+
+def _extract_provider_thread_id(message: dict, payload: dict) -> str | None:
+    for candidate in (
+        message.get("thread_id"),
+        payload.get("thread_id"),
+        message.get("threadId"),
+        payload.get("threadId"),
+        message.get("conversation_id"),
+        payload.get("conversation_id"),
+        payload.get("chat_id"),
+    ):
+        if candidate is None:
+            continue
+        normalized = str(candidate).strip()
+        if normalized:
+            return normalized
+    return None
+
+
 def _is_outbound_message_event(payload: dict) -> bool:
     event_type = _extract_event_type(payload)
     if event_type != "message_received":
@@ -586,3 +667,35 @@ def _is_outbound_message_event(payload: dict) -> bool:
     sender_provider_id = str(sender.get("attendee_provider_id") or "").strip()
     account_user_id = str(account_info.get("user_id") or "").strip()
     return bool(sender_provider_id and account_user_id and sender_provider_id == account_user_id)
+
+
+async def _is_outbound_email_event(
+    payload: dict,
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    sender_id: str,
+) -> bool:
+    if _extract_event_type(payload) != "mail_received":
+        return False
+
+    normalized_sender = _normalize_email_identity(sender_id)
+    if not normalized_sender:
+        return False
+
+    result = await db.execute(
+        select(EmailAccount.id)
+        .where(
+            EmailAccount.tenant_id == tenant_id,
+            EmailAccount.is_active.is_(True),
+            func.lower(EmailAccount.email_address) == normalized_sender,
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+def _normalize_email_identity(value: str | None) -> str:
+    _display_name, address = parseaddr(value or "")
+    normalized = (address or value or "").strip().lower()
+    return normalized

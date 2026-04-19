@@ -22,12 +22,18 @@ class InteractionResponse(BaseModel):
     id: uuid.UUID
     lead_id: uuid.UUID
     tenant_id: uuid.UUID
+    cadence_step_id: uuid.UUID | None
     channel: Channel
     direction: str           # "outbound" | "inbound"
     content_text: str | None
     content_audio_url: str | None
     intent: Intent | None
     unipile_message_id: str | None
+    email_message_id: str | None
+    provider_thread_id: str | None
+    reply_match_status: str | None
+    reply_match_source: str | None
+    reply_match_sent_cadence_count: int | None
     opened: bool
     created_at: datetime
 

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.webhooks import unipile as unipile_webhook
 from integrations.llm import LLMRegistry
+from models.email_account import EmailAccount
 from models.enums import Channel, LeadStatus
 from models.lead import Lead
 
@@ -242,6 +243,62 @@ async def test_handle_message_received_marks_bounce_for_mail_received(
     await db.refresh(lead)
     assert lead.email_bounced_at is not None
     assert lead.email_bounce_type == "hard"
+
+
+@pytest.mark.asyncio
+async def test_handle_message_received_ignores_outbound_mail_from_tenant_account(
+    db: AsyncSession,
+    tenant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lead = Lead(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Lead Email",
+        email_corporate="adriano@compostoweb.com.br",
+        status=LeadStatus.IN_CADENCE,
+        source="manual",
+    )
+    email_account = EmailAccount(
+        tenant_id=tenant.id,
+        display_name="Gmail principal",
+        email_address="adriano@compostoweb.com.br",
+        provider_type="unipile_gmail",
+        unipile_account_id="acc_mail_1",
+        is_active=True,
+    )
+    db.add(lead)
+    db.add(email_account)
+    await db.flush()
+
+    async def _fake_resolve(account_id: str, db_session, **kwargs):  # type: ignore[no-untyped-def]
+        assert account_id == "acc_mail_1"
+        return SimpleNamespace(tenant_id=tenant.id, channel=Channel.EMAIL)
+
+    async def _should_not_process(**kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("autoenvio não deve cair em process_inbound_reply")
+
+    monkeypatch.setattr(unipile_webhook, "resolve_unipile_account_context", _fake_resolve)
+    monkeypatch.setattr(unipile_webhook, "process_inbound_reply", _should_not_process)
+
+    payload = {
+        "event": "mail_received",
+        "account_id": "acc_mail_1",
+        "sender": {"attendee_provider_id": "adriano@compostoweb.com.br"},
+        "message": {
+            "id": "mail_self_1",
+            "account_id": "acc_mail_1",
+            "account_type": "GMAIL",
+            "subject": "Teste",
+            "body": "Oi, Adriano.",
+        },
+    }
+
+    await unipile_webhook._handle_message_received(
+        payload,
+        db,
+        cast(LLMRegistry, SimpleNamespace()),
+    )
 
 
 @pytest.mark.asyncio

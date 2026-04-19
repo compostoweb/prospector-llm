@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
 from models.email_account import EmailAccount
-from models.enums import Channel, Intent, StepStatus
+from models.enums import Channel, Intent, LeadStatus, StepStatus
 from models.interaction import Interaction
 from models.lead import Lead
 from models.lead_email import LeadEmail
@@ -197,3 +197,362 @@ async def test_process_inbound_reply_marks_connect_step_replied_for_linkedin_dm(
     assert lead.status == "converted"
     assert interaction is not None
     assert interaction.channel == Channel.LINKEDIN_DM
+
+
+async def test_process_inbound_reply_pauses_remaining_steps_on_neutral_reply(
+    db: AsyncSession,
+    tenant,
+) -> None:
+    lead = _make_lead(tenant.id)
+    cadence = Cadence(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Cadência Teste",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+        llm_temperature=0.7,
+        llm_max_tokens=256,
+    )
+    replied_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence.id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        scheduled_at=datetime.now(tz=UTC) - timedelta(days=2),
+        sent_at=datetime.now(tz=UTC) - timedelta(hours=3),
+        status=StepStatus.SENT,
+    )
+    pending_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence.id,
+        channel=Channel.LINKEDIN_DM,
+        step_number=2,
+        day_offset=1,
+        scheduled_at=datetime.now(tz=UTC) + timedelta(hours=4),
+        status=StepStatus.PENDING,
+    )
+    db.add_all([lead, cadence, replied_step, pending_step])
+    await db.flush()
+
+    parser_instance = MagicMock()
+    parser_instance.classify = AsyncMock(
+        return_value={
+            "intent": "NEUTRAL",
+            "confidence": 0.81,
+            "summary": "Respondeu sem demonstrar interesse imediato",
+        }
+    )
+
+    with (
+        patch(
+            "services.inbound_message_service.resolve_tenant_llm_config",
+            new=AsyncMock(return_value=SimpleNamespace(provider="openai", model="gpt-5.4-mini")),
+        ),
+        patch("services.inbound_message_service.ReplyParser", return_value=parser_instance),
+        patch("api.routes.ws.broadcast_event", new=AsyncMock()),
+    ):
+        result = await process_inbound_reply(
+            db=db,
+            registry=MagicMock(),
+            tenant_id=tenant.id,
+            lead=lead,
+            channel=Channel.EMAIL,
+            reply_text="Recebi aqui, obrigado.",
+            external_message_id="msg_email_123",
+        )
+
+    await db.refresh(replied_step)
+    await db.refresh(pending_step)
+    await db.refresh(lead)
+
+    assert result.intent == Intent.NEUTRAL
+    assert replied_step.status == StepStatus.REPLIED
+    assert pending_step.status == StepStatus.SKIPPED
+    assert lead.status == LeadStatus.IN_CADENCE
+
+
+async def test_process_inbound_reply_matches_reply_to_exact_outbound_message(
+    db: AsyncSession,
+    tenant,
+) -> None:
+    lead = _make_lead(tenant.id)
+    cadence_a = Cadence(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Cadência A",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    cadence_b = Cadence(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Cadência B",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    older_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence_a.id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        scheduled_at=datetime.now(tz=UTC) - timedelta(days=3),
+        sent_at=datetime.now(tz=UTC) - timedelta(days=2),
+        status=StepStatus.SENT,
+    )
+    latest_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence_b.id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        scheduled_at=datetime.now(tz=UTC) - timedelta(days=1),
+        sent_at=datetime.now(tz=UTC) - timedelta(hours=2),
+        status=StepStatus.SENT,
+    )
+    older_interaction = Interaction(
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_step_id=older_step.id,
+        channel=Channel.EMAIL,
+        direction="outbound",
+        email_message_id="<older-message@prospector.local>",
+    )
+    latest_interaction = Interaction(
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_step_id=latest_step.id,
+        channel=Channel.EMAIL,
+        direction="outbound",
+        email_message_id="<latest-message@prospector.local>",
+    )
+    db.add_all(
+        [lead, cadence_a, cadence_b, older_step, latest_step, older_interaction, latest_interaction]
+    )
+    await db.flush()
+
+    parser_instance = MagicMock()
+    parser_instance.classify = AsyncMock(
+        return_value={"intent": "NEUTRAL", "confidence": 0.77, "summary": "Resposta direta"}
+    )
+
+    with (
+        patch(
+            "services.inbound_message_service.resolve_tenant_llm_config",
+            new=AsyncMock(return_value=SimpleNamespace(provider="openai", model="gpt-5.4-mini")),
+        ),
+        patch("services.inbound_message_service.ReplyParser", return_value=parser_instance),
+        patch("api.routes.ws.broadcast_event", new=AsyncMock()),
+    ):
+        await process_inbound_reply(
+            db=db,
+            registry=MagicMock(),
+            tenant_id=tenant.id,
+            lead=lead,
+            channel=Channel.EMAIL,
+            reply_text="Respondendo ao email certo.",
+            external_message_id="reply_msg_1",
+            reply_to_message_ids=["<older-message@prospector.local>"],
+        )
+
+    await db.refresh(older_step)
+    await db.refresh(latest_step)
+    interaction_result = await db.execute(
+        select(Interaction).where(Interaction.unipile_message_id == "reply_msg_1")
+    )
+    interaction = interaction_result.scalar_one()
+
+    assert older_step.status == StepStatus.REPLIED
+    assert latest_step.status == StepStatus.SENT
+    assert interaction.reply_match_status == "matched"
+    assert interaction.reply_match_source == "email_message_id"
+
+
+async def test_process_inbound_reply_does_not_pick_cadence_when_multiple_sent_and_no_reference(
+    db: AsyncSession,
+    tenant,
+) -> None:
+    lead = _make_lead(tenant.id)
+    cadence_a = Cadence(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Cadência A",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    cadence_b = Cadence(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Cadência B",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    step_a = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence_a.id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        scheduled_at=datetime.now(tz=UTC) - timedelta(days=2),
+        sent_at=datetime.now(tz=UTC) - timedelta(days=1),
+        status=StepStatus.SENT,
+    )
+    step_b = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence_b.id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        scheduled_at=datetime.now(tz=UTC) - timedelta(days=1),
+        sent_at=datetime.now(tz=UTC) - timedelta(hours=1),
+        status=StepStatus.SENT,
+    )
+    db.add_all([lead, cadence_a, cadence_b, step_a, step_b])
+    await db.flush()
+
+    parser_instance = MagicMock()
+    parser_instance.classify = AsyncMock(
+        return_value={"intent": "INTEREST", "confidence": 0.93, "summary": "Quero saber mais"}
+    )
+
+    with (
+        patch(
+            "services.inbound_message_service.resolve_tenant_llm_config",
+            new=AsyncMock(return_value=SimpleNamespace(provider="openai", model="gpt-5.4-mini")),
+        ),
+        patch("services.inbound_message_service.ReplyParser", return_value=parser_instance),
+        patch("api.routes.ws.broadcast_event", new=AsyncMock()),
+        patch("services.notification.send_reply_notification", new=AsyncMock()),
+    ):
+        await process_inbound_reply(
+            db=db,
+            registry=MagicMock(),
+            tenant_id=tenant.id,
+            lead=lead,
+            channel=Channel.EMAIL,
+            reply_text="Tenho interesse.",
+            external_message_id="reply_msg_2",
+        )
+
+    await db.refresh(step_a)
+    await db.refresh(step_b)
+    await db.refresh(lead)
+    interaction_result = await db.execute(
+        select(Interaction).where(Interaction.unipile_message_id == "reply_msg_2")
+    )
+    interaction = interaction_result.scalar_one()
+
+    assert step_a.status == StepStatus.SENT
+    assert step_b.status == StepStatus.SENT
+    assert interaction.reply_match_status == "ambiguous"
+    assert interaction.reply_match_sent_cadence_count == 2
+    assert lead.status == LeadStatus.IN_CADENCE
+
+
+async def test_process_inbound_reply_broadcasts_alert_when_reply_is_ambiguous(
+    db: AsyncSession,
+    tenant,
+) -> None:
+    lead = _make_lead(tenant.id)
+    cadence_a = Cadence(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Cadência A",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    cadence_b = Cadence(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Cadência B",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    step_a = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence_a.id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        scheduled_at=datetime.now(tz=UTC) - timedelta(days=2),
+        sent_at=datetime.now(tz=UTC) - timedelta(days=1),
+        status=StepStatus.SENT,
+    )
+    step_b = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence_b.id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        scheduled_at=datetime.now(tz=UTC) - timedelta(days=1),
+        sent_at=datetime.now(tz=UTC) - timedelta(hours=1),
+        status=StepStatus.SENT,
+    )
+    db.add_all([lead, cadence_a, cadence_b, step_a, step_b])
+    await db.flush()
+
+    parser_instance = MagicMock()
+    parser_instance.classify = AsyncMock(
+        return_value={"intent": "NEUTRAL", "confidence": 0.71, "summary": "Resposta curta"}
+    )
+    broadcast_event = AsyncMock()
+
+    with (
+        patch(
+            "services.inbound_message_service.resolve_tenant_llm_config",
+            new=AsyncMock(return_value=SimpleNamespace(provider="openai", model="gpt-5.4-mini")),
+        ),
+        patch("services.inbound_message_service.ReplyParser", return_value=parser_instance),
+        patch("api.routes.ws.broadcast_event", new=broadcast_event),
+    ):
+        await process_inbound_reply(
+            db=db,
+            registry=MagicMock(),
+            tenant_id=tenant.id,
+            lead=lead,
+            channel=Channel.EMAIL,
+            reply_text="Pode me explicar melhor?",
+            external_message_id="reply_msg_3",
+        )
+
+    ambiguous_calls = [
+        call
+        for call in broadcast_event.await_args_list
+        if call.args[1].get("type") == "inbound.reply_ambiguous"
+    ]
+    interaction_result = await db.execute(
+        select(Interaction).where(Interaction.unipile_message_id == "reply_msg_3")
+    )
+    interaction = interaction_result.scalar_one()
+
+    assert len(ambiguous_calls) == 1
+    assert ambiguous_calls[0].args[0] == str(tenant.id)
+    assert ambiguous_calls[0].args[1]["lead_id"] == str(lead.id)
+    assert ambiguous_calls[0].args[1]["sent_cadence_count"] == 2
+    assert interaction.reply_match_status == "ambiguous"
+    assert interaction.reply_match_sent_cadence_count == 2
+    assert lead.status == LeadStatus.IN_CADENCE

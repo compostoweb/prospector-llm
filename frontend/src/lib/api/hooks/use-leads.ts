@@ -40,6 +40,12 @@ export interface Lead {
     id: string
     name: string
   }>
+  active_cadence_count: number
+  active_cadences: Array<{
+    id: string
+    name: string
+  }>
+  has_multiple_active_cadences: boolean
   origin_key: string
   origin_label: string
   origin_detail: string | null
@@ -97,6 +103,36 @@ export interface LeadStep {
   manual_task_type?: string | null
   manual_task_detail?: string | null
   notes?: string | null
+}
+
+export interface LeadInteraction {
+  id: string
+  lead_id: string
+  tenant_id: string
+  cadence_step_id: string | null
+  channel: string
+  direction: "outbound" | "inbound"
+  content_text: string | null
+  content_audio_url: string | null
+  intent: string | null
+  unipile_message_id: string | null
+  email_message_id: string | null
+  provider_thread_id: string | null
+  reply_match_status: "matched" | "ambiguous" | "unmatched" | null
+  reply_match_source:
+    | "email_message_id"
+    | "unipile_message_id"
+    | "provider_thread_id"
+    | "fallback_single_cadence"
+    | null
+  reply_match_sent_cadence_count: number | null
+  opened: boolean
+  created_at: string
+}
+
+export interface LeadInteractionListResponse {
+  items: LeadInteraction[]
+  total: number
 }
 
 export interface CreateLeadBody {
@@ -312,6 +348,23 @@ export function useLeadSteps(leadId: string) {
       const { data, error } = await client.GET(`/leads/${leadId}/steps` as never)
       if (error) throw new Error("Falha ao carregar histórico do lead")
       return (data as LeadStep[]) ?? []
+    },
+    enabled: !!session?.accessToken && !!leadId,
+  })
+}
+
+export function useLeadInteractions(leadId: string, pageSize = 50) {
+  const { data: session } = useSession()
+
+  return useQuery({
+    queryKey: ["leads", leadId, "interactions", pageSize],
+    queryFn: async (): Promise<LeadInteractionListResponse> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.GET(
+        `/leads/${leadId}/interactions?page=1&page_size=${pageSize}` as never,
+      )
+      if (error) throw new Error("Falha ao carregar auditoria de interações")
+      return data as LeadInteractionListResponse
     },
     enabled: !!session?.accessToken && !!leadId,
   })
