@@ -24,6 +24,10 @@ export const metadata: Metadata = {
   },
   description: "Sistema de prospecção B2B automatizado",
   robots: { index: false, follow: false }, // app privado
+  icons: {
+    icon: "/icon.png",
+    apple: "/icon.png",
+  },
 }
 
 // ── Layout ────────────────────────────────────────────────────────────

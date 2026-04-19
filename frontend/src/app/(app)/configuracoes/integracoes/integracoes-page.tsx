@@ -1,7 +1,15 @@
 ﻿"use client"
 
 import { useEffect, useState } from "react"
-import { CheckCircle2, XCircle, ExternalLink, Info, Loader2, Save, AlertTriangle } from "lucide-react"
+import {
+  CheckCircle2,
+  XCircle,
+  ExternalLink,
+  Info,
+  Loader2,
+  Save,
+  AlertTriangle,
+} from "lucide-react"
 import { useTenant, useUpdateIntegrations } from "@/lib/api/hooks/use-tenant"
 import {
   usePipedrivePipelines,
@@ -62,10 +70,14 @@ export default function IntegracoesPage() {
     isError: pipelinesError,
     error: pipelinesErrorDetails,
   } = usePipedrivePipelines(pipedriveConnected)
-  const { data: stages, isLoading: loadingStages } = usePipedriveStages(
-    pdPipelineId,
-    pipedriveConnected,
-  )
+  // Sempre busca TODOS os stages (sem filtro de pipeline); filtramos em memória.
+  const {
+    data: allStages,
+    isLoading: loadingStages,
+    isError: stagesError,
+  } = usePipedriveStages(null, pipedriveConnected)
+  // Stages visíveis no select — filtrados pelo pipeline selecionado
+  const stages = pdPipelineId ? allStages?.filter((s) => s.pipeline_id === pdPipelineId) : allStages
   const {
     data: users,
     isLoading: loadingUsers,
@@ -75,19 +87,43 @@ export default function IntegracoesPage() {
 
   useEffect(() => {
     if (!integration || pdInitialized) return
+
+    if (pipedriveConnected) {
+      // Aguarda TODOS os selects terem dados (ou terem falhado) antes de inicializar.
+      // Isso garante que os <SelectItem> estejam no DOM quando o valor for setado —
+      // caso contrário o Radix Select recebe value sem item correspondente e fica em branco.
+      const stagesReady = allStages !== undefined || stagesError
+      const pipelinesReady = pipelines !== undefined || pipelinesError
+      const usersReady = users !== undefined || usersError
+      if (!stagesReady || !pipelinesReady || !usersReady) return
+    }
+
     setPdToken("")
     setPdDomain(integration.pipedrive_domain ?? "")
-    setPdStageInterest(integration.pipedrive_stage_interest?.toString() ?? "")
-    setPdStageObjection(integration.pipedrive_stage_objection?.toString() ?? "")
+    const stageInterest = integration.pipedrive_stage_interest?.toString() ?? ""
+    const stageObjection = integration.pipedrive_stage_objection?.toString() ?? ""
+    setPdStageInterest(stageInterest)
+    setPdStageObjection(stageObjection)
     setPdOwnerId(integration.pipedrive_owner_id?.toString() ?? "")
-    setPdInitialized(true)
-  }, [integration, pdInitialized])
 
-  useEffect(() => {
-    if (!stages || stages.length === 0 || pdPipelineId !== null || !pdStageInterest) return
-    const match = stages.find((s) => s.id === Number(pdStageInterest))
-    if (match) setPdPipelineId(match.pipeline_id)
-  }, [stages, pdPipelineId, pdStageInterest])
+    // Infere o pipeline a partir do stage salvo (apenas para filtro de UI)
+    if (stageInterest && allStages && allStages.length > 0) {
+      const match = allStages.find((s) => s.id === Number(stageInterest))
+      if (match) setPdPipelineId(match.pipeline_id)
+    }
+
+    setPdInitialized(true)
+  }, [
+    integration,
+    pdInitialized,
+    pipedriveConnected,
+    allStages,
+    stagesError,
+    pipelines,
+    pipelinesError,
+    users,
+    usersError,
+  ])
 
   function handleSavePipedrive(e: React.FormEvent) {
     e.preventDefault()
@@ -106,6 +142,9 @@ export default function IntegracoesPage() {
 
   const linkedinConnected = !!integration?.unipile_linkedin_account_id
   const gmailConnected = !!integration?.unipile_gmail_account_id
+
+  // Enquanto o tenant ou os dados do Pipedrive estiverem carregando, mostra spinner
+  const pdLoading = pipedriveConnected && !pdInitialized
 
   if (isLoading) {
     return (
@@ -132,15 +171,23 @@ export default function IntegracoesPage() {
           ) : null}
           {pipelinesError ? (
             <p>
-              Pipelines do Pipedrive: {pipelinesErrorDetails instanceof Error ? pipelinesErrorDetails.message : "falha ao carregar pipelines."}
+              Pipelines do Pipedrive:{" "}
+              {pipelinesErrorDetails instanceof Error
+                ? pipelinesErrorDetails.message
+                : "falha ao carregar pipelines."}
             </p>
           ) : null}
           {usersError ? (
             <p>
-              Usuários do Pipedrive: {usersErrorDetails instanceof Error ? usersErrorDetails.message : "falha ao carregar usuários."}
+              Usuários do Pipedrive:{" "}
+              {usersErrorDetails instanceof Error
+                ? usersErrorDetails.message
+                : "falha ao carregar usuários."}
             </p>
           ) : null}
-          <p>Revise o backend e as credenciais do Pipedrive antes de salvar alterações operacionais.</p>
+          <p>
+            Revise o backend e as credenciais do Pipedrive antes de salvar alterações operacionais.
+          </p>
         </SettingsCallout>
       ) : null}
 
@@ -163,152 +210,158 @@ export default function IntegracoesPage() {
             </div>
           }
         >
-          <form onSubmit={handleSavePipedrive} className="space-y-4">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="pd-token">API Token</Label>
-                <div className="relative">
-                  <Input
-                    id="pd-token"
-                    type="password"
-                    value={pdToken}
-                    onChange={(e) => setPdToken(e.target.value)}
-                    placeholder={
-                      pipedriveConnected ? "••••••••••••••••" : "Token da API do Pipedrive"
-                    }
-                  />
-                  {pipedriveConnected && !pdToken && (
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[11px] text-emerald-600">
-                      <CheckCircle2 size={12} />
-                      Configurado
-                    </span>
+          {pdLoading ? (
+            <div className="flex items-center gap-2 py-6 text-sm text-(--text-tertiary)">
+              <Loader2 size={15} className="animate-spin" />
+              Carregando configuração do Pipedrive…
+            </div>
+          ) : (
+            <form onSubmit={handleSavePipedrive} className="space-y-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="pd-token">API Token</Label>
+                  <div className="relative">
+                    <Input
+                      id="pd-token"
+                      type="password"
+                      value={pdToken}
+                      onChange={(e) => setPdToken(e.target.value)}
+                      placeholder={
+                        pipedriveConnected ? "••••••••••••••••" : "Token da API do Pipedrive"
+                      }
+                    />
+                    {pipedriveConnected && !pdToken && (
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[11px] text-emerald-600">
+                        <CheckCircle2 size={12} />
+                        Configurado
+                      </span>
+                    )}
+                  </div>
+                  {pipedriveConnected && (
+                    <p className="text-[11px] text-(--text-tertiary)">
+                      Deixe em branco para manter o token atual.
+                    </p>
                   )}
                 </div>
-                {pipedriveConnected && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="pd-domain">Domínio</Label>
+                  <Input
+                    id="pd-domain"
+                    value={pdDomain}
+                    onChange={(e) => setPdDomain(e.target.value)}
+                    placeholder="suaempresa"
+                  />
                   <p className="text-[11px] text-(--text-tertiary)">
-                    Deixe em branco para manter o token atual.
+                    Ex: suaempresa (.pipedrive.com)
                   </p>
+                </div>
+
+                {/* Pipeline selector — filtra os stages (opcional, não salvo no banco) */}
+                <div className="space-y-1.5">
+                  <Label>
+                    Pipeline{" "}
+                    <span className="font-normal text-(--text-tertiary)">(filtro opcional)</span>
+                  </Label>
+                  <Select
+                    value={pdPipelineId?.toString() ?? ""}
+                    onValueChange={(v) => setPdPipelineId(Number(v))}
+                    disabled={!pipedriveConnected}
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={loadingPipelines ? "Carregando..." : "Selecione o pipeline"}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {pipelines?.map((p) => (
+                        <SelectItem key={p.id} value={p.id.toString()}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Stage — Interesse */}
+                <div className="space-y-1.5">
+                  <Label>Stage (Interesse)</Label>
+                  <Select
+                    value={pdStageInterest}
+                    onValueChange={setPdStageInterest}
+                    disabled={!pipedriveConnected}
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={loadingStages ? "Carregando..." : "Selecione o stage"}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {stages?.map((s) => (
+                        <SelectItem key={s.id} value={s.id.toString()}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Stage — Objeção */}
+                <div className="space-y-1.5">
+                  <Label>Stage (Objeção)</Label>
+                  <Select
+                    value={pdStageObjection}
+                    onValueChange={setPdStageObjection}
+                    disabled={!pipedriveConnected}
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={loadingStages ? "Carregando..." : "Selecione o stage"}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {stages?.map((s) => (
+                        <SelectItem key={s.id} value={s.id.toString()}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Owner (usuário) */}
+                <div className="space-y-1.5">
+                  <Label>Proprietário dos Deals</Label>
+                  <Select
+                    value={pdOwnerId}
+                    onValueChange={setPdOwnerId}
+                    disabled={!pipedriveConnected}
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={loadingUsers ? "Carregando..." : "Selecione o proprietário"}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {users?.map((u) => (
+                        <SelectItem key={u.id} value={u.id.toString()}>
+                          {u.name} ({u.email})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <Button type="submit" size="sm" disabled={saving}>
+                {saving ? (
+                  <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                ) : (
+                  <Save size={14} aria-hidden="true" />
                 )}
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="pd-domain">Domínio</Label>
-                <Input
-                  id="pd-domain"
-                  value={pdDomain}
-                  onChange={(e) => setPdDomain(e.target.value)}
-                  placeholder="suaempresa"
-                />
-                <p className="text-[11px] text-(--text-tertiary)">
-                  Ex: suaempresa (.pipedrive.com)
-                </p>
-              </div>
-
-              {/* Pipeline selector — filtra os stages */}
-              <div className="space-y-1.5">
-                <Label>Pipeline</Label>
-                <Select
-                  value={pdPipelineId?.toString() ?? ""}
-                  onValueChange={(v) => {
-                    setPdPipelineId(Number(v))
-                    setPdStageInterest("")
-                    setPdStageObjection("")
-                  }}
-                  disabled={!pipedriveConnected}
-                >
-                  <SelectTrigger>
-                    <SelectValue
-                      placeholder={loadingPipelines ? "Carregando..." : "Selecione o pipeline"}
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {pipelines?.map((p) => (
-                      <SelectItem key={p.id} value={p.id.toString()}>
-                        {p.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Stage — Interesse */}
-              <div className="space-y-1.5">
-                <Label>Stage (Interesse)</Label>
-                <Select
-                  value={pdStageInterest}
-                  onValueChange={setPdStageInterest}
-                  disabled={!pipedriveConnected || !pdPipelineId}
-                >
-                  <SelectTrigger>
-                    <SelectValue
-                      placeholder={loadingStages ? "Carregando..." : "Selecione o stage"}
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {stages?.map((s) => (
-                      <SelectItem key={s.id} value={s.id.toString()}>
-                        {s.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Stage — Objeção */}
-              <div className="space-y-1.5">
-                <Label>Stage (Objeção)</Label>
-                <Select
-                  value={pdStageObjection}
-                  onValueChange={setPdStageObjection}
-                  disabled={!pipedriveConnected || !pdPipelineId}
-                >
-                  <SelectTrigger>
-                    <SelectValue
-                      placeholder={loadingStages ? "Carregando..." : "Selecione o stage"}
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {stages?.map((s) => (
-                      <SelectItem key={s.id} value={s.id.toString()}>
-                        {s.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Owner (usuário) */}
-              <div className="space-y-1.5">
-                <Label>Proprietário dos Deals</Label>
-                <Select
-                  value={pdOwnerId}
-                  onValueChange={setPdOwnerId}
-                  disabled={!pipedriveConnected}
-                >
-                  <SelectTrigger>
-                    <SelectValue
-                      placeholder={loadingUsers ? "Carregando..." : "Selecione o proprietário"}
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {users?.map((u) => (
-                      <SelectItem key={u.id} value={u.id.toString()}>
-                        {u.name} ({u.email})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <Button type="submit" size="sm" disabled={saving}>
-              {saving ? (
-                <Loader2 size={14} className="animate-spin" aria-hidden="true" />
-              ) : (
-                <Save size={14} aria-hidden="true" />
-              )}
-              Salvar Pipedrive
-            </Button>
-          </form>
+                Salvar Pipedrive
+              </Button>
+            </form>
+          )}
         </SettingsPanel>
 
         <div className="space-y-4 lg:sticky lg:top-4 lg:self-start">
