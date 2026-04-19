@@ -262,15 +262,20 @@ function SidebarSection({ title, children }: { title: string; children: React.Re
 function SidebarField({
   label,
   hint,
+  action,
   children,
 }: {
   label: string
   hint?: string
+  action?: React.ReactNode
   children: React.ReactNode
 }) {
   return (
     <div className="space-y-1.5">
-      <label className="block text-xs font-medium text-[--text-secondary]">{label}</label>
+      <div className="flex items-center justify-between gap-2">
+        <label className="block text-xs font-medium text-[--text-secondary]">{label}</label>
+        {action}
+      </div>
       {children}
       {hint && <p className="text-[11px] leading-relaxed text-[--text-tertiary]">{hint}</p>}
     </div>
@@ -765,7 +770,33 @@ export function StepEditorSidebar({
                 </div>
               )}
 
-              <SidebarField label={composerCopy.fieldLabel} hint={composerCopy.fieldHint}>
+              <SidebarField
+                label={composerCopy.fieldLabel}
+                hint={composerCopy.fieldHint}
+                action={
+                  isComposableChannel ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void handleCompose(step.message_template.trim() ? "improve" : "generate")
+                      }
+                      disabled={composeStep.isPending}
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-600 transition-colors hover:text-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {composeStep.isPending ? (
+                        <Loader2 size={11} className="animate-spin" />
+                      ) : step.message_template.trim() ? (
+                        <Wand2 size={11} />
+                      ) : (
+                        <Sparkles size={11} />
+                      )}
+                      {step.message_template.trim()
+                        ? composerCopy.improveLabel
+                        : composerCopy.generateLabel}
+                    </button>
+                  ) : undefined
+                }
+              >
                 <textarea
                   ref={textareaRef}
                   value={step.message_template}
@@ -775,38 +806,6 @@ export function StepEditorSidebar({
                   className="w-full resize-none rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-[--text-primary] placeholder:text-gray-400 transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
                 />
               </SidebarField>
-
-              {isComposableChannel && (
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void handleCompose("generate")}
-                    disabled={composeStep.isPending}
-                    className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700 transition-colors hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {composeStep.isPending ? (
-                      <Loader2 size={13} className="animate-spin" />
-                    ) : (
-                      <Sparkles size={13} />
-                    )}
-                    {composerCopy.generateLabel}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => void handleCompose("improve")}
-                    disabled={composeStep.isPending || !step.message_template.trim()}
-                    className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 transition-colors hover:border-blue-300 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {composeStep.isPending ? (
-                      <Loader2 size={13} className="animate-spin" />
-                    ) : (
-                      <Wand2 size={13} />
-                    )}
-                    {composerCopy.improveLabel}
-                  </button>
-                </div>
-              )}
 
               {step.channel === "email" && selectedEmailTemplate && (
                 <p className="text-[11px] text-amber-600">
@@ -871,46 +870,49 @@ export function StepEditorSidebar({
               )}
 
               {previewQuery.data && (previewQuery.data.body || previewQuery.data.subject) && (
-                <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-[11px]">
-                  <p className="font-semibold text-blue-800">
-                    Prévia real com {previewQuery.data.lead_name ?? "lead de exemplo"}
-                  </p>
-
-                  {previewQuery.data.subject && (
-                    <div className="mt-2 rounded-md border border-blue-200 bg-white/70 px-2.5 py-2 text-blue-900">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-500">
-                        Assunto
-                      </p>
-                      <p className="mt-1 whitespace-pre-wrap font-medium">
-                        {previewQuery.data.subject}
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="mt-2 rounded-md border border-blue-200 bg-white/70 px-2.5 py-2 text-blue-800">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-500">
-                      {composerCopy.previewBodyLabel}
+                <div className="overflow-hidden rounded-lg border border-blue-100 bg-blue-50 text-[11px]">
+                  {/* Cabeçalho da prévia */}
+                  <div className="border-b border-blue-100 bg-blue-100/60 px-3 py-2">
+                    <p className="font-semibold text-blue-800">
+                      Prévia real com {previewQuery.data.lead_name ?? "lead de exemplo"}
                     </p>
-                    {previewQuery.data.body_is_html ? (
-                      <div
-                        className="prose prose-sm mt-1 max-w-none text-blue-800"
-                        dangerouslySetInnerHTML={{ __html: previewQuery.data.body }}
-                      />
-                    ) : (
-                      <p className="mt-1 whitespace-pre-wrap text-blue-700">
-                        {previewQuery.data.body}
-                      </p>
-                    )}
                   </div>
 
-                  {step.channel === "email" && (
-                    <div className="mt-3 flex items-start gap-2">
-                      <div className="shrink-0">
+                  <div className="space-y-2 p-3">
+                    {previewQuery.data.subject && (
+                      <div className="rounded-md border border-blue-200 bg-white/80 px-2.5 py-2 text-blue-900">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-400">
+                          Assunto
+                        </p>
+                        <p className="mt-1 whitespace-pre-wrap font-medium">
+                          {previewQuery.data.subject}
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="rounded-md border border-blue-200 bg-white/80 px-2.5 py-2 text-blue-800">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-400">
+                        {composerCopy.previewBodyLabel}
+                      </p>
+                      {previewQuery.data.body_is_html ? (
+                        <div
+                          className="prose prose-sm mt-1 max-w-none text-blue-800"
+                          dangerouslySetInnerHTML={{ __html: previewQuery.data.body }}
+                        />
+                      ) : (
+                        <p className="mt-1 whitespace-pre-wrap text-blue-700">
+                          {previewQuery.data.body}
+                        </p>
+                      )}
+                    </div>
+
+                    {step.channel === "email" && (
+                      <div className="space-y-2 pt-1">
                         <button
                           type="button"
                           onClick={() => setTestEmailOpen(true)}
                           disabled={sendTestEmail.isPending}
-                          className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-medium text-blue-700 transition-colors hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                          className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-medium text-blue-700 transition-colors hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {sendTestEmail.isPending ? (
                             <Loader2 size={13} className="animate-spin" />
@@ -919,13 +921,15 @@ export function StepEditorSidebar({
                           )}
                           Enviar teste por e-mail
                         </button>
+                        <div className="rounded-md border border-blue-200 bg-white/80 px-2.5 py-2 text-[11px]">
+                          <p className="font-medium text-blue-800">
+                            Conta: {testEmailTransport.shortLabel}
+                          </p>
+                          <p className="mt-0.5 text-blue-600">{testEmailTransport.hint}</p>
+                        </div>
                       </div>
-                      <div className="min-w-0 flex-1 rounded-md border border-blue-200 bg-white/70 px-2.5 py-2 text-[11px] text-blue-800">
-                        <p className="font-medium">Transporte do teste: {testEmailTransport.shortLabel}</p>
-                        <p className="mt-1 text-blue-700">{testEmailTransport.hint}</p>
-                      </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               )}
             </SidebarSection>
