@@ -57,7 +57,11 @@ export default function VozPage() {
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const integration = tenant?.integration ?? null
-  const ttsDefaultVoiceIds: Record<string, string> = integration?.tts_default_voice_ids ?? {}
+  const ttsDefaultVoiceIds = useMemo<Record<string, string>>(
+    () => integration?.tts_default_voice_ids ?? {},
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(integration?.tts_default_voice_ids)],
+  )
   const ttsDefaultProvider = integration?.tts_default_provider ?? null
 
   const [selectedProvider, setSelectedProvider] = useState<string>("elevenlabs")
@@ -102,7 +106,8 @@ export default function VozPage() {
   // Sincroniza selectedProvider com o primeiro provider disponível na API
   useEffect(() => {
     if (providers.length > 0 && !providers.includes(selectedProvider)) {
-      setSelectedProvider(providers[0])
+      const first = providers[0]
+      if (first) setSelectedProvider(first)
     }
   }, [providers]) // eslint-disable-line react-hooks/exhaustive-deps
 
