@@ -35,6 +35,9 @@ export interface TenantIntegration {
   cold_email_llm_model: string
   cold_email_llm_temperature: number
   cold_email_llm_max_tokens: number
+  // TTS — padrão do sistema
+  tts_default_provider: string | null
+  tts_default_voice_ids: Record<string, string>
   created_at: string
 }
 
@@ -134,6 +137,27 @@ export interface UpdateIntegrationsBody {
   cold_email_llm_model?: string
   cold_email_llm_temperature?: number
   cold_email_llm_max_tokens?: number
+  // TTS — padrão do sistema
+  tts_default_provider?: string | null
+  tts_default_voice_ids?: Record<string, string>
+}
+
+export interface TenantTTSDefaults {
+  provider: string | null
+  voiceId: string | null
+}
+
+/** Retorna o provider + voice ID padrão TTS do tenant */
+export function getTenantTTSDefaults(
+  integration: TenantIntegration | null | undefined,
+  provider?: string,
+): TenantTTSDefaults {
+  if (!integration) return { provider: null, voiceId: null }
+  const resolvedProvider = provider ?? integration.tts_default_provider ?? null
+  const voiceId = resolvedProvider
+    ? (integration.tts_default_voice_ids?.[resolvedProvider] ?? null)
+    : null
+  return { provider: resolvedProvider, voiceId }
 }
 
 export interface TenantLLMConfig {

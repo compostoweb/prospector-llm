@@ -128,7 +128,14 @@ class Settings(BaseSettings):
     LLM_DAILY_BUDGET_TOKENS: int = 500_000
 
     # ── Voz / TTS ────────────────────────────────────────────────────
-    VOICE_PROVIDER: str = "speechify"
+    VOICE_PROVIDER: str = "elevenlabs"
+
+    # ── ElevenLabs (provider ativo) ───────────────────────────────────
+    ELEVENLABS_API_KEY: str | None = None
+    ELEVENLABS_VOICE_ID: str = ""
+    ELEVENLABS_MODEL_ID: str = "eleven_multilingual_v2"
+
+    # ── Speechify (desativado — preserve código) ──────────────────────
     SPEECHIFY_API_KEY: str | None = None
     SPEECHIFY_VOICE_ID: str = "henry"
 
@@ -136,8 +143,8 @@ class Settings(BaseSettings):
     VOICEBOX_BASE_URL: str = "http://localhost:17493"
     VOICEBOX_ENABLED: bool = False
 
-    # ── Edge TTS (Microsoft Neural — gratuito) ───────────────────────
-    EDGE_TTS_ENABLED: bool = True
+    # ── Edge TTS (desativado — preserve código) ───────────────────────
+    EDGE_TTS_ENABLED: bool = False
     EDGE_TTS_DEFAULT_VOICE: str = "pt-BR-FranciscaNeural"
 
     # ── Unipile ───────────────────────────────────────────────────────

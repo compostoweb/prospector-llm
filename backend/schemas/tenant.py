@@ -116,6 +116,10 @@ class TenantIntegrationUpdate(BaseModel):
     cold_email_llm_temperature: float | None = Field(default=None, ge=0.0, le=1.0)
     cold_email_llm_max_tokens: int | None = Field(default=None, ge=64, le=8192)
 
+    # TTS — padrão do sistema
+    tts_default_provider: str | None = Field(default=None, max_length=50)
+    tts_default_voice_ids: dict[str, str] | None = None
+
 
 class TenantIntegrationResponse(BaseModel):
     """Dados das integrações do tenant (sem expor tokens sensíveis em texto limpo)."""
@@ -151,6 +155,9 @@ class TenantIntegrationResponse(BaseModel):
     cold_email_llm_model: str
     cold_email_llm_temperature: float
     cold_email_llm_max_tokens: int
+    # TTS — padrão do sistema
+    tts_default_provider: str | None = None
+    tts_default_voice_ids: dict[str, str] = Field(default_factory=dict)
     created_at: datetime
 
 

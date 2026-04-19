@@ -1,6 +1,7 @@
 "use client"
 
 import { useTTSProviders, useTTSVoices, useTestTTS } from "@/lib/api/hooks/use-tts"
+import { useTenant, getTenantTTSDefaults } from "@/lib/api/hooks/use-tenant"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import {
@@ -29,6 +30,7 @@ interface TTSConfigFormProps {
 }
 
 const PROVIDER_LABELS: Record<string, { label: string; description: string }> = {
+  elevenlabs: { label: "ElevenLabs", description: "Cloud — multilíngue, voice cloning" },
   edge: { label: "Edge TTS", description: "Microsoft Neural — gratuito, pt-BR nativo" },
   speechify: { label: "Speechify", description: "Cloud — multilíngue, voice cloning" },
   voicebox: { label: "Voicebox", description: "Self-hosted — voice cloning" },
@@ -38,6 +40,7 @@ const PROVIDER_LABELS: Record<string, { label: string; description: string }> = 
 export function TTSConfigForm({ value, onChange, hasVoiceSteps }: TTSConfigFormProps) {
   // Busca lista de providers via endpoint leve (não carrega 1800+ vozes)
   const { data: providersData } = useTTSProviders()
+  const { data: tenant } = useTenant()
   // Busca vozes só do provider selecionado
   const { data, isLoading } = useTTSVoices(value.tts_provider ?? undefined)
   const testTTS = useTestTTS()
@@ -66,7 +69,9 @@ export function TTSConfigForm({ value, onChange, hasVoiceSteps }: TTSConfigFormP
   function update<K extends keyof TTSConfig>(key: K, val: TTSConfig[K]) {
     const updated = { ...value, [key]: val }
     if (key === "tts_provider" && val !== value.tts_provider) {
-      updated.tts_voice_id = null
+      // Auto-seleciona a voz padrão salva para este provider (se houver)
+      const { voiceId } = getTenantTTSDefaults(tenant?.integration ?? null, val as string)
+      updated.tts_voice_id = voiceId ?? null
     }
     onChange(updated)
   }

@@ -121,6 +121,8 @@ class EdgeTTSProvider(TTSProvider):
         name: str,
         audio_data: bytes,
         language: str = "pt-BR",
+        filename: str = "audio",
+        content_type: str = "audio/mpeg",
     ) -> TTSVoice:
         """Edge TTS não suporta voice cloning."""
         raise NotImplementedError(
@@ -130,6 +132,4 @@ class EdgeTTSProvider(TTSProvider):
 
     async def delete_voice(self, voice_id: str) -> None:
         """Edge TTS não tem vozes customizadas para deletar."""
-        raise NotImplementedError(
-            "Edge TTS não suporta deleção de vozes — todas são built-in."
-        )
+        raise NotImplementedError("Edge TTS não suporta deleção de vozes — todas são built-in.")

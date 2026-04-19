@@ -32,6 +32,7 @@ _MAX_AUDIO_SIZE = 5 * 1024 * 1024  # 5 MB
 
 # ── Schemas ───────────────────────────────────────────────────────────
 
+
 class VoiceResponse(BaseModel):
     id: str
     name: str
@@ -40,7 +41,7 @@ class VoiceResponse(BaseModel):
     is_cloned: bool
 
     @classmethod
-    def from_tts_voice(cls, v: TTSVoice) -> "VoiceResponse":
+    def from_tts_voice(cls, v: TTSVoice) -> VoiceResponse:
         return cls(
             id=v.id,
             name=v.name,
@@ -69,6 +70,7 @@ class TestRequest(BaseModel):
 
 
 # ── Rotas ─────────────────────────────────────────────────────────────
+
 
 @router.get("/providers", summary="Lista provedores TTS configurados")
 async def get_providers(
@@ -147,6 +149,8 @@ async def create_voice(
         name=name,
         audio_data=audio_data,
         language=language,
+        filename=audio.filename or "audio",
+        content_type=audio.content_type or "audio/mpeg",
     )
     logger.info("tts.voice.created", provider=provider, voice_id=voice.id, name=name)
     return VoiceResponse.from_tts_voice(voice)

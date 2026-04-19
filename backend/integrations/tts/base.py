@@ -13,11 +13,12 @@ from dataclasses import dataclass
 @dataclass
 class TTSVoice:
     """Informações de uma voz disponível no provedor."""
+
     id: str
     name: str
     language: str
-    provider: str       # "speechify" | "voicebox" | "edge"
-    is_cloned: bool     # True se é um voice clone (não built-in)
+    provider: str  # "speechify" | "voicebox" | "edge"
+    is_cloned: bool  # True se é um voice clone (não built-in)
 
 
 class TTSProvider(ABC):
@@ -50,6 +51,8 @@ class TTSProvider(ABC):
         name: str,
         audio_data: bytes,
         language: str = "pt-BR",
+        filename: str = "audio",
+        content_type: str = "audio/mpeg",
     ) -> TTSVoice:
         """Cria um voice clone a partir de áudio de referência."""
         ...

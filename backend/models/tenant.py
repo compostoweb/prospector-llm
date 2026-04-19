@@ -18,7 +18,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base
@@ -176,6 +176,19 @@ class TenantIntegration(Base):
         default=512,
         nullable=False,
         comment="Max tokens LLM para cold email (64–8192)",
+    )
+
+    # ── TTS — padrão do sistema ───────────────────────────────────────
+    tts_default_provider: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Provider TTS padrão ao criar novas cadências (ex: elevenlabs)",
+    )
+    tts_default_voice_ids: Mapped[dict] = mapped_column(
+        JSON,
+        default=dict,
+        nullable=False,
+        comment='Mapa provider → voice_id padrão (ex: {"elevenlabs": "abc123"})',
     )
 
     created_at: Mapped[datetime] = mapped_column(

@@ -34,13 +34,24 @@ _VOICES_CACHE_TTL = int(timedelta(hours=1).total_seconds())
 
 
 class TTSRegistry:
-
     def __init__(self, settings: Settings, redis: RedisClient) -> None:
         self._redis = redis
         self._providers: dict[str, TTSProvider] = {}
 
+        if settings.ELEVENLABS_API_KEY:
+            from integrations.tts.elevenlabs_provider import ElevenLabsProvider
+
+            self._providers["elevenlabs"] = ElevenLabsProvider(
+                api_key=settings.ELEVENLABS_API_KEY,
+                default_voice_id=settings.ELEVENLABS_VOICE_ID,
+                model_id=settings.ELEVENLABS_MODEL_ID,
+            )
+            logger.info("tts.registry.provider_loaded", provider="elevenlabs")
+
+        # ── Speechify (desativado por padrão — preserve código) ────────
         if settings.SPEECHIFY_API_KEY:
             from integrations.tts.speechify_provider import SpeechifyProvider
+
             self._providers["speechify"] = SpeechifyProvider(
                 api_key=settings.SPEECHIFY_API_KEY,
                 default_voice_id=settings.SPEECHIFY_VOICE_ID,
@@ -49,13 +60,16 @@ class TTSRegistry:
 
         if settings.VOICEBOX_ENABLED:
             from integrations.tts.voicebox_provider import VoiceboxProvider
+
             self._providers["voicebox"] = VoiceboxProvider(
                 base_url=settings.VOICEBOX_BASE_URL,
             )
             logger.info("tts.registry.provider_loaded", provider="voicebox")
 
+        # ── Edge TTS (desativado por padrão — preserve código) ─────────
         if settings.EDGE_TTS_ENABLED:
             from integrations.tts.edge_provider import EdgeTTSProvider
+
             self._providers["edge"] = EdgeTTSProvider(
                 default_voice_id=settings.EDGE_TTS_DEFAULT_VOICE,
             )
@@ -79,7 +93,9 @@ class TTSRegistry:
     ) -> bytes:
         """Sintetiza áudio com o provider e voz especificados."""
         tts = self._get_provider(provider)
-        return await tts.synthesize(text=text, voice_id=voice_id, language=language, speed=speed, pitch=pitch)
+        return await tts.synthesize(
+            text=text, voice_id=voice_id, language=language, speed=speed, pitch=pitch
+        )
 
     # ------------------------------------------------------------------
     # Listagem de vozes — com cache Redis 1h
@@ -141,10 +157,18 @@ class TTSRegistry:
         name: str,
         audio_data: bytes,
         language: str = "pt-BR",
+        filename: str = "audio",
+        content_type: str = "audio/mpeg",
     ) -> TTSVoice:
         """Cria voice clone no provider especificado. Invalida cache."""
         tts = self._get_provider(provider)
-        voice = await tts.create_voice(name=name, audio_data=audio_data, language=language)
+        voice = await tts.create_voice(
+            name=name,
+            audio_data=audio_data,
+            language=language,
+            filename=filename,
+            content_type=content_type,
+        )
         await self._invalidate_cache()
         return voice
 
@@ -168,10 +192,7 @@ class TTSRegistry:
     def _get_provider(self, provider: str) -> TTSProvider:
         if provider not in self._providers:
             available = list(self._providers.keys())
-            raise ValueError(
-                f"Provedor TTS '{provider}' não configurado. "
-                f"Disponíveis: {available}"
-            )
+            raise ValueError(f"Provedor TTS '{provider}' não configurado. Disponíveis: {available}")
         return self._providers[provider]
 
     async def _invalidate_cache(self) -> None:

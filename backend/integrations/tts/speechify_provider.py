@@ -23,7 +23,6 @@ _TIMEOUT = 60.0
 
 
 class SpeechifyProvider(TTSProvider):
-
     def __init__(self, api_key: str, default_voice_id: str = "henry") -> None:
         self._api_key = api_key
         self._default_voice_id = default_voice_id
@@ -54,7 +53,7 @@ class SpeechifyProvider(TTSProvider):
             p = round(max(-50, min(pitch, 50)))
             sign = "+" if p > 0 else ""
             attrs.append(f'pitch="{sign}{p}%"')
-        return f'<speak><prosody {" ".join(attrs)}>{text}</prosody></speak>'
+        return f"<speak><prosody {' '.join(attrs)}>{text}</prosody></speak>"
 
     async def synthesize(
         self,
@@ -116,6 +115,8 @@ class SpeechifyProvider(TTSProvider):
         name: str,
         audio_data: bytes,
         language: str = "pt-BR",
+        filename: str = "audio",
+        content_type: str = "audio/mpeg",
     ) -> TTSVoice:
         """
         Cria voice clone via POST /voices.
@@ -124,7 +125,7 @@ class SpeechifyProvider(TTSProvider):
         resp = await self._client.post(
             "/voices",
             data={"name": name, "consent": "true"},
-            files={"sample": (f"{name}.mp3", audio_data, "audio/mpeg")},
+            files={"sample": (filename, audio_data, content_type)},
         )
         resp.raise_for_status()
         data = resp.json()

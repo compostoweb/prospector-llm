@@ -26,7 +26,6 @@ _TIMEOUT = 120.0  # Voice synthesis no CPU pode ser lento
 
 
 class VoiceboxProvider(TTSProvider):
-
     def __init__(self, base_url: str = "http://localhost:17493") -> None:
         self._base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(
@@ -72,7 +71,9 @@ class VoiceboxProvider(TTSProvider):
     async def list_voices(self) -> list[TTSVoice]:
         resp = await self._client.get("/profiles")
         resp.raise_for_status()
-        raw_profiles: list[dict] = resp.json() if isinstance(resp.json(), list) else resp.json().get("profiles", [])
+        raw_profiles: list[dict] = (
+            resp.json() if isinstance(resp.json(), list) else resp.json().get("profiles", [])
+        )
 
         voices: list[TTSVoice] = []
         for p in raw_profiles:
@@ -92,12 +93,14 @@ class VoiceboxProvider(TTSProvider):
         name: str,
         audio_data: bytes,
         language: str = "pt-BR",
+        filename: str = "audio",
+        content_type: str = "audio/mpeg",
     ) -> TTSVoice:
         """Cria voice clone via POST /profiles com áudio de referência."""
         resp = await self._client.post(
             "/profiles",
             data={"name": name, "language": language},
-            files={"audio": (f"{name}.mp3", audio_data, "audio/mpeg")},
+            files={"audio": (filename, audio_data, content_type)},
         )
         resp.raise_for_status()
         data = resp.json()
