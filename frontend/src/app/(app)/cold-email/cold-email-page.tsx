@@ -37,6 +37,7 @@ import {
 } from "@/lib/api/hooks/use-email-analytics"
 import type { EmailOverTimeItem } from "@/lib/api/hooks/use-email-analytics"
 import { useCadences } from "@/lib/api/hooks/use-cadences"
+import { useCadenceOverview } from "@/lib/api/hooks/use-cadence-analytics"
 import { useTenant, useUpdateIntegrations } from "@/lib/api/hooks/use-tenant"
 import { LLMConfigForm, type LLMConfig } from "@/components/cadencias/llm-config-form"
 import {
@@ -420,6 +421,11 @@ export default function ColdEmailPage() {
   const [aiModalOpen, setAiModalOpen] = useState(false)
   const { data: stats, isLoading: loadingStats, isError: statsError } = useEmailStats(days)
   const {
+    data: cadenceOverview,
+    isLoading: loadingOverview,
+    isError: cadenceOverviewError,
+  } = useCadenceOverview()
+  const {
     data: analyticsData,
     isLoading: loadingCadences,
     isError: analyticsError,
@@ -430,17 +436,20 @@ export default function ColdEmailPage() {
     isError: allCadencesError,
   } = useCadences("email_only")
   const { data: overTime, isError: overTimeError } = useEmailOverTime(days)
-  const hasColdEmailError = statsError || analyticsError || allCadencesError || overTimeError
+  const hasColdEmailError =
+    statsError || analyticsError || allCadencesError || overTimeError || cadenceOverviewError
   const chartData = useMemo(() => buildColdEmailChartData(days, overTime), [days, overTime])
 
   // Merge: show all email_only cadences, with analytics when available
   const analyticsMap = new Map((analyticsData ?? []).map((c) => [c.cadence_id, c]))
+  const overviewMap = new Map((cadenceOverview ?? []).map((c) => [c.cadence_id, c]))
   const mergedCadences = (allEmailCadences ?? []).map((c) => ({
     cadence_id: c.id,
     cadence_name: c.name,
+    lead_count: overviewMap.get(c.id)?.total_leads ?? 0,
     sent: analyticsMap.get(c.id)?.sent ?? 0,
     opened: analyticsMap.get(c.id)?.opened ?? 0,
-    replied: analyticsMap.get(c.id)?.replied ?? 0,
+    replied: analyticsMap.get(c.id)?.replied ?? overviewMap.get(c.id)?.replies ?? 0,
     bounced: analyticsMap.get(c.id)?.bounced ?? 0,
     open_rate: analyticsMap.get(c.id)?.open_rate ?? 0,
     reply_rate: analyticsMap.get(c.id)?.reply_rate ?? 0,
@@ -545,6 +554,20 @@ export default function ColdEmailPage() {
         </div>
       )}
 
+      {!loadingStats && (stats?.sent ?? 0) > 0 && (stats?.opened ?? 0) === 0 ? (
+        <div className="flex items-start gap-3 rounded-lg border border-(--warning) bg-(--warning-subtle) px-4 py-3 text-sm text-(--warning-subtle-fg)">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <div>
+            <p className="font-medium">Aberturas ainda não foram registradas.</p>
+            <p className="mt-1 text-(--text-secondary)">
+              Se você já abriu emails dessa campanha, valide no backend uma TRACKING_BASE_URL
+              pública. Em ambiente local, pixels apontando para localhost não conseguem registrar
+              abertura fora da sua máquina.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
       {/* Gráfico ao longo do tempo */}
       <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-4">
         <h2 className="mb-4 text-sm font-semibold text-(--text-primary)">
@@ -615,7 +638,7 @@ export default function ColdEmailPage() {
             Ver todas →
           </Link>
         </div>
-        {loadingCadences || loadingAllCadences ? (
+        {loadingCadences || loadingAllCadences || loadingOverview ? (
           <div className="space-y-2 p-4">
             {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="h-10 animate-pulse rounded bg-(--bg-overlay)" />
@@ -623,20 +646,13 @@ export default function ColdEmailPage() {
           </div>
         ) : mergedCadences.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full table-fixed text-sm">
-              <colgroup>
-                <col className="w-[30%]" />
-                <col className="w-[10%]" />
-                <col className="w-[14%]" />
-                <col className="w-[14%]" />
-                <col className="w-[10%]" />
-                <col className="w-[12%]" />
-                <col className="w-[10%]" />
-              </colgroup>
+            <table className="min-w-245 w-full text-sm">
               <thead>
                 <tr className="border-b border-(--border-subtle) text-left text-xs text-(--text-tertiary)">
                   <th className="px-4 py-2">Cadência</th>
+                  <th className="px-4 py-2 text-right">Qtd Leads</th>
                   <th className="px-4 py-2 text-right">Enviados</th>
+                  <th className="px-4 py-2 text-right">Qtd Respostas</th>
                   <th className="px-4 py-2 text-right">T. Abertura</th>
                   <th className="px-4 py-2 text-right">T. Resposta</th>
                   <th className="px-4 py-2 text-right">Bounce</th>
@@ -659,8 +675,12 @@ export default function ColdEmailPage() {
                       </Link>
                     </td>
                     <td className="px-4 py-2.5 text-right text-(--text-secondary)">
+                      {c.lead_count}
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-(--text-secondary)">
                       {c.sent > 0 ? c.sent : <span className="text-(--text-disabled)">—</span>}
                     </td>
+                    <td className="px-4 py-2.5 text-right text-(--text-secondary)">{c.replied}</td>
                     <td className="px-4 py-2.5 text-right font-medium text-(--accent)">
                       {c.sent > 0 ? (
                         `${c.open_rate}%`
@@ -682,7 +702,7 @@ export default function ColdEmailPage() {
                           c.bounced > 0 ? "text-red-500" : "text-(--text-tertiary)",
                         )}
                       >
-                        {c.bounced > 0 ? c.bounced : "—"}
+                        {c.bounced}
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-center align-middle whitespace-nowrap">

@@ -19,6 +19,7 @@ interface CadenceReplyManagementProps {
 
 interface ReplyLeadSummary {
   lead: CadenceReplyEvent["lead"]
+  firstReply: CadenceReplyEvent
   latestReply: CadenceReplyEvent
   eventCount: number
   channels: string[]
@@ -41,6 +42,7 @@ function buildReplyLeadSummaries(replies: CadenceReplyEvent[]): ReplyLeadSummary
     if (!existing) {
       grouped.set(reply.lead.id, {
         lead: reply.lead,
+        firstReply: reply,
         latestReply: reply,
         eventCount: 1,
         channels: [reply.channel],
@@ -50,6 +52,14 @@ function buildReplyLeadSummaries(replies: CadenceReplyEvent[]): ReplyLeadSummary
     }
 
     existing.eventCount += 1
+    if (new Date(reply.replied_at).getTime() < new Date(existing.firstReply.replied_at).getTime()) {
+      existing.firstReply = reply
+    }
+    if (
+      new Date(reply.replied_at).getTime() > new Date(existing.latestReply.replied_at).getTime()
+    ) {
+      existing.latestReply = reply
+    }
     if (!existing.channels.includes(reply.channel)) {
       existing.channels.push(reply.channel)
     }
@@ -64,6 +74,17 @@ function buildReplyLeadSummaries(replies: CadenceReplyEvent[]): ReplyLeadSummary
 function renderLeadSubtitle(summary: ReplyLeadSummary): string {
   const fragments = [summary.lead.company, summary.lead.job_title].filter(Boolean)
   return fragments.join(" · ") || "Lead sem empresa/cargo preenchidos"
+}
+
+function buildReplyPreview(replyText: string | null): string {
+  const normalized = (replyText ?? "").replace(/\s+/g, " ").trim()
+  if (!normalized) {
+    return "Sem conteúdo textual disponível."
+  }
+  if (normalized.length <= 120) {
+    return normalized
+  }
+  return `${normalized.slice(0, 117)}...`
 }
 
 export function CadenceReplyManagement({ cadenceId }: CadenceReplyManagementProps) {
@@ -138,8 +159,8 @@ export function CadenceReplyManagement({ cadenceId }: CadenceReplyManagementProp
           <div>
             <h2 className="text-sm font-semibold text-(--text-primary)">Leads respondidos</h2>
             <p className="text-xs text-(--text-secondary)">
-              Use esta lista para abrir o histórico do lead, validar o último reply e detectar leads
-              em múltiplas cadências ativas.
+              A tabela separa a primeira resposta contabilizada do histórico bruto de eventos para
+              evitar distorção nas métricas da cadência.
             </p>
           </div>
         </div>
@@ -158,24 +179,153 @@ export function CadenceReplyManagement({ cadenceId }: CadenceReplyManagementProp
             className="px-4 py-10"
           />
         ) : (
-          <div className="space-y-3">
-            {replyLeadSummaries.map((summary) => {
-              const latestReply = summary.latestReply
-              const stepLabel =
-                summary.steps.length > 0
-                  ? `Steps ${summary.steps
-                      .sort((a, b) => a - b)
-                      .map((step) => `#${step}`)
-                      .join(", ")}`
-                  : "Step não identificado"
+          <>
+            <div className="hidden overflow-x-auto lg:block">
+              <table className="min-w-full border-separate border-spacing-0 text-sm">
+                <thead>
+                  <tr className="text-left text-xs uppercase tracking-[0.14em] text-(--text-tertiary)">
+                    <th className="border-b border-(--border-subtle) px-4 py-3 font-semibold">
+                      Lead
+                    </th>
+                    <th className="border-b border-(--border-subtle) px-4 py-3 font-semibold">
+                      1ª resposta contabilizada
+                    </th>
+                    <th className="border-b border-(--border-subtle) px-4 py-3 font-semibold">
+                      Última interação
+                    </th>
+                    <th className="border-b border-(--border-subtle) px-4 py-3 font-semibold">
+                      Canais
+                    </th>
+                    <th className="border-b border-(--border-subtle) px-4 py-3 font-semibold">
+                      Eventos
+                    </th>
+                    <th className="border-b border-(--border-subtle) px-4 py-3 font-semibold">
+                      Último reply
+                    </th>
+                    <th className="border-b border-(--border-subtle) px-4 py-3 font-semibold">
+                      Ação
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {replyLeadSummaries.map((summary) => {
+                    const sortedSteps = [...summary.steps].sort((left, right) => left - right)
+                    const firstReply = summary.firstReply
+                    const latestReply = summary.latestReply
 
-              return (
-                <article
-                  key={summary.lead.id}
-                  className="rounded-lg border border-(--border-subtle) bg-(--bg-overlay) p-4"
-                >
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="min-w-0 space-y-2">
+                    return (
+                      <tr key={summary.lead.id} className="align-top">
+                        <td className="border-b border-(--border-subtle) px-4 py-4">
+                          <div className="min-w-56 space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Link
+                                href={`/leads/${summary.lead.id}`}
+                                className="text-sm font-semibold text-(--text-primary) transition-colors hover:text-(--accent)"
+                              >
+                                {summary.lead.name}
+                              </Link>
+                              {summary.lead.has_multiple_active_cadences ? (
+                                <span className="inline-flex items-center gap-1 rounded-(--radius-full) border border-(--warning) bg-(--warning-subtle) px-2 py-0.5 text-[11px] font-medium text-(--warning-subtle-fg)">
+                                  <AlertTriangle size={12} aria-hidden="true" />
+                                  {summary.lead.active_cadence_count} cadências ativas
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="text-sm text-(--text-secondary)">
+                              {renderLeadSubtitle(summary)}
+                            </p>
+                          </div>
+                        </td>
+                        <td className="border-b border-(--border-subtle) px-4 py-4">
+                          <div className="min-w-52 space-y-2">
+                            <time
+                              dateTime={firstReply.replied_at}
+                              className="block font-medium text-(--text-primary)"
+                            >
+                              {formatRelativeTime(firstReply.replied_at)}
+                            </time>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <BadgeChannel channel={firstReply.channel} />
+                              {firstReply.step_number != null ? (
+                                <span className="rounded-(--radius-full) border border-(--border-default) bg-(--bg-overlay) px-2 py-0.5 text-xs text-(--text-secondary)">
+                                  Step #{firstReply.step_number}
+                                </span>
+                              ) : null}
+                            </div>
+                            {firstReply.reply_match_source ? (
+                              <ReplyMatchSourceBadge source={firstReply.reply_match_source} short />
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="border-b border-(--border-subtle) px-4 py-4">
+                          <div className="min-w-44 space-y-1 text-sm">
+                            <time
+                              dateTime={latestReply.replied_at}
+                              className="block text-(--text-primary)"
+                            >
+                              {formatRelativeTime(latestReply.replied_at)}
+                            </time>
+                            <p className="text-(--text-secondary)">
+                              {latestReply.intent
+                                ? (intentLabel[latestReply.intent] ?? latestReply.intent)
+                                : "Intent não classificado"}
+                            </p>
+                            <p className="text-xs text-(--text-tertiary)">
+                              {sortedSteps.length > 0
+                                ? `Steps ${sortedSteps.map((step) => `#${step}`).join(", ")}`
+                                : "Step não identificado"}
+                            </p>
+                          </div>
+                        </td>
+                        <td className="border-b border-(--border-subtle) px-4 py-4">
+                          <div className="flex min-w-36 flex-wrap gap-2">
+                            {summary.channels.map((channel) => (
+                              <BadgeChannel
+                                key={`${summary.lead.id}-${channel}`}
+                                channel={channel}
+                              />
+                            ))}
+                          </div>
+                        </td>
+                        <td className="border-b border-(--border-subtle) px-4 py-4">
+                          <div className="min-w-28">
+                            <p className="font-medium text-(--text-primary)">
+                              {summary.eventCount}
+                            </p>
+                            <p className="text-xs text-(--text-secondary)">histórico bruto</p>
+                          </div>
+                        </td>
+                        <td className="border-b border-(--border-subtle) px-4 py-4">
+                          <p className="min-w-72 whitespace-pre-wrap text-sm leading-relaxed text-(--text-secondary)">
+                            {buildReplyPreview(latestReply.reply_text)}
+                          </p>
+                        </td>
+                        <td className="border-b border-(--border-subtle) px-4 py-4">
+                          <Link
+                            href={`/leads/${summary.lead.id}`}
+                            className="inline-flex items-center rounded-lg border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-sm font-medium text-(--text-primary) transition-colors hover:border-(--accent) hover:text-(--accent)"
+                          >
+                            Abrir histórico
+                          </Link>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="space-y-3 lg:hidden">
+              {replyLeadSummaries.map((summary) => {
+                const firstReply = summary.firstReply
+                const latestReply = summary.latestReply
+
+                return (
+                  <article
+                    key={summary.lead.id}
+                    className="rounded-lg border border-(--border-subtle) bg-(--bg-overlay) p-4"
+                  >
+                    <div className="space-y-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <Link
                           href={`/leads/${summary.lead.id}`}
@@ -184,7 +334,7 @@ export function CadenceReplyManagement({ cadenceId }: CadenceReplyManagementProp
                           {summary.lead.name}
                         </Link>
                         {summary.lead.has_multiple_active_cadences ? (
-                          <span className="inline-flex items-center gap-1 rounded-(--radius-full) border border-(--warning) bg-(--warning-subtle) px-2 py-0.5 text-xs font-medium text-(--warning-subtle-fg)">
+                          <span className="inline-flex items-center gap-1 rounded-(--radius-full) border border-(--warning) bg-(--warning-subtle) px-2 py-0.5 text-[11px] font-medium text-(--warning-subtle-fg)">
                             <AlertTriangle size={12} aria-hidden="true" />
                             {summary.lead.active_cadence_count} cadências ativas
                           </span>
@@ -195,27 +345,63 @@ export function CadenceReplyManagement({ cadenceId }: CadenceReplyManagementProp
                         {renderLeadSubtitle(summary)}
                       </p>
 
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-(--text-tertiary)">
-                        <span>
-                          {summary.eventCount} reply{summary.eventCount === 1 ? "" : "s"}
-                        </span>
-                        <span>{stepLabel}</span>
-                        <time dateTime={latestReply.replied_at}>
-                          {formatRelativeTime(latestReply.replied_at)}
-                        </time>
-                        {latestReply.intent ? (
-                          <span>{intentLabel[latestReply.intent] ?? latestReply.intent}</span>
-                        ) : null}
-                      </div>
-                    </div>
+                      <div className="grid gap-3 rounded-lg border border-(--border-default) bg-(--bg-surface) p-3 text-sm">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.12em] text-(--text-tertiary)">
+                            1ª resposta contabilizada
+                          </p>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <span className="font-medium text-(--text-primary)">
+                              {formatRelativeTime(firstReply.replied_at)}
+                            </span>
+                            <BadgeChannel channel={firstReply.channel} />
+                            {firstReply.step_number != null ? (
+                              <span className="rounded-(--radius-full) border border-(--border-default) bg-(--bg-overlay) px-2 py-0.5 text-xs text-(--text-secondary)">
+                                Step #{firstReply.step_number}
+                              </span>
+                            ) : null}
+                            {firstReply.reply_match_source ? (
+                              <ReplyMatchSourceBadge source={firstReply.reply_match_source} short />
+                            ) : null}
+                          </div>
+                        </div>
 
-                    <div className="flex shrink-0 flex-wrap items-center gap-2">
-                      {latestReply.reply_match_source === "email_subject" ? (
-                        <ReplyMatchSourceBadge source={latestReply.reply_match_source} short />
-                      ) : null}
-                      {summary.channels.map((channel) => (
-                        <BadgeChannel key={`${summary.lead.id}-${channel}`} channel={channel} />
-                      ))}
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.12em] text-(--text-tertiary)">
+                            Última interação
+                          </p>
+                          <p className="mt-2 font-medium text-(--text-primary)">
+                            {formatRelativeTime(latestReply.replied_at)}
+                          </p>
+                          <p className="text-sm text-(--text-secondary)">
+                            {latestReply.intent
+                              ? (intentLabel[latestReply.intent] ?? latestReply.intent)
+                              : "Intent não classificado"}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.12em] text-(--text-tertiary)">
+                            Canais e eventos
+                          </p>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            {summary.channels.map((channel) => (
+                              <BadgeChannel
+                                key={`${summary.lead.id}-${channel}`}
+                                channel={channel}
+                              />
+                            ))}
+                            <span className="rounded-(--radius-full) border border-(--border-default) bg-(--bg-overlay) px-2 py-0.5 text-xs text-(--text-secondary)">
+                              {summary.eventCount} evento{summary.eventCount === 1 ? "" : "s"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-(--text-secondary)">
+                        {buildReplyPreview(latestReply.reply_text)}
+                      </p>
+
                       <Link
                         href={`/leads/${summary.lead.id}`}
                         className="inline-flex items-center rounded-lg border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-sm font-medium text-(--text-primary) transition-colors hover:border-(--accent) hover:text-(--accent)"
@@ -223,15 +409,11 @@ export function CadenceReplyManagement({ cadenceId }: CadenceReplyManagementProp
                         Abrir histórico
                       </Link>
                     </div>
-                  </div>
-
-                  <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-(--text-secondary)">
-                    {latestReply.reply_text || "Sem conteúdo textual disponível neste reply."}
-                  </p>
-                </article>
-              )
-            })}
-          </div>
+                  </article>
+                )
+              })}
+            </div>
+          </>
         )}
       </section>
 

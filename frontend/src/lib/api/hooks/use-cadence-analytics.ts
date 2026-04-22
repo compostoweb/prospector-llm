@@ -10,20 +10,30 @@ export interface CadenceAnalyticsChannel {
   channel: string
   sent: number
   replied: number
+  opened: number
+  accepted: number
   pending: number
   skipped: number
   failed: number
+  open_rate: number
+  acceptance_rate: number
   reply_rate: number
 }
 
 export interface CadenceAnalyticsStep {
   step_number: number
   channel: string
+  lead_count: number
   sent: number
   replied: number
+  opened: number
+  bounced: number
+  accepted: number
   pending: number
   skipped: number
   failed: number
+  open_rate: number
+  acceptance_rate: number
   reply_rate: number
 }
 

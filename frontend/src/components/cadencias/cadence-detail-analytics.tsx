@@ -132,7 +132,10 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
         {deliveryBudgetQuery.isLoading ? (
           <div className="flex flex-wrap gap-3">
             {Array.from({ length: 3 }).map((_, index) => (
-              <div key={index} className="h-32 w-full animate-pulse rounded-lg bg-(--bg-overlay) sm:w-80" />
+              <div
+                key={index}
+                className="h-32 w-full animate-pulse rounded-lg bg-(--bg-overlay) sm:w-80"
+              />
             ))}
           </div>
         ) : deliveryBudgetQuery.isError ? (
@@ -165,7 +168,7 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
                   Desempenho por canal
                 </h2>
                 <p className="text-xs text-(--text-secondary)">
-                  Envios e respostas nos últimos {days} dias
+                  Envios, respostas, abertura de e-mail e aceites de conexão nos últimos {days} dias
                 </p>
               </div>
             </div>
@@ -186,13 +189,30 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
                 >
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <BadgeChannel channel={row.channel} />
-                    <span className="text-xs font-medium text-(--text-tertiary)">
-                      {row.reply_rate}% resposta
-                    </span>
+                    <div className="text-right text-xs font-medium text-(--text-tertiary)">
+                      <p>{row.reply_rate}% resposta</p>
+                      {row.channel === "email" ? <p>{row.open_rate}% abertura</p> : null}
+                      {row.channel === "linkedin_connect" ? (
+                        <p>{row.acceptance_rate}% aceite</p>
+                      ) : null}
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <MetricMini label="Enviados" value={row.sent} />
                     <MetricMini label="Respondidos" value={row.replied} />
+                    <MetricMini label="Tx. resposta" value={`${row.reply_rate}%`} />
+                    {row.channel === "email" ? (
+                      <>
+                        <MetricMini label="Abertos" value={row.opened} />
+                        <MetricMini label="Tx. abertura" value={`${row.open_rate}%`} />
+                      </>
+                    ) : null}
+                    {row.channel === "linkedin_connect" ? (
+                      <>
+                        <MetricMini label="Aceites" value={row.accepted} />
+                        <MetricMini label="Tx. aceite" value={`${row.acceptance_rate}%`} />
+                      </>
+                    ) : null}
                     <MetricMini label="Pendentes" value={row.pending} />
                     <MetricMini label="Falhas" value={row.failed + row.skipped} />
                   </div>
@@ -212,7 +232,7 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
             <div>
               <h2 className="text-sm font-semibold text-(--text-primary)">Leitura por step</h2>
               <p className="text-xs text-(--text-secondary)">
-                Desempenho recente por etapa e pendências atuais
+                Base por etapa, taxa de resposta explícita, abertura, bounce e aceites por canal
               </p>
             </div>
           </div>
@@ -231,10 +251,28 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
                     <th className="pb-2 pr-3 font-medium text-(--text-tertiary)">Step</th>
                     <th className="pb-2 pr-3 font-medium text-(--text-tertiary)">Canal</th>
                     <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
+                      Leads
+                    </th>
+                    <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
                       Envios
                     </th>
                     <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
                       Respostas
+                    </th>
+                    <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
+                      Tx. resposta
+                    </th>
+                    <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
+                      Tx. abertura
+                    </th>
+                    <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
+                      Bounce
+                    </th>
+                    <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
+                      Aceites
+                    </th>
+                    <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
+                      Tx. aceite
                     </th>
                     <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
                       Pendentes
@@ -242,7 +280,6 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
                     <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
                       Falhas
                     </th>
-                    <th className="pb-2 text-right font-medium text-(--text-tertiary)">Taxa</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -258,19 +295,34 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
                         <BadgeChannel channel={row.channel} />
                       </td>
                       <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
+                        {row.lead_count}
+                      </td>
+                      <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
                         {row.sent}
                       </td>
                       <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
                         {row.replied}
+                      </td>
+                      <td className="py-3 pr-3 text-right tabular-nums font-medium text-(--text-primary)">
+                        {row.reply_rate}%
+                      </td>
+                      <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
+                        {row.channel === "email" ? `${row.open_rate}%` : "—"}
+                      </td>
+                      <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
+                        {row.channel === "email" ? row.bounced : "—"}
+                      </td>
+                      <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
+                        {row.channel === "linkedin_connect" ? row.accepted : "—"}
+                      </td>
+                      <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
+                        {row.channel === "linkedin_connect" ? `${row.acceptance_rate}%` : "—"}
                       </td>
                       <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
                         {row.pending}
                       </td>
                       <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
                         {row.failed + row.skipped}
-                      </td>
-                      <td className="py-3 text-right tabular-nums font-medium text-(--text-primary)">
-                        {row.reply_rate}%
                       </td>
                     </tr>
                   ))}
@@ -378,7 +430,7 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
   )
 }
 
-function MetricMini({ label, value }: { label: string; value: number }) {
+function MetricMini({ label, value }: { label: string; value: number | string }) {
   return (
     <div>
       <p className="text-[11px] uppercase tracking-wide text-(--text-tertiary)">{label}</p>
@@ -508,7 +560,9 @@ function summarizeBudgetByAction(
       daily_budget: item.daily_budget,
       used_today: item.used_today,
       remaining_today: item.remaining_today,
-      usage_pct: item.daily_budget ? Number(((item.used_today / item.daily_budget) * 100).toFixed(1)) : 0,
+      usage_pct: item.daily_budget
+        ? Number(((item.used_today / item.daily_budget) * 100).toFixed(1))
+        : 0,
     })
   }
 

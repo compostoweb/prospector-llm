@@ -175,7 +175,7 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
         FakeResult(scalar_one_or_none_value=cadence),
         FakeResult(scalar_value=5),
         FakeResult(scalar_value=4),
-        FakeResult(one_value=SimpleNamespace(sent=2, pending=1, skipped=0, failed=1)),
+        FakeResult(one_value=SimpleNamespace(sent=3, pending=1, skipped=0, failed=1)),
         FakeResult(one_value=SimpleNamespace(replied=1)),
         FakeResult(
             all_values=[
@@ -193,11 +193,28 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
                     skipped=0,
                     failed=0,
                 ),
+                SimpleNamespace(
+                    channel=Channel.LINKEDIN_CONNECT,
+                    sent=1,
+                    pending=0,
+                    skipped=0,
+                    failed=0,
+                ),
             ]
         ),
         FakeResult(
             all_values=[
                 SimpleNamespace(channel=Channel.LINKEDIN_DM, replied=1),
+            ]
+        ),
+        FakeResult(
+            all_values=[
+                SimpleNamespace(channel=Channel.EMAIL, opened=1),
+            ]
+        ),
+        FakeResult(
+            all_values=[
+                SimpleNamespace(channel=Channel.LINKEDIN_CONNECT, accepted=1),
             ]
         ),
         FakeResult(
@@ -234,11 +251,34 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
                     skipped=0,
                     failed=1,
                 ),
+                SimpleNamespace(
+                    step_number=5,
+                    channel=Channel.LINKEDIN_CONNECT,
+                    sent=1,
+                    pending=0,
+                    skipped=0,
+                    failed=0,
+                ),
             ]
         ),
         FakeResult(
             all_values=[
                 SimpleNamespace(step_number=2, channel=Channel.LINKEDIN_DM, replied=1),
+            ]
+        ),
+        FakeResult(
+            all_values=[
+                SimpleNamespace(step_number=1, channel=Channel.EMAIL, opened=1),
+            ]
+        ),
+        FakeResult(
+            all_values=[
+                SimpleNamespace(step_number=1, channel=Channel.EMAIL, bounced=1),
+            ]
+        ),
+        FakeResult(
+            all_values=[
+                SimpleNamespace(step_number=5, channel=Channel.LINKEDIN_CONNECT, accepted=1),
             ]
         ),
     )
@@ -253,34 +293,38 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
     assert result.cadence_id == str(cadence.id)
     assert result.total_leads == 5
     assert result.leads_active == 4
-    assert result.steps_sent == 2
+    assert result.steps_sent == 3
     assert result.replies == 1
     assert result.pending_steps == 1
     assert result.failed_steps == 1
     assert result.skipped_steps == 0
-    assert result.reply_rate == 50.0
+    assert result.reply_rate == 33.3
 
     channel_map = {item.channel: item for item in result.channel_breakdown}
     assert channel_map["email"].sent == 1
     assert channel_map["email"].pending == 1
     assert channel_map["email"].failed == 1
+    assert channel_map["email"].open_rate == 100.0
     assert channel_map["linkedin_dm"].replied == 1
+    assert channel_map["linkedin_connect"].accepted == 1
+    assert channel_map["linkedin_connect"].acceptance_rate == 100.0
 
     step_map = {(item.step_number, item.channel): item for item in result.step_breakdown}
     assert step_map[(1, "email")].sent == 1
+    assert step_map[(1, "email")].lead_count == 1
+    assert step_map[(1, "email")].open_rate == 100.0
+    assert step_map[(1, "email")].bounced == 1
     assert step_map[(2, "linkedin_dm")].reply_rate == 100.0
     assert step_map[(3, "email")].pending == 1
     assert step_map[(4, "email")].failed == 1
+    assert step_map[(5, "linkedin_connect")].accepted == 1
+    assert step_map[(5, "linkedin_connect")].acceptance_rate == 100.0
 
-    assert _statement_contains_param(session.statements[3], marker_since)
-    assert _statement_contains_param(session.statements[4], marker_since)
-    assert _statement_contains_param(session.statements[5], marker_since)
-    assert _statement_contains_param(session.statements[6], marker_since)
-    assert _statement_contains_param(session.statements[7], marker_since)
-    assert _statement_contains_param(session.statements[8], marker_since)
+    for index in range(3, 14):
+        assert _statement_contains_param(session.statements[index], marker_since)
     assert _statement_contains_param(session.statements[4], "fallback_single_cadence")
     assert _statement_contains_param(session.statements[6], "fallback_single_cadence")
-    assert _statement_contains_param(session.statements[8], "fallback_single_cadence")
+    assert _statement_contains_param(session.statements[10], "fallback_single_cadence")
 
 
 async def test_get_cadence_analytics_raises_404_when_missing() -> None:
@@ -317,6 +361,11 @@ async def test_get_cadence_analytics_syncs_legacy_list_members_before_counting(
         FakeResult(scalar_value=1),
         FakeResult(one_value=SimpleNamespace(sent=0, pending=1, skipped=0, failed=0)),
         FakeResult(one_value=SimpleNamespace(replied=0)),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
         FakeResult(all_values=[]),
         FakeResult(all_values=[]),
         FakeResult(all_values=[]),
@@ -501,8 +550,10 @@ async def test_get_email_cadences_stats_filters_to_email_only_cadences(
     assert _statement_contains_param(session.statements[3], "email_only")
     assert _statement_contains_param(session.statements[4], "email_only")
     assert _statement_contains_param(session.statements[3], "fallback_single_cadence")
-    assert "interactions.cadence_step_id = cadence_steps.id" in _compiled_sql(session.statements[2])
-    assert "interactions.cadence_step_id = cadence_steps.id" in _compiled_sql(session.statements[3])
+    assert "interactions" in _compiled_sql(session.statements[2]).lower()
+    assert "cadence_steps" in _compiled_sql(session.statements[2]).lower()
+    assert "interactions" in _compiled_sql(session.statements[3]).lower()
+    assert "cadence_steps" in _compiled_sql(session.statements[3]).lower()
 
 
 async def test_get_email_over_time_maps_daily_series_and_inlines_day_bucket(

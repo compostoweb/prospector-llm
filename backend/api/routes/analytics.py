@@ -116,20 +116,30 @@ class CadenceAnalyticsChannelItem(BaseModel):
     channel: str
     sent: int = 0
     replied: int = 0
+    opened: int = 0
+    accepted: int = 0
     pending: int = 0
     skipped: int = 0
     failed: int = 0
+    open_rate: float = 0.0
+    acceptance_rate: float = 0.0
     reply_rate: float = 0.0
 
 
 class CadenceAnalyticsStepItem(BaseModel):
     step_number: int
     channel: str
+    lead_count: int = 0
     sent: int = 0
     replied: int = 0
+    opened: int = 0
+    bounced: int = 0
+    accepted: int = 0
     pending: int = 0
     skipped: int = 0
     failed: int = 0
+    open_rate: float = 0.0
+    acceptance_rate: float = 0.0
     reply_rate: float = 0.0
 
 
@@ -178,6 +188,204 @@ def _interaction_matches_cadence_step():
 
 def _reliable_reply_interaction_condition():
     return reliable_reply_interaction_condition()
+
+
+def _first_reliable_reply_per_cadence_lead_subquery(
+    *,
+    tenant_id: UUID,
+    since: datetime | None = None,
+    cadence_id: UUID | None = None,
+    cadence_ids: list[UUID] | None = None,
+    channel: Channel | None = None,
+    cadence_type: str | None = None,
+):
+    conditions = [
+        Interaction.tenant_id == tenant_id,
+        CadenceStep.tenant_id == tenant_id,
+        _reliable_reply_interaction_condition(),
+    ]
+    if since is not None:
+        conditions.append(Interaction.created_at >= since)
+    if cadence_id is not None:
+        conditions.append(CadenceStep.cadence_id == cadence_id)
+    if cadence_ids:
+        conditions.append(CadenceStep.cadence_id.in_(cadence_ids))
+    if channel is not None:
+        conditions.extend(
+            [
+                Interaction.channel == channel,
+                CadenceStep.channel == channel,
+            ]
+        )
+
+    ranked_reply_query = select(
+        Interaction.id.label("interaction_id"),
+        Interaction.lead_id.label("lead_id"),
+        Interaction.channel.label("channel"),
+        Interaction.created_at.label("replied_at"),
+        CadenceStep.cadence_id.label("cadence_id"),
+        CadenceStep.step_number.label("step_number"),
+        func.row_number()
+        .over(
+            partition_by=[CadenceStep.cadence_id, Interaction.lead_id],
+            order_by=[Interaction.created_at.asc(), Interaction.id.asc()],
+        )
+        .label("reply_rank"),
+    ).join(CadenceStep, CadenceStep.id == Interaction.cadence_step_id)
+    if cadence_type is not None:
+        ranked_reply_query = ranked_reply_query.join(Cadence, Cadence.id == CadenceStep.cadence_id)
+        conditions.append(Cadence.cadence_type == cadence_type)
+
+    ranked_replies_sq = ranked_reply_query.where(*conditions).subquery()
+
+    return (
+        select(
+            ranked_replies_sq.c.interaction_id,
+            ranked_replies_sq.c.lead_id,
+            ranked_replies_sq.c.channel,
+            ranked_replies_sq.c.replied_at,
+            ranked_replies_sq.c.cadence_id,
+            ranked_replies_sq.c.step_number,
+        )
+        .where(ranked_replies_sq.c.reply_rank == 1)
+        .subquery()
+    )
+
+
+def _opened_email_interactions_subquery(
+    *,
+    tenant_id: UUID,
+    since: datetime,
+    cadence_id: UUID | None = None,
+    cadence_ids: list[UUID] | None = None,
+    cadence_type: str | None = None,
+):
+    conditions = [
+        Interaction.tenant_id == tenant_id,
+        Interaction.channel == Channel.EMAIL,
+        Interaction.direction == InteractionDirection.OUTBOUND,
+        Interaction.opened.is_(True),
+        Interaction.opened_at.is_not(None),
+        Interaction.opened_at >= since,
+        CadenceStep.tenant_id == tenant_id,
+        CadenceStep.channel == Channel.EMAIL,
+        CadenceStep.sent_at.is_not(None),
+        CadenceStep.sent_at >= since,
+    ]
+    if cadence_id is not None:
+        conditions.append(CadenceStep.cadence_id == cadence_id)
+    if cadence_ids:
+        conditions.append(CadenceStep.cadence_id.in_(cadence_ids))
+
+    opened_query = select(
+        Interaction.id.label("interaction_id"),
+        Interaction.lead_id.label("lead_id"),
+        Interaction.opened_at.label("opened_at"),
+        CadenceStep.cadence_id.label("cadence_id"),
+        CadenceStep.step_number.label("step_number"),
+        CadenceStep.channel.label("channel"),
+    ).join(CadenceStep, CadenceStep.id == Interaction.cadence_step_id)
+    if cadence_type is not None:
+        opened_query = opened_query.join(Cadence, Cadence.id == CadenceStep.cadence_id)
+        conditions.append(Cadence.cadence_type == cadence_type)
+
+    return opened_query.where(*conditions).subquery()
+
+
+def _latest_email_bounce_step_subquery(
+    *,
+    tenant_id: UUID,
+    since: datetime,
+    cadence_id: UUID | None = None,
+    cadence_ids: list[UUID] | None = None,
+):
+    ranked_bounces_sq = (
+        select(
+            Lead.id.label("lead_id"),
+            CadenceStep.cadence_id.label("cadence_id"),
+            CadenceStep.step_number.label("step_number"),
+            CadenceStep.channel.label("channel"),
+            func.row_number()
+            .over(
+                partition_by=[Lead.id],
+                order_by=[CadenceStep.sent_at.desc(), CadenceStep.id.desc()],
+            )
+            .label("bounce_rank"),
+        )
+        .join(Lead, Lead.id == CadenceStep.lead_id)
+        .where(
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.channel == Channel.EMAIL,
+            CadenceStep.sent_at.is_not(None),
+            CadenceStep.sent_at >= since,
+            Lead.tenant_id == tenant_id,
+            Lead.email_bounced_at.is_not(None),
+            Lead.email_bounced_at >= since,
+            CadenceStep.sent_at <= Lead.email_bounced_at,
+        )
+        .subquery()
+    )
+
+    filtered_bounces = select(
+        ranked_bounces_sq.c.lead_id,
+        ranked_bounces_sq.c.cadence_id,
+        ranked_bounces_sq.c.step_number,
+        ranked_bounces_sq.c.channel,
+    ).where(ranked_bounces_sq.c.bounce_rank == 1)
+    if cadence_id is not None:
+        filtered_bounces = filtered_bounces.where(ranked_bounces_sq.c.cadence_id == cadence_id)
+    if cadence_ids:
+        filtered_bounces = filtered_bounces.where(ranked_bounces_sq.c.cadence_id.in_(cadence_ids))
+
+    return filtered_bounces.subquery()
+
+
+def _latest_linkedin_accept_step_subquery(
+    *,
+    tenant_id: UUID,
+    since: datetime,
+    cadence_id: UUID | None = None,
+    cadence_ids: list[UUID] | None = None,
+):
+    ranked_accepts_sq = (
+        select(
+            Lead.id.label("lead_id"),
+            CadenceStep.cadence_id.label("cadence_id"),
+            CadenceStep.step_number.label("step_number"),
+            CadenceStep.channel.label("channel"),
+            func.row_number()
+            .over(
+                partition_by=[Lead.id],
+                order_by=[CadenceStep.sent_at.desc(), CadenceStep.id.desc()],
+            )
+            .label("accept_rank"),
+        )
+        .join(Lead, Lead.id == CadenceStep.lead_id)
+        .where(
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.channel == Channel.LINKEDIN_CONNECT,
+            CadenceStep.sent_at.is_not(None),
+            CadenceStep.sent_at >= since,
+            Lead.tenant_id == tenant_id,
+            Lead.linkedin_connected_at.is_not(None),
+            Lead.linkedin_connected_at >= since,
+            CadenceStep.sent_at <= Lead.linkedin_connected_at,
+        )
+        .subquery()
+    )
+
+    filtered_accepts = select(
+        ranked_accepts_sq.c.lead_id,
+        ranked_accepts_sq.c.cadence_id,
+        ranked_accepts_sq.c.step_number,
+        ranked_accepts_sq.c.channel,
+    ).where(ranked_accepts_sq.c.accept_rank == 1)
+    if cadence_id is not None:
+        filtered_accepts = filtered_accepts.where(ranked_accepts_sq.c.cadence_id == cadence_id)
+    if cadence_ids:
+        filtered_accepts = filtered_accepts.where(ranked_accepts_sq.c.cadence_id.in_(cadence_ids))
+
+    return filtered_accepts.subquery()
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────
@@ -546,20 +754,16 @@ async def get_cadence_performance(
     )
     name_map = {row.id: row.name for row in cadences_q.all()}
 
+    first_replies_sq = _first_reliable_reply_per_cadence_lead_subquery(
+        tenant_id=tenant_id,
+        since=since,
+        cadence_ids=cadence_ids,
+    )
     replies_q = await db.execute(
         select(
-            CadenceStep.cadence_id,
-            func.count(Interaction.id).label("replied"),
-        )
-        .join(Interaction, Interaction.cadence_step_id == CadenceStep.id)
-        .where(
-            CadenceStep.cadence_id.in_(cadence_ids),
-            CadenceStep.tenant_id == tenant_id,
-            Interaction.tenant_id == tenant_id,
-            Interaction.created_at >= since,
-            _reliable_reply_interaction_condition(),
-        )
-        .group_by(CadenceStep.cadence_id)
+            first_replies_sq.c.cadence_id,
+            func.count(first_replies_sq.c.interaction_id).label("replied"),
+        ).group_by(first_replies_sq.c.cadence_id)
     )
     reply_map = {row.cadence_id: row.replied for row in replies_q.all()}
 
@@ -633,20 +837,17 @@ async def get_cadences_overview(
         .subquery()
     )
 
+    first_replies_sq = _first_reliable_reply_per_cadence_lead_subquery(
+        tenant_id=tenant_id,
+        cadence_ids=cadence_ids,
+    )
     reply_progress_sq = (
         select(
-            CadenceStep.cadence_id.label("cadence_id"),
-            CadenceStep.lead_id.label("lead_id"),
-            func.count(Interaction.id).label("reply_count"),
+            first_replies_sq.c.cadence_id.label("cadence_id"),
+            first_replies_sq.c.lead_id.label("lead_id"),
+            func.count(first_replies_sq.c.interaction_id).label("reply_count"),
         )
-        .join(Interaction, Interaction.cadence_step_id == CadenceStep.id)
-        .where(
-            CadenceStep.tenant_id == tenant_id,
-            CadenceStep.cadence_id.in_(cadence_ids),
-            Interaction.tenant_id == tenant_id,
-            _reliable_reply_interaction_condition(),
-        )
-        .group_by(CadenceStep.cadence_id, CadenceStep.lead_id)
+        .group_by(first_replies_sq.c.cadence_id, first_replies_sq.c.lead_id)
         .subquery()
     )
 
@@ -800,16 +1001,28 @@ async def get_cadence_analytics(
     )
     step_summary = step_summary_q.one()
 
+    first_replies_sq = _first_reliable_reply_per_cadence_lead_subquery(
+        tenant_id=tenant_id,
+        since=since,
+        cadence_id=cadence_id,
+    )
+    opened_email_sq = _opened_email_interactions_subquery(
+        tenant_id=tenant_id,
+        since=since,
+        cadence_id=cadence_id,
+    )
+    bounced_email_sq = _latest_email_bounce_step_subquery(
+        tenant_id=tenant_id,
+        since=since,
+        cadence_id=cadence_id,
+    )
+    linkedin_accepts_sq = _latest_linkedin_accept_step_subquery(
+        tenant_id=tenant_id,
+        since=since,
+        cadence_id=cadence_id,
+    )
     reply_summary_q = await db.execute(
-        select(func.count(Interaction.id).label("replied"))
-        .join(CadenceStep, CadenceStep.id == Interaction.cadence_step_id)
-        .where(
-            Interaction.tenant_id == tenant_id,
-            Interaction.created_at >= since,
-            CadenceStep.tenant_id == tenant_id,
-            CadenceStep.cadence_id == cadence_id,
-            _reliable_reply_interaction_condition(),
-        )
+        select(func.count(first_replies_sq.c.interaction_id).label("replied"))
     )
     reply_summary = reply_summary_q.one()
 
@@ -854,28 +1067,39 @@ async def get_cadence_analytics(
     channel_rows = channel_step_q.all()
     channel_reply_q = await db.execute(
         select(
-            CadenceStep.channel,
-            func.count(Interaction.id).label("replied"),
-        )
-        .join(CadenceStep, CadenceStep.id == Interaction.cadence_step_id)
-        .where(
-            Interaction.tenant_id == tenant_id,
-            Interaction.created_at >= since,
-            CadenceStep.tenant_id == tenant_id,
-            CadenceStep.cadence_id == cadence_id,
-            _reliable_reply_interaction_condition(),
-        )
-        .group_by(CadenceStep.channel)
+            first_replies_sq.c.channel,
+            func.count(first_replies_sq.c.interaction_id).label("replied"),
+        ).group_by(first_replies_sq.c.channel)
+    )
+    channel_open_q = await db.execute(
+        select(
+            opened_email_sq.c.channel,
+            func.count(opened_email_sq.c.interaction_id).label("opened"),
+        ).group_by(opened_email_sq.c.channel)
+    )
+    channel_accept_q = await db.execute(
+        select(
+            linkedin_accepts_sq.c.channel,
+            func.count(linkedin_accepts_sq.c.lead_id).label("accepted"),
+        ).group_by(linkedin_accepts_sq.c.channel)
     )
     channel_reply_map = {row.channel: row.replied for row in channel_reply_q.all()}
+    channel_open_map = {row.channel: row.opened for row in channel_open_q.all()}
+    channel_accept_map = {row.channel: row.accepted for row in channel_accept_q.all()}
     channel_stats_map = {row.channel: row for row in channel_rows}
     channel_breakdown = []
     for channel in sorted(
-        channel_stats_map.keys() | channel_reply_map.keys(), key=lambda item: item.value
+        channel_stats_map.keys()
+        | channel_reply_map.keys()
+        | channel_open_map.keys()
+        | channel_accept_map.keys(),
+        key=lambda item: item.value,
     ):
         row = channel_stats_map.get(channel)
         sent = row.sent if row is not None else 0
         replied = channel_reply_map.get(channel, 0)
+        opened = channel_open_map.get(channel, 0)
+        accepted = channel_accept_map.get(channel, 0)
         pending = row.pending if row is not None else 0
         skipped = row.skipped if row is not None else 0
         failed = row.failed if row is not None else 0
@@ -884,9 +1108,13 @@ async def get_cadence_analytics(
                 channel=channel.value if hasattr(channel, "value") else str(channel),
                 sent=sent or 0,
                 replied=replied or 0,
+                opened=opened or 0,
+                accepted=accepted or 0,
                 pending=pending or 0,
                 skipped=skipped or 0,
                 failed=failed or 0,
+                open_rate=_safe_rate(opened or 0, sent or 0),
+                acceptance_rate=_safe_rate(accepted or 0, sent or 0),
                 reply_rate=_safe_rate(replied or 0, sent or 0),
             )
         )
@@ -927,41 +1155,71 @@ async def get_cadence_analytics(
     step_rows = step_stats_q.all()
     step_reply_q = await db.execute(
         select(
-            CadenceStep.step_number,
-            CadenceStep.channel,
-            func.count(Interaction.id).label("replied"),
-        )
-        .join(CadenceStep, CadenceStep.id == Interaction.cadence_step_id)
-        .where(
-            Interaction.tenant_id == tenant_id,
-            Interaction.created_at >= since,
-            CadenceStep.tenant_id == tenant_id,
-            CadenceStep.cadence_id == cadence_id,
-            _reliable_reply_interaction_condition(),
-        )
-        .group_by(CadenceStep.step_number, CadenceStep.channel)
+            first_replies_sq.c.step_number,
+            first_replies_sq.c.channel,
+            func.count(first_replies_sq.c.interaction_id).label("replied"),
+        ).group_by(first_replies_sq.c.step_number, first_replies_sq.c.channel)
+    )
+    step_open_q = await db.execute(
+        select(
+            opened_email_sq.c.step_number,
+            opened_email_sq.c.channel,
+            func.count(opened_email_sq.c.interaction_id).label("opened"),
+        ).group_by(opened_email_sq.c.step_number, opened_email_sq.c.channel)
+    )
+    step_bounce_q = await db.execute(
+        select(
+            bounced_email_sq.c.step_number,
+            bounced_email_sq.c.channel,
+            func.count(bounced_email_sq.c.lead_id).label("bounced"),
+        ).group_by(bounced_email_sq.c.step_number, bounced_email_sq.c.channel)
+    )
+    step_accept_q = await db.execute(
+        select(
+            linkedin_accepts_sq.c.step_number,
+            linkedin_accepts_sq.c.channel,
+            func.count(linkedin_accepts_sq.c.lead_id).label("accepted"),
+        ).group_by(linkedin_accepts_sq.c.step_number, linkedin_accepts_sq.c.channel)
     )
     step_reply_map = {(row.step_number, row.channel): row.replied for row in step_reply_q.all()}
+    step_open_map = {(row.step_number, row.channel): row.opened for row in step_open_q.all()}
+    step_bounce_map = {(row.step_number, row.channel): row.bounced for row in step_bounce_q.all()}
+    step_accept_map = {(row.step_number, row.channel): row.accepted for row in step_accept_q.all()}
     step_stats_map = {(row.step_number, row.channel): row for row in step_rows}
     step_breakdown = []
     for step_number, channel in sorted(
-        step_stats_map.keys() | step_reply_map.keys(), key=lambda item: (item[0], item[1].value)
+        step_stats_map.keys()
+        | step_reply_map.keys()
+        | step_open_map.keys()
+        | step_bounce_map.keys()
+        | step_accept_map.keys(),
+        key=lambda item: (item[0], item[1].value),
     ):
         step_row = step_stats_map.get((step_number, channel))
         sent = step_row.sent if step_row is not None else 0
         replied = step_reply_map.get((step_number, channel), 0)
+        opened = step_open_map.get((step_number, channel), 0)
+        bounced = step_bounce_map.get((step_number, channel), 0)
+        accepted = step_accept_map.get((step_number, channel), 0)
         pending = step_row.pending if step_row is not None else 0
         skipped = step_row.skipped if step_row is not None else 0
         failed = step_row.failed if step_row is not None else 0
+        lead_count = (sent or 0) + (pending or 0) + (skipped or 0) + (failed or 0)
         step_breakdown.append(
             CadenceAnalyticsStepItem(
                 step_number=step_number,
                 channel=channel.value if hasattr(channel, "value") else str(channel),
+                lead_count=lead_count,
                 sent=sent or 0,
                 replied=replied or 0,
+                opened=opened or 0,
+                bounced=bounced or 0,
+                accepted=accepted or 0,
                 pending=pending or 0,
                 skipped=skipped or 0,
                 failed=failed or 0,
+                open_rate=_safe_rate(opened or 0, sent or 0),
+                acceptance_rate=_safe_rate(accepted or 0, sent or 0),
                 reply_rate=_safe_rate(replied or 0, sent or 0),
             )
         )
@@ -1065,41 +1323,25 @@ async def get_email_stats(
     )
     sent = sent_q.scalar() or 0
 
-    # Abertos apenas de cadências email_only
-    opened_q = await db.execute(
-        select(func.count(func.distinct(Interaction.id)))
-        .join(CadenceStep, _interaction_matches_cadence_step())
-        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
-        .where(
-            Interaction.tenant_id == tenant_id,
-            Interaction.channel == Channel.EMAIL,
-            Interaction.direction == InteractionDirection.OUTBOUND,
-            Interaction.opened.is_(True),
-            Interaction.opened_at >= since,
-            CadenceStep.tenant_id == tenant_id,
-            CadenceStep.channel == Channel.EMAIL,
-            CadenceStep.sent_at >= since,
-            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
-        )
+    opened_email_sq = _opened_email_interactions_subquery(
+        tenant_id=tenant_id,
+        since=since,
+        cadence_type=_EMAIL_ONLY_CADENCE_TYPE,
     )
+
+    # Abertos apenas de cadências email_only
+    opened_q = await db.execute(select(func.count(opened_email_sq.c.interaction_id)))
     opened = opened_q.scalar() or 0
 
-    # Respondidos (inbound EMAIL) apenas de cadências email_only
-    replied_q = await db.execute(
-        select(func.count(func.distinct(Interaction.id)))
-        .join(CadenceStep, _interaction_matches_cadence_step())
-        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
-        .where(
-            Interaction.tenant_id == tenant_id,
-            Interaction.channel == Channel.EMAIL,
-            Interaction.created_at >= since,
-            CadenceStep.tenant_id == tenant_id,
-            CadenceStep.channel == Channel.EMAIL,
-            CadenceStep.sent_at >= since,
-            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
-            _reliable_reply_interaction_condition(),
-        )
+    first_email_replies_sq = _first_reliable_reply_per_cadence_lead_subquery(
+        tenant_id=tenant_id,
+        since=since,
+        channel=Channel.EMAIL,
+        cadence_type=_EMAIL_ONLY_CADENCE_TYPE,
     )
+
+    # Respondidos (primeira resposta confiável por lead) apenas de cadências email_only
+    replied_q = await db.execute(select(func.count(first_email_replies_sq.c.interaction_id)))
     replied = replied_q.scalar() or 0
 
     # Descadastros associados a leads em cadências email_only
@@ -1191,46 +1433,36 @@ async def get_email_cadences_stats(
     )
     name_map = {row.id: row.name for row in cadences_q.all()}
 
-    # Abertos por cadência (via CadenceStep.lead_id + Interaction join)
+    opened_email_sq = _opened_email_interactions_subquery(
+        tenant_id=tenant_id,
+        since=since,
+        cadence_ids=cadence_ids,
+        cadence_type=_EMAIL_ONLY_CADENCE_TYPE,
+    )
+
+    # Abertos por cadência
     opened_q = await db.execute(
         select(
-            CadenceStep.cadence_id,
-            func.count(func.distinct(Interaction.id)).label("opened"),
-        )
-        .join(Interaction, Interaction.cadence_step_id == CadenceStep.id)
-        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
-        .where(
-            CadenceStep.cadence_id.in_(cadence_ids),
-            CadenceStep.tenant_id == tenant_id,
-            CadenceStep.channel == Channel.EMAIL,
-            Interaction.channel == Channel.EMAIL,
-            Interaction.direction == InteractionDirection.OUTBOUND,
-            Interaction.opened.is_(True),
-            Interaction.opened_at >= since,
-            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
-        )
-        .group_by(CadenceStep.cadence_id)
+            opened_email_sq.c.cadence_id,
+            func.count(opened_email_sq.c.interaction_id).label("opened"),
+        ).group_by(opened_email_sq.c.cadence_id)
     )
     opened_map = {row.cadence_id: row.opened for row in opened_q.all()}
 
-    # Respondidos por cadência
+    first_email_replies_sq = _first_reliable_reply_per_cadence_lead_subquery(
+        tenant_id=tenant_id,
+        since=since,
+        cadence_ids=cadence_ids,
+        channel=Channel.EMAIL,
+        cadence_type=_EMAIL_ONLY_CADENCE_TYPE,
+    )
+
+    # Respondidos por cadência (primeira resposta confiável por lead)
     replied_q = await db.execute(
         select(
-            CadenceStep.cadence_id,
-            func.count(func.distinct(Interaction.id)).label("replied"),
-        )
-        .join(Interaction, Interaction.cadence_step_id == CadenceStep.id)
-        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
-        .where(
-            CadenceStep.cadence_id.in_(cadence_ids),
-            CadenceStep.tenant_id == tenant_id,
-            CadenceStep.channel == Channel.EMAIL,
-            Interaction.channel == Channel.EMAIL,
-            Interaction.created_at >= since,
-            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
-            _reliable_reply_interaction_condition(),
-        )
-        .group_by(CadenceStep.cadence_id)
+            first_email_replies_sq.c.cadence_id,
+            func.count(first_email_replies_sq.c.interaction_id).label("replied"),
+        ).group_by(first_email_replies_sq.c.cadence_id)
     )
     replied_map = {row.cadence_id: row.replied for row in replied_q.all()}
 
@@ -1314,48 +1546,36 @@ async def get_email_over_time(
         sent_map[row.day.strftime("%Y-%m-%d")] = row.cnt
 
     # Abertos por dia apenas de cadências email_only
+    opened_email_sq = _opened_email_interactions_subquery(
+        tenant_id=tenant_id,
+        since=since,
+        cadence_type=_EMAIL_ONLY_CADENCE_TYPE,
+    )
     opened_q = await db.execute(
         select(
-            opened_day_expr.label("day"),
-            func.count(func.distinct(Interaction.id)).label("cnt"),
-        )
-        .join(CadenceStep, _interaction_matches_cadence_step())
-        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
-        .where(
-            Interaction.tenant_id == tenant_id,
-            Interaction.channel == Channel.EMAIL,
-            Interaction.opened.is_(True),
-            Interaction.opened_at >= since,
-            CadenceStep.tenant_id == tenant_id,
-            CadenceStep.channel == Channel.EMAIL,
-            CadenceStep.sent_at >= since,
-            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
-        )
-        .group_by(opened_day_expr)
+            func.date_trunc(literal_column("'day'"), opened_email_sq.c.opened_at).label("day"),
+            func.count(opened_email_sq.c.interaction_id).label("cnt"),
+        ).group_by(func.date_trunc(literal_column("'day'"), opened_email_sq.c.opened_at))
     )
     opened_map: dict[str, int] = {}
     for row in opened_q.all():
         opened_map[row.day.strftime("%Y-%m-%d")] = row.cnt
 
-    # Respondidos por dia (inbound) apenas de cadências email_only
+    first_email_replies_sq = _first_reliable_reply_per_cadence_lead_subquery(
+        tenant_id=tenant_id,
+        since=since,
+        channel=Channel.EMAIL,
+        cadence_type=_EMAIL_ONLY_CADENCE_TYPE,
+    )
+
+    # Respondidos por dia (primeira resposta confiável por lead) apenas de cadências email_only
     replied_q = await db.execute(
         select(
-            replied_day_expr.label("day"),
-            func.count(func.distinct(Interaction.id)).label("cnt"),
-        )
-        .join(CadenceStep, _interaction_matches_cadence_step())
-        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
-        .where(
-            Interaction.tenant_id == tenant_id,
-            Interaction.channel == Channel.EMAIL,
-            Interaction.created_at >= since,
-            CadenceStep.tenant_id == tenant_id,
-            CadenceStep.channel == Channel.EMAIL,
-            CadenceStep.sent_at >= since,
-            Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
-            _reliable_reply_interaction_condition(),
-        )
-        .group_by(replied_day_expr)
+            func.date_trunc(literal_column("'day'"), first_email_replies_sq.c.replied_at).label(
+                "day"
+            ),
+            func.count(first_email_replies_sq.c.interaction_id).label("cnt"),
+        ).group_by(func.date_trunc(literal_column("'day'"), first_email_replies_sq.c.replied_at))
     )
     replied_map: dict[str, int] = {}
     for row in replied_q.all():
