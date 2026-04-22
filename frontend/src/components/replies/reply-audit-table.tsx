@@ -617,7 +617,7 @@ export function ReplyAuditTable({
                         Step para vincular como resposta
                       </p>
                       <Select
-                        value={selectedStepId}
+                        {...(selectedStepId ? { value: selectedStepId } : {})}
                         onValueChange={setSelectedStepId}
                         disabled={stepsQuery.isLoading || candidateSteps.length === 0 || isMutating}
                       >
