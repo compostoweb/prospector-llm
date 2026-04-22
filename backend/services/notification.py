@@ -230,6 +230,42 @@ async def _get_notify_config(tenant_id: uuid.UUID, db: AsyncSession) -> NotifyCo
     }
 
 
+async def _resolve_reply_notification_recipient(
+    *,
+    tenant_id: uuid.UUID,
+    db: AsyncSession,
+    replied_step: Any | None,
+) -> str | None:
+    """Prefere a caixa remetente da cadência para replies de email; fallback para notify_email."""
+    if replied_step is None:
+        return None
+
+    from sqlalchemy import select
+
+    from models.cadence import Cadence
+    from models.email_account import EmailAccount
+    from models.enums import Channel
+
+    if replied_step.channel != Channel.EMAIL:
+        return None
+
+    result = await db.execute(
+        select(EmailAccount.email_address)
+        .join(Cadence, Cadence.email_account_id == EmailAccount.id)
+        .where(
+            Cadence.id == replied_step.cadence_id,
+            Cadence.tenant_id == tenant_id,
+            EmailAccount.tenant_id == tenant_id,
+            EmailAccount.is_active == True,  # noqa: E712
+        )
+        .limit(1)
+    )
+    recipient = result.scalar_one_or_none()
+    if recipient is None:
+        return None
+    return str(recipient)
+
+
 async def send_calculator_submission_notification(
     *,
     result: ContentCalculatorResult,
@@ -794,6 +830,7 @@ async def send_reply_notification(
     reply_text: str,
     tenant_id: uuid.UUID,
     db: AsyncSession,
+    replied_step: Any | None = None,
 ) -> bool:
     """
     Envia notificação quando um lead responde (interesse ou objeção).
@@ -807,7 +844,14 @@ async def send_reply_notification(
     if not config:
         return False
 
-    notify_email = config["email"]
+    notify_email = (
+        await _resolve_reply_notification_recipient(
+            tenant_id=tenant_id,
+            db=db,
+            replied_step=replied_step,
+        )
+        or config["email"]
+    )
 
     # Respeitar preferências do tenant
     if intent == "interest" and not config["on_interest"]:

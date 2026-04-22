@@ -7,7 +7,7 @@ Testes de integração para GET/POST/PATCH/DELETE /cadences.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
@@ -846,6 +846,138 @@ async def test_update_cadence_linking_list_enrolls_existing_members(
     refreshed_lead = await db.get(Lead, lead.id)
     assert refreshed_lead is not None
     assert refreshed_lead.status == LeadStatus.IN_CADENCE
+
+
+async def test_update_cadence_reschedules_pending_steps_when_template_changes(
+    client: AsyncClient,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+):
+    lead = Lead(
+        tenant_id=tenant_id,
+        name="Lead Reagendado",
+        first_name="Lead",
+        company="Acme",
+        email_corporate="lead@acme.com",
+        source=LeadSource.MANUAL,
+        status=LeadStatus.ENRICHED,
+    )
+    db.add(lead)
+    await db.commit()
+
+    created = await _create_cadence(
+        client,
+        cadence_type="email_only",
+        steps_template=[
+            {
+                "channel": "email",
+                "day_offset": 0,
+                "message_template": "Olá {first_name}",
+                "use_voice": False,
+                "audio_file_id": None,
+                "step_type": "email_first",
+            },
+            {
+                "channel": "email",
+                "day_offset": 1,
+                "message_template": "Follow-up 1 {first_name}",
+                "use_voice": False,
+                "audio_file_id": None,
+                "step_type": "email_followup",
+            },
+            {
+                "channel": "email",
+                "day_offset": 0,
+                "message_template": "Breakup {first_name}",
+                "use_voice": False,
+                "audio_file_id": None,
+                "step_type": "email_breakup",
+            },
+        ],
+    )
+
+    activate_resp = await client.patch(
+        f"/cadences/{created['id']}",
+        json={"is_active": True},
+    )
+    assert activate_resp.status_code == 200, activate_resp.text
+
+    enroll_resp = await client.post(
+        f"/leads/{lead.id}/enroll",
+        json={"cadence_id": created["id"]},
+    )
+    assert enroll_resp.status_code == 200, enroll_resp.text
+
+    before_steps = (
+        (
+            await db.execute(
+                select(CadenceStep)
+                .where(
+                    CadenceStep.cadence_id == uuid.UUID(created["id"]),
+                    CadenceStep.lead_id == lead.id,
+                )
+                .order_by(CadenceStep.step_number.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    before_scheduled_at = {step.step_number: step.scheduled_at for step in before_steps}
+
+    patch_resp = await client.patch(
+        f"/cadences/{created['id']}",
+        json={
+            "steps_template": [
+                {
+                    "channel": "email",
+                    "day_offset": 0,
+                    "message_template": "Olá {first_name}",
+                    "use_voice": False,
+                    "audio_file_id": None,
+                    "step_type": "email_first",
+                },
+                {
+                    "channel": "email",
+                    "day_offset": 1,
+                    "message_template": "Follow-up 1 {first_name}",
+                    "use_voice": False,
+                    "audio_file_id": None,
+                    "step_type": "email_followup",
+                },
+                {
+                    "channel": "email",
+                    "day_offset": 1,
+                    "message_template": "Breakup {first_name}",
+                    "use_voice": False,
+                    "audio_file_id": None,
+                    "step_type": "email_breakup",
+                },
+            ]
+        },
+    )
+    assert patch_resp.status_code == 200, patch_resp.text
+
+    after_steps = (
+        (
+            await db.execute(
+                select(CadenceStep)
+                .where(
+                    CadenceStep.cadence_id == uuid.UUID(created["id"]),
+                    CadenceStep.lead_id == lead.id,
+                )
+                .order_by(CadenceStep.step_number.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    after_map = {step.step_number: step for step in after_steps}
+
+    assert after_map[1].scheduled_at == before_scheduled_at[1]
+    assert after_map[2].scheduled_at == before_scheduled_at[2]
+    assert after_map[3].day_offset == 1
+    assert after_map[3].scheduled_at == before_scheduled_at[3] + timedelta(days=1)
+    assert after_map[3].status == StepStatus.PENDING
 
 
 # ── DELETE /cadences/{id} ─────────────────────────────────────────────

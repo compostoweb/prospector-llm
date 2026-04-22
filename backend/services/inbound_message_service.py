@@ -274,6 +274,7 @@ async def process_inbound_reply(
             reply_text=reply_text,
             tenant_id=tenant_id,
             db=db,
+            replied_step=replied_step,
         )
 
     from api.routes.ws import broadcast_event

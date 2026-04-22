@@ -2,10 +2,19 @@ from __future__ import annotations
 
 import base64
 import uuid
+from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.content_calculator_result import ContentCalculatorResult
+from models.cadence import Cadence
+from models.cadence_step import CadenceStep
+from models.email_account import EmailAccount
+from models.enums import Channel
+from models.lead import Lead
+from models.tenant import TenantIntegration
 from services import notification
 from services.content.calculator_report import build_calculator_diagnosis_pdf
 
@@ -246,3 +255,96 @@ async def test_build_calculator_diagnosis_pdf_derives_executive_summary_from_res
 
     assert filename.startswith("diagnostico-roi-clinica-exemplo-")
     assert pdf_bytes.startswith(b"%PDF")
+
+
+async def test_send_reply_notification_prefers_cadence_email_account_recipient(
+    db: AsyncSession,
+    tenant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent_payload: dict[str, object] = {}
+
+    class FakeEmails:
+        @staticmethod
+        def send(payload: dict[str, object]) -> None:
+            sent_payload.update(payload)
+
+    class FakeResend:
+        Emails = FakeEmails
+
+    account_id = uuid.uuid4()
+    cadence_id = uuid.uuid4()
+    lead_id = uuid.uuid4()
+
+    account = EmailAccount(
+        id=account_id,
+        tenant_id=tenant.id,
+        display_name="Adriano Gmail",
+        email_address="adriano@compostoweb.com.br",
+        provider_type="google_oauth",
+        is_active=True,
+    )
+    db.add(account)
+    await db.flush()
+
+    cadence = Cadence(
+        id=cadence_id,
+        tenant_id=tenant.id,
+        name="Cadência Email",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+        llm_temperature=0.7,
+        llm_max_tokens=256,
+        email_account_id=account.id,
+    )
+    lead = Lead(
+        id=lead_id,
+        tenant_id=tenant.id,
+        name="Adriano",
+        company="Pró-video endoscopia",
+        email_corporate="adrianovaladao01@gmail.com",
+        source="manual",
+        status="converted",
+    )
+    step = CadenceStep(
+        tenant_id=tenant.id,
+        lead_id=lead_id,
+        cadence_id=cadence_id,
+        channel=Channel.EMAIL,
+        step_number=3,
+        day_offset=1,
+        scheduled_at=datetime.now(UTC),
+        status="replied",
+    )
+    integration = (
+        await db.execute(select(TenantIntegration).where(TenantIntegration.tenant_id == tenant.id))
+    ).scalar_one()
+    integration.notify_email = "fallback@compostoweb.com.br"
+    integration.notify_on_interest = True
+    integration.notify_on_objection = True
+
+    db.add_all([cadence, lead, step])
+    await db.flush()
+
+    monkeypatch.setattr(notification, "_get_resend", lambda: FakeResend)
+    monkeypatch.setattr(
+        notification.settings,
+        "RESEND_FROM_EMAIL",
+        "site@compostoweb.com.br",
+        raising=False,
+    )
+
+    sent = await notification.send_reply_notification(
+        lead=lead,
+        intent="interest",
+        reply_text="Quero saber mais.",
+        tenant_id=tenant.id,
+        db=db,
+        replied_step=step,
+    )
+
+    assert sent is True
+    assert sent_payload["from"] == "site@compostoweb.com.br"
+    assert sent_payload["to"] == ["adriano@compostoweb.com.br"]
+    assert "Quero saber mais." in str(sent_payload["html"])

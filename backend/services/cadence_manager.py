@@ -47,11 +47,11 @@ AUTO_ENROLLABLE_LEAD_STATUSES = (LeadStatus.RAW, LeadStatus.ENRICHED)
 # Template padrão de cadência multi-canal
 # Cada entry: (channel, day_offset, use_voice, audio_file_id, step_type)
 _DEFAULT_TEMPLATE: list[tuple[Channel, int, bool, str | None, str | None]] = [
-    (Channel.LINKEDIN_CONNECT, 0,  False, None, None),
-    (Channel.LINKEDIN_DM,      3,  False, None, None),
-    (Channel.EMAIL,            5,  False, None, None),
-    (Channel.LINKEDIN_DM,      10, True,  None, None),   # follow-up com voz
-    (Channel.EMAIL,            14, False, None, None),  # follow-up final
+    (Channel.LINKEDIN_CONNECT, 0, False, None, None),
+    (Channel.LINKEDIN_DM, 3, False, None, None),
+    (Channel.EMAIL, 5, False, None, None),
+    (Channel.LINKEDIN_DM, 10, True, None, None),  # follow-up com voz
+    (Channel.EMAIL, 14, False, None, None),  # follow-up final
 ]
 
 
@@ -111,9 +111,7 @@ class CadenceManager:
         # Validação email_only: todos os steps do template devem ser EMAIL
         is_email_only = getattr(cadence, "cadence_type", "mixed") == "email_only"
         if is_email_only:
-            non_email = [
-                item[0].value for item in template if item[0] != Channel.EMAIL
-            ]
+            non_email = [item[0].value for item in template if item[0] != Channel.EMAIL]
             if non_email:
                 raise ValueError(
                     f"Cadência email_only não pode ter steps do(s) canal(is): {', '.join(non_email)}"
@@ -140,10 +138,16 @@ class CadenceManager:
             if channel == Channel.EMAIL and lead.timezone:
                 try:
                     from zoneinfo import ZoneInfo  # noqa: PLC0415
+
                     tz = ZoneInfo(lead.timezone)
                     local_date = base_date.astimezone(tz).date()
                     scheduled_at = datetime(
-                        local_date.year, local_date.month, local_date.day, 9, 0, 0,
+                        local_date.year,
+                        local_date.month,
+                        local_date.day,
+                        9,
+                        0,
+                        0,
                         tzinfo=tz,
                     ).astimezone(UTC)
                 except Exception:
@@ -226,7 +230,9 @@ class CadenceManager:
             return 0
 
         already_enrolled_subq = (
-            select(CadenceStep.lead_id).where(CadenceStep.cadence_id == cadence.id).scalar_subquery()
+            select(CadenceStep.lead_id)
+            .where(CadenceStep.cadence_id == cadence.id)
+            .scalar_subquery()
         )
 
         stmt = (
@@ -310,6 +316,7 @@ class CadenceManager:
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
+
 def _resolve_template(cadence: Cadence) -> list[tuple[Channel, int, bool, str | None, str | None]]:
     """Retorna o template de steps: customizado (JSONB) ou o padrão."""
     if not cadence.steps_template:
@@ -346,6 +353,56 @@ async def auto_enroll_linked_cadences_for_list(
         )
 
     return enrolled_count
+
+
+async def sync_pending_steps_with_template(
+    cadence: Cadence,
+    db: AsyncSession,
+) -> int:
+    """Sincroniza steps pendentes já criados com o template atual da cadência."""
+    result = await db.execute(
+        select(CadenceStep, Lead)
+        .join(Lead, Lead.id == CadenceStep.lead_id)
+        .where(
+            CadenceStep.cadence_id == cadence.id,
+            CadenceStep.status == StepStatus.PENDING,
+            CadenceStep.sent_at.is_(None),
+        )
+        .order_by(CadenceStep.lead_id.asc(), CadenceStep.step_number.asc())
+    )
+    rows = result.all()
+    updated = 0
+
+    for step, lead in rows:
+        template_step = get_template_step_config(cadence, step.step_number)
+        if template_step is None:
+            step.status = StepStatus.SKIPPED
+            updated += 1
+            continue
+
+        new_channel = Channel(str(template_step.get("channel", step.channel.value)))
+        if not _lead_has_channel(lead, new_channel, cadence):
+            step.status = StepStatus.SKIPPED
+            updated += 1
+            continue
+
+        new_day_offset = int(template_step.get("day_offset", step.day_offset))
+        if new_day_offset != step.day_offset:
+            step.scheduled_at = step.scheduled_at + timedelta(days=new_day_offset - step.day_offset)
+
+        step.day_offset = new_day_offset
+        step.channel = new_channel
+        step.use_voice = bool(template_step.get("use_voice", False))
+
+        audio_file_id = template_step.get("audio_file_id")
+        step.audio_file_id = uuid.UUID(str(audio_file_id)) if audio_file_id else None
+
+        step.composed_text = None
+        step.composed_subject = None
+        step.subject_used = None
+        updated += 1
+
+    return updated
 
 
 def serialize_steps_template(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

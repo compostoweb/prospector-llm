@@ -39,6 +39,18 @@ logger = structlog.get_logger()
 _BATCH_SIZE = 50
 
 
+def _status_after_enrichment(current_status: LeadStatus) -> LeadStatus:
+    """
+    Preserva estados mais avançados da jornada quando um enrich roda depois.
+
+    Caso típico: lead é criado, inscrito na cadência e o worker de enrich termina em
+    seguida. Nesse caso, não podemos rebaixar IN_CADENCE para ENRICHED.
+    """
+    if current_status in {LeadStatus.IN_CADENCE, LeadStatus.CONVERTED, LeadStatus.ARCHIVED}:
+        return current_status
+    return LeadStatus.ENRICHED
+
+
 @celery_app.task(
     bind=True,
     name="workers.enrich.enrich_pending_batch",
@@ -154,7 +166,7 @@ async def _enrich_single_async(
 
             try:
                 await _enrich_lead(lead, email_finder)
-                lead.status = LeadStatus.ENRICHED
+                lead.status = _status_after_enrichment(lead.status)
                 lead.enriched_at = datetime.now(tz=UTC)
                 lead.score = float(lead_scorer.score(lead))
                 await db.commit()
@@ -210,7 +222,7 @@ async def _enrich_batch_async(
             for lead in leads:
                 try:
                     await _enrich_lead(lead, email_finder)
-                    lead.status = LeadStatus.ENRICHED
+                    lead.status = _status_after_enrichment(lead.status)
                     lead.enriched_at = datetime.now(tz=UTC)
                     lead.score = float(lead_scorer.score(lead))
                     enriched_count += 1

@@ -59,6 +59,7 @@ from services.cadence_manager import (
     get_template_step_config,
     get_total_template_steps,
     serialize_steps_template,
+    sync_pending_steps_with_template,
 )
 from services.lead_management import load_active_cadences_for_leads, serialize_lead
 from services.llm_config import resolve_tenant_llm_config
@@ -488,6 +489,7 @@ async def update_cadence(
 ) -> CadenceResponse:
     cadence = await _get_cadence_or_404(cadence_id, tenant_id, db)
     previous_lead_list_id = cadence.lead_list_id
+    steps_template_updated = body.steps_template is not None
 
     updates = body.model_dump(
         exclude_unset=True,
@@ -557,6 +559,10 @@ async def update_cadence(
     if "cadence_type" in raw and body.cadence_type is not None:
         cadence.cadence_type = body.cadence_type
 
+    rescheduled_pending_steps = 0
+    if steps_template_updated:
+        rescheduled_pending_steps = await sync_pending_steps_with_template(cadence, db)
+
     enrolled_from_list = 0
     if cadence.lead_list_id and cadence.lead_list_id != previous_lead_list_id:
         enrolled_from_list = await _cadence_manager.auto_enroll_list_members(cadence, db)
@@ -567,6 +573,7 @@ async def update_cadence(
         "cadence.updated",
         cadence_id=str(cadence_id),
         enrolled_from_list=enrolled_from_list,
+        rescheduled_pending_steps=rescheduled_pending_steps,
     )
     return CadenceResponse.model_validate(cadence)
 

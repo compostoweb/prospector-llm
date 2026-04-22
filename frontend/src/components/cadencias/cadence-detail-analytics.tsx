@@ -190,7 +190,7 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <BadgeChannel channel={row.channel} />
                     <div className="text-right text-xs font-medium text-(--text-tertiary)">
-                      <p>{row.reply_rate}% resposta</p>
+                      <p>{row.reply_rate}% resp./envio</p>
                       {row.channel === "email" ? <p>{row.open_rate}% abertura</p> : null}
                       {row.channel === "linkedin_connect" ? (
                         <p>{row.acceptance_rate}% aceite</p>
@@ -200,7 +200,7 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <MetricMini label="Enviados" value={row.sent} />
                     <MetricMini label="Respondidos" value={row.replied} />
-                    <MetricMini label="Tx. resposta" value={`${row.reply_rate}%`} />
+                    <MetricMini label="Tx. resp./envio" value={`${row.reply_rate}%`} />
                     {row.channel === "email" ? (
                       <>
                         <MetricMini label="Abertos" value={row.opened} />
@@ -232,7 +232,7 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
             <div>
               <h2 className="text-sm font-semibold text-(--text-primary)">Leitura por step</h2>
               <p className="text-xs text-(--text-secondary)">
-                Base por etapa, taxa de resposta explícita, abertura, bounce e aceites por canal
+                Base por etapa, taxa de resposta sobre envios, abertura, bounce e aceites por canal
               </p>
             </div>
           </div>
@@ -260,7 +260,7 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
                       Respostas
                     </th>
                     <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
-                      Tx. resposta
+                      Tx. resp./envio
                     </th>
                     <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
                       Tx. abertura
