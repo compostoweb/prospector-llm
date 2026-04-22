@@ -291,12 +291,14 @@ export function ReplyAuditTable({
       return
     }
 
+    const reviewPayload = {
+      leadId: selectedItem.leadId,
+      interactionId: selectedItem.interactionId,
+      ...(cadenceId ? { cadenceId } : {}),
+    }
+
     reviewReplyAudit(
-      {
-        leadId: selectedItem.leadId,
-        interactionId: selectedItem.interactionId,
-        cadenceId,
-      },
+      reviewPayload,
       {
         onSuccess: () => {
           toast.success("Reply marcado como revisado")
