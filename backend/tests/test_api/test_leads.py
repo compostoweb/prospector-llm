@@ -18,8 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
-from models.interaction import Interaction
 from models.enums import Channel, LeadStatus, ManualTaskStatus, StepStatus
+from models.interaction import Interaction
 from models.lead import Lead
 from models.lead_list import LeadList
 from models.manual_task import ManualTask
@@ -423,6 +423,77 @@ async def test_list_lead_steps_matches_interactions_by_cadence_step_id(
     assert first_item["reply_content"] is None
     assert second_item["message_content"] == "Segundo email enviado"
     assert second_item["reply_content"] == "Resposta do segundo step"
+
+
+async def test_list_lead_steps_ignores_low_confidence_email_reply_without_reliable_inbound(
+    client: AsyncClient,
+    db: AsyncSession,
+):
+    created = (
+        await client.post(
+            "/leads",
+            json=_lead_payload(linkedin_url="https://linkedin.com/in/step-low-confidence-history"),
+        )
+    ).json()
+
+    lead_id = uuid.UUID(created["id"])
+    tenant_id = uuid.UUID(created["tenant_id"])
+
+    cadence = Cadence(
+        tenant_id=tenant_id,
+        name="Cadência Timeline Reply Fraco",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    db.add(cadence)
+    await db.flush()
+
+    step = CadenceStep(
+        tenant_id=tenant_id,
+        cadence_id=cadence.id,
+        lead_id=lead_id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        use_voice=False,
+        status=StepStatus.REPLIED,
+        scheduled_at=datetime.now(tz=UTC),
+        sent_at=datetime.now(tz=UTC),
+    )
+    db.add(step)
+    await db.flush()
+
+    db.add_all(
+        [
+            Interaction(
+                tenant_id=tenant_id,
+                lead_id=lead_id,
+                cadence_step_id=step.id,
+                channel=Channel.EMAIL,
+                direction="outbound",
+                content_text="Email enviado",
+            ),
+            Interaction(
+                tenant_id=tenant_id,
+                lead_id=lead_id,
+                cadence_step_id=step.id,
+                channel=Channel.EMAIL,
+                direction="inbound",
+                content_text="Backup Completo N8N",
+                reply_match_status="matched",
+                reply_match_source="fallback_single_cadence",
+            ),
+        ]
+    )
+    await db.commit()
+
+    resp = await client.get(f"/leads/{created['id']}/steps")
+
+    assert resp.status_code == 200, resp.text
+    item = resp.json()[0]
+    assert item["status"] == StepStatus.SENT.value
+    assert item["reply_content"] is None
 
 
 async def test_list_lead_steps_includes_manual_task_metadata_and_manual_task_history(

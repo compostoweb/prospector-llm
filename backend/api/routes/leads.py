@@ -30,7 +30,7 @@ from sqlalchemy.orm import selectinload
 from api.dependencies import get_effective_tenant_id, get_session_flexible
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
-from models.enums import Channel, LeadSource, LeadStatus
+from models.enums import Channel, LeadSource, LeadStatus, StepStatus
 from models.interaction import Interaction
 from models.lead import Lead
 from models.lead_list import LeadList
@@ -70,6 +70,7 @@ from services.lead_management import (
     serialize_lead,
 )
 from services.lead_scorer import lead_scorer
+from services.reply_matching import is_reliable_reply_interaction
 
 logger = structlog.get_logger()
 
@@ -152,8 +153,7 @@ async def list_leads(
 
     return LeadListResponse(
         items=[
-            serialize_lead(lead, active_cadences_by_lead=active_cadences_by_lead)
-            for lead in leads
+            serialize_lead(lead, active_cadences_by_lead=active_cadences_by_lead) for lead in leads
         ],
         total=total,
         page=page,
@@ -631,7 +631,7 @@ async def list_lead_steps(
             continue
         if ix.direction.value == "outbound":
             outbound_by_step_id[ix.cadence_step_id] = ix
-        else:
+        elif is_reliable_reply_interaction(ix):
             inbound_by_step_id[ix.cadence_step_id] = ix
 
     timeline_items: list[tuple[datetime, LeadStepResponse]] = []
@@ -653,6 +653,9 @@ async def list_lead_steps(
         reply_content = inbound_interaction.content_text if inbound_interaction else None
         interaction_intent = inbound_interaction.intent if inbound_interaction is not None else None
         intent: str | None = interaction_intent.value if interaction_intent is not None else None
+        display_status = step.status
+        if display_status == StepStatus.REPLIED and inbound_interaction is None:
+            display_status = StepStatus.SENT
 
         if step.channel == Channel.MANUAL_TASK and not message_content:
             message_content = manual_task_detail
@@ -666,7 +669,7 @@ async def list_lead_steps(
                     cadence_id=step.cadence_id,
                     step_number=step.step_number,
                     channel=ch,
-                    status=step.status.value,
+                    status=display_status.value,
                     item_kind="manual_task"
                     if step.channel == Channel.MANUAL_TASK
                     else "cadence_step",

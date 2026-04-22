@@ -30,6 +30,9 @@ from models.interaction import Interaction
 from models.lead import Lead
 from models.lead_email import LeadEmail
 from services.cadence_manager import CadenceManager
+from services.reply_matching import (
+    reliable_reply_interaction_condition,
+)
 
 logger = structlog.get_logger()
 
@@ -169,6 +172,14 @@ def _cadence_step_period_expr():
     return func.coalesce(CadenceStep.sent_at, CadenceStep.scheduled_at)
 
 
+def _interaction_matches_cadence_step():
+    return CadenceStep.id == Interaction.cadence_step_id
+
+
+def _reliable_reply_interaction_condition():
+    return reliable_reply_interaction_condition()
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 
@@ -252,7 +263,7 @@ async def get_dashboard_stats(
             .label("prev_period"),
         ).where(
             Interaction.tenant_id == tenant_id,
-            Interaction.direction == InteractionDirection.INBOUND,
+            _reliable_reply_interaction_condition(),
         )
     )
     reply_row = reply_q.one()
@@ -344,7 +355,7 @@ async def get_channel_breakdown(
         )
         .where(
             Interaction.tenant_id == tenant_id,
-            Interaction.direction == InteractionDirection.INBOUND,
+            _reliable_reply_interaction_condition(),
             Interaction.created_at >= since,
         )
         .group_by(Interaction.channel)
@@ -391,7 +402,7 @@ async def get_recent_replies(
         .join(Lead, Interaction.lead_id == Lead.id)
         .where(
             Interaction.tenant_id == tenant_id,
-            Interaction.direction == InteractionDirection.INBOUND,
+            _reliable_reply_interaction_condition(),
         )
         .order_by(Interaction.created_at.desc())
         .limit(limit)
@@ -430,7 +441,7 @@ async def get_intent_breakdown(
         )
         .where(
             Interaction.tenant_id == tenant_id,
-            Interaction.direction == InteractionDirection.INBOUND,
+            _reliable_reply_interaction_condition(),
             Interaction.intent.is_not(None),
             Interaction.created_at >= since,
         )
@@ -513,11 +524,6 @@ async def get_cadence_performance(
         select(
             CadenceStep.cadence_id,
             func.count(CadenceStep.id).label("sent"),
-            func.count(CadenceStep.id)
-            .filter(
-                CadenceStep.status == StepStatus.REPLIED,
-            )
-            .label("replied"),
         )
         .where(
             CadenceStep.tenant_id == tenant_id,
@@ -540,6 +546,23 @@ async def get_cadence_performance(
     )
     name_map = {row.id: row.name for row in cadences_q.all()}
 
+    replies_q = await db.execute(
+        select(
+            CadenceStep.cadence_id,
+            func.count(Interaction.id).label("replied"),
+        )
+        .join(Interaction, Interaction.cadence_step_id == CadenceStep.id)
+        .where(
+            CadenceStep.cadence_id.in_(cadence_ids),
+            CadenceStep.tenant_id == tenant_id,
+            Interaction.tenant_id == tenant_id,
+            Interaction.created_at >= since,
+            _reliable_reply_interaction_condition(),
+        )
+        .group_by(CadenceStep.cadence_id)
+    )
+    reply_map = {row.cadence_id: row.replied for row in replies_q.all()}
+
     # Active leads per cadence (leads currently IN_CADENCE with steps in this cadence)
     active_q = await db.execute(
         select(
@@ -559,7 +582,7 @@ async def get_cadence_performance(
     result = []
     for row in step_rows:
         sent = row.sent or 0
-        replied = row.replied or 0
+        replied = reply_map.get(row.cadence_id, 0)
         rate = round((replied / sent) * 100, 1) if sent > 0 else 0.0
         result.append(
             CadencePerformanceItem(
@@ -591,28 +614,16 @@ async def get_cadences_overview(
     if not cadence_ids:
         return []
 
-    lead_progress_sq = (
+    lead_state_sq = (
         select(
             CadenceStep.cadence_id.label("cadence_id"),
             CadenceStep.lead_id.label("lead_id"),
-            func.max(
-                case(
-                    (CadenceStep.status == StepStatus.REPLIED, 1),
-                    else_=0,
-                )
-            ).label("has_reply"),
             func.max(
                 case(
                     (CadenceStep.status.in_([StepStatus.PENDING, StepStatus.DISPATCHING]), 1),
                     else_=0,
                 )
             ).label("has_pending"),
-            func.sum(
-                case(
-                    (CadenceStep.status == StepStatus.REPLIED, 1),
-                    else_=0,
-                )
-            ).label("reply_count"),
         )
         .where(
             CadenceStep.tenant_id == tenant_id,
@@ -622,17 +633,34 @@ async def get_cadences_overview(
         .subquery()
     )
 
+    reply_progress_sq = (
+        select(
+            CadenceStep.cadence_id.label("cadence_id"),
+            CadenceStep.lead_id.label("lead_id"),
+            func.count(Interaction.id).label("reply_count"),
+        )
+        .join(Interaction, Interaction.cadence_step_id == CadenceStep.id)
+        .where(
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.cadence_id.in_(cadence_ids),
+            Interaction.tenant_id == tenant_id,
+            _reliable_reply_interaction_condition(),
+        )
+        .group_by(CadenceStep.cadence_id, CadenceStep.lead_id)
+        .subquery()
+    )
+
     overview_q = await db.execute(
         select(
-            lead_progress_sq.c.cadence_id,
-            func.count(lead_progress_sq.c.lead_id).label("total_leads"),
+            lead_state_sq.c.cadence_id,
+            func.count(lead_state_sq.c.lead_id).label("total_leads"),
             func.count(
                 case(
                     (
                         and_(
                             Lead.status == LeadStatus.IN_CADENCE,
-                            lead_progress_sq.c.has_pending == 1,
-                            lead_progress_sq.c.has_reply == 0,
+                            lead_state_sq.c.has_pending == 1,
+                            func.coalesce(reply_progress_sq.c.reply_count, 0) == 0,
                         ),
                         1,
                     )
@@ -643,21 +671,32 @@ async def get_cadences_overview(
                 case(
                     (
                         and_(
-                            lead_progress_sq.c.has_pending == 0,
-                            lead_progress_sq.c.has_reply == 0,
+                            lead_state_sq.c.has_pending == 0,
+                            func.coalesce(reply_progress_sq.c.reply_count, 0) == 0,
                         ),
                         1,
                     )
                 )
             ).label("leads_finished"),
-            func.coalesce(func.sum(lead_progress_sq.c.reply_count), 0).label("replies"),
-            func.count(case((lead_progress_sq.c.has_reply == 1, 1))).label("leads_paused"),
+            func.coalesce(func.sum(func.coalesce(reply_progress_sq.c.reply_count, 0)), 0).label(
+                "replies"
+            ),
+            func.count(case((func.coalesce(reply_progress_sq.c.reply_count, 0) > 0, 1))).label(
+                "leads_paused"
+            ),
         )
-        .join(Lead, Lead.id == lead_progress_sq.c.lead_id)
+        .join(Lead, Lead.id == lead_state_sq.c.lead_id)
+        .outerjoin(
+            reply_progress_sq,
+            and_(
+                reply_progress_sq.c.cadence_id == lead_state_sq.c.cadence_id,
+                reply_progress_sq.c.lead_id == lead_state_sq.c.lead_id,
+            ),
+        )
         .where(
             Lead.tenant_id == tenant_id,
         )
-        .group_by(lead_progress_sq.c.cadence_id)
+        .group_by(lead_state_sq.c.cadence_id)
     )
     metrics_map = {
         row.cadence_id: {
@@ -731,7 +770,7 @@ async def get_cadence_analytics(
     )
     leads_active = active_leads_q.scalar() or 0
 
-    summary_q = await db.execute(
+    step_summary_q = await db.execute(
         select(
             func.count(CadenceStep.id)
             .filter(
@@ -739,12 +778,6 @@ async def get_cadence_analytics(
                 period_expr >= since,
             )
             .label("sent"),
-            func.count(CadenceStep.id)
-            .filter(
-                CadenceStep.status == StepStatus.REPLIED,
-                period_expr >= since,
-            )
-            .label("replied"),
             func.count(CadenceStep.id)
             .filter(CadenceStep.status.in_([StepStatus.PENDING, StepStatus.DISPATCHING]))
             .label("pending"),
@@ -765,14 +798,28 @@ async def get_cadence_analytics(
             CadenceStep.cadence_id == cadence_id,
         )
     )
-    summary = summary_q.one()
-    steps_sent = summary.sent or 0
-    replies = summary.replied or 0
-    pending_steps = summary.pending or 0
-    skipped_steps = summary.skipped or 0
-    failed_steps = summary.failed or 0
+    step_summary = step_summary_q.one()
 
-    channel_q = await db.execute(
+    reply_summary_q = await db.execute(
+        select(func.count(Interaction.id).label("replied"))
+        .join(CadenceStep, CadenceStep.id == Interaction.cadence_step_id)
+        .where(
+            Interaction.tenant_id == tenant_id,
+            Interaction.created_at >= since,
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.cadence_id == cadence_id,
+            _reliable_reply_interaction_condition(),
+        )
+    )
+    reply_summary = reply_summary_q.one()
+
+    steps_sent = step_summary.sent or 0
+    replies = reply_summary.replied or 0
+    pending_steps = step_summary.pending or 0
+    skipped_steps = step_summary.skipped or 0
+    failed_steps = step_summary.failed or 0
+
+    channel_step_q = await db.execute(
         select(
             CadenceStep.channel,
             func.count(CadenceStep.id)
@@ -781,12 +828,6 @@ async def get_cadence_analytics(
                 period_expr >= since,
             )
             .label("sent"),
-            func.count(CadenceStep.id)
-            .filter(
-                CadenceStep.status == StepStatus.REPLIED,
-                period_expr >= since,
-            )
-            .label("replied"),
             func.count(CadenceStep.id)
             .filter(CadenceStep.status.in_([StepStatus.PENDING, StepStatus.DISPATCHING]))
             .label("pending"),
@@ -810,20 +851,47 @@ async def get_cadence_analytics(
         .group_by(CadenceStep.channel)
         .order_by(CadenceStep.channel.asc())
     )
-    channel_breakdown = [
-        CadenceAnalyticsChannelItem(
-            channel=row.channel.value if hasattr(row.channel, "value") else str(row.channel),
-            sent=row.sent or 0,
-            replied=row.replied or 0,
-            pending=row.pending or 0,
-            skipped=row.skipped or 0,
-            failed=row.failed or 0,
-            reply_rate=_safe_rate(row.replied or 0, row.sent or 0),
+    channel_rows = channel_step_q.all()
+    channel_reply_q = await db.execute(
+        select(
+            CadenceStep.channel,
+            func.count(Interaction.id).label("replied"),
         )
-        for row in channel_q.all()
-    ]
+        .join(CadenceStep, CadenceStep.id == Interaction.cadence_step_id)
+        .where(
+            Interaction.tenant_id == tenant_id,
+            Interaction.created_at >= since,
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.cadence_id == cadence_id,
+            _reliable_reply_interaction_condition(),
+        )
+        .group_by(CadenceStep.channel)
+    )
+    channel_reply_map = {row.channel: row.replied for row in channel_reply_q.all()}
+    channel_stats_map = {row.channel: row for row in channel_rows}
+    channel_breakdown = []
+    for channel in sorted(
+        channel_stats_map.keys() | channel_reply_map.keys(), key=lambda item: item.value
+    ):
+        row = channel_stats_map.get(channel)
+        sent = row.sent if row is not None else 0
+        replied = channel_reply_map.get(channel, 0)
+        pending = row.pending if row is not None else 0
+        skipped = row.skipped if row is not None else 0
+        failed = row.failed if row is not None else 0
+        channel_breakdown.append(
+            CadenceAnalyticsChannelItem(
+                channel=channel.value if hasattr(channel, "value") else str(channel),
+                sent=sent or 0,
+                replied=replied or 0,
+                pending=pending or 0,
+                skipped=skipped or 0,
+                failed=failed or 0,
+                reply_rate=_safe_rate(replied or 0, sent or 0),
+            )
+        )
 
-    step_q = await db.execute(
+    step_stats_q = await db.execute(
         select(
             CadenceStep.step_number,
             CadenceStep.channel,
@@ -833,12 +901,6 @@ async def get_cadence_analytics(
                 period_expr >= since,
             )
             .label("sent"),
-            func.count(CadenceStep.id)
-            .filter(
-                CadenceStep.status == StepStatus.REPLIED,
-                period_expr >= since,
-            )
-            .label("replied"),
             func.count(CadenceStep.id)
             .filter(CadenceStep.status.in_([StepStatus.PENDING, StepStatus.DISPATCHING]))
             .label("pending"),
@@ -862,19 +924,47 @@ async def get_cadence_analytics(
         .group_by(CadenceStep.step_number, CadenceStep.channel)
         .order_by(CadenceStep.step_number.asc(), CadenceStep.channel.asc())
     )
-    step_breakdown = [
-        CadenceAnalyticsStepItem(
-            step_number=row.step_number,
-            channel=row.channel.value if hasattr(row.channel, "value") else str(row.channel),
-            sent=row.sent or 0,
-            replied=row.replied or 0,
-            pending=row.pending or 0,
-            skipped=row.skipped or 0,
-            failed=row.failed or 0,
-            reply_rate=_safe_rate(row.replied or 0, row.sent or 0),
+    step_rows = step_stats_q.all()
+    step_reply_q = await db.execute(
+        select(
+            CadenceStep.step_number,
+            CadenceStep.channel,
+            func.count(Interaction.id).label("replied"),
         )
-        for row in step_q.all()
-    ]
+        .join(CadenceStep, CadenceStep.id == Interaction.cadence_step_id)
+        .where(
+            Interaction.tenant_id == tenant_id,
+            Interaction.created_at >= since,
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.cadence_id == cadence_id,
+            _reliable_reply_interaction_condition(),
+        )
+        .group_by(CadenceStep.step_number, CadenceStep.channel)
+    )
+    step_reply_map = {(row.step_number, row.channel): row.replied for row in step_reply_q.all()}
+    step_stats_map = {(row.step_number, row.channel): row for row in step_rows}
+    step_breakdown = []
+    for step_number, channel in sorted(
+        step_stats_map.keys() | step_reply_map.keys(), key=lambda item: (item[0], item[1].value)
+    ):
+        step_row = step_stats_map.get((step_number, channel))
+        sent = step_row.sent if step_row is not None else 0
+        replied = step_reply_map.get((step_number, channel), 0)
+        pending = step_row.pending if step_row is not None else 0
+        skipped = step_row.skipped if step_row is not None else 0
+        failed = step_row.failed if step_row is not None else 0
+        step_breakdown.append(
+            CadenceAnalyticsStepItem(
+                step_number=step_number,
+                channel=channel.value if hasattr(channel, "value") else str(channel),
+                sent=sent or 0,
+                replied=replied or 0,
+                pending=pending or 0,
+                skipped=skipped or 0,
+                failed=failed or 0,
+                reply_rate=_safe_rate(replied or 0, sent or 0),
+            )
+        )
 
     logger.debug(
         "analytics.cadence.detail",
@@ -960,7 +1050,7 @@ async def get_email_stats(
     # Enviados (outbound EMAIL) apenas de cadências email_only
     sent_q = await db.execute(
         select(func.count(func.distinct(Interaction.id)))
-        .join(CadenceStep, CadenceStep.lead_id == Interaction.lead_id)
+        .join(CadenceStep, _interaction_matches_cadence_step())
         .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
             Interaction.tenant_id == tenant_id,
@@ -978,7 +1068,7 @@ async def get_email_stats(
     # Abertos apenas de cadências email_only
     opened_q = await db.execute(
         select(func.count(func.distinct(Interaction.id)))
-        .join(CadenceStep, CadenceStep.lead_id == Interaction.lead_id)
+        .join(CadenceStep, _interaction_matches_cadence_step())
         .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
             Interaction.tenant_id == tenant_id,
@@ -997,17 +1087,17 @@ async def get_email_stats(
     # Respondidos (inbound EMAIL) apenas de cadências email_only
     replied_q = await db.execute(
         select(func.count(func.distinct(Interaction.id)))
-        .join(CadenceStep, CadenceStep.lead_id == Interaction.lead_id)
+        .join(CadenceStep, _interaction_matches_cadence_step())
         .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
             Interaction.tenant_id == tenant_id,
             Interaction.channel == Channel.EMAIL,
-            Interaction.direction == InteractionDirection.INBOUND,
             Interaction.created_at >= since,
             CadenceStep.tenant_id == tenant_id,
             CadenceStep.channel == Channel.EMAIL,
             CadenceStep.sent_at >= since,
             Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
+            _reliable_reply_interaction_condition(),
         )
     )
     replied = replied_q.scalar() or 0
@@ -1107,7 +1197,7 @@ async def get_email_cadences_stats(
             CadenceStep.cadence_id,
             func.count(func.distinct(Interaction.id)).label("opened"),
         )
-        .join(Interaction, Interaction.lead_id == CadenceStep.lead_id)
+        .join(Interaction, Interaction.cadence_step_id == CadenceStep.id)
         .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
             CadenceStep.cadence_id.in_(cadence_ids),
@@ -1129,16 +1219,16 @@ async def get_email_cadences_stats(
             CadenceStep.cadence_id,
             func.count(func.distinct(Interaction.id)).label("replied"),
         )
-        .join(Interaction, Interaction.lead_id == CadenceStep.lead_id)
+        .join(Interaction, Interaction.cadence_step_id == CadenceStep.id)
         .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
             CadenceStep.cadence_id.in_(cadence_ids),
             CadenceStep.tenant_id == tenant_id,
             CadenceStep.channel == Channel.EMAIL,
             Interaction.channel == Channel.EMAIL,
-            Interaction.direction == InteractionDirection.INBOUND,
             Interaction.created_at >= since,
             Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
+            _reliable_reply_interaction_condition(),
         )
         .group_by(CadenceStep.cadence_id)
     )
@@ -1205,7 +1295,7 @@ async def get_email_over_time(
             sent_day_expr.label("day"),
             func.count(func.distinct(Interaction.id)).label("cnt"),
         )
-        .join(CadenceStep, CadenceStep.lead_id == Interaction.lead_id)
+        .join(CadenceStep, _interaction_matches_cadence_step())
         .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
             Interaction.tenant_id == tenant_id,
@@ -1229,7 +1319,7 @@ async def get_email_over_time(
             opened_day_expr.label("day"),
             func.count(func.distinct(Interaction.id)).label("cnt"),
         )
-        .join(CadenceStep, CadenceStep.lead_id == Interaction.lead_id)
+        .join(CadenceStep, _interaction_matches_cadence_step())
         .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
             Interaction.tenant_id == tenant_id,
@@ -1253,17 +1343,17 @@ async def get_email_over_time(
             replied_day_expr.label("day"),
             func.count(func.distinct(Interaction.id)).label("cnt"),
         )
-        .join(CadenceStep, CadenceStep.lead_id == Interaction.lead_id)
+        .join(CadenceStep, _interaction_matches_cadence_step())
         .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
             Interaction.tenant_id == tenant_id,
             Interaction.channel == Channel.EMAIL,
-            Interaction.direction == InteractionDirection.INBOUND,
             Interaction.created_at >= since,
             CadenceStep.tenant_id == tenant_id,
             CadenceStep.channel == Channel.EMAIL,
             CadenceStep.sent_at >= since,
             Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
+            _reliable_reply_interaction_condition(),
         )
         .group_by(replied_day_expr)
     )
@@ -1327,7 +1417,7 @@ async def get_email_ab_results(
             CadenceStep.subject_used,
             func.count(func.distinct(Interaction.id)).label("opened"),
         )
-        .join(Interaction, Interaction.lead_id == CadenceStep.lead_id)
+        .join(Interaction, Interaction.cadence_step_id == CadenceStep.id)
         .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
             CadenceStep.tenant_id == tenant_id,

@@ -4,6 +4,7 @@ import { useQueries, useQuery } from "@tanstack/react-query"
 import { useSession } from "next-auth/react"
 import { createBrowserClient } from "@/lib/api/client"
 import type { CadenceStep } from "@/lib/api/hooks/use-cadences"
+import type { Lead } from "@/lib/api/hooks/use-leads"
 
 export interface CadenceAnalyticsChannel {
   channel: string
@@ -83,6 +84,33 @@ export interface CadenceDeliveryBudget {
   cadence_id: string
   generated_at: string
   items: CadenceDeliveryBudgetItem[]
+}
+
+export interface CadenceReplyEvent {
+  interaction_id: string
+  lead: Lead
+  channel: string
+  step_number: number | null
+  replied_at: string
+  intent: string | null
+  reply_text: string | null
+  reply_match_source: string | null
+}
+
+export interface CadenceReplyAuditItem {
+  interaction_id: string
+  lead: Lead
+  channel: string
+  created_at: string
+  reply_match_status: "ambiguous" | "unmatched" | "low_confidence"
+  reply_match_source: string | null
+  reply_match_sent_cadence_count: number | null
+  content_text: string | null
+}
+
+export interface CadenceReplyManagement {
+  replies: CadenceReplyEvent[]
+  audit_items: CadenceReplyAuditItem[]
 }
 
 export function useCadenceAnalytics(cadenceId: string, days = 30) {
@@ -177,6 +205,23 @@ export function useCadenceDeliveryBudget(cadenceId: string) {
       const { data, error } = await client.GET(`/cadences/${cadenceId}/delivery-budget` as never)
       if (error) throw new Error("Falha ao carregar limite operacional da cadência")
       return data as CadenceDeliveryBudget
+    },
+    staleTime: 60 * 1000,
+    refetchInterval: 2 * 60 * 1000,
+    enabled: !!session?.accessToken && !!cadenceId,
+  })
+}
+
+export function useCadenceReplyManagement(cadenceId: string) {
+  const { data: session } = useSession()
+
+  return useQuery({
+    queryKey: ["cadences", cadenceId, "reply-management"],
+    queryFn: async (): Promise<CadenceReplyManagement> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.GET(`/cadences/${cadenceId}/reply-management` as never)
+      if (error) throw new Error("Falha ao carregar respostas da cadência")
+      return data as CadenceReplyManagement
     },
     staleTime: 60 * 1000,
     refetchInterval: 2 * 60 * 1000,

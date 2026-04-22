@@ -10,10 +10,12 @@ from integrations.linkedin.registry import LinkedInRegistry
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
 from models.email_account import EmailAccount
-from models.enums import Channel, StepStatus
+from models.enums import Channel
+from models.interaction import Interaction
 from models.lead import Lead
 from models.linkedin_account import LinkedInAccount
 from models.tenant import TenantIntegration
+from services.reply_matching import reliable_reply_interaction_condition
 
 
 @dataclass(frozen=True)
@@ -131,12 +133,14 @@ async def _lead_has_replied_in_cadence(
     tenant_id,
 ) -> bool:
     result = await db.execute(
-        select(CadenceStep.id)
+        select(Interaction.id)
+        .join(CadenceStep, CadenceStep.id == Interaction.cadence_step_id)
         .where(
             CadenceStep.tenant_id == tenant_id,
             CadenceStep.lead_id == lead_id,
             CadenceStep.cadence_id == cadence_id,
-            CadenceStep.status == StepStatus.REPLIED,
+            Interaction.tenant_id == tenant_id,
+            reliable_reply_interaction_condition(),
         )
         .limit(1)
     )

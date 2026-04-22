@@ -362,7 +362,9 @@ async def _resolve_step_from_outbound_interaction(
     provider_thread_id: str | None,
 ) -> tuple[CadenceStep | None, str | None]:
     step_channels = _step_channels_for_inbound_channel(channel)
-    normalized_email_message_ids = [_normalize_email_message_id(value) for value in reply_to_message_ids]
+    normalized_email_message_ids = [
+        _normalize_email_message_id(value) for value in reply_to_message_ids
+    ]
     normalized_email_message_ids = [value for value in normalized_email_message_ids if value]
     email_message_lookup_ids = list(
         dict.fromkeys(
@@ -493,6 +495,15 @@ async def _resolve_fallback_step_for_reply(
             sent_cadence_count=len(cadence_ids),
             match_status="ambiguous",
         )
+
+    if channel == Channel.EMAIL:
+        logger.info(
+            "inbound.reply.email_requires_reference",
+            tenant_id=str(tenant_id),
+            lead_id=str(lead_id),
+            sent_cadence_count=len(cadence_ids),
+        )
+        return RepliedStepResolution(step=None, match_status="unmatched")
 
     latest_step = sent_steps[0]
     latest_step.status = StepStatus.REPLIED

@@ -7,6 +7,7 @@ import {
   FlaskConical,
   Loader2,
   BarChart2,
+  MessageSquare,
   Settings2,
   Play,
   Pause,
@@ -14,6 +15,7 @@ import {
   Info,
 } from "lucide-react"
 import { CadenceDetailAnalytics } from "@/components/cadencias/cadence-detail-analytics"
+import { CadenceReplyManagement } from "@/components/cadencias/cadence-reply-management"
 import { Badge } from "@/components/ui/badge"
 import {
   Dialog,
@@ -29,7 +31,7 @@ import { CadenceStepsEditor } from "@/components/cadencias/cadence-steps-editor"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
-type Tab = "visao-geral" | "configuracao" | "passos"
+type Tab = "visao-geral" | "respostas" | "configuracao" | "passos"
 
 const TABS: {
   key: Tab
@@ -37,6 +39,7 @@ const TABS: {
   icon: React.ComponentType<{ size?: number; className?: string }>
 }[] = [
   { key: "visao-geral", label: "Visão Geral", icon: BarChart2 },
+  { key: "respostas", label: "Respostas", icon: MessageSquare },
   { key: "configuracao", label: "Configuração", icon: Settings2 },
   { key: "passos", label: "Passos", icon: ListTodo },
 ]
@@ -101,7 +104,10 @@ export default function CadenciaDetailPage() {
                     : "OpenRouter"}{" "}
               · {cadence.llm_model}
             </Badge>
-            <Badge variant={cadence.mode === "automatic" ? "info" : "warning"} className="px-2.5 py-1">
+            <Badge
+              variant={cadence.mode === "automatic" ? "info" : "warning"}
+              className="px-2.5 py-1"
+            >
               {cadence.mode === "automatic" ? "Automática" : "Semi-automática"}
             </Badge>
             <Badge variant="outline" className="px-2.5 py-1">
@@ -225,6 +231,7 @@ export default function CadenciaDetailPage() {
 
       {/* Tab content */}
       {tab === "visao-geral" && <CadenceDetailAnalytics cadence={cadence} />}
+      {tab === "respostas" && <CadenceReplyManagement cadenceId={cadence.id} />}
       {tab === "configuracao" && <CadenceForm cadence={cadence} />}
       {tab === "passos" && <CadenceStepsEditor cadence={cadence} />}
     </div>

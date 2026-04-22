@@ -21,20 +21,26 @@ from typing import Any, Literal, cast
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from api.dependencies import get_effective_tenant_id, get_llm_registry, get_session_flexible
 from integrations.llm import LLMRegistry
 from models.cadence import Cadence
+from models.cadence_step import CadenceStep
 from models.email_template import EmailTemplate
-from models.enums import Channel, StepType
+from models.enums import Channel, InteractionDirection, StepType
+from models.interaction import Interaction
 from models.lead import Lead
 from models.tenant import TenantIntegration
 from schemas.cadence import (
     CadenceCreateRequest,
     CadenceDeliveryBudgetItemResponse,
     CadenceDeliveryBudgetResponse,
+    CadenceReplyAuditItemResponse,
+    CadenceReplyEventResponse,
+    CadenceReplyManagementResponse,
     CadenceResponse,
     CadenceUpdateRequest,
     StepComposeRequest,
@@ -54,6 +60,7 @@ from services.cadence_manager import (
     get_total_template_steps,
     serialize_steps_template,
 )
+from services.lead_management import load_active_cadences_for_leads, serialize_lead
 from services.llm_config import resolve_tenant_llm_config
 from services.message_quality import build_fallback_email_subject
 from services.message_template_renderer import (
@@ -67,6 +74,7 @@ logger = structlog.get_logger()
 
 router = APIRouter(prefix="/cadences", tags=["Cadences"])
 _cadence_manager = CadenceManager()
+_LOW_CONFIDENCE_EMAIL_REPLY_SOURCE = "fallback_single_cadence"
 
 
 @router.get("/template-variables", response_model=list[TemplateVariableResponse])
@@ -199,6 +207,121 @@ async def get_cadence_delivery_budget(
             for item in snapshots
         ],
     )
+
+
+@router.get("/{cadence_id}/reply-management", response_model=CadenceReplyManagementResponse)
+async def get_cadence_reply_management(
+    cadence_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> CadenceReplyManagementResponse:
+    await _get_cadence_or_404(cadence_id, tenant_id, db)
+
+    reply_q = await db.execute(
+        select(Interaction, CadenceStep.step_number)
+        .join(CadenceStep, CadenceStep.id == Interaction.cadence_step_id)
+        .where(
+            Interaction.tenant_id == tenant_id,
+            Interaction.direction == InteractionDirection.INBOUND,
+            ~(
+                (Interaction.channel == Channel.EMAIL)
+                & (Interaction.reply_match_source == _LOW_CONFIDENCE_EMAIL_REPLY_SOURCE)
+            ),
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.cadence_id == cadence_id,
+        )
+        .order_by(Interaction.created_at.desc())
+    )
+    reply_rows = reply_q.all()
+
+    cadence_lead_exists = exists(
+        select(CadenceStep.id).where(
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.cadence_id == cadence_id,
+            CadenceStep.lead_id == Interaction.lead_id,
+        )
+    )
+    audit_q = await db.execute(
+        select(Interaction)
+        .where(
+            Interaction.tenant_id == tenant_id,
+            Interaction.direction == InteractionDirection.INBOUND,
+            (
+                Interaction.reply_match_status.in_(["ambiguous", "unmatched"])
+                | (
+                    (Interaction.channel == Channel.EMAIL)
+                    & (Interaction.reply_match_source == _LOW_CONFIDENCE_EMAIL_REPLY_SOURCE)
+                )
+            ),
+            cadence_lead_exists,
+        )
+        .order_by(Interaction.created_at.desc())
+    )
+    audit_items = audit_q.scalars().all()
+
+    lead_ids = list(
+        dict.fromkeys(
+            [interaction.lead_id for interaction, _step_number in reply_rows]
+            + [interaction.lead_id for interaction in audit_items]
+        )
+    )
+
+    lead_map: dict[uuid.UUID, Lead] = {}
+    active_cadences_by_lead: dict[uuid.UUID, list] = {}
+    if lead_ids:
+        leads_q = await db.execute(
+            select(Lead)
+            .where(Lead.tenant_id == tenant_id, Lead.id.in_(lead_ids))
+            .options(selectinload(Lead.lists), selectinload(Lead.emails))
+        )
+        leads = leads_q.scalars().all()
+        lead_map = {lead.id: lead for lead in leads}
+        active_cadences_by_lead = await load_active_cadences_for_leads(
+            db,
+            tenant_id=tenant_id,
+            lead_ids=lead_ids,
+        )
+
+    replies = [
+        CadenceReplyEventResponse(
+            interaction_id=interaction.id,
+            lead=serialize_lead(
+                lead_map[interaction.lead_id],
+                active_cadences_by_lead=active_cadences_by_lead,
+            ),
+            channel=interaction.channel,
+            step_number=step_number,
+            replied_at=interaction.created_at,
+            intent=interaction.intent.value if interaction.intent else None,
+            reply_text=interaction.content_text,
+            reply_match_source=interaction.reply_match_source,
+        )
+        for interaction, step_number in reply_rows
+        if interaction.lead_id in lead_map
+    ]
+    audit = [
+        CadenceReplyAuditItemResponse(
+            interaction_id=interaction.id,
+            lead=serialize_lead(
+                lead_map[interaction.lead_id],
+                active_cadences_by_lead=active_cadences_by_lead,
+            ),
+            channel=interaction.channel,
+            created_at=interaction.created_at,
+            reply_match_status=(
+                "low_confidence"
+                if interaction.reply_match_source == _LOW_CONFIDENCE_EMAIL_REPLY_SOURCE
+                else interaction.reply_match_status or "unmatched"
+            ),
+            reply_match_source=interaction.reply_match_source,
+            reply_match_sent_cadence_count=interaction.reply_match_sent_cadence_count,
+            content_text=interaction.content_text,
+        )
+        for interaction in audit_items
+        if interaction.lead_id in lead_map
+    ]
+
+    return CadenceReplyManagementResponse(replies=replies, audit_items=audit)
 
 
 @router.post("/{cadence_id}/steps/{step_index}/compose", response_model=StepComposeResponse)

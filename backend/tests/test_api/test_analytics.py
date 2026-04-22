@@ -102,6 +102,10 @@ def _statement_param_count(statement: CompilableStatement, expected: object) -> 
     return sum(1 for value in compiled.params.values() if value == expected)
 
 
+def _compiled_sql(statement: CompilableStatement) -> str:
+    return str(statement.compile())
+
+
 async def test_get_cadences_overview_returns_real_metrics() -> None:
     tenant_id = uuid.uuid4()
     cadence_id = uuid.uuid4()
@@ -163,19 +167,21 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
     marker_since = datetime(2026, 3, 28, tzinfo=UTC)
 
     monkeypatch.setattr(analytics_routes, "_utc_days_ago", lambda days: marker_since)
-    monkeypatch.setattr(analytics_routes, "_sync_cadence_list_members", _fake_sync_cadence_list_members)
+    monkeypatch.setattr(
+        analytics_routes, "_sync_cadence_list_members", _fake_sync_cadence_list_members
+    )
 
     session = FakeAsyncSession(
         FakeResult(scalar_one_or_none_value=cadence),
         FakeResult(scalar_value=5),
         FakeResult(scalar_value=4),
-        FakeResult(one_value=SimpleNamespace(sent=2, replied=1, pending=1, skipped=0, failed=1)),
+        FakeResult(one_value=SimpleNamespace(sent=2, pending=1, skipped=0, failed=1)),
+        FakeResult(one_value=SimpleNamespace(replied=1)),
         FakeResult(
             all_values=[
                 SimpleNamespace(
                     channel=Channel.EMAIL,
                     sent=1,
-                    replied=0,
                     pending=1,
                     skipped=0,
                     failed=1,
@@ -183,7 +189,6 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
                 SimpleNamespace(
                     channel=Channel.LINKEDIN_DM,
                     sent=1,
-                    replied=1,
                     pending=0,
                     skipped=0,
                     failed=0,
@@ -192,11 +197,15 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
         ),
         FakeResult(
             all_values=[
+                SimpleNamespace(channel=Channel.LINKEDIN_DM, replied=1),
+            ]
+        ),
+        FakeResult(
+            all_values=[
                 SimpleNamespace(
                     step_number=1,
                     channel=Channel.EMAIL,
                     sent=1,
-                    replied=0,
                     pending=0,
                     skipped=0,
                     failed=0,
@@ -205,7 +214,6 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
                     step_number=2,
                     channel=Channel.LINKEDIN_DM,
                     sent=1,
-                    replied=1,
                     pending=0,
                     skipped=0,
                     failed=0,
@@ -214,7 +222,6 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
                     step_number=3,
                     channel=Channel.EMAIL,
                     sent=0,
-                    replied=0,
                     pending=1,
                     skipped=0,
                     failed=0,
@@ -223,11 +230,15 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
                     step_number=4,
                     channel=Channel.EMAIL,
                     sent=0,
-                    replied=0,
                     pending=0,
                     skipped=0,
                     failed=1,
                 ),
+            ]
+        ),
+        FakeResult(
+            all_values=[
+                SimpleNamespace(step_number=2, channel=Channel.LINKEDIN_DM, replied=1),
             ]
         ),
     )
@@ -264,6 +275,12 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
     assert _statement_contains_param(session.statements[3], marker_since)
     assert _statement_contains_param(session.statements[4], marker_since)
     assert _statement_contains_param(session.statements[5], marker_since)
+    assert _statement_contains_param(session.statements[6], marker_since)
+    assert _statement_contains_param(session.statements[7], marker_since)
+    assert _statement_contains_param(session.statements[8], marker_since)
+    assert _statement_contains_param(session.statements[4], "fallback_single_cadence")
+    assert _statement_contains_param(session.statements[6], "fallback_single_cadence")
+    assert _statement_contains_param(session.statements[8], "fallback_single_cadence")
 
 
 async def test_get_cadence_analytics_raises_404_when_missing() -> None:
@@ -298,7 +315,10 @@ async def test_get_cadence_analytics_syncs_legacy_list_members_before_counting(
         FakeResult(scalar_one_or_none_value=cadence),
         FakeResult(scalar_value=1),
         FakeResult(scalar_value=1),
-        FakeResult(one_value=SimpleNamespace(sent=0, replied=0, pending=1, skipped=0, failed=0)),
+        FakeResult(one_value=SimpleNamespace(sent=0, pending=1, skipped=0, failed=0)),
+        FakeResult(one_value=SimpleNamespace(replied=0)),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
         FakeResult(all_values=[]),
         FakeResult(all_values=[]),
     )
@@ -435,6 +455,11 @@ async def test_get_email_stats_filters_to_email_only_cadences(
         assert _statement_contains_param(statement, marker_since)
         assert _statement_contains_param(statement, "email_only")
 
+    assert "cadence_steps.id = interactions.cadence_step_id" in _compiled_sql(session.statements[0])
+    assert "cadence_steps.id = interactions.cadence_step_id" in _compiled_sql(session.statements[1])
+    assert "cadence_steps.id = interactions.cadence_step_id" in _compiled_sql(session.statements[2])
+    assert _statement_contains_param(session.statements[2], "fallback_single_cadence")
+
 
 async def test_get_email_cadences_stats_filters_to_email_only_cadences(
     monkeypatch: pytest.MonkeyPatch,
@@ -475,6 +500,9 @@ async def test_get_email_cadences_stats_filters_to_email_only_cadences(
     assert _statement_contains_param(session.statements[2], "email_only")
     assert _statement_contains_param(session.statements[3], "email_only")
     assert _statement_contains_param(session.statements[4], "email_only")
+    assert _statement_contains_param(session.statements[3], "fallback_single_cadence")
+    assert "interactions.cadence_step_id = cadence_steps.id" in _compiled_sql(session.statements[2])
+    assert "interactions.cadence_step_id = cadence_steps.id" in _compiled_sql(session.statements[3])
 
 
 async def test_get_email_over_time_maps_daily_series_and_inlines_day_bucket(
@@ -519,6 +547,115 @@ async def test_get_email_over_time_maps_daily_series_and_inlines_day_bucket(
     assert _statement_contains_param(session.statements[0], "email_only")
     assert _statement_contains_param(session.statements[1], "email_only")
     assert _statement_contains_param(session.statements[2], "email_only")
+    assert _statement_contains_param(session.statements[2], "fallback_single_cadence")
     assert _statement_param_count(session.statements[0], "day") == 0
     assert _statement_param_count(session.statements[1], "day") == 0
     assert _statement_param_count(session.statements[2], "day") == 0
+    assert "cadence_steps.id = interactions.cadence_step_id" in _compiled_sql(session.statements[0])
+    assert "cadence_steps.id = interactions.cadence_step_id" in _compiled_sql(session.statements[1])
+    assert "cadence_steps.id = interactions.cadence_step_id" in _compiled_sql(session.statements[2])
+
+
+async def test_dashboard_channel_recent_and_intent_queries_ignore_low_confidence_email_replies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker_today = datetime(2026, 4, 22, tzinfo=UTC)
+    marker_week = datetime(2026, 4, 15, tzinfo=UTC)
+    marker_period = datetime(2026, 4, 1, tzinfo=UTC)
+
+    def _fake_days_ago(days: int) -> datetime:
+        if days == 7:
+            return marker_week
+        if days == 30:
+            return marker_period
+        if days == 60:
+            return datetime(2026, 3, 1, tzinfo=UTC)
+        raise AssertionError(f"Unexpected days value: {days}")
+
+    monkeypatch.setattr(analytics_routes, "_utc_start_of_today", lambda: marker_today)
+    monkeypatch.setattr(analytics_routes, "_utc_days_ago", _fake_days_ago)
+
+    tenant_id = uuid.uuid4()
+
+    dashboard_session = FakeAsyncSession(
+        FakeResult(one_value=SimpleNamespace(total=10, in_cadence=4, converted=1, archived=0)),
+        FakeResult(one_value=SimpleNamespace(current=3, previous=2)),
+        FakeResult(one_value=SimpleNamespace(today=2, week=5, period=9, prev_period=7)),
+        FakeResult(one_value=SimpleNamespace(today=1, week=2, period=3, prev_period=1)),
+        FakeResult(one_value=SimpleNamespace(current=2, previous=1)),
+    )
+    dashboard = await analytics_routes.get_dashboard_stats(
+        days=30,
+        db=cast(AsyncSession, dashboard_session),
+        tenant_id=tenant_id,
+    )
+    assert dashboard.replies_period == 3
+    assert _statement_contains_param(dashboard_session.statements[3], "fallback_single_cadence")
+
+    channel_session = FakeAsyncSession(
+        FakeResult(all_values=[SimpleNamespace(channel=Channel.EMAIL, sent=5)]),
+        FakeResult(all_values=[SimpleNamespace(channel=Channel.EMAIL, replies=1)]),
+    )
+    channels = await analytics_routes.get_channel_breakdown(
+        days=30,
+        db=cast(AsyncSession, channel_session),
+        tenant_id=tenant_id,
+    )
+    assert channels[0].replies == 1
+    assert _statement_contains_param(channel_session.statements[1], "fallback_single_cadence")
+
+    recent_session = FakeAsyncSession(
+        FakeResult(
+            all_values=[
+                SimpleNamespace(
+                    id=uuid.uuid4(),
+                    channel=Channel.EMAIL,
+                    intent=None,
+                    created_at=marker_today,
+                    lead_id=uuid.uuid4(),
+                    lead_name="Adriano",
+                    company_name="Composto Web",
+                )
+            ]
+        )
+    )
+    recent = await analytics_routes.get_recent_replies(
+        limit=5,
+        db=cast(AsyncSession, recent_session),
+        tenant_id=tenant_id,
+    )
+    assert recent[0].lead_name == "Adriano"
+    assert _statement_contains_param(recent_session.statements[0], "fallback_single_cadence")
+
+    intent_session = FakeAsyncSession(
+        FakeResult(all_values=[SimpleNamespace(intent=SimpleNamespace(value="neutral"), cnt=2)])
+    )
+    intents = await analytics_routes.get_intent_breakdown(
+        days=30,
+        db=cast(AsyncSession, intent_session),
+        tenant_id=tenant_id,
+    )
+    assert intents[0].count == 2
+    assert _statement_contains_param(intent_session.statements[0], "fallback_single_cadence")
+
+
+async def test_get_email_ab_results_joins_outbound_opened_by_cadence_step_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker_since = datetime(2026, 3, 25, tzinfo=UTC)
+    monkeypatch.setattr(analytics_routes, "_utc_days_ago", lambda days: marker_since)
+
+    session = FakeAsyncSession(
+        FakeResult(all_values=[SimpleNamespace(subject_used="Variante A", sent=1)]),
+        FakeResult(all_values=[SimpleNamespace(subject_used="Variante A", opened=1)]),
+    )
+
+    await analytics_routes.get_email_ab_results(
+        cadence_id=uuid.uuid4(),
+        step_number=1,
+        days=7,
+        db=cast(AsyncSession, session),
+        tenant_id=uuid.uuid4(),
+    )
+
+    assert "interactions.cadence_step_id = cadence_steps.id" in _compiled_sql(session.statements[1])

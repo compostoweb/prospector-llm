@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Detecta o ambiente antes de instanciar Settings
@@ -227,10 +227,16 @@ class Settings(BaseSettings):
     LIMIT_EMAIL: int = 300
 
     # ── Cold Email / Tracking ─────────────────────────────────────────
-    TRACKING_BASE_URL: str = Field(
-        default="http://localhost:8000",
+    TRACKING_BASE_URL: str | None = Field(
+        default=None,
         description="URL pública da API — usada em pixels de rastreamento e links de unsubscribe",
     )
+
+    @model_validator(mode="after")
+    def apply_tracking_base_url_fallback(self) -> Settings:
+        if not self.TRACKING_BASE_URL:
+            self.TRACKING_BASE_URL = self.API_PUBLIC_URL
+        return self
 
     # ── Email Providers (Google OAuth direto para Gmail) ──────────────
     GOOGLE_CLIENT_ID_EMAIL: str | None = Field(

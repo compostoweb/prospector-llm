@@ -237,7 +237,15 @@ async def test_process_inbound_reply_pauses_remaining_steps_on_neutral_reply(
         scheduled_at=datetime.now(tz=UTC) + timedelta(hours=4),
         status=StepStatus.PENDING,
     )
-    db.add_all([lead, cadence, replied_step, pending_step])
+    outbound_interaction = Interaction(
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_step_id=replied_step.id,
+        channel=Channel.EMAIL,
+        direction="outbound",
+        email_message_id="<threaded-neutral@prospector.local>",
+    )
+    db.add_all([lead, cadence, replied_step, pending_step, outbound_interaction])
     await db.flush()
 
     parser_instance = MagicMock()
@@ -265,6 +273,7 @@ async def test_process_inbound_reply_pauses_remaining_steps_on_neutral_reply(
             channel=Channel.EMAIL,
             reply_text="Recebi aqui, obrigado.",
             external_message_id="msg_email_123",
+            reply_to_message_ids=["<threaded-neutral@prospector.local>"],
         )
 
     await db.refresh(replied_step)
@@ -275,6 +284,84 @@ async def test_process_inbound_reply_pauses_remaining_steps_on_neutral_reply(
     assert replied_step.status == StepStatus.REPLIED
     assert pending_step.status == StepStatus.SKIPPED
     assert lead.status == LeadStatus.IN_CADENCE
+
+
+async def test_process_inbound_reply_does_not_auto_match_email_without_reference_even_single_cadence(
+    db: AsyncSession,
+    tenant,
+) -> None:
+    lead = _make_lead(tenant.id)
+    cadence = Cadence(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Cadência Email",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+        llm_temperature=0.7,
+        llm_max_tokens=256,
+    )
+    sent_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence.id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        scheduled_at=datetime.now(tz=UTC) - timedelta(days=2),
+        sent_at=datetime.now(tz=UTC) - timedelta(hours=3),
+        status=StepStatus.SENT,
+    )
+    pending_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence.id,
+        channel=Channel.EMAIL,
+        step_number=2,
+        day_offset=1,
+        scheduled_at=datetime.now(tz=UTC) + timedelta(days=1),
+        status=StepStatus.PENDING,
+    )
+    db.add_all([lead, cadence, sent_step, pending_step])
+    await db.flush()
+
+    parser_instance = MagicMock()
+    parser_instance.classify = AsyncMock(
+        return_value={"intent": "NEUTRAL", "confidence": 0.66, "summary": "Mensagem genérica"}
+    )
+
+    with (
+        patch(
+            "services.inbound_message_service.resolve_tenant_llm_config",
+            new=AsyncMock(return_value=SimpleNamespace(provider="openai", model="gpt-5.4-mini")),
+        ),
+        patch("services.inbound_message_service.ReplyParser", return_value=parser_instance),
+        patch("api.routes.ws.broadcast_event", new=AsyncMock()),
+    ):
+        await process_inbound_reply(
+            db=db,
+            registry=MagicMock(),
+            tenant_id=tenant.id,
+            lead=lead,
+            channel=Channel.EMAIL,
+            reply_text="Backup realizado com sucesso.",
+            external_message_id="msg_email_unrelated",
+        )
+
+    await db.refresh(sent_step)
+    await db.refresh(pending_step)
+    interaction_result = await db.execute(
+        select(Interaction).where(Interaction.unipile_message_id == "msg_email_unrelated")
+    )
+    interaction = interaction_result.scalar_one()
+
+    assert sent_step.status == StepStatus.SENT
+    assert pending_step.status == StepStatus.PENDING
+    assert interaction.cadence_step_id is None
+    assert interaction.reply_match_status == "unmatched"
+    assert interaction.reply_match_source is None
 
 
 async def test_process_inbound_reply_matches_reply_to_exact_outbound_message(

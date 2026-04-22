@@ -37,8 +37,11 @@ const RECONNECT_DELAYS = [1_000, 2_000, 4_000, 8_000, 30_000] // backoff escalon
 const INVALIDATION_MAP: Partial<Record<WSEventType, string[][]>> = {
   "lead.replied": [
     ["leads"],
+    ["cadences"],
     ["dashboard", "stats"],
     ["analytics", "cadences", "overview"],
+    ["analytics", "cadences"],
+    ["analytics", "email"],
     ["analytics", "recent-replies"],
     ["analytics", "intents"],
     ["analytics", "channels"],
@@ -66,6 +69,7 @@ const INVALIDATION_MAP: Partial<Record<WSEventType, string[][]>> = {
     ["inbox", "conversations"],
     ["inbox", "messages"],
   ],
+  "inbound.reply_ambiguous": [["cadences"], ["analytics", "cadences"], ["analytics", "email"]],
   "inbox.chat_read": [["inbox", "conversations"]],
 }
 

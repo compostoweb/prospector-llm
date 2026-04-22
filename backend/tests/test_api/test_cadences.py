@@ -17,7 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.routes import cadences as cadence_routes
 from models.cadence_step import CadenceStep
 from models.email_template import EmailTemplate
-from models.enums import LeadSource, LeadStatus
+from models.enums import Channel, Intent, InteractionDirection, LeadSource, LeadStatus, StepStatus
+from models.interaction import Interaction
 from models.lead import Lead
 from models.lead_list import LeadList
 from models.tenant import TenantIntegration
@@ -274,6 +275,114 @@ async def test_get_cadence_delivery_budget(client: AsyncClient, monkeypatch: pyt
 async def test_get_cadence_not_found(client: AsyncClient):
     resp = await client.get(f"/cadences/{uuid.uuid4()}")
     assert resp.status_code == 404
+
+
+async def test_get_cadence_reply_management_returns_replies_and_audit_items(
+    client: AsyncClient,
+    db: AsyncSession,
+    tenant_id,
+) -> None:
+    created = await _create_cadence(client)
+    cadence_id = uuid.UUID(created["id"])
+
+    lead = Lead(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        name="Lead Respondeu",
+        company="Acme",
+        job_title="Founder",
+        email_corporate="lead@acme.com",
+        status=LeadStatus.IN_CADENCE,
+        source=LeadSource.MANUAL,
+    )
+    replied_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        cadence_id=cadence_id,
+        lead_id=lead.id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        use_voice=False,
+        status=StepStatus.REPLIED,
+        scheduled_at=datetime.now(UTC),
+        sent_at=datetime.now(UTC),
+    )
+    pending_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        cadence_id=cadence_id,
+        lead_id=lead.id,
+        channel=Channel.EMAIL,
+        step_number=2,
+        day_offset=2,
+        use_voice=False,
+        status=StepStatus.PENDING,
+        scheduled_at=datetime.now(UTC),
+    )
+    reply_interaction = Interaction(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        lead_id=lead.id,
+        cadence_step_id=replied_step.id,
+        channel=Channel.EMAIL,
+        direction=InteractionDirection.INBOUND,
+        content_text="Tenho interesse, vamos conversar.",
+        intent=Intent.INTEREST,
+        reply_match_status="matched",
+        reply_match_source="message_id",
+    )
+    audit_interaction = Interaction(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        lead_id=lead.id,
+        channel=Channel.EMAIL,
+        direction=InteractionDirection.INBOUND,
+        content_text="Respondi de outro fio.",
+        reply_match_status="ambiguous",
+        reply_match_source="lead_only",
+        reply_match_sent_cadence_count=2,
+    )
+    low_confidence_interaction = Interaction(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        lead_id=lead.id,
+        cadence_step_id=pending_step.id,
+        channel=Channel.EMAIL,
+        direction=InteractionDirection.INBOUND,
+        content_text="Backup realizado com sucesso.",
+        reply_match_status="matched",
+        reply_match_source="fallback_single_cadence",
+    )
+
+    db.add_all(
+        [
+            lead,
+            replied_step,
+            pending_step,
+            reply_interaction,
+            audit_interaction,
+            low_confidence_interaction,
+        ]
+    )
+    await db.commit()
+
+    resp = await client.get(f"/cadences/{created['id']}/reply-management")
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert len(data["replies"]) == 1
+    assert data["replies"][0]["lead"]["id"] == str(lead.id)
+    assert data["replies"][0]["step_number"] == 1
+    assert data["replies"][0]["reply_text"] == "Tenho interesse, vamos conversar."
+
+    assert len(data["audit_items"]) == 2
+    audit_statuses = {item["reply_match_status"] for item in data["audit_items"]}
+    assert audit_statuses == {"ambiguous", "low_confidence"}
+    low_confidence_item = next(
+        item for item in data["audit_items"] if item["reply_match_status"] == "low_confidence"
+    )
+    assert low_confidence_item["content_text"] == "Backup realizado com sucesso."
 
 
 async def test_list_template_variables(client: AsyncClient):

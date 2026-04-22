@@ -14,6 +14,7 @@ from typing import Literal
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from models.enums import CadenceMode, Channel, StepType
+from schemas.lead import LeadResponse
 
 # Combinações válidas: provider → lista de prefixos de model aceitos
 # Serve para validação básica — a lista completa vem da API dos providers
@@ -413,3 +414,30 @@ class CadenceDeliveryBudgetResponse(BaseModel):
     cadence_id: uuid.UUID
     generated_at: datetime
     items: list[CadenceDeliveryBudgetItemResponse] = Field(default_factory=list)
+
+
+class CadenceReplyEventResponse(BaseModel):
+    interaction_id: uuid.UUID
+    lead: LeadResponse
+    channel: Channel
+    step_number: int | None = None
+    replied_at: datetime
+    intent: str | None = None
+    reply_text: str | None = None
+    reply_match_source: str | None = None
+
+
+class CadenceReplyAuditItemResponse(BaseModel):
+    interaction_id: uuid.UUID
+    lead: LeadResponse
+    channel: Channel
+    created_at: datetime
+    reply_match_status: str
+    reply_match_source: str | None = None
+    reply_match_sent_cadence_count: int | None = None
+    content_text: str | None = None
+
+
+class CadenceReplyManagementResponse(BaseModel):
+    replies: list[CadenceReplyEventResponse] = Field(default_factory=list)
+    audit_items: list[CadenceReplyAuditItemResponse] = Field(default_factory=list)
