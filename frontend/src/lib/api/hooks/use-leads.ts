@@ -81,6 +81,7 @@ export interface LeadStep {
   id: string
   lead_id: string
   cadence_id: string
+  cadence_name: string | null
   step_number: number
   channel: string
   status:
@@ -123,9 +124,12 @@ export interface LeadInteraction {
     | "email_message_id"
     | "unipile_message_id"
     | "provider_thread_id"
+    | "email_subject"
     | "fallback_single_cadence"
+    | "manual_review"
     | null
   reply_match_sent_cadence_count: number | null
+  reply_reviewed_at: string | null
   opened: boolean
   created_at: string
 }
@@ -367,6 +371,76 @@ export function useLeadInteractions(leadId: string, pageSize = 50) {
       return data as LeadInteractionListResponse
     },
     enabled: !!session?.accessToken && !!leadId,
+  })
+}
+
+export function useReviewLeadReplyAudit() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      leadId,
+      interactionId,
+    }: {
+      leadId: string
+      interactionId: string
+      cadenceId?: string
+    }) => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.POST(
+        `/leads/${leadId}/interactions/${interactionId}/review-reply-audit` as never,
+      )
+      if (error) throw new Error("Falha ao marcar reply como revisado")
+      return data as LeadInteraction
+    },
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ["leads", variables.leadId, "interactions"] })
+      if (variables.cadenceId) {
+        void queryClient.invalidateQueries({
+          queryKey: ["cadences", variables.cadenceId, "reply-management"],
+        })
+      }
+    },
+  })
+}
+
+export function useLinkLeadReplyAudit() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      leadId,
+      interactionId,
+      cadenceStepId,
+    }: {
+      leadId: string
+      interactionId: string
+      cadenceStepId: string
+      cadenceId?: string
+    }) => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.POST(
+        `/leads/${leadId}/interactions/${interactionId}/link-reply-audit` as never,
+        {
+          body: { cadence_step_id: cadenceStepId } as never,
+        },
+      )
+      if (error) throw new Error("Falha ao vincular reply ao step selecionado")
+      return data as LeadInteraction
+    },
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ["leads", variables.leadId] })
+      void queryClient.invalidateQueries({ queryKey: ["leads", variables.leadId, "steps"] })
+      void queryClient.invalidateQueries({ queryKey: ["leads", variables.leadId, "interactions"] })
+      void queryClient.invalidateQueries({ queryKey: ["leads"] })
+      if (variables.cadenceId) {
+        void queryClient.invalidateQueries({
+          queryKey: ["cadences", variables.cadenceId, "reply-management"],
+        })
+      }
+    },
   })
 }
 

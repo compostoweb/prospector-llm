@@ -14,9 +14,10 @@ Responsabilidades:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base, TenantMixin
@@ -24,7 +25,7 @@ from models.enums import Channel, Intent, InteractionDirection
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Interaction(Base, TenantMixin):
@@ -81,6 +82,13 @@ class Interaction(Base, TenantMixin):
     reply_match_status: Mapped[str | None] = mapped_column(String(30), index=True)
     reply_match_source: Mapped[str | None] = mapped_column(String(50))
     reply_match_sent_cadence_count: Mapped[int | None] = mapped_column(Integer)
+    reply_reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+        index=True,
+        comment="Timestamp em que um reply auditável foi revisado manualmente.",
+    )
     opened: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     opened_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
@@ -96,7 +104,7 @@ class Interaction(Base, TenantMixin):
     )
 
     # Relacionamento com Lead (lazy para evitar N+1 desnecessário)
-    lead: Mapped["Lead"] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    lead: Mapped[Lead] = relationship(  # type: ignore[name-defined]  # noqa: F821
         "Lead",
         lazy="select",
     )

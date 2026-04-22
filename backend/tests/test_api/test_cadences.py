@@ -385,6 +385,58 @@ async def test_get_cadence_reply_management_returns_replies_and_audit_items(
     assert low_confidence_item["content_text"] == "Backup realizado com sucesso."
 
 
+async def test_get_cadence_reply_management_excludes_reviewed_audit_items(
+    client: AsyncClient,
+    db: AsyncSession,
+    tenant_id,
+) -> None:
+    created = await _create_cadence(client)
+    cadence_id = uuid.UUID(created["id"])
+
+    lead = Lead(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        name="Lead Revisado",
+        company="Acme",
+        job_title="Founder",
+        email_corporate="lead.reviewed@acme.com",
+        status=LeadStatus.IN_CADENCE,
+        source=LeadSource.MANUAL,
+    )
+    step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        cadence_id=cadence_id,
+        lead_id=lead.id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        use_voice=False,
+        status=StepStatus.SENT,
+        scheduled_at=datetime.now(UTC),
+        sent_at=datetime.now(UTC),
+    )
+    reviewed_audit = Interaction(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        lead_id=lead.id,
+        cadence_step_id=step.id,
+        channel=Channel.EMAIL,
+        direction=InteractionDirection.INBOUND,
+        content_text="Reply já tratado.",
+        reply_match_status="ambiguous",
+        reply_reviewed_at=datetime.now(UTC),
+    )
+
+    db.add_all([lead, step, reviewed_audit])
+    await db.commit()
+
+    resp = await client.get(f"/cadences/{created['id']}/reply-management")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["audit_items"] == []
+
+
 async def test_list_template_variables(client: AsyncClient):
     resp = await client.get("/cadences/template-variables")
     assert resp.status_code == 200

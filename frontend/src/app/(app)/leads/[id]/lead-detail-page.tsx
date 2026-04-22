@@ -334,6 +334,7 @@ export default function LeadDetailPage() {
               </CardHeader>
               <CardContent>
                 <LeadReplyAudit
+                  lead={lead}
                   interactions={interactions?.items ?? []}
                   isLoading={loadingInteractions}
                 />

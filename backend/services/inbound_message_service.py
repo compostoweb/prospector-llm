@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 
@@ -17,12 +18,18 @@ from models.lead_email import LeadEmail
 from models.linkedin_account import LinkedInAccount
 from models.tenant import Tenant, TenantIntegration
 from services.llm_config import resolve_tenant_llm_config
+from services.message_quality import normalize_email_subject
+from services.reply_matching import reply_candidate_step_channels
 from services.reply_parser import ReplyParser
 
 logger = structlog.get_logger()
 
 _LINKEDIN_ACCOUNT_TYPE = "LINKEDIN"
 _EMAIL_ACCOUNT_TYPE = "GMAIL"
+_EMAIL_REPLY_SUBJECT_PREFIX_RE = re.compile(
+    r"^(?:(?:re|fw|fwd|aw|res)\s*:\s*)+",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,6 +197,7 @@ async def process_inbound_reply(
     external_message_id: str | None,
     reply_to_message_ids: list[str] | None = None,
     provider_thread_id: str | None = None,
+    inbound_subject: str | None = None,
 ) -> InboundReplyResult:
     llm_config = await resolve_tenant_llm_config(db, lead.tenant_id)
     parser = ReplyParser(
@@ -218,6 +226,7 @@ async def process_inbound_reply(
         channel=channel,
         reply_to_message_ids=reply_to_message_ids or [],
         provider_thread_id=provider_thread_id,
+        inbound_subject=inbound_subject,
     )
     replied_step = reply_resolution.step
 
@@ -326,6 +335,7 @@ async def resolve_replied_step_for_inbound_message(
     channel: Channel,
     reply_to_message_ids: list[str],
     provider_thread_id: str | None,
+    inbound_subject: str | None = None,
 ) -> RepliedStepResolution:
     matched_step, matched_via = await _resolve_step_from_outbound_interaction(
         db=db,
@@ -343,6 +353,21 @@ async def resolve_replied_step_for_inbound_message(
             match_status="matched",
             matched_via=matched_via,
         )
+
+    subject_resolution = await _resolve_email_step_from_subject(
+        db=db,
+        tenant_id=tenant_id,
+        lead_id=lead_id,
+        channel=channel,
+        inbound_subject=inbound_subject,
+    )
+    if subject_resolution is not None:
+        if (
+            subject_resolution.step is not None
+            and subject_resolution.step.status == StepStatus.SENT
+        ):
+            subject_resolution.step.status = StepStatus.REPLIED
+        return subject_resolution
 
     return await _resolve_fallback_step_for_reply(
         lead_id=lead_id,
@@ -442,6 +467,72 @@ async def _resolve_step_from_outbound_interaction(
     return None, None
 
 
+async def _resolve_email_step_from_subject(
+    *,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    lead_id: uuid.UUID,
+    channel: Channel,
+    inbound_subject: str | None,
+) -> RepliedStepResolution | None:
+    if channel != Channel.EMAIL:
+        return None
+
+    normalized_subject = _normalize_email_subject_for_matching(inbound_subject)
+    if not normalized_subject:
+        return None
+
+    result = await db.execute(
+        select(CadenceStep)
+        .where(
+            CadenceStep.lead_id == lead_id,
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.channel == Channel.EMAIL,
+            CadenceStep.status == StepStatus.SENT,
+        )
+        .order_by(CadenceStep.sent_at.desc().nulls_last(), CadenceStep.scheduled_at.desc())
+    )
+    subject_matches = [
+        step
+        for step in result.scalars().all()
+        if _normalize_email_subject_for_matching(step.subject_used or step.composed_subject)
+        == normalized_subject
+    ]
+    if not subject_matches:
+        return None
+
+    if len(subject_matches) == 1:
+        return RepliedStepResolution(
+            step=subject_matches[0],
+            match_status="matched",
+            matched_via="email_subject",
+        )
+
+    cadence_ids = {step.cadence_id for step in subject_matches}
+    if len(cadence_ids) > 1:
+        logger.warning(
+            "inbound.reply.subject_ambiguous",
+            tenant_id=str(tenant_id),
+            lead_id=str(lead_id),
+            subject_match_count=len(subject_matches),
+            sent_cadence_count=len(cadence_ids),
+        )
+        return RepliedStepResolution(
+            step=None,
+            ambiguous=True,
+            sent_cadence_count=len(cadence_ids),
+            match_status="ambiguous",
+        )
+
+    logger.info(
+        "inbound.reply.subject_non_unique",
+        tenant_id=str(tenant_id),
+        lead_id=str(lead_id),
+        subject_match_count=len(subject_matches),
+    )
+    return None
+
+
 async def _load_step_by_id(
     db: AsyncSession,
     cadence_step_id: uuid.UUID,
@@ -519,6 +610,20 @@ def _normalize_email_message_id(value: str | None) -> str:
     if normalized.startswith("<") and normalized.endswith(">"):
         normalized = normalized[1:-1].strip()
     return normalized
+
+
+def _normalize_email_subject_for_matching(subject: str | None) -> str:
+    normalized = normalize_email_subject(subject or "")
+    if not normalized:
+        return ""
+
+    while True:
+        stripped = _EMAIL_REPLY_SUBJECT_PREFIX_RE.sub("", normalized).strip()
+        if stripped == normalized:
+            break
+        normalized = stripped
+
+    return normalize_email_subject(normalized)
 
 
 async def _load_unipile_account_matches(
@@ -617,6 +722,4 @@ def _filter_matches(
 
 
 def _step_channels_for_inbound_channel(channel: Channel) -> tuple[Channel, ...]:
-    if channel == Channel.LINKEDIN_DM:
-        return (Channel.LINKEDIN_DM, Channel.LINKEDIN_CONNECT)
-    return (channel,)
+    return reply_candidate_step_channels(channel)

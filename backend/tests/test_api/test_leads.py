@@ -329,6 +329,133 @@ async def test_list_interactions_includes_reply_audit_fields(
     item = resp.json()["items"][0]
     assert item["reply_match_status"] == "ambiguous"
     assert item["reply_match_sent_cadence_count"] == 2
+    assert item["reply_reviewed_at"] is None
+
+
+async def test_review_lead_reply_audit_marks_interaction_as_reviewed(
+    client: AsyncClient,
+    db: AsyncSession,
+):
+    created = (
+        await client.post(
+            "/leads", json=_lead_payload(linkedin_url="https://linkedin.com/in/review-reply-audit")
+        )
+    ).json()
+
+    interaction = Interaction(
+        tenant_id=uuid.UUID(created["tenant_id"]),
+        lead_id=uuid.UUID(created["id"]),
+        channel=Channel.EMAIL,
+        direction="inbound",
+        content_text="Recebi aqui, mas não sei a qual cadência pertence.",
+        reply_match_status="ambiguous",
+        reply_match_sent_cadence_count=2,
+    )
+    db.add(interaction)
+    await db.commit()
+
+    resp = await client.post(
+        f"/leads/{created['id']}/interactions/{interaction.id}/review-reply-audit"
+    )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["id"] == str(interaction.id)
+    assert data["reply_reviewed_at"] is not None
+
+    await db.refresh(interaction)
+    assert interaction.reply_reviewed_at is not None
+
+
+async def test_link_lead_reply_audit_links_interaction_and_skips_remaining_steps(
+    client: AsyncClient,
+    db: AsyncSession,
+):
+    created = (
+        await client.post(
+            "/leads", json=_lead_payload(linkedin_url="https://linkedin.com/in/link-reply-audit")
+        )
+    ).json()
+
+    lead_id = uuid.UUID(created["id"])
+    tenant_id = uuid.UUID(created["tenant_id"])
+
+    cadence = Cadence(
+        tenant_id=tenant_id,
+        name="Cadência Link Manual",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    db.add(cadence)
+    await db.flush()
+
+    replied_step = CadenceStep(
+        tenant_id=tenant_id,
+        cadence_id=cadence.id,
+        lead_id=lead_id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        use_voice=False,
+        status=StepStatus.SENT,
+        scheduled_at=datetime.now(tz=UTC),
+        sent_at=datetime.now(tz=UTC),
+    )
+    pending_step = CadenceStep(
+        tenant_id=tenant_id,
+        cadence_id=cadence.id,
+        lead_id=lead_id,
+        channel=Channel.EMAIL,
+        step_number=2,
+        day_offset=1,
+        use_voice=False,
+        status=StepStatus.PENDING,
+        scheduled_at=datetime.now(tz=UTC),
+        sent_at=None,
+    )
+    db.add_all([replied_step, pending_step])
+    await db.flush()
+
+    interaction = Interaction(
+        tenant_id=tenant_id,
+        lead_id=lead_id,
+        channel=Channel.EMAIL,
+        direction="inbound",
+        content_text="Sim, quero entender melhor.",
+        intent="interest",
+        reply_match_status="ambiguous",
+        reply_match_sent_cadence_count=2,
+    )
+    db.add(interaction)
+    await db.commit()
+
+    resp = await client.post(
+        f"/leads/{created['id']}/interactions/{interaction.id}/link-reply-audit",
+        json={"cadence_step_id": str(replied_step.id)},
+    )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["id"] == str(interaction.id)
+    assert data["cadence_step_id"] == str(replied_step.id)
+    assert data["reply_match_status"] == "matched"
+    assert data["reply_match_source"] == "manual_review"
+    assert data["reply_reviewed_at"] is not None
+
+    await db.refresh(interaction)
+    await db.refresh(replied_step)
+    await db.refresh(pending_step)
+
+    lead = await db.get(Lead, lead_id)
+    assert lead is not None
+    assert interaction.cadence_step_id == replied_step.id
+    assert interaction.reply_match_status == "matched"
+    assert interaction.reply_match_source == "manual_review"
+    assert interaction.reply_reviewed_at is not None
+    assert replied_step.status == StepStatus.REPLIED
+    assert pending_step.status == StepStatus.SKIPPED
+    assert lead.status == LeadStatus.CONVERTED
 
 
 async def test_list_lead_steps_matches_interactions_by_cadence_step_id(

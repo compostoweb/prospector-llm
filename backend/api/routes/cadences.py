@@ -68,13 +68,16 @@ from services.message_template_renderer import (
     render_message_template,
     render_saved_email_template,
 )
+from services.reply_matching import (
+    LOW_CONFIDENCE_EMAIL_REPLY_SOURCE,
+    pending_reply_audit_interaction_condition,
+)
 from services.test_email_service import send_test_email
 
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/cadences", tags=["Cadences"])
 _cadence_manager = CadenceManager()
-_LOW_CONFIDENCE_EMAIL_REPLY_SOURCE = "fallback_single_cadence"
 
 
 @router.get("/template-variables", response_model=list[TemplateVariableResponse])
@@ -225,7 +228,7 @@ async def get_cadence_reply_management(
             Interaction.direction == InteractionDirection.INBOUND,
             ~(
                 (Interaction.channel == Channel.EMAIL)
-                & (Interaction.reply_match_source == _LOW_CONFIDENCE_EMAIL_REPLY_SOURCE)
+                & (Interaction.reply_match_source == LOW_CONFIDENCE_EMAIL_REPLY_SOURCE)
             ),
             CadenceStep.tenant_id == tenant_id,
             CadenceStep.cadence_id == cadence_id,
@@ -245,14 +248,7 @@ async def get_cadence_reply_management(
         select(Interaction)
         .where(
             Interaction.tenant_id == tenant_id,
-            Interaction.direction == InteractionDirection.INBOUND,
-            (
-                Interaction.reply_match_status.in_(["ambiguous", "unmatched"])
-                | (
-                    (Interaction.channel == Channel.EMAIL)
-                    & (Interaction.reply_match_source == _LOW_CONFIDENCE_EMAIL_REPLY_SOURCE)
-                )
-            ),
+            pending_reply_audit_interaction_condition(),
             cadence_lead_exists,
         )
         .order_by(Interaction.created_at.desc())
@@ -310,7 +306,7 @@ async def get_cadence_reply_management(
             created_at=interaction.created_at,
             reply_match_status=(
                 "low_confidence"
-                if interaction.reply_match_source == _LOW_CONFIDENCE_EMAIL_REPLY_SOURCE
+                if interaction.reply_match_source == LOW_CONFIDENCE_EMAIL_REPLY_SOURCE
                 else interaction.reply_match_status or "unmatched"
             ),
             reply_match_source=interaction.reply_match_source,

@@ -685,6 +685,7 @@ async def _process_email_reply(
                 external_message_id=message_id,
                 reply_to_message_ids=reply_reference_ids or [],
                 provider_thread_id=provider_thread_id,
+                inbound_subject=subject or None,
             )
         finally:
             from integrations.llm.base import close_async_resource

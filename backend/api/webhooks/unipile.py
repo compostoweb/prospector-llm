@@ -419,6 +419,7 @@ async def _handle_message_received(
         external_message_id=unipile_message_id or None,
         reply_to_message_ids=reply_to_message_ids,
         provider_thread_id=provider_thread_id,
+        inbound_subject=subject or None,
     )
 
     if result.intent == Intent.NOT_INTERESTED:

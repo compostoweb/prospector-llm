@@ -17,7 +17,7 @@ Endpoints:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from importlib import import_module
 from typing import Annotated, Any, cast
 
@@ -30,12 +30,16 @@ from sqlalchemy.orm import selectinload
 from api.dependencies import get_effective_tenant_id, get_session_flexible
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
-from models.enums import Channel, LeadSource, LeadStatus, StepStatus
+from models.enums import Channel, Intent, LeadSource, LeadStatus, StepStatus
 from models.interaction import Interaction
 from models.lead import Lead
 from models.lead_list import LeadList
 from models.manual_task import ManualTask
-from schemas.interaction import InteractionListResponse, InteractionResponse
+from schemas.interaction import (
+    InteractionLinkReplyAuditRequest,
+    InteractionListResponse,
+    InteractionResponse,
+)
 from schemas.lead import (
     LeadCreateRequest,
     LeadEnrollRequest,
@@ -53,6 +57,7 @@ from schemas.lead import (
     LeadUpdateRequest,
 )
 from services.cadence_manager import CadenceManager, get_template_step_config
+from services.inbound_message_service import pause_remaining_cadence_steps_after_reply
 from services.lead_generation import preview_generated_leads
 from services.lead_management import (
     additional_lead_email_specs,
@@ -70,7 +75,12 @@ from services.lead_management import (
     serialize_lead,
 )
 from services.lead_scorer import lead_scorer
-from services.reply_matching import is_reliable_reply_interaction
+from services.reply_matching import (
+    MANUAL_REVIEW_REPLY_SOURCE,
+    is_pending_reply_audit_interaction,
+    is_reliable_reply_interaction,
+    reply_candidate_step_channels,
+)
 
 logger = structlog.get_logger()
 
@@ -578,6 +588,158 @@ async def list_lead_interactions(
     )
 
 
+@router.post(
+    "/{lead_id}/interactions/{interaction_id}/review-reply-audit",
+    response_model=InteractionResponse,
+)
+async def review_lead_reply_audit(
+    lead_id: uuid.UUID,
+    interaction_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> InteractionResponse:
+    await _get_lead_or_404(lead_id, tenant_id, db)
+
+    result = await db.execute(
+        select(Interaction).where(
+            Interaction.id == interaction_id,
+            Interaction.lead_id == lead_id,
+            Interaction.tenant_id == tenant_id,
+        )
+    )
+    interaction = result.scalar_one_or_none()
+    if interaction is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Interação não encontrada para este lead.",
+        )
+
+    if interaction.reply_reviewed_at is not None:
+        return InteractionResponse.model_validate(interaction)
+
+    if not is_pending_reply_audit_interaction(interaction):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Esta interação não está pendente de auditoria.",
+        )
+
+    interaction.reply_reviewed_at = datetime.now(UTC)
+    await db.commit()
+    await db.refresh(interaction)
+
+    logger.info(
+        "lead.reply_audit_reviewed",
+        lead_id=str(lead_id),
+        interaction_id=str(interaction_id),
+        tenant_id=str(tenant_id),
+    )
+    return InteractionResponse.model_validate(interaction)
+
+
+@router.post(
+    "/{lead_id}/interactions/{interaction_id}/link-reply-audit",
+    response_model=InteractionResponse,
+)
+async def link_lead_reply_audit(
+    lead_id: uuid.UUID,
+    interaction_id: uuid.UUID,
+    body: InteractionLinkReplyAuditRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> InteractionResponse:
+    lead = await _get_lead_or_404(lead_id, tenant_id, db)
+
+    interaction_result = await db.execute(
+        select(Interaction).where(
+            Interaction.id == interaction_id,
+            Interaction.lead_id == lead_id,
+            Interaction.tenant_id == tenant_id,
+        )
+    )
+    interaction = interaction_result.scalar_one_or_none()
+    if interaction is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Interação não encontrada para este lead.",
+        )
+
+    if (
+        interaction.reply_match_status == "matched"
+        and interaction.cadence_step_id == body.cadence_step_id
+        and interaction.reply_match_source == MANUAL_REVIEW_REPLY_SOURCE
+    ):
+        return InteractionResponse.model_validate(interaction)
+
+    if not is_pending_reply_audit_interaction(interaction):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Esta interação não está pendente de auditoria.",
+        )
+
+    step_result = await db.execute(
+        select(CadenceStep).where(
+            CadenceStep.id == body.cadence_step_id,
+            CadenceStep.lead_id == lead_id,
+            CadenceStep.tenant_id == tenant_id,
+        )
+    )
+    step = step_result.scalar_one_or_none()
+    if step is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Step não encontrado para este lead.",
+        )
+
+    allowed_channels = reply_candidate_step_channels(interaction.channel)
+    if step.channel not in allowed_channels:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Este step não é compatível com o canal do inbound selecionado.",
+        )
+
+    if step.sent_at is None and step.status != StepStatus.REPLIED:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Somente steps já enviados podem receber vínculo manual de reply.",
+        )
+
+    interaction.cadence_step_id = step.id
+    interaction.reply_match_status = "matched"
+    interaction.reply_match_source = MANUAL_REVIEW_REPLY_SOURCE
+    interaction.reply_match_sent_cadence_count = None
+    interaction.reply_reviewed_at = datetime.now(UTC)
+
+    if step.status == StepStatus.SENT:
+        step.status = StepStatus.REPLIED
+
+    paused_steps = await pause_remaining_cadence_steps_after_reply(
+        db=db,
+        tenant_id=tenant_id,
+        lead_id=lead_id,
+        cadence_id=step.cadence_id,
+        replied_step_id=step.id,
+    )
+
+    if interaction.intent == Intent.INTEREST:
+        lead.status = LeadStatus.CONVERTED
+    elif interaction.intent == Intent.NOT_INTERESTED:
+        lead.status = LeadStatus.ARCHIVED
+
+    await db.commit()
+    await db.refresh(interaction)
+
+    logger.info(
+        "lead.reply_audit_linked",
+        lead_id=str(lead_id),
+        interaction_id=str(interaction_id),
+        cadence_step_id=str(step.id),
+        cadence_id=str(step.cadence_id),
+        paused_steps=paused_steps,
+        tenant_id=str(tenant_id),
+    )
+    return InteractionResponse.model_validate(interaction)
+
+
 # ── Steps de cadência (timeline) ──────────────────────────────────────
 
 
@@ -667,6 +829,7 @@ async def list_lead_steps(
                     id=step.id,
                     lead_id=step.lead_id,
                     cadence_id=step.cadence_id,
+                    cadence_name=cadence.name if cadence else None,
                     step_number=step.step_number,
                     channel=ch,
                     status=display_status.value,
@@ -703,6 +866,7 @@ async def list_lead_steps(
                     id=task.id,
                     lead_id=task.lead_id,
                     cadence_id=task.cadence_id,
+                    cadence_name=cadence.name if cadence else None,
                     step_number=task.step_number,
                     channel=task.channel.value,
                     status=task.status.value,

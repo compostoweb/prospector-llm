@@ -1,12 +1,14 @@
 "use client"
 
+import { useMemo } from "react"
 import Link from "next/link"
 import { AlertTriangle, History, MessageSquare, ShieldAlert, Workflow } from "lucide-react"
 import { BadgeChannel } from "@/components/shared/badge-channel"
 import { EmptyState } from "@/components/shared/empty-state"
+import { ReplyMatchSourceBadge } from "@/components/replies/reply-match-source-badge"
+import { ReplyAuditTable, type ReplyAuditTableItem } from "@/components/replies/reply-audit-table"
 import {
   useCadenceReplyManagement,
-  type CadenceReplyAuditItem,
   type CadenceReplyEvent,
 } from "@/lib/api/hooks/use-cadence-analytics"
 import { formatRelativeTime } from "@/lib/utils"
@@ -21,18 +23,6 @@ interface ReplyLeadSummary {
   eventCount: number
   channels: string[]
   steps: number[]
-}
-
-const statusLabel: Record<CadenceReplyAuditItem["reply_match_status"], string> = {
-  ambiguous: "Ambíguo",
-  unmatched: "Sem vínculo automático",
-  low_confidence: "Vínculo fraco",
-}
-
-const statusClass: Record<CadenceReplyAuditItem["reply_match_status"], string> = {
-  ambiguous: "border-(--warning) bg-(--warning-subtle) text-(--warning-subtle-fg)",
-  unmatched: "border-(--border-default) bg-(--bg-overlay) text-(--text-secondary)",
-  low_confidence: "border-(--info) bg-(--info-subtle) text-(--info-subtle-fg)",
 }
 
 const intentLabel: Record<string, string> = {
@@ -78,9 +68,28 @@ function renderLeadSubtitle(summary: ReplyLeadSummary): string {
 
 export function CadenceReplyManagement({ cadenceId }: CadenceReplyManagementProps) {
   const query = useCadenceReplyManagement(cadenceId)
-  const replies = query.data?.replies ?? []
-  const auditItems = query.data?.audit_items ?? []
+  const replies = useMemo(() => query.data?.replies ?? [], [query.data?.replies])
+  const auditItems = useMemo(() => query.data?.audit_items ?? [], [query.data?.audit_items])
   const replyLeadSummaries = buildReplyLeadSummaries(replies)
+  const normalizedAuditItems = useMemo<ReplyAuditTableItem[]>(
+    () =>
+      auditItems.map((item) => ({
+        interactionId: item.interaction_id,
+        leadId: item.lead.id,
+        leadName: item.lead.name,
+        leadCompany: item.lead.company,
+        leadJobTitle: item.lead.job_title,
+        leadHasMultipleActiveCadences: item.lead.has_multiple_active_cadences,
+        leadActiveCadenceCount: item.lead.active_cadence_count,
+        channel: item.channel,
+        createdAt: item.created_at,
+        replyMatchStatus: item.reply_match_status,
+        replyMatchSource: item.reply_match_source,
+        replyMatchSentCadenceCount: item.reply_match_sent_cadence_count,
+        contentText: item.content_text,
+      })),
+    [auditItems],
+  )
 
   return (
     <div className="space-y-6">
@@ -201,6 +210,9 @@ export function CadenceReplyManagement({ cadenceId }: CadenceReplyManagementProp
                     </div>
 
                     <div className="flex shrink-0 flex-wrap items-center gap-2">
+                      {latestReply.reply_match_source === "email_subject" ? (
+                        <ReplyMatchSourceBadge source={latestReply.reply_match_source} short />
+                      ) : null}
                       {summary.channels.map((channel) => (
                         <BadgeChannel key={`${summary.lead.id}-${channel}`} channel={channel} />
                       ))}
@@ -231,8 +243,8 @@ export function CadenceReplyManagement({ cadenceId }: CadenceReplyManagementProp
           <div>
             <h2 className="text-sm font-semibold text-(--text-primary)">Auditoria de replies</h2>
             <p className="text-xs text-(--text-secondary)">
-              Esta é a tela central de gestão para replies ambíguos ou sem vínculo automático desta
-              cadência.
+              Visualize a fila em formato compacto e abra o detalhe apenas quando precisar tratar um
+              inbound específico.
             </p>
           </div>
         </div>
@@ -251,54 +263,12 @@ export function CadenceReplyManagement({ cadenceId }: CadenceReplyManagementProp
             className="px-4 py-10"
           />
         ) : (
-          <div className="space-y-3">
-            {auditItems.map((item) => (
-              <article
-                key={item.interaction_id}
-                className="rounded-lg border border-(--border-subtle) bg-(--bg-overlay) p-4"
-              >
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Link
-                        href={`/leads/${item.lead.id}`}
-                        className="text-sm font-semibold text-(--text-primary) transition-colors hover:text-(--accent)"
-                      >
-                        {item.lead.name}
-                      </Link>
-                      <BadgeChannel channel={item.channel} />
-                      <span
-                        className={`inline-flex items-center gap-1 rounded-(--radius-full) border px-2 py-0.5 text-xs font-medium ${statusClass[item.reply_match_status]}`}
-                      >
-                        <AlertTriangle size={12} aria-hidden="true" />
-                        {statusLabel[item.reply_match_status]}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3 text-xs text-(--text-tertiary)">
-                      <time dateTime={item.created_at}>{formatRelativeTime(item.created_at)}</time>
-                      {item.reply_match_source ? (
-                        <span>Fonte: {item.reply_match_source}</span>
-                      ) : null}
-                      {item.reply_match_sent_cadence_count != null ? (
-                        <span>Cadências candidatas: {item.reply_match_sent_cadence_count}</span>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <Link
-                    href={`/leads/${item.lead.id}`}
-                    className="inline-flex items-center rounded-lg border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-sm font-medium text-(--text-primary) transition-colors hover:border-(--accent) hover:text-(--accent)"
-                  >
-                    Revisar lead
-                  </Link>
-                </div>
-
-                <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-(--text-secondary)">
-                  {item.content_text || "Sem conteúdo textual disponível."}
-                </p>
-              </article>
-            ))}
-          </div>
+          <ReplyAuditTable
+            items={normalizedAuditItems}
+            cadenceId={cadenceId}
+            emptyTitle="Nenhum reply pendente de auditoria"
+            emptyDescription="Quando um inbound ficar ambíguo ou sem vínculo automático para esta base, ele aparecerá aqui."
+          />
         )}
       </section>
     </div>

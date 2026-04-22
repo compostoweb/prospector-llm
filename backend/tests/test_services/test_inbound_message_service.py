@@ -643,3 +643,171 @@ async def test_process_inbound_reply_broadcasts_alert_when_reply_is_ambiguous(
     assert interaction.reply_match_status == "ambiguous"
     assert interaction.reply_match_sent_cadence_count == 2
     assert lead.status == LeadStatus.IN_CADENCE
+
+
+async def test_process_inbound_reply_matches_email_by_subject_when_unique(
+    db: AsyncSession,
+    tenant,
+) -> None:
+    lead = _make_lead(tenant.id)
+    cadence_a = Cadence(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Cadência A",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    cadence_b = Cadence(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Cadência B",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    target_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence_a.id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        scheduled_at=datetime.now(tz=UTC) - timedelta(days=2),
+        sent_at=datetime.now(tz=UTC) - timedelta(hours=5),
+        status=StepStatus.SENT,
+        subject_used="Acme: processo manual ou automatizado?",
+    )
+    other_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence_b.id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        scheduled_at=datetime.now(tz=UTC) - timedelta(days=1),
+        sent_at=datetime.now(tz=UTC) - timedelta(hours=2),
+        status=StepStatus.SENT,
+        subject_used="Novo angulo sobre esse processo",
+    )
+    db.add_all([lead, cadence_a, cadence_b, target_step, other_step])
+    await db.flush()
+
+    parser_instance = MagicMock()
+    parser_instance.classify = AsyncMock(
+        return_value={"intent": "NEUTRAL", "confidence": 0.74, "summary": "Resposta direta"}
+    )
+
+    with (
+        patch(
+            "services.inbound_message_service.resolve_tenant_llm_config",
+            new=AsyncMock(return_value=SimpleNamespace(provider="openai", model="gpt-5.4-mini")),
+        ),
+        patch("services.inbound_message_service.ReplyParser", return_value=parser_instance),
+        patch("api.routes.ws.broadcast_event", new=AsyncMock()),
+    ):
+        await process_inbound_reply(
+            db=db,
+            registry=MagicMock(),
+            tenant_id=tenant.id,
+            lead=lead,
+            channel=Channel.EMAIL,
+            reply_text="Respondendo pelo assunto.",
+            external_message_id="reply_msg_subject_1",
+            inbound_subject="Re: Acme: processo manual ou automatizado?",
+        )
+
+    await db.refresh(target_step)
+    await db.refresh(other_step)
+    interaction_result = await db.execute(
+        select(Interaction).where(Interaction.unipile_message_id == "reply_msg_subject_1")
+    )
+    interaction = interaction_result.scalar_one()
+
+    assert target_step.status == StepStatus.REPLIED
+    assert other_step.status == StepStatus.SENT
+    assert interaction.cadence_step_id == target_step.id
+    assert interaction.reply_match_status == "matched"
+    assert interaction.reply_match_source == "email_subject"
+
+
+async def test_process_inbound_reply_does_not_match_email_by_subject_when_non_unique_same_cadence(
+    db: AsyncSession,
+    tenant,
+) -> None:
+    lead = _make_lead(tenant.id)
+    cadence = Cadence(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Cadência Email",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    first_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence.id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        scheduled_at=datetime.now(tz=UTC) - timedelta(days=3),
+        sent_at=datetime.now(tz=UTC) - timedelta(days=2),
+        status=StepStatus.SENT,
+        subject_used="Acme: processo manual ou automatizado?",
+    )
+    second_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence.id,
+        channel=Channel.EMAIL,
+        step_number=2,
+        day_offset=1,
+        scheduled_at=datetime.now(tz=UTC) - timedelta(days=2),
+        sent_at=datetime.now(tz=UTC) - timedelta(hours=6),
+        status=StepStatus.SENT,
+        subject_used="Acme: processo manual ou automatizado?",
+    )
+    db.add_all([lead, cadence, first_step, second_step])
+    await db.flush()
+
+    parser_instance = MagicMock()
+    parser_instance.classify = AsyncMock(
+        return_value={"intent": "NEUTRAL", "confidence": 0.68, "summary": "Resposta curta"}
+    )
+
+    with (
+        patch(
+            "services.inbound_message_service.resolve_tenant_llm_config",
+            new=AsyncMock(return_value=SimpleNamespace(provider="openai", model="gpt-5.4-mini")),
+        ),
+        patch("services.inbound_message_service.ReplyParser", return_value=parser_instance),
+        patch("api.routes.ws.broadcast_event", new=AsyncMock()),
+    ):
+        await process_inbound_reply(
+            db=db,
+            registry=MagicMock(),
+            tenant_id=tenant.id,
+            lead=lead,
+            channel=Channel.EMAIL,
+            reply_text="Respondendo sem referência forte.",
+            external_message_id="reply_msg_subject_2",
+            inbound_subject="Re: Acme: processo manual ou automatizado?",
+        )
+
+    await db.refresh(first_step)
+    await db.refresh(second_step)
+    interaction_result = await db.execute(
+        select(Interaction).where(Interaction.unipile_message_id == "reply_msg_subject_2")
+    )
+    interaction = interaction_result.scalar_one()
+
+    assert first_step.status == StepStatus.SENT
+    assert second_step.status == StepStatus.SENT
+    assert interaction.cadence_step_id is None
+    assert interaction.reply_match_status == "unmatched"
+    assert interaction.reply_match_source is None

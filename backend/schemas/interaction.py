@@ -24,7 +24,7 @@ class InteractionResponse(BaseModel):
     tenant_id: uuid.UUID
     cadence_step_id: uuid.UUID | None
     channel: Channel
-    direction: str           # "outbound" | "inbound"
+    direction: str  # "outbound" | "inbound"
     content_text: str | None
     content_audio_url: str | None
     intent: Intent | None
@@ -34,11 +34,19 @@ class InteractionResponse(BaseModel):
     reply_match_status: str | None
     reply_match_source: str | None
     reply_match_sent_cadence_count: int | None
+    reply_reviewed_at: datetime | None
     opened: bool
     created_at: datetime
 
 
+class InteractionLinkReplyAuditRequest(BaseModel):
+    """Payload para vincular manualmente um reply auditado a um cadence step."""
+
+    cadence_step_id: uuid.UUID
+
+
 class InteractionListResponse(BaseModel):
     """Paginação de interações de um lead."""
+
     items: list[InteractionResponse]
     total: int

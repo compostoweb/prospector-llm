@@ -188,6 +188,7 @@ class LeadStepResponse(BaseModel):
     id: uuid.UUID
     lead_id: uuid.UUID
     cadence_id: uuid.UUID
+    cadence_name: str | None = None
     step_number: int
     channel: str
     status: str
