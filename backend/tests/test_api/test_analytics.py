@@ -583,6 +583,38 @@ async def test_get_email_stats_accepts_explicit_date_range() -> None:
     assert _statement_contains_param(session.statements[2], datetime(2026, 3, 11, tzinfo=UTC))
 
 
+async def test_get_linkedin_stats_splits_connect_and_dm_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker_since = datetime(2026, 3, 25, tzinfo=UTC)
+    monkeypatch.setattr(analytics_routes, "_utc_days_ago", lambda days: marker_since)
+
+    session = FakeAsyncSession(
+        FakeResult(scalar_value=8),
+        FakeResult(scalar_value=3),
+        FakeResult(scalar_value=6),
+        FakeResult(scalar_value=2),
+    )
+
+    result = await analytics_routes.get_linkedin_stats(
+        days=7,
+        db=cast(AsyncSession, session),
+        tenant_id=uuid.uuid4(),
+    )
+
+    assert result.connect_sent == 8
+    assert result.connect_accepted == 3
+    assert result.connect_acceptance_rate == 37.5
+    assert result.dm_sent == 6
+    assert result.dm_replied == 2
+    assert result.dm_reply_rate == 33.3
+
+    for statement in session.statements:
+        assert _statement_contains_param(statement, marker_since)
+
+    assert _statement_contains_param(session.statements[3], "fallback_single_cadence")
+
+
 async def test_get_email_cadences_stats_filters_to_email_only_cadences(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -846,6 +878,7 @@ async def test_dashboard_breakdowns_accept_explicit_date_range() -> None:
         FakeResult(all_values=[SimpleNamespace(cadence_id=cadence_id, sent=5)]),
         FakeResult(all_values=[SimpleNamespace(id=cadence_id, name="Cadência A")]),
         FakeResult(all_values=[SimpleNamespace(cadence_id=cadence_id, replied=2)]),
+        FakeResult(all_values=[SimpleNamespace(cadence_id=cadence_id, total_leads=4)]),
         FakeResult(all_values=[SimpleNamespace(cadence_id=cadence_id, active=1)]),
     )
     performance = await analytics_routes.get_cadence_performance(
@@ -856,6 +889,7 @@ async def test_dashboard_breakdowns_accept_explicit_date_range() -> None:
         tenant_id=tenant_id,
     )
     assert performance[0].steps_sent == 5
+    assert performance[0].total_leads == 4
     assert _statement_contains_param(performance_session.statements[0], period_end)
     assert _statement_contains_param(performance_session.statements[2], period_end)
 

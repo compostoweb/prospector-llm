@@ -96,6 +96,7 @@ class FunnelItem(BaseModel):
 class CadencePerformanceItem(BaseModel):
     cadence_id: str
     cadence_name: str
+    total_leads: int = 0
     leads_active: int = 0
     steps_sent: int = 0
     replies: int = 0
@@ -851,6 +852,20 @@ async def get_cadence_performance(
     )
     reply_map = {row.cadence_id: row.replied for row in replies_q.all()}
 
+    # Total unique leads ever associated to this cadence in cadence_steps.
+    total_leads_q = await db.execute(
+        select(
+            CadenceStep.cadence_id,
+            func.count(func.distinct(CadenceStep.lead_id)).label("total_leads"),
+        )
+        .where(
+            CadenceStep.cadence_id.in_(cadence_ids),
+            CadenceStep.tenant_id == tenant_id,
+        )
+        .group_by(CadenceStep.cadence_id)
+    )
+    total_leads_map = {row.cadence_id: row.total_leads for row in total_leads_q.all()}
+
     # Active leads per cadence (leads currently IN_CADENCE with steps in this cadence)
     active_q = await db.execute(
         select(
@@ -876,6 +891,7 @@ async def get_cadence_performance(
             CadencePerformanceItem(
                 cadence_id=str(row.cadence_id),
                 cadence_name=name_map.get(row.cadence_id, "—"),
+                total_leads=total_leads_map.get(row.cadence_id, 0),
                 leads_active=active_map.get(row.cadence_id, 0),
                 steps_sent=sent,
                 replies=replied,
@@ -1368,6 +1384,15 @@ class EmailStatsResponse(BaseModel):
     unsubscribe_rate: float = 0.0
 
 
+class LinkedInStatsResponse(BaseModel):
+    connect_sent: int = 0
+    connect_accepted: int = 0
+    connect_acceptance_rate: float = 0.0
+    dm_sent: int = 0
+    dm_replied: int = 0
+    dm_reply_rate: float = 0.0
+
+
 class EmailCadenceItem(BaseModel):
     cadence_id: str
     cadence_name: str
@@ -1495,6 +1520,73 @@ async def get_email_stats(
         reply_rate=reply_rate,
         bounce_rate=bounce_rate,
         unsubscribe_rate=unsubscribe_rate,
+    )
+
+
+@router.get("/linkedin/stats", response_model=LinkedInStatsResponse)
+async def get_linkedin_stats(
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
+    start_date: Annotated[date | None, Query()] = None,
+    end_date: Annotated[date | None, Query()] = None,
+    db: AsyncSession = Depends(get_session_flexible),
+    tenant_id: UUID = Depends(get_effective_tenant_id),
+) -> LinkedInStatsResponse:
+    """Estatísticas gerais de LinkedIn separadas entre convite e DM."""
+    since, until = _resolve_period_bounds(days=days, start_date=start_date, end_date=end_date)
+
+    connect_sent_q = await db.execute(
+        select(func.count(CadenceStep.id)).where(
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.channel == Channel.LINKEDIN_CONNECT,
+            CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED]),
+            CadenceStep.sent_at >= since,
+            CadenceStep.sent_at < until,
+        )
+    )
+    connect_sent = connect_sent_q.scalar() or 0
+
+    linkedin_accepts_sq = _latest_linkedin_accept_step_subquery(
+        tenant_id=tenant_id,
+        since=since,
+        until=until,
+    )
+    connect_accepted_q = await db.execute(
+        select(func.count(linkedin_accepts_sq.c.lead_id)).where(
+            linkedin_accepts_sq.c.channel == Channel.LINKEDIN_CONNECT,
+        )
+    )
+    connect_accepted = connect_accepted_q.scalar() or 0
+
+    dm_sent_q = await db.execute(
+        select(func.count(CadenceStep.id)).where(
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.channel == Channel.LINKEDIN_DM,
+            CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED]),
+            CadenceStep.sent_at >= since,
+            CadenceStep.sent_at < until,
+        )
+    )
+    dm_sent = dm_sent_q.scalar() or 0
+
+    first_linkedin_dm_replies_sq = _first_reliable_reply_per_cadence_lead_subquery(
+        tenant_id=tenant_id,
+        since=since,
+        until=until,
+        channel=Channel.LINKEDIN_DM,
+    )
+    dm_replied_q = await db.execute(
+        select(func.count(first_linkedin_dm_replies_sq.c.interaction_id))
+    )
+    dm_replied = dm_replied_q.scalar() or 0
+
+    logger.debug("analytics.linkedin.stats", tenant_id=str(tenant_id), days=days)
+    return LinkedInStatsResponse(
+        connect_sent=connect_sent,
+        connect_accepted=connect_accepted,
+        connect_acceptance_rate=_safe_rate(connect_accepted, connect_sent),
+        dm_sent=dm_sent,
+        dm_replied=dm_replied,
+        dm_reply_rate=_safe_rate(dm_replied, dm_sent),
     )
 
 

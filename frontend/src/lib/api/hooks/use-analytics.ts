@@ -3,10 +3,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { useSession } from "next-auth/react"
 import { createBrowserClient } from "@/lib/api/client"
-import {
-  buildAnalyticsQueryString,
-  type AnalyticsRangeQuery,
-} from "@/lib/analytics-period"
+import { buildAnalyticsQueryString, type AnalyticsRangeQuery } from "@/lib/analytics-period"
 
 // ── Tipos ─────────────────────────────────────────────────────────────
 
@@ -60,6 +57,7 @@ export interface FunnelItem {
 export interface CadencePerformance {
   cadence_id: string
   cadence_name: string
+  total_leads: number
   leads_active: number
   steps_sent: number
   replies: number
@@ -78,6 +76,15 @@ export interface EmailStats {
   unsubscribe_rate: number
 }
 
+export interface LinkedInStats {
+  connect_sent: number
+  connect_accepted: number
+  connect_acceptance_rate: number
+  dm_sent: number
+  dm_replied: number
+  dm_reply_rate: number
+}
+
 // ── Hooks ─────────────────────────────────────────────────────────────
 
 export function useDashboardStats(range: AnalyticsRangeQuery = { days: 30 }) {
@@ -85,7 +92,13 @@ export function useDashboardStats(range: AnalyticsRangeQuery = { days: 30 }) {
   const query = buildAnalyticsQueryString(range)
 
   return useQuery({
-    queryKey: ["dashboard", "stats", range.days ?? null, range.startDate ?? null, range.endDate ?? null],
+    queryKey: [
+      "dashboard",
+      "stats",
+      range.days ?? null,
+      range.startDate ?? null,
+      range.endDate ?? null,
+    ],
     queryFn: async (): Promise<DashboardStats> => {
       const client = createBrowserClient(session?.accessToken)
       const { data, error } = await client.GET(`/analytics/dashboard${query}` as never)
@@ -103,7 +116,13 @@ export function useChannelBreakdown(range: AnalyticsRangeQuery = { days: 30 }) {
   const query = buildAnalyticsQueryString(range)
 
   return useQuery({
-    queryKey: ["analytics", "channels", range.days ?? null, range.startDate ?? null, range.endDate ?? null],
+    queryKey: [
+      "analytics",
+      "channels",
+      range.days ?? null,
+      range.startDate ?? null,
+      range.endDate ?? null,
+    ],
     queryFn: async (): Promise<ChannelBreakdown[]> => {
       const client = createBrowserClient(session?.accessToken)
       const { data, error } = await client.GET(`/analytics/channels${query}` as never)
@@ -137,7 +156,13 @@ export function useIntentBreakdown(range: AnalyticsRangeQuery = { days: 30 }) {
   const query = buildAnalyticsQueryString(range)
 
   return useQuery({
-    queryKey: ["analytics", "intents", range.days ?? null, range.startDate ?? null, range.endDate ?? null],
+    queryKey: [
+      "analytics",
+      "intents",
+      range.days ?? null,
+      range.startDate ?? null,
+      range.endDate ?? null,
+    ],
     queryFn: async (): Promise<IntentBreakdown[]> => {
       const client = createBrowserClient(session?.accessToken)
       const { data, error } = await client.GET(`/analytics/intents${query}` as never)
@@ -172,7 +197,13 @@ export function useCadencePerformance(range: AnalyticsRangeQuery = { days: 30 })
   const query = buildAnalyticsQueryString(range)
 
   return useQuery({
-    queryKey: ["analytics", "performance", range.days ?? null, range.startDate ?? null, range.endDate ?? null],
+    queryKey: [
+      "analytics",
+      "performance",
+      range.days ?? null,
+      range.startDate ?? null,
+      range.endDate ?? null,
+    ],
     queryFn: async (): Promise<CadencePerformance[]> => {
       const client = createBrowserClient(session?.accessToken)
       const { data, error } = await client.GET(`/analytics/performance${query}` as never)
@@ -190,12 +221,42 @@ export function useEmailStats(range: AnalyticsRangeQuery = { days: 30 }) {
   const query = buildAnalyticsQueryString(range)
 
   return useQuery({
-    queryKey: ["analytics", "email", range.days ?? null, range.startDate ?? null, range.endDate ?? null],
+    queryKey: [
+      "analytics",
+      "email",
+      range.days ?? null,
+      range.startDate ?? null,
+      range.endDate ?? null,
+    ],
     queryFn: async (): Promise<EmailStats> => {
       const client = createBrowserClient(session?.accessToken)
       const { data, error } = await client.GET(`/analytics/email/stats${query}` as never)
       if (error) throw new Error("Falha ao carregar estatísticas de e-mail")
       return data as EmailStats
+    },
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    enabled: !!session?.accessToken,
+  })
+}
+
+export function useLinkedInStats(range: AnalyticsRangeQuery = { days: 30 }) {
+  const { data: session } = useSession()
+  const query = buildAnalyticsQueryString(range)
+
+  return useQuery({
+    queryKey: [
+      "analytics",
+      "linkedin",
+      range.days ?? null,
+      range.startDate ?? null,
+      range.endDate ?? null,
+    ],
+    queryFn: async (): Promise<LinkedInStats> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.GET(`/analytics/linkedin/stats${query}` as never)
+      if (error) throw new Error("Falha ao carregar estatísticas de LinkedIn")
+      return data as LinkedInStats
     },
     staleTime: 5 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,

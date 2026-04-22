@@ -16,12 +16,14 @@ interface MetricItemProps {
 function MetricItem({ icon: Icon, label, value, colorClass }: MetricItemProps) {
   return (
     <div className="flex items-center gap-2.5">
-      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${colorClass}`}>
-        <Icon size={15} aria-hidden="true" />
+      <div
+        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md ${colorClass}`}
+      >
+        <Icon size={20} aria-hidden="true" />
       </div>
       <div className="min-w-0">
-        <p className="text-xs text-(--text-secondary)">{label}</p>
-        <p className="text-sm font-semibold text-(--text-primary)">{value}</p>
+        <p className="text-sm text-(--text-secondary)">{label}</p>
+        <p className="text-lg font-semibold text-(--text-primary)">{value}</p>
       </div>
     </div>
   )

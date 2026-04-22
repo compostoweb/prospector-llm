@@ -49,7 +49,7 @@ export function CadencePerformanceTable({ data, isLoading }: CadencePerformanceT
                 </Link>
               </td>
               <td className="py-2 pr-3 text-right tabular-nums text-(--text-secondary)">
-                {row.leads_active}
+                {row.total_leads}
               </td>
               <td className="py-2 pr-3 text-right tabular-nums text-(--text-secondary)">
                 {row.steps_sent}

@@ -21,6 +21,7 @@ import { IntentChart } from "@/components/dashboard/intent-chart"
 import { CadencePerformanceTable } from "@/components/dashboard/cadence-performance"
 import { AnalyticsPeriodFilter } from "@/components/shared/analytics-period-filter"
 import { EmailStatsCard } from "@/components/dashboard/email-stats-card"
+import { LinkedInStatsCard } from "@/components/dashboard/linkedin-stats-card"
 import {
   useDashboardStats,
   useChannelBreakdown,
@@ -29,6 +30,7 @@ import {
   useFunnel,
   useCadencePerformance,
   useEmailStats,
+  useLinkedInStats,
   type EmailStats,
 } from "@/lib/api/hooks/use-analytics"
 import { useManualTaskStats } from "@/lib/api/hooks/use-manual-tasks"
@@ -71,21 +73,13 @@ export default function DashboardPage() {
     isLoading: loadingChannels,
     isError: channelsError,
   } = useChannelBreakdown(analyticsRange)
-  const {
-    data: replies,
-    isLoading: loadingReplies,
-    isError: repliesError,
-  } = useRecentReplies()
+  const { data: replies, isLoading: loadingReplies, isError: repliesError } = useRecentReplies()
   const {
     data: intents,
     isLoading: loadingIntents,
     isError: intentsError,
   } = useIntentBreakdown(analyticsRange)
-  const {
-    data: funnel,
-    isLoading: loadingFunnel,
-    isError: funnelError,
-  } = useFunnel()
+  const { data: funnel, isLoading: loadingFunnel, isError: funnelError } = useFunnel()
   const {
     data: cadences,
     isLoading: loadingCadences,
@@ -96,6 +90,11 @@ export default function DashboardPage() {
     isLoading: loadingEmail,
     isError: emailError,
   } = useEmailStats(analyticsRange)
+  const {
+    data: linkedInStats,
+    isLoading: loadingLinkedIn,
+    isError: linkedInError,
+  } = useLinkedInStats(analyticsRange)
   const { data: taskStats } = useManualTaskStats()
   const hasAnalyticsError =
     statsError ||
@@ -104,7 +103,8 @@ export default function DashboardPage() {
     intentsError ||
     funnelError ||
     cadencesError ||
-    emailError
+    emailError ||
+    linkedInError
 
   return (
     <div className="space-y-6">
@@ -210,6 +210,26 @@ export default function DashboardPage() {
           <EmailStatsCard data={emailStats ?? EMPTY_EMAIL_STATS} isLoading={loadingEmail} />
         </div>
       )}
+
+      <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-5 shadow-(--shadow-sm)">
+        <h2 className="mb-4 flex items-center gap-1.5 text-sm font-semibold text-(--text-primary)">
+          <MessageSquare size={15} aria-hidden="true" />
+          Desempenho de LinkedIn — período selecionado
+        </h2>
+        <LinkedInStatsCard
+          data={
+            linkedInStats ?? {
+              connect_sent: 0,
+              connect_accepted: 0,
+              connect_acceptance_rate: 0,
+              dm_sent: 0,
+              dm_replied: 0,
+              dm_reply_rate: 0,
+            }
+          }
+          isLoading={loadingLinkedIn}
+        />
+      </div>
 
       {/* Performance cadências + Respostas recentes */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
