@@ -12,6 +12,7 @@ import {
   formatSelectedRangeLabel,
   getRangeQueryFromFilter,
   resolveDateFilterValue,
+  type AnalyticsDateFilterOption,
   type AnalyticsDateFilterValue,
 } from "@/lib/analytics-period"
 import {
@@ -25,13 +26,13 @@ interface CadenceDetailAnalyticsProps {
   cadence: Cadence
 }
 
-const PERIOD_OPTIONS = new Map([
+const PERIOD_OPTIONS = new Map<number, AnalyticsDateFilterOption>([
   [7, { id: "last_7_days", label: "7 dias", days: 7 }],
   [15, { id: "last_15_days", label: "15 dias", days: 15 }],
   [30, { id: "last_30_days", label: "30 dias", days: 30 }],
   [60, { id: "last_60_days", label: "60 dias", days: 60 }],
   [90, { id: "last_90_days", label: "90 dias", days: 90 }],
-] as const)
+])
 
 export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps) {
   const router = useRouter()
