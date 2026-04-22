@@ -3,6 +3,10 @@
 import { useQuery } from "@tanstack/react-query"
 import { useSession } from "next-auth/react"
 import { createBrowserClient } from "@/lib/api/client"
+import {
+  buildAnalyticsQueryString,
+  type AnalyticsRangeQuery,
+} from "@/lib/analytics-period"
 
 // ── Tipos ─────────────────────────────────────────────────────────────
 
@@ -76,14 +80,15 @@ export interface EmailStats {
 
 // ── Hooks ─────────────────────────────────────────────────────────────
 
-export function useDashboardStats(days = 30) {
+export function useDashboardStats(range: AnalyticsRangeQuery = { days: 30 }) {
   const { data: session } = useSession()
+  const query = buildAnalyticsQueryString(range)
 
   return useQuery({
-    queryKey: ["dashboard", "stats", days],
+    queryKey: ["dashboard", "stats", range.days ?? null, range.startDate ?? null, range.endDate ?? null],
     queryFn: async (): Promise<DashboardStats> => {
       const client = createBrowserClient(session?.accessToken)
-      const { data, error } = await client.GET(`/analytics/dashboard?days=${days}` as never)
+      const { data, error } = await client.GET(`/analytics/dashboard${query}` as never)
       if (error) throw new Error("Falha ao carregar estatísticas")
       return data as DashboardStats
     },
@@ -93,14 +98,15 @@ export function useDashboardStats(days = 30) {
   })
 }
 
-export function useChannelBreakdown(days = 30) {
+export function useChannelBreakdown(range: AnalyticsRangeQuery = { days: 30 }) {
   const { data: session } = useSession()
+  const query = buildAnalyticsQueryString(range)
 
   return useQuery({
-    queryKey: ["analytics", "channels", days],
+    queryKey: ["analytics", "channels", range.days ?? null, range.startDate ?? null, range.endDate ?? null],
     queryFn: async (): Promise<ChannelBreakdown[]> => {
       const client = createBrowserClient(session?.accessToken)
-      const { data, error } = await client.GET(`/analytics/channels?days=${days}` as never)
+      const { data, error } = await client.GET(`/analytics/channels${query}` as never)
       if (error) throw new Error("Falha ao carregar breakdown de canais")
       return (data as ChannelBreakdown[]) ?? []
     },
@@ -126,14 +132,15 @@ export function useRecentReplies(limit = 10) {
   })
 }
 
-export function useIntentBreakdown(days = 30) {
+export function useIntentBreakdown(range: AnalyticsRangeQuery = { days: 30 }) {
   const { data: session } = useSession()
+  const query = buildAnalyticsQueryString(range)
 
   return useQuery({
-    queryKey: ["analytics", "intents", days],
+    queryKey: ["analytics", "intents", range.days ?? null, range.startDate ?? null, range.endDate ?? null],
     queryFn: async (): Promise<IntentBreakdown[]> => {
       const client = createBrowserClient(session?.accessToken)
-      const { data, error } = await client.GET(`/analytics/intents?days=${days}` as never)
+      const { data, error } = await client.GET(`/analytics/intents${query}` as never)
       if (error) throw new Error("Falha ao carregar breakdown de intenções")
       return (data as IntentBreakdown[]) ?? []
     },
@@ -160,14 +167,15 @@ export function useFunnel() {
   })
 }
 
-export function useCadencePerformance(days = 30) {
+export function useCadencePerformance(range: AnalyticsRangeQuery = { days: 30 }) {
   const { data: session } = useSession()
+  const query = buildAnalyticsQueryString(range)
 
   return useQuery({
-    queryKey: ["analytics", "performance", days],
+    queryKey: ["analytics", "performance", range.days ?? null, range.startDate ?? null, range.endDate ?? null],
     queryFn: async (): Promise<CadencePerformance[]> => {
       const client = createBrowserClient(session?.accessToken)
-      const { data, error } = await client.GET(`/analytics/performance?days=${days}` as never)
+      const { data, error } = await client.GET(`/analytics/performance${query}` as never)
       if (error) throw new Error("Falha ao carregar performance de cadências")
       return (data as CadencePerformance[]) ?? []
     },
@@ -177,14 +185,15 @@ export function useCadencePerformance(days = 30) {
   })
 }
 
-export function useEmailStats(days = 30) {
+export function useEmailStats(range: AnalyticsRangeQuery = { days: 30 }) {
   const { data: session } = useSession()
+  const query = buildAnalyticsQueryString(range)
 
   return useQuery({
-    queryKey: ["analytics", "email", days],
+    queryKey: ["analytics", "email", range.days ?? null, range.startDate ?? null, range.endDate ?? null],
     queryFn: async (): Promise<EmailStats> => {
       const client = createBrowserClient(session?.accessToken)
-      const { data, error } = await client.GET(`/analytics/email/stats?days=${days}` as never)
+      const { data, error } = await client.GET(`/analytics/email/stats${query}` as never)
       if (error) throw new Error("Falha ao carregar estatísticas de e-mail")
       return data as EmailStats
     },

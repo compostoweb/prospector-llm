@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import {
   Users,
   GitBranch,
@@ -19,7 +19,7 @@ import { RecentReplies } from "@/components/dashboard/recent-replies"
 import { FunnelChart } from "@/components/dashboard/funnel-chart"
 import { IntentChart } from "@/components/dashboard/intent-chart"
 import { CadencePerformanceTable } from "@/components/dashboard/cadence-performance"
-import { PeriodFilter } from "@/components/dashboard/period-filter"
+import { AnalyticsPeriodFilter } from "@/components/shared/analytics-period-filter"
 import { EmailStatsCard } from "@/components/dashboard/email-stats-card"
 import {
   useDashboardStats,
@@ -32,6 +32,11 @@ import {
   type EmailStats,
 } from "@/lib/api/hooks/use-analytics"
 import { useManualTaskStats } from "@/lib/api/hooks/use-manual-tasks"
+import {
+  buildDateFilterValue,
+  getRangeQueryFromFilter,
+  type AnalyticsDateFilterValue,
+} from "@/lib/analytics-period"
 
 const EMPTY_EMAIL_STATS: EmailStats = {
   sent: 0,
@@ -51,18 +56,21 @@ function trendProps(value: number | undefined): { trend?: { value: number; label
 }
 
 export default function DashboardPage() {
-  const [days, setDays] = useState(30)
+  const [dateFilter, setDateFilter] = useState<AnalyticsDateFilterValue>(() =>
+    buildDateFilterValue({ id: "last_30_days", label: "30 dias", days: 30 }),
+  )
+  const analyticsRange = useMemo(() => getRangeQueryFromFilter(dateFilter), [dateFilter])
 
   const {
     data: stats,
     isLoading: loadingStats,
     isError: statsError,
-  } = useDashboardStats(days)
+  } = useDashboardStats(analyticsRange)
   const {
     data: channels,
     isLoading: loadingChannels,
     isError: channelsError,
-  } = useChannelBreakdown(days)
+  } = useChannelBreakdown(analyticsRange)
   const {
     data: replies,
     isLoading: loadingReplies,
@@ -72,7 +80,7 @@ export default function DashboardPage() {
     data: intents,
     isLoading: loadingIntents,
     isError: intentsError,
-  } = useIntentBreakdown(days)
+  } = useIntentBreakdown(analyticsRange)
   const {
     data: funnel,
     isLoading: loadingFunnel,
@@ -82,12 +90,12 @@ export default function DashboardPage() {
     data: cadences,
     isLoading: loadingCadences,
     isError: cadencesError,
-  } = useCadencePerformance(days)
+  } = useCadencePerformance(analyticsRange)
   const {
     data: emailStats,
     isLoading: loadingEmail,
     isError: emailError,
-  } = useEmailStats(days)
+  } = useEmailStats(analyticsRange)
   const { data: taskStats } = useManualTaskStats()
   const hasAnalyticsError =
     statsError ||
@@ -106,7 +114,7 @@ export default function DashboardPage() {
           <h1 className="text-lg font-semibold text-(--text-primary)">Dashboard</h1>
           <p className="text-sm text-(--text-secondary)">Visão geral da prospecção</p>
         </div>
-        <PeriodFilter value={days} onChange={setDays} />
+        <AnalyticsPeriodFilter value={dateFilter} onChange={setDateFilter} />
       </div>
 
       {hasAnalyticsError && (
@@ -187,7 +195,7 @@ export default function DashboardPage() {
       {/* Gráfico por canal */}
       <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-5 shadow-(--shadow-sm)">
         <h2 className="mb-4 text-sm font-semibold text-(--text-primary)">
-          Atividade por canal — últimos {days} dias
+          Atividade por canal — período selecionado
         </h2>
         <ChannelChart data={channels ?? []} isLoading={loadingChannels} />
       </div>
@@ -197,7 +205,7 @@ export default function DashboardPage() {
         <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-5 shadow-(--shadow-sm)">
           <h2 className="mb-4 flex items-center gap-1.5 text-sm font-semibold text-(--text-primary)">
             <Mail size={15} aria-hidden="true" />
-            Desempenho de e-mail — últimos {days} dias
+            Desempenho de e-mail — período selecionado
           </h2>
           <EmailStatsCard data={emailStats ?? EMPTY_EMAIL_STATS} isLoading={loadingEmail} />
         </div>
@@ -207,7 +215,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-5 shadow-(--shadow-sm)">
           <h2 className="mb-4 text-sm font-semibold text-(--text-primary)">
-            Top cadências — últimos {days} dias
+            Top cadências — período selecionado
           </h2>
           <CadencePerformanceTable data={cadences ?? []} isLoading={loadingCadences} />
         </div>

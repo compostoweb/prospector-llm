@@ -12,7 +12,7 @@ Endpoints:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated
 from uuid import UUID
 
@@ -172,6 +172,37 @@ def _utc_days_ago(days: int) -> datetime:
     return datetime.now(UTC) - timedelta(days=days)
 
 
+def _resolve_period_bounds(
+    *,
+    days: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> tuple[datetime, datetime]:
+    if (start_date is None) != (end_date is None):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="start_date e end_date devem ser enviados juntos.",
+        )
+
+    if start_date is not None and end_date is not None:
+        if end_date < start_date:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="end_date não pode ser anterior a start_date.",
+            )
+
+        since = datetime.combine(start_date, time.min, tzinfo=UTC)
+        until = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=UTC)
+        return since, until
+
+    return _utc_days_ago(days), datetime.now(UTC)
+
+
+def _previous_period_bounds(since: datetime, until: datetime) -> tuple[datetime, datetime]:
+    period_span = until - since
+    return since - period_span, since
+
+
 def _safe_rate(numerator: int, denominator: int) -> float:
     if denominator <= 0:
         return 0.0
@@ -194,6 +225,7 @@ def _first_reliable_reply_per_cadence_lead_subquery(
     *,
     tenant_id: UUID,
     since: datetime | None = None,
+    until: datetime | None = None,
     cadence_id: UUID | None = None,
     cadence_ids: list[UUID] | None = None,
     channel: Channel | None = None,
@@ -206,6 +238,8 @@ def _first_reliable_reply_per_cadence_lead_subquery(
     ]
     if since is not None:
         conditions.append(Interaction.created_at >= since)
+    if until is not None:
+        conditions.append(Interaction.created_at < until)
     if cadence_id is not None:
         conditions.append(CadenceStep.cadence_id == cadence_id)
     if cadence_ids:
@@ -256,6 +290,7 @@ def _opened_email_interactions_subquery(
     *,
     tenant_id: UUID,
     since: datetime,
+    until: datetime | None = None,
     cadence_id: UUID | None = None,
     cadence_ids: list[UUID] | None = None,
     cadence_type: str | None = None,
@@ -272,6 +307,13 @@ def _opened_email_interactions_subquery(
         CadenceStep.sent_at.is_not(None),
         CadenceStep.sent_at >= since,
     ]
+    if until is not None:
+        conditions.extend(
+            [
+                Interaction.opened_at < until,
+                CadenceStep.sent_at < until,
+            ]
+        )
     if cadence_id is not None:
         conditions.append(CadenceStep.cadence_id == cadence_id)
     if cadence_ids:
@@ -296,9 +338,28 @@ def _latest_email_bounce_step_subquery(
     *,
     tenant_id: UUID,
     since: datetime,
+    until: datetime | None = None,
     cadence_id: UUID | None = None,
     cadence_ids: list[UUID] | None = None,
 ):
+    conditions = [
+        CadenceStep.tenant_id == tenant_id,
+        CadenceStep.channel == Channel.EMAIL,
+        CadenceStep.sent_at.is_not(None),
+        CadenceStep.sent_at >= since,
+        Lead.tenant_id == tenant_id,
+        Lead.email_bounced_at.is_not(None),
+        Lead.email_bounced_at >= since,
+        CadenceStep.sent_at <= Lead.email_bounced_at,
+    ]
+    if until is not None:
+        conditions.extend(
+            [
+                CadenceStep.sent_at < until,
+                Lead.email_bounced_at < until,
+            ]
+        )
+
     ranked_bounces_sq = (
         select(
             Lead.id.label("lead_id"),
@@ -313,16 +374,7 @@ def _latest_email_bounce_step_subquery(
             .label("bounce_rank"),
         )
         .join(Lead, Lead.id == CadenceStep.lead_id)
-        .where(
-            CadenceStep.tenant_id == tenant_id,
-            CadenceStep.channel == Channel.EMAIL,
-            CadenceStep.sent_at.is_not(None),
-            CadenceStep.sent_at >= since,
-            Lead.tenant_id == tenant_id,
-            Lead.email_bounced_at.is_not(None),
-            Lead.email_bounced_at >= since,
-            CadenceStep.sent_at <= Lead.email_bounced_at,
-        )
+        .where(*conditions)
         .subquery()
     )
 
@@ -344,9 +396,28 @@ def _latest_linkedin_accept_step_subquery(
     *,
     tenant_id: UUID,
     since: datetime,
+    until: datetime | None = None,
     cadence_id: UUID | None = None,
     cadence_ids: list[UUID] | None = None,
 ):
+    conditions = [
+        CadenceStep.tenant_id == tenant_id,
+        CadenceStep.channel == Channel.LINKEDIN_CONNECT,
+        CadenceStep.sent_at.is_not(None),
+        CadenceStep.sent_at >= since,
+        Lead.tenant_id == tenant_id,
+        Lead.linkedin_connected_at.is_not(None),
+        Lead.linkedin_connected_at >= since,
+        CadenceStep.sent_at <= Lead.linkedin_connected_at,
+    ]
+    if until is not None:
+        conditions.extend(
+            [
+                CadenceStep.sent_at < until,
+                Lead.linkedin_connected_at < until,
+            ]
+        )
+
     ranked_accepts_sq = (
         select(
             Lead.id.label("lead_id"),
@@ -361,16 +432,7 @@ def _latest_linkedin_accept_step_subquery(
             .label("accept_rank"),
         )
         .join(Lead, Lead.id == CadenceStep.lead_id)
-        .where(
-            CadenceStep.tenant_id == tenant_id,
-            CadenceStep.channel == Channel.LINKEDIN_CONNECT,
-            CadenceStep.sent_at.is_not(None),
-            CadenceStep.sent_at >= since,
-            Lead.tenant_id == tenant_id,
-            Lead.linkedin_connected_at.is_not(None),
-            Lead.linkedin_connected_at >= since,
-            CadenceStep.sent_at <= Lead.linkedin_connected_at,
-        )
+        .where(*conditions)
         .subquery()
     )
 
@@ -394,14 +456,20 @@ def _latest_linkedin_accept_step_subquery(
 @router.get("/dashboard", response_model=DashboardStatsResponse)
 async def get_dashboard_stats(
     days: Annotated[int, Query(ge=1, le=365)] = 30,
+    start_date: Annotated[date | None, Query()] = None,
+    end_date: Annotated[date | None, Query()] = None,
     db: AsyncSession = Depends(get_session_flexible),
     tenant_id: UUID = Depends(get_effective_tenant_id),
 ) -> DashboardStatsResponse:
     """Retorna estatísticas gerais do dashboard com trends."""
     today_start = _utc_start_of_today()
     week_ago = _utc_days_ago(7)
-    period_start = _utc_days_ago(days)
-    prev_period_start = _utc_days_ago(days * 2)
+    period_start, period_end = _resolve_period_bounds(
+        days=days,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    prev_period_start, prev_period_end = _previous_period_bounds(period_start, period_end)
 
     # Lead counts via conditional aggregation (single query)
     lead_q = await db.execute(
@@ -421,11 +489,13 @@ async def get_dashboard_stats(
     # Leads created in current period vs previous (for trend)
     lead_trend_q = await db.execute(
         select(
-            func.count(Lead.id).filter(Lead.created_at >= period_start).label("current"),
+            func.count(Lead.id)
+            .filter(Lead.created_at >= period_start, Lead.created_at < period_end)
+            .label("current"),
             func.count(Lead.id)
             .filter(
                 Lead.created_at >= prev_period_start,
-                Lead.created_at < period_start,
+                Lead.created_at < prev_period_end,
             )
             .label("previous"),
         ).where(Lead.tenant_id == tenant_id)
@@ -437,11 +507,13 @@ async def get_dashboard_stats(
         select(
             func.count(CadenceStep.id).filter(CadenceStep.sent_at >= today_start).label("today"),
             func.count(CadenceStep.id).filter(CadenceStep.sent_at >= week_ago).label("week"),
-            func.count(CadenceStep.id).filter(CadenceStep.sent_at >= period_start).label("period"),
+            func.count(CadenceStep.id)
+            .filter(CadenceStep.sent_at >= period_start, CadenceStep.sent_at < period_end)
+            .label("period"),
             func.count(CadenceStep.id)
             .filter(
                 CadenceStep.sent_at >= prev_period_start,
-                CadenceStep.sent_at < period_start,
+                CadenceStep.sent_at < prev_period_end,
             )
             .label("prev_period"),
         ).where(
@@ -461,12 +533,12 @@ async def get_dashboard_stats(
             func.count(Interaction.id).filter(Interaction.created_at >= today_start).label("today"),
             func.count(Interaction.id).filter(Interaction.created_at >= week_ago).label("week"),
             func.count(Interaction.id)
-            .filter(Interaction.created_at >= period_start)
+            .filter(Interaction.created_at >= period_start, Interaction.created_at < period_end)
             .label("period"),
             func.count(Interaction.id)
             .filter(
                 Interaction.created_at >= prev_period_start,
-                Interaction.created_at < period_start,
+                Interaction.created_at < prev_period_end,
             )
             .label("prev_period"),
         ).where(
@@ -495,13 +567,14 @@ async def get_dashboard_stats(
             .filter(
                 CadenceStep.step_number == 1,
                 CadenceStep.scheduled_at >= period_start,
+                CadenceStep.scheduled_at < period_end,
             )
             .label("current"),
             func.count(func.distinct(CadenceStep.lead_id))
             .filter(
                 CadenceStep.step_number == 1,
                 CadenceStep.scheduled_at >= prev_period_start,
-                CadenceStep.scheduled_at < period_start,
+                CadenceStep.scheduled_at < prev_period_end,
             )
             .label("previous"),
         ).where(CadenceStep.tenant_id == tenant_id)
@@ -534,11 +607,13 @@ async def get_dashboard_stats(
 @router.get("/channels", response_model=list[ChannelBreakdownItem])
 async def get_channel_breakdown(
     days: Annotated[int, Query(ge=1, le=365)] = 30,
+    start_date: Annotated[date | None, Query()] = None,
+    end_date: Annotated[date | None, Query()] = None,
     db: AsyncSession = Depends(get_session_flexible),
     tenant_id: UUID = Depends(get_effective_tenant_id),
 ) -> list[ChannelBreakdownItem]:
     """Retorna breakdown de atividade por canal."""
-    since = _utc_days_ago(days)
+    since, until = _resolve_period_bounds(days=days, start_date=start_date, end_date=end_date)
 
     # Steps sent per channel
     sent_q = await db.execute(
@@ -550,6 +625,7 @@ async def get_channel_breakdown(
             CadenceStep.tenant_id == tenant_id,
             CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED]),
             CadenceStep.sent_at >= since,
+            CadenceStep.sent_at < until,
         )
         .group_by(CadenceStep.channel)
     )
@@ -565,6 +641,7 @@ async def get_channel_breakdown(
             Interaction.tenant_id == tenant_id,
             _reliable_reply_interaction_condition(),
             Interaction.created_at >= since,
+            Interaction.created_at < until,
         )
         .group_by(Interaction.channel)
     )
@@ -636,11 +713,13 @@ async def get_recent_replies(
 @router.get("/intents", response_model=list[IntentBreakdownItem])
 async def get_intent_breakdown(
     days: Annotated[int, Query(ge=1, le=365)] = 30,
+    start_date: Annotated[date | None, Query()] = None,
+    end_date: Annotated[date | None, Query()] = None,
     db: AsyncSession = Depends(get_session_flexible),
     tenant_id: UUID = Depends(get_effective_tenant_id),
 ) -> list[IntentBreakdownItem]:
     """Retorna breakdown de intents das respostas recebidas."""
-    since = _utc_days_ago(days)
+    since, until = _resolve_period_bounds(days=days, start_date=start_date, end_date=end_date)
 
     q = await db.execute(
         select(
@@ -652,6 +731,7 @@ async def get_intent_breakdown(
             _reliable_reply_interaction_condition(),
             Interaction.intent.is_not(None),
             Interaction.created_at >= since,
+            Interaction.created_at < until,
         )
         .group_by(Interaction.intent)
     )
@@ -720,12 +800,14 @@ async def get_funnel(
 @router.get("/performance", response_model=list[CadencePerformanceItem])
 async def get_cadence_performance(
     days: Annotated[int, Query(ge=1, le=365)] = 30,
+    start_date: Annotated[date | None, Query()] = None,
+    end_date: Annotated[date | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=20)] = 5,
     db: AsyncSession = Depends(get_session_flexible),
     tenant_id: UUID = Depends(get_effective_tenant_id),
 ) -> list[CadencePerformanceItem]:
     """Retorna performance das cadências ativas (top N por steps enviados)."""
-    since = _utc_days_ago(days)
+    since, until = _resolve_period_bounds(days=days, start_date=start_date, end_date=end_date)
 
     # Steps sent & replied per cadence
     steps_q = await db.execute(
@@ -737,6 +819,7 @@ async def get_cadence_performance(
             CadenceStep.tenant_id == tenant_id,
             CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED]),
             CadenceStep.sent_at >= since,
+            CadenceStep.sent_at < until,
         )
         .group_by(CadenceStep.cadence_id)
         .order_by(func.count(CadenceStep.id).desc())
@@ -757,6 +840,7 @@ async def get_cadence_performance(
     first_replies_sq = _first_reliable_reply_per_cadence_lead_subquery(
         tenant_id=tenant_id,
         since=since,
+        until=until,
         cadence_ids=cadence_ids,
     )
     replies_q = await db.execute(
@@ -930,11 +1014,13 @@ async def get_cadences_overview(
 async def get_cadence_analytics(
     cadence_id: UUID,
     days: Annotated[int, Query(ge=1, le=365)] = 30,
+    start_date: Annotated[date | None, Query()] = None,
+    end_date: Annotated[date | None, Query()] = None,
     db: AsyncSession = Depends(get_session_flexible),
     tenant_id: UUID = Depends(get_effective_tenant_id),
 ) -> CadenceAnalyticsResponse:
     """Retorna analytics operacionais de uma cadência específica."""
-    since = _utc_days_ago(days)
+    since, until = _resolve_period_bounds(days=days, start_date=start_date, end_date=end_date)
     period_expr = _cadence_step_period_expr()
 
     cadence_q = await db.execute(
@@ -977,6 +1063,7 @@ async def get_cadence_analytics(
             .filter(
                 CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED]),
                 period_expr >= since,
+                period_expr < until,
             )
             .label("sent"),
             func.count(CadenceStep.id)
@@ -986,12 +1073,14 @@ async def get_cadence_analytics(
             .filter(
                 CadenceStep.status == StepStatus.SKIPPED,
                 period_expr >= since,
+                period_expr < until,
             )
             .label("skipped"),
             func.count(CadenceStep.id)
             .filter(
                 CadenceStep.status == StepStatus.FAILED,
                 period_expr >= since,
+                period_expr < until,
             )
             .label("failed"),
         ).where(
@@ -1004,21 +1093,25 @@ async def get_cadence_analytics(
     first_replies_sq = _first_reliable_reply_per_cadence_lead_subquery(
         tenant_id=tenant_id,
         since=since,
+        until=until,
         cadence_id=cadence_id,
     )
     opened_email_sq = _opened_email_interactions_subquery(
         tenant_id=tenant_id,
         since=since,
+        until=until,
         cadence_id=cadence_id,
     )
     bounced_email_sq = _latest_email_bounce_step_subquery(
         tenant_id=tenant_id,
         since=since,
+        until=until,
         cadence_id=cadence_id,
     )
     linkedin_accepts_sq = _latest_linkedin_accept_step_subquery(
         tenant_id=tenant_id,
         since=since,
+        until=until,
         cadence_id=cadence_id,
     )
     reply_summary_q = await db.execute(
@@ -1039,6 +1132,7 @@ async def get_cadence_analytics(
             .filter(
                 CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED]),
                 period_expr >= since,
+                period_expr < until,
             )
             .label("sent"),
             func.count(CadenceStep.id)
@@ -1048,12 +1142,14 @@ async def get_cadence_analytics(
             .filter(
                 CadenceStep.status == StepStatus.SKIPPED,
                 period_expr >= since,
+                period_expr < until,
             )
             .label("skipped"),
             func.count(CadenceStep.id)
             .filter(
                 CadenceStep.status == StepStatus.FAILED,
                 period_expr >= since,
+                period_expr < until,
             )
             .label("failed"),
         )
@@ -1127,6 +1223,7 @@ async def get_cadence_analytics(
             .filter(
                 CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED]),
                 period_expr >= since,
+                period_expr < until,
             )
             .label("sent"),
             func.count(CadenceStep.id)
@@ -1136,12 +1233,14 @@ async def get_cadence_analytics(
             .filter(
                 CadenceStep.status == StepStatus.SKIPPED,
                 period_expr >= since,
+                period_expr < until,
             )
             .label("skipped"),
             func.count(CadenceStep.id)
             .filter(
                 CadenceStep.status == StepStatus.FAILED,
                 period_expr >= since,
+                period_expr < until,
             )
             .label("failed"),
         )
@@ -1297,27 +1396,26 @@ class EmailABResultItem(BaseModel):
 @router.get("/email/stats", response_model=EmailStatsResponse)
 async def get_email_stats(
     days: Annotated[int, Query(ge=1, le=365)] = 30,
+    start_date: Annotated[date | None, Query()] = None,
+    end_date: Annotated[date | None, Query()] = None,
     db: AsyncSession = Depends(get_session_flexible),
     tenant_id: UUID = Depends(get_effective_tenant_id),
 ) -> EmailStatsResponse:
     """Estatísticas gerais de e-mail: enviados, abertos, respondidos, descadastros."""
     from models.email_unsubscribe import EmailUnsubscribe  # noqa: PLC0415
 
-    since = _utc_days_ago(days)
+    since, until = _resolve_period_bounds(days=days, start_date=start_date, end_date=end_date)
 
     # Enviados (outbound EMAIL) apenas de cadências email_only
     sent_q = await db.execute(
-        select(func.count(func.distinct(Interaction.id)))
-        .join(CadenceStep, _interaction_matches_cadence_step())
+        select(func.count(CadenceStep.id))
         .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
-            Interaction.tenant_id == tenant_id,
-            Interaction.channel == Channel.EMAIL,
-            Interaction.direction == InteractionDirection.OUTBOUND,
-            Interaction.created_at >= since,
             CadenceStep.tenant_id == tenant_id,
             CadenceStep.channel == Channel.EMAIL,
+            CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED]),
             CadenceStep.sent_at >= since,
+            CadenceStep.sent_at < until,
             Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
     )
@@ -1326,6 +1424,7 @@ async def get_email_stats(
     opened_email_sq = _opened_email_interactions_subquery(
         tenant_id=tenant_id,
         since=since,
+        until=until,
         cadence_type=_EMAIL_ONLY_CADENCE_TYPE,
     )
 
@@ -1336,6 +1435,7 @@ async def get_email_stats(
     first_email_replies_sq = _first_reliable_reply_per_cadence_lead_subquery(
         tenant_id=tenant_id,
         since=since,
+        until=until,
         channel=Channel.EMAIL,
         cadence_type=_EMAIL_ONLY_CADENCE_TYPE,
     )
@@ -1354,6 +1454,7 @@ async def get_email_stats(
         .where(
             EmailUnsubscribe.tenant_id == tenant_id,
             EmailUnsubscribe.unsubscribed_at >= since,
+            EmailUnsubscribe.unsubscribed_at < until,
             LeadEmail.tenant_id == tenant_id,
             CadenceStep.tenant_id == tenant_id,
             CadenceStep.channel == Channel.EMAIL,
@@ -1370,6 +1471,7 @@ async def get_email_stats(
         .where(
             Lead.tenant_id == tenant_id,
             Lead.email_bounced_at >= since,
+            Lead.email_bounced_at < until,
             CadenceStep.tenant_id == tenant_id,
             CadenceStep.channel == Channel.EMAIL,
             Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
@@ -1399,11 +1501,13 @@ async def get_email_stats(
 @router.get("/email/cadences", response_model=list[EmailCadenceItem])
 async def get_email_cadences_stats(
     days: Annotated[int, Query(ge=1, le=365)] = 30,
+    start_date: Annotated[date | None, Query()] = None,
+    end_date: Annotated[date | None, Query()] = None,
     db: AsyncSession = Depends(get_session_flexible),
     tenant_id: UUID = Depends(get_effective_tenant_id),
 ) -> list[EmailCadenceItem]:
     """Performance por cadência: enviados, abertos, taxa de abertura e resposta."""
-    since = _utc_days_ago(days)
+    since, until = _resolve_period_bounds(days=days, start_date=start_date, end_date=end_date)
 
     # Steps EMAIL enviados por cadência email_only
     steps_q = await db.execute(
@@ -1417,6 +1521,7 @@ async def get_email_cadences_stats(
             CadenceStep.channel == Channel.EMAIL,
             CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED]),
             CadenceStep.sent_at >= since,
+            CadenceStep.sent_at < until,
             Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
         .group_by(CadenceStep.cadence_id)
@@ -1436,6 +1541,7 @@ async def get_email_cadences_stats(
     opened_email_sq = _opened_email_interactions_subquery(
         tenant_id=tenant_id,
         since=since,
+        until=until,
         cadence_ids=cadence_ids,
         cadence_type=_EMAIL_ONLY_CADENCE_TYPE,
     )
@@ -1452,6 +1558,7 @@ async def get_email_cadences_stats(
     first_email_replies_sq = _first_reliable_reply_per_cadence_lead_subquery(
         tenant_id=tenant_id,
         since=since,
+        until=until,
         cadence_ids=cadence_ids,
         channel=Channel.EMAIL,
         cadence_type=_EMAIL_ONLY_CADENCE_TYPE,
@@ -1480,6 +1587,7 @@ async def get_email_cadences_stats(
             CadenceStep.channel == Channel.EMAIL,
             Lead.email_bounced_at.is_not(None),
             Lead.email_bounced_at >= since,
+            Lead.email_bounced_at < until,
             Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
         .group_by(CadenceStep.cadence_id)
@@ -1512,34 +1620,31 @@ async def get_email_cadences_stats(
 @router.get("/email/over-time", response_model=list[EmailOverTimeItem])
 async def get_email_over_time(
     days: Annotated[int, Query(ge=1, le=365)] = 30,
+    start_date: Annotated[date | None, Query()] = None,
+    end_date: Annotated[date | None, Query()] = None,
     db: AsyncSession = Depends(get_session_flexible),
     tenant_id: UUID = Depends(get_effective_tenant_id),
 ) -> list[EmailOverTimeItem]:
     """Série temporal diária de e-mails enviados, abertos e respondidos."""
-    since = _utc_days_ago(days)
-    sent_day_expr = func.date_trunc(literal_column("'day'"), Interaction.created_at)
-    opened_day_expr = func.date_trunc(literal_column("'day'"), Interaction.opened_at)
-    replied_day_expr = func.date_trunc(literal_column("'day'"), Interaction.created_at)
+    since, until = _resolve_period_bounds(days=days, start_date=start_date, end_date=end_date)
+    sent_step_day_expr = func.date_trunc(literal_column("'day'"), CadenceStep.sent_at)
 
     # Enviados por dia apenas de cadências email_only
     sent_q = await db.execute(
         select(
-            sent_day_expr.label("day"),
-            func.count(func.distinct(Interaction.id)).label("cnt"),
+            sent_step_day_expr.label("day"),
+            func.count(CadenceStep.id).label("cnt"),
         )
-        .join(CadenceStep, _interaction_matches_cadence_step())
         .join(Cadence, Cadence.id == CadenceStep.cadence_id)
         .where(
-            Interaction.tenant_id == tenant_id,
-            Interaction.channel == Channel.EMAIL,
-            Interaction.direction == InteractionDirection.OUTBOUND,
-            Interaction.created_at >= since,
             CadenceStep.tenant_id == tenant_id,
             CadenceStep.channel == Channel.EMAIL,
+            CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED]),
             CadenceStep.sent_at >= since,
+            CadenceStep.sent_at < until,
             Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
-        .group_by(sent_day_expr)
+        .group_by(sent_step_day_expr)
     )
     sent_map: dict[str, int] = {}
     for row in sent_q.all():
@@ -1549,6 +1654,7 @@ async def get_email_over_time(
     opened_email_sq = _opened_email_interactions_subquery(
         tenant_id=tenant_id,
         since=since,
+        until=until,
         cadence_type=_EMAIL_ONLY_CADENCE_TYPE,
     )
     opened_q = await db.execute(
@@ -1564,6 +1670,7 @@ async def get_email_over_time(
     first_email_replies_sq = _first_reliable_reply_per_cadence_lead_subquery(
         tenant_id=tenant_id,
         since=since,
+        until=until,
         channel=Channel.EMAIL,
         cadence_type=_EMAIL_ONLY_CADENCE_TYPE,
     )
@@ -1601,11 +1708,13 @@ async def get_email_ab_results(
     cadence_id: UUID = Query(..., description="ID da cadência"),
     step_number: int = Query(..., ge=1, description="Número do step"),
     days: Annotated[int, Query(ge=1, le=365)] = 30,
+    start_date: Annotated[date | None, Query()] = None,
+    end_date: Annotated[date | None, Query()] = None,
     db: AsyncSession = Depends(get_session_flexible),
     tenant_id: UUID = Depends(get_effective_tenant_id),
 ) -> list[EmailABResultItem]:
     """Resultados A/B por variante de assunto para um step específico."""
-    since = _utc_days_ago(days)
+    since, until = _resolve_period_bounds(days=days, start_date=start_date, end_date=end_date)
 
     # Busca steps agrupados por subject_used
     q = await db.execute(
@@ -1622,6 +1731,7 @@ async def get_email_ab_results(
             CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED]),
             CadenceStep.subject_used.is_not(None),
             CadenceStep.sent_at >= since,
+            CadenceStep.sent_at < until,
             Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
         .group_by(CadenceStep.subject_used)
@@ -1646,10 +1756,12 @@ async def get_email_ab_results(
             CadenceStep.channel == Channel.EMAIL,
             CadenceStep.subject_used.is_not(None),
             CadenceStep.sent_at >= since,
+            CadenceStep.sent_at < until,
             Interaction.channel == Channel.EMAIL,
             Interaction.direction == InteractionDirection.OUTBOUND,
             Interaction.opened.is_(True),
             Interaction.opened_at >= since,
+            Interaction.opened_at < until,
             Cadence.cadence_type == _EMAIL_ONLY_CADENCE_TYPE,
         )
         .group_by(CadenceStep.subject_used)

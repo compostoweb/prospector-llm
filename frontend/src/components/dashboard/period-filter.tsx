@@ -1,6 +1,7 @@
 "use client"
 
-import { cn } from "@/lib/utils"
+import { AnalyticsPeriodFilter } from "@/components/shared/analytics-period-filter"
+import { buildDateFilterValue, type AnalyticsDateFilterOption } from "@/lib/analytics-period"
 
 interface PeriodFilterProps {
   value: number
@@ -8,30 +9,25 @@ interface PeriodFilterProps {
   className?: string
 }
 
-const OPTIONS = [
-  { label: "7d", days: 7 },
-  { label: "30d", days: 30 },
-  { label: "90d", days: 90 },
-] as const
+const OPTIONS: AnalyticsDateFilterOption[] = [
+  { id: "last_7_days", label: "7 dias", days: 7 },
+  { id: "last_30_days", label: "30 dias", days: 30 },
+  { id: "last_90_days", label: "90 dias", days: 90 },
+]
 
 export function PeriodFilter({ value, onChange, className }: PeriodFilterProps) {
+  const selectedOption = OPTIONS.find((option) => option.days === value) ?? OPTIONS[1]
+
   return (
-    <div className={cn("inline-flex rounded-md border border-(--border-default) p-0.5", className)}>
-      {OPTIONS.map(({ label, days }) => (
-        <button
-          key={days}
-          type="button"
-          onClick={() => onChange(days)}
-          className={cn(
-            "rounded-sm px-3 py-1 text-xs font-medium transition-colors",
-            value === days
-              ? "bg-(--accent) text-(--text-invert)"
-              : "text-(--text-secondary) hover:text-(--text-primary)",
-          )}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
+    <AnalyticsPeriodFilter
+      value={buildDateFilterValue(selectedOption)}
+      onChange={(next) => {
+        const matched = OPTIONS.find((option) => option.id === next.id)
+        onChange(matched?.days ?? 30)
+      }}
+      options={OPTIONS}
+      enableCustom={false}
+      className={className}
+    />
   )
 }

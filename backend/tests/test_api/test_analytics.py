@@ -9,7 +9,7 @@ sem depender do ambiente asyncpg atual, que segue instável para esse tipo de se
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from typing import Any, Protocol, cast
 
@@ -327,6 +327,52 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
     assert _statement_contains_param(session.statements[10], "fallback_single_cadence")
 
 
+async def test_get_cadence_analytics_accepts_explicit_date_range() -> None:
+    tenant_id = uuid.uuid4()
+    cadence = _make_cadence(tenant_id)
+    period_start = date(2026, 3, 28)
+    period_end = date(2026, 4, 2)
+    period_until = datetime(2026, 4, 3, tzinfo=UTC)
+
+    session = FakeAsyncSession(
+        FakeResult(scalar_one_or_none_value=cadence),
+        FakeResult(scalar_value=5),
+        FakeResult(scalar_value=4),
+        FakeResult(one_value=SimpleNamespace(sent=3, pending=1, skipped=0, failed=1)),
+        FakeResult(one_value=SimpleNamespace(replied=1)),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+    )
+
+    original_sync = analytics_routes._sync_cadence_list_members
+    analytics_routes._sync_cadence_list_members = _fake_sync_cadence_list_members
+    try:
+        result = await analytics_routes.get_cadence_analytics(
+            cadence_id=cadence.id,
+            days=30,
+            start_date=period_start,
+            end_date=period_end,
+            db=cast(AsyncSession, session),
+            tenant_id=tenant_id,
+        )
+    finally:
+        analytics_routes._sync_cadence_list_members = original_sync
+
+    assert result.cadence_id == str(cadence.id)
+    assert _statement_contains_param(session.statements[3], datetime(2026, 3, 28, tzinfo=UTC))
+    assert _statement_contains_param(session.statements[3], period_until)
+    assert _statement_contains_param(session.statements[4], period_until)
+    assert _statement_contains_param(session.statements[6], period_until)
+    assert _statement_contains_param(session.statements[7], period_until)
+
+
 async def test_get_cadence_analytics_raises_404_when_missing() -> None:
     tenant_id = uuid.uuid4()
     session = FakeAsyncSession(FakeResult(scalar_one_or_none_value=None))
@@ -504,10 +550,37 @@ async def test_get_email_stats_filters_to_email_only_cadences(
         assert _statement_contains_param(statement, marker_since)
         assert _statement_contains_param(statement, "email_only")
 
-    assert "cadence_steps.id = interactions.cadence_step_id" in _compiled_sql(session.statements[0])
+    assert "from cadence_steps join cadences" in _compiled_sql(session.statements[0]).lower()
+    assert "interactions" not in _compiled_sql(session.statements[0]).lower()
     assert "cadence_steps.id = interactions.cadence_step_id" in _compiled_sql(session.statements[1])
     assert "cadence_steps.id = interactions.cadence_step_id" in _compiled_sql(session.statements[2])
     assert _statement_contains_param(session.statements[2], "fallback_single_cadence")
+
+
+async def test_get_email_stats_accepts_explicit_date_range() -> None:
+    start_date = date(2026, 3, 1)
+    end_date = date(2026, 3, 10)
+    session = FakeAsyncSession(
+        FakeResult(scalar_value=4),
+        FakeResult(scalar_value=1),
+        FakeResult(scalar_value=2),
+        FakeResult(scalar_value=0),
+        FakeResult(scalar_value=0),
+    )
+
+    result = await analytics_routes.get_email_stats(
+        days=30,
+        start_date=start_date,
+        end_date=end_date,
+        db=cast(AsyncSession, session),
+        tenant_id=uuid.uuid4(),
+    )
+
+    assert result.sent == 4
+    assert _statement_contains_param(session.statements[0], datetime(2026, 3, 1, tzinfo=UTC))
+    assert _statement_contains_param(session.statements[0], datetime(2026, 3, 11, tzinfo=UTC))
+    assert _statement_contains_param(session.statements[1], datetime(2026, 3, 11, tzinfo=UTC))
+    assert _statement_contains_param(session.statements[2], datetime(2026, 3, 11, tzinfo=UTC))
 
 
 async def test_get_email_cadences_stats_filters_to_email_only_cadences(
@@ -602,9 +675,31 @@ async def test_get_email_over_time_maps_daily_series_and_inlines_day_bucket(
     assert _statement_param_count(session.statements[0], "day") == 0
     assert _statement_param_count(session.statements[1], "day") == 0
     assert _statement_param_count(session.statements[2], "day") == 0
-    assert "cadence_steps.id = interactions.cadence_step_id" in _compiled_sql(session.statements[0])
+    assert "from cadence_steps join cadences" in _compiled_sql(session.statements[0]).lower()
+    assert "interactions" not in _compiled_sql(session.statements[0]).lower()
     assert "cadence_steps.id = interactions.cadence_step_id" in _compiled_sql(session.statements[1])
     assert "cadence_steps.id = interactions.cadence_step_id" in _compiled_sql(session.statements[2])
+
+
+async def test_resolve_period_bounds_validates_custom_ranges() -> None:
+    with pytest.raises(HTTPException):
+        analytics_routes._resolve_period_bounds(days=30, start_date=date(2026, 3, 1), end_date=None)
+
+    with pytest.raises(HTTPException):
+        analytics_routes._resolve_period_bounds(
+            days=30,
+            start_date=date(2026, 3, 10),
+            end_date=date(2026, 3, 1),
+        )
+
+    since, until = analytics_routes._resolve_period_bounds(
+        days=30,
+        start_date=date(2026, 3, 1),
+        end_date=date(2026, 3, 10),
+    )
+
+    assert since == datetime(2026, 3, 1, tzinfo=UTC)
+    assert until == datetime(2026, 3, 11, tzinfo=UTC)
 
 
 async def test_dashboard_channel_recent_and_intent_queries_ignore_low_confidence_email_replies(
@@ -688,6 +783,81 @@ async def test_dashboard_channel_recent_and_intent_queries_ignore_low_confidence
     )
     assert intents[0].count == 2
     assert _statement_contains_param(intent_session.statements[0], "fallback_single_cadence")
+
+
+async def test_dashboard_breakdowns_accept_explicit_date_range() -> None:
+    start_date = date(2026, 4, 10)
+    end_date = date(2026, 4, 22)
+    period_start = datetime(2026, 4, 10, tzinfo=UTC)
+    period_end = datetime(2026, 4, 23, tzinfo=UTC)
+    prev_period_start = datetime(2026, 3, 28, tzinfo=UTC)
+
+    tenant_id = uuid.uuid4()
+    cadence_id = uuid.uuid4()
+
+    dashboard_session = FakeAsyncSession(
+        FakeResult(one_value=SimpleNamespace(total=10, in_cadence=4, converted=1, archived=0)),
+        FakeResult(one_value=SimpleNamespace(current=3, previous=2)),
+        FakeResult(one_value=SimpleNamespace(today=2, week=5, period=9, prev_period=7)),
+        FakeResult(one_value=SimpleNamespace(today=1, week=2, period=3, prev_period=1)),
+        FakeResult(one_value=SimpleNamespace(current=2, previous=1)),
+    )
+    dashboard = await analytics_routes.get_dashboard_stats(
+        days=30,
+        start_date=start_date,
+        end_date=end_date,
+        db=cast(AsyncSession, dashboard_session),
+        tenant_id=tenant_id,
+    )
+    assert dashboard.steps_sent_period == 9
+    assert _statement_contains_param(dashboard_session.statements[1], period_start)
+    assert _statement_contains_param(dashboard_session.statements[1], period_end)
+    assert _statement_contains_param(dashboard_session.statements[1], prev_period_start)
+
+    channel_session = FakeAsyncSession(
+        FakeResult(all_values=[SimpleNamespace(channel=Channel.EMAIL, sent=5)]),
+        FakeResult(all_values=[SimpleNamespace(channel=Channel.EMAIL, replies=1)]),
+    )
+    channels = await analytics_routes.get_channel_breakdown(
+        days=30,
+        start_date=start_date,
+        end_date=end_date,
+        db=cast(AsyncSession, channel_session),
+        tenant_id=tenant_id,
+    )
+    assert channels[0].steps_sent == 5
+    assert _statement_contains_param(channel_session.statements[0], period_end)
+    assert _statement_contains_param(channel_session.statements[1], period_end)
+
+    intent_session = FakeAsyncSession(
+        FakeResult(all_values=[SimpleNamespace(intent=SimpleNamespace(value="neutral"), cnt=2)])
+    )
+    intents = await analytics_routes.get_intent_breakdown(
+        days=30,
+        start_date=start_date,
+        end_date=end_date,
+        db=cast(AsyncSession, intent_session),
+        tenant_id=tenant_id,
+    )
+    assert intents[0].count == 2
+    assert _statement_contains_param(intent_session.statements[0], period_end)
+
+    performance_session = FakeAsyncSession(
+        FakeResult(all_values=[SimpleNamespace(cadence_id=cadence_id, sent=5)]),
+        FakeResult(all_values=[SimpleNamespace(id=cadence_id, name="Cadência A")]),
+        FakeResult(all_values=[SimpleNamespace(cadence_id=cadence_id, replied=2)]),
+        FakeResult(all_values=[SimpleNamespace(cadence_id=cadence_id, active=1)]),
+    )
+    performance = await analytics_routes.get_cadence_performance(
+        days=30,
+        start_date=start_date,
+        end_date=end_date,
+        db=cast(AsyncSession, performance_session),
+        tenant_id=tenant_id,
+    )
+    assert performance[0].steps_sent == 5
+    assert _statement_contains_param(performance_session.statements[0], period_end)
+    assert _statement_contains_param(performance_session.statements[2], period_end)
 
 
 async def test_get_email_ab_results_joins_outbound_opened_by_cadence_step_id(

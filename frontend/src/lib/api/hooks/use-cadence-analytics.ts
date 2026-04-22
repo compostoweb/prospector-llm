@@ -3,6 +3,7 @@
 import { useQueries, useQuery } from "@tanstack/react-query"
 import { useSession } from "next-auth/react"
 import { createBrowserClient } from "@/lib/api/client"
+import { buildAnalyticsQueryString, type AnalyticsRangeQuery } from "@/lib/analytics-period"
 import type { CadenceStep } from "@/lib/api/hooks/use-cadences"
 import type { Lead } from "@/lib/api/hooks/use-leads"
 
@@ -123,16 +124,22 @@ export interface CadenceReplyManagement {
   audit_items: CadenceReplyAuditItem[]
 }
 
-export function useCadenceAnalytics(cadenceId: string, days = 30) {
+export function useCadenceAnalytics(cadenceId: string, range: AnalyticsRangeQuery = { days: 30 }) {
   const { data: session } = useSession()
+  const query = buildAnalyticsQueryString(range)
 
   return useQuery({
-    queryKey: ["analytics", "cadences", cadenceId, days],
+    queryKey: [
+      "analytics",
+      "cadences",
+      cadenceId,
+      range.days ?? null,
+      range.startDate ?? null,
+      range.endDate ?? null,
+    ],
     queryFn: async (): Promise<CadenceAnalytics> => {
       const client = createBrowserClient(session?.accessToken)
-      const { data, error } = await client.GET(
-        `/analytics/cadences/${cadenceId}?days=${days}` as never,
-      )
+      const { data, error } = await client.GET(`/analytics/cadences/${cadenceId}${query}` as never)
       if (error) throw new Error("Falha ao carregar analytics da cadência")
       return data as CadenceAnalytics
     },
@@ -145,9 +152,10 @@ export function useCadenceAnalytics(cadenceId: string, days = 30) {
 export function useCadenceABTestResults(
   cadenceId: string,
   stepsTemplate: CadenceStep[] | null | undefined,
-  days = 30,
+  range: AnalyticsRangeQuery = { days: 30 },
 ): CadenceABStepResult[] {
   const { data: session } = useSession()
+  const query = buildAnalyticsQueryString(range)
 
   const abSteps = (stepsTemplate ?? []).flatMap((step, index) => {
     const subjectVariants =
@@ -166,11 +174,20 @@ export function useCadenceABTestResults(
 
   const queryResults = useQueries({
     queries: abSteps.map((step) => ({
-      queryKey: ["analytics", "cadences", cadenceId, "ab-results", step.stepNumber, days],
+      queryKey: [
+        "analytics",
+        "cadences",
+        cadenceId,
+        "ab-results",
+        step.stepNumber,
+        range.days ?? null,
+        range.startDate ?? null,
+        range.endDate ?? null,
+      ],
       queryFn: async (): Promise<CadenceABResult[]> => {
         const client = createBrowserClient(session?.accessToken)
         const { data, error } = await client.GET(
-          `/analytics/email/ab-results?cadence_id=${cadenceId}&step_number=${step.stepNumber}&days=${days}` as never,
+          `/analytics/email/ab-results?cadence_id=${cadenceId}&step_number=${step.stepNumber}${query ? `&${query.slice(1)}` : ""}` as never,
         )
         if (error) throw new Error("Falha ao carregar resultados A/B da cadência")
         return (data as CadenceABResult[]) ?? []

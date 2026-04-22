@@ -7,7 +7,6 @@ import {
   Send,
   Eye,
   MessageSquare,
-  UserMinus,
   AlertCircle,
   Plus,
   Sparkles,
@@ -35,10 +34,11 @@ import {
   useEmailOverTime,
   useEmailABResults,
 } from "@/lib/api/hooks/use-email-analytics"
-import type { EmailOverTimeItem } from "@/lib/api/hooks/use-email-analytics"
+import type { EmailAnalyticsRange, EmailOverTimeItem } from "@/lib/api/hooks/use-email-analytics"
 import { useCadences } from "@/lib/api/hooks/use-cadences"
 import { useCadenceOverview } from "@/lib/api/hooks/use-cadence-analytics"
 import { useTenant, useUpdateIntegrations } from "@/lib/api/hooks/use-tenant"
+import { AnalyticsPeriodFilter } from "@/components/shared/analytics-period-filter"
 import { LLMConfigForm, type LLMConfig } from "@/components/cadencias/llm-config-form"
 import {
   Dialog,
@@ -53,8 +53,12 @@ import { cn } from "@/lib/utils"
 import { useSession } from "next-auth/react"
 import { createBrowserClient } from "@/lib/api/client"
 import { useQueryClient } from "@tanstack/react-query"
-
-type Days = 7 | 30 | 90
+import {
+  buildDateFilterValue,
+  getRangeQueryFromFilter,
+  parseInputDate,
+  type AnalyticsDateFilterValue,
+} from "@/lib/analytics-period"
 
 const coldEmailAxisDateFormatter = new Intl.DateTimeFormat("pt-BR", {
   day: "2-digit",
@@ -79,19 +83,18 @@ function formatColdEmailDate(value: string, mode: "axis" | "tooltip" = "axis"): 
     : coldEmailAxisDateFormatter.format(parsed)
 }
 
+
 function buildColdEmailChartData(
-  selectedDays: Days,
+  startDate: string,
+  endDate: string,
   data: EmailOverTimeItem[] | undefined,
 ): EmailOverTimeItem[] {
   const byDate = new Map((data ?? []).map((item) => [item.date, item]))
   const timeline: EmailOverTimeItem[] = []
-  const today = new Date()
+  const current = parseInputDate(startDate)
+  const end = parseInputDate(endDate)
 
-  today.setUTCHours(0, 0, 0, 0)
-
-  for (let offset = selectedDays - 1; offset >= 0; offset -= 1) {
-    const current = new Date(today)
-    current.setUTCDate(today.getUTCDate() - offset)
+  while (current <= end) {
     const dateKey = current.toISOString().slice(0, 10)
     const existing = byDate.get(dateKey)
 
@@ -101,6 +104,8 @@ function buildColdEmailChartData(
       opened: existing?.opened ?? 0,
       replied: existing?.replied ?? 0,
     })
+
+    current.setUTCDate(current.getUTCDate() + 1)
   }
 
   return timeline
@@ -304,12 +309,14 @@ function CadenceToggleButton({
 
 function ABResultsSection({
   cadences,
+  range,
 }: {
   cadences: { cadence_id: string; cadence_name: string }[]
+  range: EmailAnalyticsRange
 }) {
   const [selectedCadenceId, setSelectedCadenceId] = useState("")
   const [stepNumber, setStepNumber] = useState(1)
-  const { data: abResults, isLoading } = useEmailABResults(selectedCadenceId, stepNumber)
+  const { data: abResults, isLoading } = useEmailABResults(selectedCadenceId, stepNumber, range)
 
   return (
     <div className="rounded-lg border border-(--border-default) bg-(--bg-surface)">
@@ -417,9 +424,16 @@ function ABResultsSection({
 // ── Página principal ──────────────────────────────────────────────────
 
 export default function ColdEmailPage() {
-  const [days, setDays] = useState<Days>(30)
+  const [dateFilter, setDateFilter] = useState<AnalyticsDateFilterValue>(() =>
+    buildDateFilterValue({ id: "last_30_days", label: "30 dias", days: 30 }),
+  )
   const [aiModalOpen, setAiModalOpen] = useState(false)
-  const { data: stats, isLoading: loadingStats, isError: statsError } = useEmailStats(days)
+  const analyticsRange = useMemo<EmailAnalyticsRange>(() => getRangeQueryFromFilter(dateFilter), [dateFilter])
+  const {
+    data: stats,
+    isLoading: loadingStats,
+    isError: statsError,
+  } = useEmailStats(analyticsRange)
   const {
     data: cadenceOverview,
     isLoading: loadingOverview,
@@ -429,16 +443,19 @@ export default function ColdEmailPage() {
     data: analyticsData,
     isLoading: loadingCadences,
     isError: analyticsError,
-  } = useEmailCadences(days)
+  } = useEmailCadences(analyticsRange)
   const {
     data: allEmailCadences,
     isLoading: loadingAllCadences,
     isError: allCadencesError,
   } = useCadences("email_only")
-  const { data: overTime, isError: overTimeError } = useEmailOverTime(days)
+  const { data: overTime, isError: overTimeError } = useEmailOverTime(analyticsRange)
   const hasColdEmailError =
     statsError || analyticsError || allCadencesError || overTimeError || cadenceOverviewError
-  const chartData = useMemo(() => buildColdEmailChartData(days, overTime), [days, overTime])
+  const chartData = useMemo(
+    () => buildColdEmailChartData(dateFilter.startDate, dateFilter.endDate, overTime),
+    [dateFilter.endDate, dateFilter.startDate, overTime],
+  )
 
   // Merge: show all email_only cadences, with analytics when available
   const analyticsMap = new Map((analyticsData ?? []).map((c) => [c.cadence_id, c]))
@@ -497,23 +514,7 @@ export default function ColdEmailPage() {
         </div>
       ) : null}
 
-      <div className="flex gap-1 rounded-md border border-(--border-default) bg-(--bg-overlay) p-1 w-fit">
-        {([7, 30, 90] as Days[]).map((d) => (
-          <button
-            key={d}
-            type="button"
-            onClick={() => setDays(d)}
-            className={cn(
-              "rounded px-3 py-1 text-xs font-medium transition-colors",
-              days === d
-                ? "bg-(--bg-surface) text-(--text-primary) shadow-sm"
-                : "text-(--text-secondary) hover:text-(--text-primary)",
-            )}
-          >
-            {d} dias
-          </button>
-        ))}
-      </div>
+      <AnalyticsPeriodFilter value={dateFilter} onChange={setDateFilter} />
 
       {/* KPIs */}
       {loadingStats ? (
@@ -539,10 +540,10 @@ export default function ColdEmailPage() {
             sub={`${stats?.replied ?? 0} respostas`}
           />
           <KPICard
-            icon={UserMinus}
-            label="Descadastros"
-            value={stats?.unsubscribed ?? 0}
-            sub={stats?.unsubscribe_rate != null ? `${stats.unsubscribe_rate}%` : undefined}
+            icon={Mail}
+            label="Total de respostas"
+            value={stats?.replied ?? 0}
+            sub="Todas as cadências de email puro"
           />
           <KPICard
             icon={AlertCircle}
@@ -571,7 +572,7 @@ export default function ColdEmailPage() {
       {/* Gráfico ao longo do tempo */}
       <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-4">
         <h2 className="mb-4 text-sm font-semibold text-(--text-primary)">
-          Evolução nos últimos {days} dias
+          Evolução no período selecionado
         </h2>
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
@@ -746,7 +747,9 @@ export default function ColdEmailPage() {
       </div>
 
       {/* A/B Results */}
-      {mergedCadences.length > 0 && <ABResultsSection cadences={mergedCadences} />}
+      {mergedCadences.length > 0 && (
+        <ABResultsSection cadences={mergedCadences} range={analyticsRange} />
+      )}
     </div>
   )
 }

@@ -3,10 +3,17 @@
 import type { Route } from "next"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { AlertTriangle, Clock3, Gauge, MessageSquare, Send, Users } from "lucide-react"
-import { PeriodFilter } from "@/components/dashboard/period-filter"
+import { AnalyticsPeriodFilter } from "@/components/shared/analytics-period-filter"
 import { StatCard } from "@/components/dashboard/stat-card"
 import { BadgeChannel } from "@/components/shared/badge-channel"
 import type { Cadence } from "@/lib/api/hooks/use-cadences"
+import {
+  buildDateFilterValue,
+  formatSelectedRangeLabel,
+  getRangeQueryFromFilter,
+  resolveDateFilterValue,
+  type AnalyticsDateFilterValue,
+} from "@/lib/analytics-period"
 import {
   useCadenceABTestResults,
   useCadenceAnalytics,
@@ -18,7 +25,13 @@ interface CadenceDetailAnalyticsProps {
   cadence: Cadence
 }
 
-const PERIOD_OPTIONS = new Set([7, 30, 90])
+const PERIOD_OPTIONS = new Map([
+  [7, { id: "last_7_days", label: "7 dias", days: 7 }],
+  [15, { id: "last_15_days", label: "15 dias", days: 15 }],
+  [30, { id: "last_30_days", label: "30 dias", days: 30 }],
+  [60, { id: "last_60_days", label: "60 dias", days: 60 }],
+  [90, { id: "last_90_days", label: "90 dias", days: 90 }],
+] as const)
 
 export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps) {
   const router = useRouter()
@@ -26,15 +39,34 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
   const searchParams = useSearchParams()
 
   const rawDays = Number(searchParams.get("days") ?? "30")
-  const days = PERIOD_OPTIONS.has(rawDays) ? rawDays : 30
+  const rawStartDate = searchParams.get("start_date")
+  const rawEndDate = searchParams.get("end_date")
+  const selectedPeriod = (() => {
+    if (rawStartDate && rawEndDate) {
+      return resolveDateFilterValue({ startDate: rawStartDate, endDate: rawEndDate })
+    }
 
-  function handlePeriodChange(nextDays: number) {
+    const preset = PERIOD_OPTIONS.get(rawDays) ?? PERIOD_OPTIONS.get(30)
+    return buildDateFilterValue(preset ?? { id: "last_30_days", label: "30 dias", days: 30 })
+  })()
+
+  function handlePeriodChange(nextPeriod: AnalyticsDateFilterValue) {
     const params = new URLSearchParams(searchParams.toString())
 
-    if (nextDays === 30) {
-      params.delete("days")
+    const preset = Array.from(PERIOD_OPTIONS.values()).find((option) => option.id === nextPeriod.id)
+
+    if (preset?.days) {
+      if (preset.days === 30) {
+        params.delete("days")
+      } else {
+        params.set("days", String(preset.days))
+      }
+      params.delete("start_date")
+      params.delete("end_date")
     } else {
-      params.set("days", String(nextDays))
+      params.delete("days")
+      params.set("start_date", nextPeriod.startDate)
+      params.set("end_date", nextPeriod.endDate)
     }
 
     const query = params.toString()
@@ -42,9 +74,10 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
     router.replace(nextUrl as Route, { scroll: false })
   }
 
-  const { data, isLoading, isError } = useCadenceAnalytics(cadence.id, days)
+  const analyticsRange = getRangeQueryFromFilter(selectedPeriod)
+  const { data, isLoading, isError } = useCadenceAnalytics(cadence.id, analyticsRange)
   const deliveryBudgetQuery = useCadenceDeliveryBudget(cadence.id)
-  const abResults = useCadenceABTestResults(cadence.id, cadence.steps_template, days)
+  const abResults = useCadenceABTestResults(cadence.id, cadence.steps_template, analyticsRange)
   const deliveryBudgetItems = deliveryBudgetQuery.data?.items ?? []
   const deliveryBudgetSummaries = summarizeBudgetByAction(deliveryBudgetItems).filter(
     (item) => item.scope_count > 1,
@@ -56,11 +89,12 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
         <div>
           <p className="text-sm font-semibold text-(--text-primary)">Janela de análise</p>
           <p className="text-xs text-(--text-secondary)">
-            Envios, respostas e A/B usam os últimos {days} dias. Base de leads e backlog seguem o
-            estado atual.
+            Envios, respostas e A/B usam o período selecionado: {selectedPeriod.label} (
+            {formatSelectedRangeLabel(selectedPeriod.startDate, selectedPeriod.endDate)}). Base de
+            leads e backlog seguem o estado atual.
           </p>
         </div>
-        <PeriodFilter value={days} onChange={handlePeriodChange} />
+        <AnalyticsPeriodFilter value={selectedPeriod} onChange={handlePeriodChange} />
       </div>
 
       {isError ? (
@@ -82,7 +116,7 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
           label="Envios concluídos"
           value={isLoading ? "..." : (data?.steps_sent ?? 0)}
           icon={Send}
-          description={`Steps enviados ou respondidos nos últimos ${days} dias`}
+          description={`Steps enviados ou respondidos no período selecionado`}
         />
         <StatCard
           label="Respostas"
@@ -168,7 +202,7 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
                   Desempenho por canal
                 </h2>
                 <p className="text-xs text-(--text-secondary)">
-                  Envios, respostas, abertura de e-mail e aceites de conexão nos últimos {days} dias
+                  Envios, respostas, abertura de e-mail e aceites de conexão no período selecionado
                 </p>
               </div>
             </div>
@@ -344,8 +378,8 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
             <div>
               <h2 className="text-sm font-semibold text-(--text-primary)">A/B de assuntos</h2>
               <p className="text-xs text-(--text-secondary)">
-                Comparativo das variantes usadas nos steps de e-mail com subject variants nos
-                últimos {days} dias.
+                Comparativo das variantes usadas nos steps de e-mail com subject variants no período
+                selecionado.
               </p>
             </div>
           </div>
