@@ -21,6 +21,7 @@ Uso:
 from __future__ import annotations
 
 import asyncio
+import random
 import uuid
 from collections.abc import Awaitable
 from datetime import date
@@ -197,6 +198,85 @@ class RedisClient:
         """
         key = f"ratelimit:{tenant_id}:{channel}:{date.today()}"
         return await self.release_rate_limit_key(key)
+
+    async def reserve_delivery_slot(
+        self,
+        *,
+        throttle_scope: str,
+        now_ts: int,
+        min_gap_seconds: int,
+        max_gap_seconds: int,
+        per_minute_limit: int,
+        ttl: int = 7200,
+    ) -> int:
+        """
+        Reserva atomicamente um slot de envio com espaçamento e teto por minuto.
+
+        Retorna o timestamp UNIX do slot reservado.
+        """
+        jitter_seconds = random.randint(
+            max(1, min_gap_seconds),
+            max(max_gap_seconds, min_gap_seconds, 1),
+        )
+        next_key = f"ratelimit:next:{throttle_scope}"
+        minute_prefix = f"ratelimit:minute:{throttle_scope}"
+        scheduled_ts = await cast(
+            Awaitable[Any],
+            self._get_redis().eval(
+                """
+            local next_key = KEYS[1]
+            local minute_prefix = ARGV[1]
+            local now_ts = tonumber(ARGV[2])
+            local jitter_seconds = tonumber(ARGV[3])
+            local per_minute_limit = tonumber(ARGV[4])
+            local ttl = tonumber(ARGV[5])
+
+            local scheduled_ts = now_ts
+            local next_ts_raw = redis.call('GET', next_key)
+            if next_ts_raw then
+                local next_ts = tonumber(next_ts_raw)
+                if next_ts and next_ts > scheduled_ts then
+                    scheduled_ts = next_ts
+                end
+            end
+
+            local minute_bucket = math.floor(scheduled_ts / 60)
+            for _ = 1, 180 do
+                local minute_key = minute_prefix .. ':' .. tostring(minute_bucket)
+                local current = tonumber(redis.call('GET', minute_key) or '0')
+
+                if current < per_minute_limit then
+                    local minute_start = minute_bucket * 60
+                    if scheduled_ts < minute_start then
+                        scheduled_ts = minute_start
+                    end
+
+                    redis.call('INCR', minute_key)
+                    redis.call('EXPIRE', minute_key, ttl)
+                    redis.call('SET', next_key, tostring(scheduled_ts + jitter_seconds), 'EX', ttl)
+                    return scheduled_ts
+                end
+
+                minute_bucket = minute_bucket + 1
+                local next_minute_start = minute_bucket * 60
+                if scheduled_ts < next_minute_start then
+                    scheduled_ts = next_minute_start
+                end
+            end
+
+            redis.call('SET', next_key, tostring(scheduled_ts + jitter_seconds), 'EX', ttl)
+            return scheduled_ts
+            """,
+                1,
+                next_key,
+                minute_prefix,
+                str(now_ts),
+                str(jitter_seconds),
+                str(max(per_minute_limit, 1)),
+                str(ttl),
+            ),
+        )
+        return int(scheduled_ts)
 
     # ── Cache genérico ────────────────────────────────────────────────
 

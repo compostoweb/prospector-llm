@@ -24,11 +24,13 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import structlog
 from sqlalchemy import select
 
+from core.config import settings
 from core.database import WorkerSessionLocal, get_worker_session
 from core.redis_client import redis_client
 from models.cadence import Cadence
@@ -47,6 +49,19 @@ from services.cadence_step_eligibility import evaluate_step_eligibility
 from workers.celery_app import celery_app
 
 logger = structlog.get_logger()
+
+LINKEDIN_ENGAGEMENT_CHANNELS = {
+    Channel.LINKEDIN_POST_REACTION,
+    Channel.LINKEDIN_POST_COMMENT,
+}
+
+
+@dataclass(frozen=True)
+class DeliveryThrottlePolicy:
+    throttle_scope: str
+    min_interval_seconds: int
+    max_interval_seconds: int
+    per_minute_limit: int
 
 
 @celery_app.task(
@@ -161,9 +176,33 @@ async def _tick_async() -> dict:
                     # Enfileira o dispatch
                     from workers.dispatch import dispatch_step
 
+                    dispatch_countdown = await _reserve_dispatch_countdown(
+                        db=db,
+                        cadence=cadence,
+                        step=step,
+                        integration=integration,
+                        tenant_limits=tenant_limits,
+                        now=now,
+                    )
+
                     step.status = StepStatus.DISPATCHING
                     await db.flush()
-                    dispatch_step.delay(str(step.id), str(tid))
+
+                    if dispatch_countdown > 0:
+                        dispatch_step.apply_async(
+                            args=[str(step.id), str(tid)],
+                            countdown=dispatch_countdown,
+                            queue="dispatch",
+                        )
+                        logger.info(
+                            "cadence_tick.delivery_throttled",
+                            step_id=str(step.id),
+                            cadence_id=str(cadence.id),
+                            channel=step.channel.value,
+                            countdown_seconds=dispatch_countdown,
+                        )
+                    else:
+                        dispatch_step.delay(str(step.id), str(tid))
                     dispatched += 1
 
                 await db.commit()
@@ -240,6 +279,109 @@ async def _reserve_step_rate_limits(
         budget=budget,
     )
     return False
+
+
+async def _reserve_dispatch_countdown(
+    *,
+    db,
+    cadence: Cadence,
+    step: CadenceStep,
+    integration: TenantIntegration | None,
+    tenant_limits: dict[Channel, int],
+    now: datetime,
+) -> int:
+    policy = await _build_delivery_throttle_policy(
+        db=db,
+        cadence=cadence,
+        step=step,
+        integration=integration,
+        tenant_limits=tenant_limits,
+    )
+    if policy is None:
+        return 0
+
+    now_ts = int(now.timestamp())
+    scheduled_ts = await redis_client.reserve_delivery_slot(
+        throttle_scope=policy.throttle_scope,
+        now_ts=now_ts,
+        min_gap_seconds=policy.min_interval_seconds,
+        max_gap_seconds=policy.max_interval_seconds,
+        per_minute_limit=policy.per_minute_limit,
+    )
+    return max(scheduled_ts - now_ts, 0)
+
+
+async def _build_delivery_throttle_policy(
+    *,
+    db,
+    cadence: Cadence,
+    step: CadenceStep,
+    integration: TenantIntegration | None,
+    tenant_limits: dict[Channel, int],
+) -> DeliveryThrottlePolicy | None:
+    throttled_channels = {
+        Channel.EMAIL,
+        Channel.LINKEDIN_CONNECT,
+        Channel.LINKEDIN_DM,
+        Channel.LINKEDIN_POST_REACTION,
+        Channel.LINKEDIN_POST_COMMENT,
+        Channel.LINKEDIN_INMAIL,
+    }
+    if step.channel not in throttled_channels:
+        return None
+
+    tenant_limit = tenant_limits.get(step.channel, DEFAULT_CHANNEL_LIMITS.get(step.channel, 40))
+    account_scope = await resolve_account_rate_scope(
+        db=db,
+        cadence=cadence,
+        channel=step.channel,
+        integration=integration,
+        tenant_limit=tenant_limit,
+    )
+    if account_scope is None:
+        return None
+
+    if step.channel == Channel.EMAIL:
+        return DeliveryThrottlePolicy(
+            throttle_scope=f"email:{account_scope.scope_key}",
+            min_interval_seconds=settings.CADENCE_EMAIL_MIN_INTERVAL_SECONDS,
+            max_interval_seconds=settings.CADENCE_EMAIL_MAX_INTERVAL_SECONDS,
+            per_minute_limit=settings.CADENCE_EMAIL_MAX_PER_MINUTE,
+        )
+
+    if step.channel == Channel.LINKEDIN_CONNECT:
+        return DeliveryThrottlePolicy(
+            throttle_scope=f"linkedin:{account_scope.scope_key}",
+            min_interval_seconds=settings.CADENCE_LINKEDIN_CONNECT_MIN_INTERVAL_SECONDS,
+            max_interval_seconds=settings.CADENCE_LINKEDIN_CONNECT_MAX_INTERVAL_SECONDS,
+            per_minute_limit=settings.CADENCE_LINKEDIN_CONNECT_MAX_PER_MINUTE,
+        )
+
+    if step.channel == Channel.LINKEDIN_DM:
+        return DeliveryThrottlePolicy(
+            throttle_scope=f"linkedin:{account_scope.scope_key}",
+            min_interval_seconds=settings.CADENCE_LINKEDIN_DM_MIN_INTERVAL_SECONDS,
+            max_interval_seconds=settings.CADENCE_LINKEDIN_DM_MAX_INTERVAL_SECONDS,
+            per_minute_limit=settings.CADENCE_LINKEDIN_DM_MAX_PER_MINUTE,
+        )
+
+    if step.channel in LINKEDIN_ENGAGEMENT_CHANNELS:
+        return DeliveryThrottlePolicy(
+            throttle_scope=f"linkedin:{account_scope.scope_key}",
+            min_interval_seconds=settings.CADENCE_LINKEDIN_ENGAGEMENT_MIN_INTERVAL_SECONDS,
+            max_interval_seconds=settings.CADENCE_LINKEDIN_ENGAGEMENT_MAX_INTERVAL_SECONDS,
+            per_minute_limit=settings.CADENCE_LINKEDIN_ENGAGEMENT_MAX_PER_MINUTE,
+        )
+
+    if step.channel == Channel.LINKEDIN_INMAIL:
+        return DeliveryThrottlePolicy(
+            throttle_scope=f"linkedin:{account_scope.scope_key}",
+            min_interval_seconds=settings.CADENCE_LINKEDIN_INMAIL_MIN_INTERVAL_SECONDS,
+            max_interval_seconds=settings.CADENCE_LINKEDIN_INMAIL_MAX_INTERVAL_SECONDS,
+            per_minute_limit=settings.CADENCE_LINKEDIN_INMAIL_MAX_PER_MINUTE,
+        )
+
+    return None
 
 
 async def _auto_enroll_list_members(db, tenant_id: uuid.UUID) -> int:

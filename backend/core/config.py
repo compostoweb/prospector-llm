@@ -225,6 +225,21 @@ class Settings(BaseSettings):
     LIMIT_LINKEDIN_CONNECT: int = 20
     LIMIT_LINKEDIN_DM: int = 40
     LIMIT_EMAIL: int = 300
+    CADENCE_LINKEDIN_CONNECT_MIN_INTERVAL_SECONDS: int = 90
+    CADENCE_LINKEDIN_CONNECT_MAX_INTERVAL_SECONDS: int = 180
+    CADENCE_LINKEDIN_CONNECT_MAX_PER_MINUTE: int = 1
+    CADENCE_LINKEDIN_DM_MIN_INTERVAL_SECONDS: int = 45
+    CADENCE_LINKEDIN_DM_MAX_INTERVAL_SECONDS: int = 90
+    CADENCE_LINKEDIN_DM_MAX_PER_MINUTE: int = 1
+    CADENCE_LINKEDIN_ENGAGEMENT_MIN_INTERVAL_SECONDS: int = 30
+    CADENCE_LINKEDIN_ENGAGEMENT_MAX_INTERVAL_SECONDS: int = 60
+    CADENCE_LINKEDIN_ENGAGEMENT_MAX_PER_MINUTE: int = 2
+    CADENCE_LINKEDIN_INMAIL_MIN_INTERVAL_SECONDS: int = 90
+    CADENCE_LINKEDIN_INMAIL_MAX_INTERVAL_SECONDS: int = 180
+    CADENCE_LINKEDIN_INMAIL_MAX_PER_MINUTE: int = 1
+    CADENCE_EMAIL_MIN_INTERVAL_SECONDS: int = 30
+    CADENCE_EMAIL_MAX_INTERVAL_SECONDS: int = 55
+    CADENCE_EMAIL_MAX_PER_MINUTE: int = 2
 
     # ── Cold Email / Tracking ─────────────────────────────────────────
     TRACKING_BASE_URL: str | None = Field(
@@ -234,8 +249,41 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def apply_tracking_base_url_fallback(self) -> Settings:
+        def _normalize_delivery_window(min_attr: str, max_attr: str, per_minute_attr: str) -> None:
+            min_value = max(int(getattr(self, min_attr)), 1)
+            max_value = max(int(getattr(self, max_attr)), min_value)
+            per_minute_value = max(int(getattr(self, per_minute_attr)), 1)
+            setattr(self, min_attr, min_value)
+            setattr(self, max_attr, max_value)
+            setattr(self, per_minute_attr, per_minute_value)
+
         if not self.TRACKING_BASE_URL:
             self.TRACKING_BASE_URL = self.API_PUBLIC_URL
+        _normalize_delivery_window(
+            "CADENCE_LINKEDIN_CONNECT_MIN_INTERVAL_SECONDS",
+            "CADENCE_LINKEDIN_CONNECT_MAX_INTERVAL_SECONDS",
+            "CADENCE_LINKEDIN_CONNECT_MAX_PER_MINUTE",
+        )
+        _normalize_delivery_window(
+            "CADENCE_LINKEDIN_DM_MIN_INTERVAL_SECONDS",
+            "CADENCE_LINKEDIN_DM_MAX_INTERVAL_SECONDS",
+            "CADENCE_LINKEDIN_DM_MAX_PER_MINUTE",
+        )
+        _normalize_delivery_window(
+            "CADENCE_LINKEDIN_ENGAGEMENT_MIN_INTERVAL_SECONDS",
+            "CADENCE_LINKEDIN_ENGAGEMENT_MAX_INTERVAL_SECONDS",
+            "CADENCE_LINKEDIN_ENGAGEMENT_MAX_PER_MINUTE",
+        )
+        _normalize_delivery_window(
+            "CADENCE_LINKEDIN_INMAIL_MIN_INTERVAL_SECONDS",
+            "CADENCE_LINKEDIN_INMAIL_MAX_INTERVAL_SECONDS",
+            "CADENCE_LINKEDIN_INMAIL_MAX_PER_MINUTE",
+        )
+        _normalize_delivery_window(
+            "CADENCE_EMAIL_MIN_INTERVAL_SECONDS",
+            "CADENCE_EMAIL_MAX_INTERVAL_SECONDS",
+            "CADENCE_EMAIL_MAX_PER_MINUTE",
+        )
         return self
 
     # ── Email Providers (Google OAuth direto para Gmail) ──────────────

@@ -276,6 +276,9 @@ def _configure_rate_limit_mocks(
     mock_redis.set_if_absent = AsyncMock(return_value=True)
     mock_redis.check_and_increment_key = AsyncMock(return_value=account_allowed)
     mock_redis.release_rate_limit = AsyncMock(return_value=0)
+    mock_redis.reserve_delivery_slot = AsyncMock(
+        side_effect=lambda **kwargs: kwargs["now_ts"]
+    )
 
 
 # ── Testes ────────────────────────────────────────────────────────────
@@ -595,6 +598,173 @@ async def test_tick_uses_account_daily_budget_for_email_account(
     _, kwargs = mock_redis.check_and_increment_key.call_args
     assert kwargs["limit"] == 23
     assert str(cadence.email_account_id) in mock_redis.check_and_increment_key.call_args.args[0]
+
+
+async def test_tick_applies_email_throttle_countdown_for_later_email_slot(
+    db: FakeAsyncSession,
+    tenant_id: uuid.UUID,
+    tenant: Tenant,
+) -> None:
+    from workers.cadence import _tick_async
+
+    lead = _make_lead(tenant_id)
+    cadence = _make_cadence(tenant_id)
+    cadence.email_account_id = uuid.uuid4()
+    step = _make_step(tenant_id, lead.id, cadence.id, channel=Channel.EMAIL)
+    email_account = EmailAccount(
+        id=cadence.email_account_id,
+        tenant_id=tenant_id,
+        display_name="Conta principal",
+        email_address="sender@example.com",
+        provider_type="smtp",
+        daily_send_limit=25,
+    )
+    db.add_all([lead, cadence, step, email_account])
+    await db.flush()
+
+    mock_wsl = _mock_worker_session_local(db, [tenant])
+
+    with (
+        patch("workers.cadence.WorkerSessionLocal", mock_wsl),
+        patch("workers.cadence.get_worker_session") as mock_get_session,
+        patch("workers.cadence.redis_client") as mock_redis,
+        patch("services.cadence_delivery_budget.random.randint", return_value=23),
+        patch("workers.dispatch.dispatch_step") as mock_dispatch,
+    ):
+
+        async def _fake_session(_tid):
+            yield db
+
+        mock_get_session.side_effect = _fake_session
+        _configure_rate_limit_mocks(mock_redis, budget_value=None)
+        mock_redis.reserve_delivery_slot = AsyncMock(side_effect=lambda **kwargs: kwargs["now_ts"] + 45)
+        mock_dispatch.delay = MagicMock()
+        mock_dispatch.apply_async = MagicMock()
+
+        result = await _tick_async()
+
+    assert result["dispatched"] == 1
+    mock_dispatch.delay.assert_not_called()
+    mock_dispatch.apply_async.assert_called_once()
+    _, kwargs = mock_dispatch.apply_async.call_args
+    assert kwargs["countdown"] == 45
+    assert kwargs["queue"] == "dispatch"
+    assert step.status == StepStatus.DISPATCHING
+
+
+async def test_tick_applies_linkedin_throttle_countdown_for_later_slot(
+    db: FakeAsyncSession,
+    tenant_id: uuid.UUID,
+    tenant: Tenant,
+) -> None:
+    from workers.cadence import _tick_async
+
+    lead = _make_lead(tenant_id)
+    cadence = _make_cadence(tenant_id)
+    cadence.linkedin_account_id = uuid.uuid4()
+    step = _make_step(tenant_id, lead.id, cadence.id, channel=Channel.LINKEDIN_CONNECT)
+    linkedin_account = LinkedInAccount(
+        id=cadence.linkedin_account_id,
+        tenant_id=tenant_id,
+        display_name="Conta LinkedIn",
+        provider_type="unipile",
+        unipile_account_id="li-account-1",
+        is_active=True,
+    )
+    db.add_all([lead, cadence, step, linkedin_account])
+    await db.flush()
+
+    mock_wsl = _mock_worker_session_local(db, [tenant])
+
+    with (
+        patch("workers.cadence.WorkerSessionLocal", mock_wsl),
+        patch("workers.cadence.get_worker_session") as mock_get_session,
+        patch("workers.cadence.redis_client") as mock_redis,
+        patch("services.cadence_delivery_budget.random.randint", return_value=12),
+        patch("workers.dispatch.dispatch_step") as mock_dispatch,
+    ):
+
+        async def _fake_session(_tid):
+            yield db
+
+        mock_get_session.side_effect = _fake_session
+        _configure_rate_limit_mocks(mock_redis, budget_value=None)
+        mock_redis.reserve_delivery_slot = AsyncMock(side_effect=lambda **kwargs: kwargs["now_ts"] + 120)
+        mock_dispatch.delay = MagicMock()
+        mock_dispatch.apply_async = MagicMock()
+
+        result = await _tick_async()
+
+    assert result["dispatched"] == 1
+    mock_dispatch.delay.assert_not_called()
+    mock_dispatch.apply_async.assert_called_once()
+    _, kwargs = mock_dispatch.apply_async.call_args
+    assert kwargs["countdown"] == 120
+    assert kwargs["queue"] == "dispatch"
+    assert step.status == StepStatus.DISPATCHING
+
+
+async def test_tick_shares_linkedin_throttle_scope_between_connect_and_dm(
+    db: FakeAsyncSession,
+    tenant_id: uuid.UUID,
+    tenant: Tenant,
+) -> None:
+    from workers.cadence import _tick_async
+
+    lead = _make_lead(tenant_id)
+    cadence = _make_cadence(tenant_id)
+    cadence.linkedin_account_id = uuid.uuid4()
+    connect_step = _make_step(tenant_id, lead.id, cadence.id, channel=Channel.LINKEDIN_CONNECT)
+    connect_step.scheduled_at = datetime.now(tz=UTC) - timedelta(minutes=6)
+    dm_step = _make_step(tenant_id, lead.id, cadence.id, channel=Channel.LINKEDIN_DM)
+    dm_step.step_number = 2
+    dm_step.scheduled_at = datetime.now(tz=UTC) - timedelta(minutes=5)
+    linkedin_account = LinkedInAccount(
+        id=cadence.linkedin_account_id,
+        tenant_id=tenant_id,
+        display_name="Conta LinkedIn",
+        provider_type="unipile",
+        unipile_account_id="li-account-1",
+        is_active=True,
+    )
+    db.add_all([lead, cadence, connect_step, dm_step, linkedin_account])
+    await db.flush()
+
+    scheduled_offsets = [0, 75]
+    mock_wsl = _mock_worker_session_local(db, [tenant])
+
+    with (
+        patch("workers.cadence.WorkerSessionLocal", mock_wsl),
+        patch("workers.cadence.get_worker_session") as mock_get_session,
+        patch("workers.cadence.redis_client") as mock_redis,
+        patch("services.cadence_delivery_budget.random.randint", return_value=12),
+        patch("workers.dispatch.dispatch_step") as mock_dispatch,
+    ):
+
+        async def _fake_session(_tid):
+            yield db
+
+        def _slot_side_effect(**kwargs):
+            return kwargs["now_ts"] + scheduled_offsets.pop(0)
+
+        mock_get_session.side_effect = _fake_session
+        _configure_rate_limit_mocks(mock_redis, budget_value=None)
+        mock_redis.reserve_delivery_slot = AsyncMock(side_effect=_slot_side_effect)
+        mock_dispatch.delay = MagicMock()
+        mock_dispatch.apply_async = MagicMock()
+
+        result = await _tick_async()
+
+    assert result["dispatched"] == 2
+    assert mock_redis.reserve_delivery_slot.await_count == 2
+    first_scope = mock_redis.reserve_delivery_slot.await_args_list[0].kwargs["throttle_scope"]
+    second_scope = mock_redis.reserve_delivery_slot.await_args_list[1].kwargs["throttle_scope"]
+    assert first_scope == second_scope
+    assert first_scope.startswith("linkedin:")
+    mock_dispatch.delay.assert_called_once_with(str(connect_step.id), str(tenant_id))
+    mock_dispatch.apply_async.assert_called_once()
+    _, kwargs = mock_dispatch.apply_async.call_args
+    assert kwargs["countdown"] == 75
 
 
 async def test_tick_releases_tenant_slot_when_account_budget_is_exhausted(
