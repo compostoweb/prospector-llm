@@ -277,6 +277,7 @@ def _extract_bounced_email(body: str) -> str | None:
         r"final-recipient:\s*rfc822;\s*([^\s\r\n]+)",
         r"x-failed-recipients?:\s*([^\s\r\n,]+)",
         r"original-recipient:\s*rfc822;\s*([^\s\r\n]+)",
+        r"(?:nao foi entregue para|não foi entregue para|not delivered to|message wasn't delivered to|couldn't be delivered to|delivery to)\s*<?([^\s<>\r\n]+@[^\s<>\r\n]+)>?",
     ]
     body_lc = body.lower()
     for pattern in patterns:
@@ -285,4 +286,11 @@ def _extract_bounced_email(body: str) -> str | None:
             addr = match.group(1).strip().strip("<>")
             if "@" in addr:
                 return addr
+
+    fallback_candidates = re.findall(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z0-9-]{2,63}", body_lc)
+    for candidate in fallback_candidates:
+        normalized = candidate.strip().strip("<>")
+        if any(normalized.startswith(prefix) for prefix in _NDR_SENDERS):
+            continue
+        return normalized
     return None

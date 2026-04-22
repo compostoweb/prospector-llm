@@ -101,6 +101,28 @@ def test_classify_inbound_email_event_detects_bounce() -> None:
     assert event.matched_email == "pessoa@empresa.com"
 
 
+def test_classify_inbound_email_event_extracts_gmail_friendly_bounce_body() -> None:
+    event = classify_inbound_email_event(
+        from_email="mailer-daemon@googlemail.com",
+        subject="Delivery Status Notification (Failure)",
+        body=(
+            "Endereço não encontrado\n"
+            "A mensagem não foi entregue para "
+            "bounce-test-1776892293@prospector-bounce-1776892293.invalid "
+            "porque o domínio prospector-bounce-1776892293.invalid não foi encontrado.\n"
+            "A resposta foi:\n"
+            "DNS Error: DNS type 'mx' lookup of prospector-bounce-1776892293.invalid "
+            "responded with code NXDOMAIN Domain name not found."
+        ),
+    )
+
+    assert event.kind == "bounce"
+    assert (
+        event.matched_email
+        == "bounce-test-1776892293@prospector-bounce-1776892293.invalid"
+    )
+
+
 def test_email_provider_capabilities_do_not_fake_delivered() -> None:
     capabilities = get_email_provider_capabilities(EmailProviderType.GOOGLE_OAUTH)
     delivery = build_outbound_email_delivery_observation(
