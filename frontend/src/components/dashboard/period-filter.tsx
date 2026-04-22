@@ -17,6 +17,7 @@ const OPTIONS: AnalyticsDateFilterOption[] = [
 
 export function PeriodFilter({ value, onChange, className }: PeriodFilterProps) {
   const selectedOption = OPTIONS.find((option) => option.days === value) ?? OPTIONS[1]
+  const optionalProps = className ? { className } : {}
 
   return (
     <AnalyticsPeriodFilter
@@ -27,7 +28,7 @@ export function PeriodFilter({ value, onChange, className }: PeriodFilterProps) 
       }}
       options={OPTIONS}
       enableCustom={false}
-      className={className}
+      {...optionalProps}
     />
   )
 }
