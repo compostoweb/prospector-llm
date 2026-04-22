@@ -297,18 +297,15 @@ export function ReplyAuditTable({
       ...(cadenceId ? { cadenceId } : {}),
     }
 
-    reviewReplyAudit(
-      reviewPayload,
-      {
-        onSuccess: () => {
-          toast.success("Reply marcado como revisado")
-          setSelectedItem(null)
-        },
-        onError: (error) => {
-          toast.error(error instanceof Error ? error.message : "Falha ao revisar o reply")
-        },
+    reviewReplyAudit(reviewPayload, {
+      onSuccess: () => {
+        toast.success("Reply marcado como revisado")
+        setSelectedItem(null)
       },
-    )
+      onError: (error) => {
+        toast.error(error instanceof Error ? error.message : "Falha ao revisar o reply")
+      },
+    })
   }
 
   function handleLinkSelectedItem() {
