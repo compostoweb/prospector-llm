@@ -16,6 +16,7 @@ from models.interaction import Interaction
 from models.lead import Lead
 from models.lead_email import LeadEmail
 from models.linkedin_account import LinkedInAccount
+from models.manual_task import ManualTask
 from models.tenant import Tenant, TenantIntegration
 from services.llm_config import resolve_tenant_llm_config
 from services.message_quality import normalize_email_subject
@@ -234,6 +235,7 @@ async def process_inbound_reply(
         tenant_id=tenant_id,
         lead_id=lead.id,
         cadence_step_id=replied_step.id if replied_step is not None else None,
+        manual_task_id=reply_resolution.manual_task.id if reply_resolution.manual_task else None,
         channel=channel,
         direction=InteractionDirection.INBOUND,
         content_text=reply_text,
@@ -257,10 +259,18 @@ async def process_inbound_reply(
             cadence_id=replied_step.cadence_id,
             replied_step_id=replied_step.id,
         )
+    elif reply_resolution.manual_task is not None:
+        paused_steps = await pause_remaining_cadence_steps_after_manual_task_reply(
+            db=db,
+            tenant_id=tenant_id,
+            lead_id=lead.id,
+            cadence_id=reply_resolution.manual_task.cadence_id,
+            replied_step_number=reply_resolution.manual_task.step_number,
+        )
 
-    if replied_step is not None and intent == Intent.INTEREST:
+    if (replied_step is not None or reply_resolution.manual_task is not None) and intent == Intent.INTEREST:
         lead.status = LeadStatus.CONVERTED
-    elif replied_step is not None and intent == Intent.NOT_INTERESTED:
+    elif (replied_step is not None or reply_resolution.manual_task is not None) and intent == Intent.NOT_INTERESTED:
         lead.status = LeadStatus.ARCHIVED
 
     await db.commit()
@@ -322,6 +332,7 @@ async def process_inbound_reply(
 @dataclass(frozen=True, slots=True)
 class RepliedStepResolution:
     step: CadenceStep | None
+    manual_task: ManualTask | None = None
     ambiguous: bool = False
     sent_cadence_count: int = 0
     match_status: str = "unmatched"
@@ -338,7 +349,7 @@ async def resolve_replied_step_for_inbound_message(
     provider_thread_id: str | None,
     inbound_subject: str | None = None,
 ) -> RepliedStepResolution:
-    matched_step, matched_via = await _resolve_step_from_outbound_interaction(
+    matched_step, matched_manual_task, matched_via = await _resolve_step_from_outbound_interaction(
         db=db,
         tenant_id=tenant_id,
         lead_id=lead_id,
@@ -351,6 +362,13 @@ async def resolve_replied_step_for_inbound_message(
             matched_step.status = StepStatus.REPLIED
         return RepliedStepResolution(
             step=matched_step,
+            match_status="matched",
+            matched_via=matched_via,
+        )
+    if matched_manual_task is not None:
+        return RepliedStepResolution(
+            step=None,
+            manual_task=matched_manual_task,
             match_status="matched",
             matched_via=matched_via,
         )
@@ -386,7 +404,7 @@ async def _resolve_step_from_outbound_interaction(
     channel: Channel,
     reply_to_message_ids: list[str],
     provider_thread_id: str | None,
-) -> tuple[CadenceStep | None, str | None]:
+) -> tuple[CadenceStep | None, ManualTask | None, str | None]:
     step_channels = _step_channels_for_inbound_channel(channel)
     normalized_email_message_ids = [
         _normalize_email_message_id(value) for value in reply_to_message_ids
@@ -409,18 +427,25 @@ async def _resolve_step_from_outbound_interaction(
                 Interaction.lead_id == lead_id,
                 Interaction.direction == InteractionDirection.OUTBOUND,
                 Interaction.channel.in_(step_channels),
-                Interaction.cadence_step_id.is_not(None),
+                or_(
+                    Interaction.cadence_step_id.is_not(None),
+                    Interaction.manual_task_id.is_not(None),
+                ),
                 func.lower(Interaction.email_message_id).in_(email_message_lookup_ids),
             )
             .order_by(Interaction.created_at.desc())
             .limit(1)
         )
         interaction = result.scalar_one_or_none()
-        if interaction is not None and interaction.cadence_step_id is not None:
-            return (
-                await _load_step_by_id(db, interaction.cadence_step_id, tenant_id, lead_id),
-                "email_message_id",
+        if interaction is not None:
+            resolved = await _resolve_reply_target_from_interaction(
+                db=db,
+                interaction=interaction,
+                tenant_id=tenant_id,
+                lead_id=lead_id,
             )
+            if resolved is not None:
+                return (*resolved, "email_message_id")
 
     if raw_message_ids:
         result = await db.execute(
@@ -430,18 +455,25 @@ async def _resolve_step_from_outbound_interaction(
                 Interaction.lead_id == lead_id,
                 Interaction.direction == InteractionDirection.OUTBOUND,
                 Interaction.channel.in_(step_channels),
-                Interaction.cadence_step_id.is_not(None),
+                or_(
+                    Interaction.cadence_step_id.is_not(None),
+                    Interaction.manual_task_id.is_not(None),
+                ),
                 Interaction.unipile_message_id.in_(raw_message_ids),
             )
             .order_by(Interaction.created_at.desc())
             .limit(1)
         )
         interaction = result.scalar_one_or_none()
-        if interaction is not None and interaction.cadence_step_id is not None:
-            return (
-                await _load_step_by_id(db, interaction.cadence_step_id, tenant_id, lead_id),
-                "unipile_message_id",
+        if interaction is not None:
+            resolved = await _resolve_reply_target_from_interaction(
+                db=db,
+                interaction=interaction,
+                tenant_id=tenant_id,
+                lead_id=lead_id,
             )
+            if resolved is not None:
+                return (*resolved, "unipile_message_id")
 
     normalized_thread_id = (provider_thread_id or "").strip()
     if normalized_thread_id:
@@ -452,20 +484,27 @@ async def _resolve_step_from_outbound_interaction(
                 Interaction.lead_id == lead_id,
                 Interaction.direction == InteractionDirection.OUTBOUND,
                 Interaction.channel.in_(step_channels),
-                Interaction.cadence_step_id.is_not(None),
+                or_(
+                    Interaction.cadence_step_id.is_not(None),
+                    Interaction.manual_task_id.is_not(None),
+                ),
                 Interaction.provider_thread_id == normalized_thread_id,
             )
             .order_by(Interaction.created_at.desc())
             .limit(1)
         )
         interaction = result.scalar_one_or_none()
-        if interaction is not None and interaction.cadence_step_id is not None:
-            return (
-                await _load_step_by_id(db, interaction.cadence_step_id, tenant_id, lead_id),
-                "provider_thread_id",
+        if interaction is not None:
+            resolved = await _resolve_reply_target_from_interaction(
+                db=db,
+                interaction=interaction,
+                tenant_id=tenant_id,
+                lead_id=lead_id,
             )
+            if resolved is not None:
+                return (*resolved, "provider_thread_id")
 
-    return None, None
+    return None, None, None
 
 
 async def _resolve_email_step_from_subject(
@@ -548,6 +587,70 @@ async def _load_step_by_id(
         )
     )
     return result.scalar_one_or_none()
+
+
+async def _resolve_reply_target_from_interaction(
+    *,
+    db: AsyncSession,
+    interaction: Interaction,
+    tenant_id: uuid.UUID,
+    lead_id: uuid.UUID,
+) -> tuple[CadenceStep | None, ManualTask | None] | None:
+    if interaction.manual_task_id is not None:
+        manual_task = await _load_manual_task_by_id(
+            db,
+            interaction.manual_task_id,
+            tenant_id,
+            lead_id,
+        )
+        if manual_task is not None:
+            return None, manual_task
+
+    if interaction.cadence_step_id is not None:
+        cadence_step = await _load_step_by_id(db, interaction.cadence_step_id, tenant_id, lead_id)
+        if cadence_step is not None:
+            return cadence_step, None
+
+    return None
+
+
+async def _load_manual_task_by_id(
+    db: AsyncSession,
+    manual_task_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    lead_id: uuid.UUID,
+) -> ManualTask | None:
+    result = await db.execute(
+        select(ManualTask).where(
+            ManualTask.id == manual_task_id,
+            ManualTask.tenant_id == tenant_id,
+            ManualTask.lead_id == lead_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def pause_remaining_cadence_steps_after_manual_task_reply(
+    *,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    lead_id: uuid.UUID,
+    cadence_id: uuid.UUID,
+    replied_step_number: int,
+) -> int:
+    result = await db.execute(
+        select(CadenceStep).where(
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.lead_id == lead_id,
+            CadenceStep.cadence_id == cadence_id,
+            CadenceStep.step_number > replied_step_number,
+            CadenceStep.status.in_((StepStatus.PENDING, StepStatus.DISPATCHING)),
+        )
+    )
+    remaining_steps = list(result.scalars().all())
+    for remaining_step in remaining_steps:
+        remaining_step.status = StepStatus.SKIPPED
+    return len(remaining_steps)
 
 
 async def _resolve_fallback_step_for_reply(

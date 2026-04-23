@@ -15,11 +15,17 @@ from typing import Any, Protocol, cast
 
 import pytest
 from fastapi import HTTPException
+from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.routes import analytics as analytics_routes
 from models.cadence import Cadence
-from models.enums import Channel
+from models.cadence_step import CadenceStep
+from models.enums import Channel, InteractionDirection, LeadSource, LeadStatus, ManualTaskStatus, StepStatus
+from models.interaction import Interaction
+from models.lead import Lead
+from models.manual_task import ManualTask
 
 pytestmark = pytest.mark.asyncio
 
@@ -516,6 +522,227 @@ async def test_get_email_ab_results_maps_open_rates_and_uses_days_filter(
     assert _statement_contains_param(session.statements[1], marker_since)
     assert _statement_contains_param(session.statements[0], "email_only")
     assert _statement_contains_param(session.statements[1], "email_only")
+
+
+async def test_cadence_analytics_includes_manual_tasks_in_operational_metrics(
+    client: AsyncClient,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+) -> None:
+    lead = Lead(
+        tenant_id=tenant_id,
+        name="Lead Analytics Manual Task",
+        company="Acme",
+        linkedin_url=f"https://linkedin.com/in/analytics-manual-{uuid.uuid4()}",
+        email_corporate="analytics-manual@acme.test",
+        source=LeadSource.MANUAL,
+        status=LeadStatus.IN_CADENCE,
+        linkedin_connection_status="connected",
+    )
+    cadence = Cadence(
+        tenant_id=tenant_id,
+        name="Cadência Analytics Manual Task",
+        is_active=True,
+        mode="semi_manual",
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    db.add_all([lead, cadence])
+    await db.flush()
+
+    db.add(
+        CadenceStep(
+            tenant_id=tenant_id,
+            cadence_id=cadence.id,
+            lead_id=lead.id,
+            channel=Channel.LINKEDIN_CONNECT,
+            step_number=1,
+            day_offset=0,
+            use_voice=False,
+            status=StepStatus.FAILED,
+            scheduled_at=datetime.now(tz=UTC),
+        )
+    )
+    db.add_all(
+        [
+            ManualTask(
+                tenant_id=tenant_id,
+                cadence_id=cadence.id,
+                lead_id=lead.id,
+                channel=Channel.LINKEDIN_DM,
+                step_number=2,
+                status=ManualTaskStatus.CONTENT_GENERATED,
+                generated_text="Mensagem pronta para revisão.",
+            ),
+            ManualTask(
+                tenant_id=tenant_id,
+                cadence_id=cadence.id,
+                lead_id=lead.id,
+                channel=Channel.EMAIL,
+                step_number=3,
+                status=ManualTaskStatus.DONE_EXTERNAL,
+                notes="Executado fora do sistema.",
+                sent_at=datetime.now(tz=UTC),
+            ),
+        ]
+    )
+    await db.flush()
+
+    email_task_result = await db.execute(
+        select(ManualTask).where(
+            ManualTask.tenant_id == tenant_id,
+            ManualTask.cadence_id == cadence.id,
+            ManualTask.lead_id == lead.id,
+            ManualTask.channel == Channel.EMAIL,
+            ManualTask.step_number == 3,
+        )
+    )
+    email_task = email_task_result.scalar_one()
+    db.add(
+        Interaction(
+            tenant_id=tenant_id,
+            lead_id=lead.id,
+            manual_task_id=email_task.id,
+            channel=Channel.EMAIL,
+            direction=InteractionDirection.INBOUND,
+            content_text="Reply da tarefa manual",
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    await db.commit()
+
+    resp = await client.get(f"/analytics/cadences/{cadence.id}")
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["total_leads"] == 1
+    assert data["steps_sent"] == 1
+    assert data["replies"] == 1
+    assert data["failed_steps"] == 1
+    assert data["pending_steps"] == 1
+    assert data["skipped_steps"] == 0
+    channel_map = {item["channel"]: item for item in data["channel_breakdown"]}
+    assert channel_map["linkedin_connect"]["failed"] == 1
+    assert channel_map["linkedin_dm"]["pending"] == 1
+    assert channel_map["email"]["sent"] == 1
+    assert channel_map["email"]["replied"] == 1
+
+    step_map = {(item["step_number"], item["channel"]): item for item in data["step_breakdown"]}
+    assert step_map[(1, "linkedin_connect")]["failed"] == 1
+    assert step_map[(2, "linkedin_dm")]["pending"] == 1
+    assert step_map[(3, "email")]["sent"] == 1
+    assert step_map[(3, "email")]["replied"] == 1
+
+
+async def test_dashboard_includes_manual_tasks_in_steps_sent_metrics(
+    client: AsyncClient,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+) -> None:
+    lead = Lead(
+        tenant_id=tenant_id,
+        name="Lead Dashboard Manual Task",
+        company="Acme",
+        linkedin_url=f"https://linkedin.com/in/dashboard-manual-{uuid.uuid4()}",
+        email_corporate="dashboard-manual@acme.test",
+        source=LeadSource.MANUAL,
+        status=LeadStatus.IN_CADENCE,
+    )
+    cadence = Cadence(
+        tenant_id=tenant_id,
+        name="Cadência Dashboard Manual Task",
+        is_active=True,
+        mode="semi_manual",
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    db.add_all([lead, cadence])
+    await db.flush()
+
+    db.add(
+        ManualTask(
+            tenant_id=tenant_id,
+            cadence_id=cadence.id,
+            lead_id=lead.id,
+            channel=Channel.EMAIL,
+            step_number=2,
+            status=ManualTaskStatus.SENT,
+            edited_text="Email enviado manualmente.",
+            sent_at=datetime.now(tz=UTC),
+        )
+    )
+    await db.commit()
+
+    resp = await client.get("/analytics/dashboard")
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["leads_total"] == 1
+    assert data["leads_in_cadence"] == 1
+    assert data["steps_sent_today"] == 1
+    assert data["steps_sent_week"] == 1
+    assert data["steps_sent_period"] == 1
+
+
+async def test_cadence_performance_includes_manual_tasks_in_steps_sent_ranking(
+    client: AsyncClient,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+) -> None:
+    lead = Lead(
+        tenant_id=tenant_id,
+        name="Lead Performance Manual Task",
+        company="Acme",
+        linkedin_url=f"https://linkedin.com/in/performance-manual-{uuid.uuid4()}",
+        email_corporate="performance-manual@acme.test",
+        source=LeadSource.MANUAL,
+        status=LeadStatus.IN_CADENCE,
+    )
+    cadence = Cadence(
+        tenant_id=tenant_id,
+        name="Cadência Performance Manual Task",
+        is_active=True,
+        mode="semi_manual",
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    db.add_all([lead, cadence])
+    await db.flush()
+
+    db.add(
+        CadenceStep(
+            tenant_id=tenant_id,
+            cadence_id=cadence.id,
+            lead_id=lead.id,
+            channel=Channel.LINKEDIN_CONNECT,
+            step_number=1,
+            day_offset=0,
+            use_voice=False,
+            status=StepStatus.PENDING,
+            scheduled_at=datetime.now(tz=UTC),
+        )
+    )
+    db.add(
+        ManualTask(
+            tenant_id=tenant_id,
+            cadence_id=cadence.id,
+            lead_id=lead.id,
+            channel=Channel.EMAIL,
+            step_number=2,
+            status=ManualTaskStatus.SENT,
+            edited_text="Email enviado manualmente.",
+            sent_at=datetime.now(tz=UTC),
+        )
+    )
+    await db.commit()
+
+    resp = await client.get("/analytics/performance")
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["cadence_id"] == str(cadence.id)
+    assert data[0]["steps_sent"] == 1
 
 
 async def test_get_email_stats_filters_to_email_only_cadences(

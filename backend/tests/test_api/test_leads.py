@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
-from models.enums import Channel, LeadStatus, ManualTaskStatus, StepStatus
+from models.enums import Channel, Intent, LeadStatus, ManualTaskStatus, StepStatus
 from models.interaction import Interaction
 from models.lead import Lead
 from models.lead_list import LeadList
@@ -703,6 +703,175 @@ async def test_list_lead_steps_includes_manual_task_metadata_and_manual_task_his
         and item["notes"] == "Operador enviou email manualmente e registrou follow-up."
         for item in items
     )
+
+
+async def test_list_lead_steps_includes_sent_manual_task_with_manual_text_priority(
+    client: AsyncClient,
+    db: AsyncSession,
+):
+    created = (
+        await client.post(
+            "/leads",
+            json=_lead_payload(
+                linkedin_url="https://linkedin.com/in/manual-task-sent-history",
+                email_corporate="timeline@acme.com",
+            ),
+        )
+    ).json()
+
+    lead_id = uuid.UUID(created["id"])
+    tenant_id = uuid.UUID(created["tenant_id"])
+
+    cadence = Cadence(
+        tenant_id=tenant_id,
+        name="Cadência Manual Enviada Timeline",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+        steps_template=[
+            {
+                "step_number": 2,
+                "channel": "email",
+                "day_offset": 1,
+                "message_template": None,
+                "use_voice": False,
+                "audio_file_id": None,
+                "step_type": None,
+                "manual_task_type": "whatsapp",
+                "manual_task_detail": "Confirmar interesse e pedir melhor horário para retorno.",
+            }
+        ],
+    )
+    db.add(cadence)
+    await db.flush()
+
+    manual_task = ManualTask(
+        tenant_id=tenant_id,
+        cadence_id=cadence.id,
+        lead_id=lead_id,
+        channel=Channel.EMAIL,
+        step_number=2,
+        status=ManualTaskStatus.SENT,
+        generated_text="Texto gerado automaticamente.",
+        edited_text="Texto final aprovado pelo operador.",
+        sent_at=datetime.now(tz=UTC),
+    )
+    db.add(manual_task)
+    await db.flush()
+
+    resp = await client.get(f"/leads/{created['id']}/steps")
+
+    assert resp.status_code == 200, resp.text
+    items = resp.json()
+    manual_task_item = next(
+        item
+        for item in items
+        if item["item_kind"] == "manual_task"
+        and item["status"] == "sent"
+        and item["manual_task_id"] == str(manual_task.id)
+    )
+
+    assert manual_task_item["channel"] == "email"
+    assert manual_task_item["message_content"] == "Texto final aprovado pelo operador."
+    assert manual_task_item["manual_task_type"] == "whatsapp"
+    assert (
+        manual_task_item["manual_task_detail"]
+        == "Confirmar interesse e pedir melhor horário para retorno."
+    )
+
+
+async def test_list_lead_steps_includes_reply_metadata_for_manual_task(
+    client: AsyncClient,
+    db: AsyncSession,
+):
+    created = (
+        await client.post(
+            "/leads",
+            json=_lead_payload(
+                linkedin_url="https://linkedin.com/in/manual-task-reply-history",
+                email_corporate="manual-reply@acme.com",
+            ),
+        )
+    ).json()
+
+    lead_id = uuid.UUID(created["id"])
+    tenant_id = uuid.UUID(created["tenant_id"])
+
+    cadence = Cadence(
+        tenant_id=tenant_id,
+        name="Cadência Manual Reply Timeline",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+        steps_template=[
+            {
+                "step_number": 2,
+                "channel": "email",
+                "day_offset": 1,
+                "message_template": None,
+                "use_voice": False,
+                "audio_file_id": None,
+                "step_type": None,
+                "manual_task_type": "email_followup",
+                "manual_task_detail": "Retomar a conversa por email.",
+            }
+        ],
+    )
+    db.add(cadence)
+    await db.flush()
+
+    manual_task = ManualTask(
+        tenant_id=tenant_id,
+        cadence_id=cadence.id,
+        lead_id=lead_id,
+        channel=Channel.EMAIL,
+        step_number=2,
+        status=ManualTaskStatus.SENT,
+        edited_text="Texto final enviado manualmente.",
+        sent_at=datetime.now(tz=UTC),
+    )
+    db.add(manual_task)
+    await db.flush()
+
+    db.add_all(
+        [
+            Interaction(
+                tenant_id=tenant_id,
+                lead_id=lead_id,
+                manual_task_id=manual_task.id,
+                channel=Channel.EMAIL,
+                direction="outbound",
+                content_text="Texto final enviado manualmente.",
+            ),
+            Interaction(
+                tenant_id=tenant_id,
+                lead_id=lead_id,
+                manual_task_id=manual_task.id,
+                channel=Channel.EMAIL,
+                direction="inbound",
+                content_text="Pode mandar mais detalhes.",
+                intent=Intent.INTEREST,
+                reply_match_status="matched",
+                reply_match_source="email_message_id",
+            ),
+        ]
+    )
+    await db.commit()
+
+    resp = await client.get(f"/leads/{created['id']}/steps")
+
+    assert resp.status_code == 200, resp.text
+    items = resp.json()
+    manual_task_item = next(
+        item
+        for item in items
+        if item["item_kind"] == "manual_task"
+        and item["manual_task_id"] == str(manual_task.id)
+    )
+
+    assert manual_task_item["reply_content"] == "Pode mandar mais detalhes."
+    assert manual_task_item["reply_manual_task_id"] == str(manual_task.id)
+    assert manual_task_item["intent"] == "interest"
 
 
 async def test_list_leads_accepts_score_min_alias(client: AsyncClient):

@@ -1,17 +1,28 @@
 from __future__ import annotations
 
+import json
 import uuid
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.dependencies import get_llm_registry, get_session_no_auth
+from api.main import app
 from api.webhooks import unipile as unipile_webhook
 from integrations.llm import LLMRegistry
+from models.cadence import Cadence
+from models.cadence_step import CadenceStep
 from models.email_account import EmailAccount
-from models.enums import Channel, LeadStatus
+from models.enums import Channel, LeadStatus, ManualTaskStatus, StepStatus
+from models.interaction import Interaction
 from models.lead import Lead
+from models.manual_task import ManualTask
 
 
 @pytest.mark.asyncio
@@ -299,6 +310,287 @@ async def test_handle_message_received_ignores_outbound_mail_from_tenant_account
         db,
         cast(LLMRegistry, SimpleNamespace()),
     )
+
+
+@pytest.mark.asyncio
+async def test_unipile_webhook_email_reply_matches_manual_task_end_to_end(
+    client: AsyncClient,
+    db: AsyncSession,
+    tenant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lead = Lead(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Lead Email Manual",
+        email_corporate="lead.manual@empresa.com",
+        status=LeadStatus.IN_CADENCE,
+        source="manual",
+    )
+    cadence = Cadence(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Cadência Email Manual",
+        is_active=True,
+        mode="semi_manual",
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    connect_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence.id,
+        channel=Channel.LINKEDIN_CONNECT,
+        step_number=1,
+        day_offset=0,
+        use_voice=False,
+        status=StepStatus.SENT,
+        scheduled_at=datetime.now(tz=UTC) - timedelta(days=2),
+        sent_at=datetime.now(tz=UTC) - timedelta(days=2),
+    )
+    future_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence.id,
+        channel=Channel.EMAIL,
+        step_number=4,
+        day_offset=4,
+        use_voice=False,
+        status=StepStatus.PENDING,
+        scheduled_at=datetime.now(tz=UTC) + timedelta(days=2),
+    )
+    manual_task = ManualTask(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        cadence_id=cadence.id,
+        lead_id=lead.id,
+        cadence_step_id=connect_step.id,
+        channel=Channel.EMAIL,
+        step_number=3,
+        status=ManualTaskStatus.SENT,
+        edited_text="Email manual enviado.",
+        sent_at=datetime.now(tz=UTC) - timedelta(hours=3),
+    )
+    outbound_interaction = Interaction(
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        manual_task_id=manual_task.id,
+        channel=Channel.EMAIL,
+        direction="outbound",
+        email_message_id="<manual-email@prospector.local>",
+        content_text="Email manual enviado.",
+        created_at=datetime.now(tz=UTC) - timedelta(hours=3),
+    )
+    db.add_all([lead, cadence, connect_step, future_step, manual_task])
+    await db.flush()
+    db.add(outbound_interaction)
+    await db.commit()
+
+    async def _override_session():
+        yield db
+
+    async def _fake_resolve(account_id: str, db_session, **kwargs):  # type: ignore[no-untyped-def]
+        assert account_id == "acc_mail_manual"
+        return SimpleNamespace(tenant_id=tenant.id, channel=Channel.EMAIL)
+
+    parser_instance = MagicMock()
+    parser_instance.classify = AsyncMock(
+        return_value={"intent": "NEUTRAL", "confidence": 0.88, "summary": "Resposta por email"}
+    )
+
+    monkeypatch.setattr(unipile_webhook.settings, "UNIPILE_WEBHOOK_SECRET", "secret-123")
+    monkeypatch.setattr(unipile_webhook.settings, "ENV", "prod")
+    monkeypatch.setattr(unipile_webhook, "resolve_unipile_account_context", _fake_resolve)
+    app.dependency_overrides[get_session_no_auth] = _override_session
+    app.dependency_overrides[get_llm_registry] = lambda: cast(LLMRegistry, SimpleNamespace())
+
+    try:
+        with (
+            patch(
+                "services.inbound_message_service.resolve_tenant_llm_config",
+                new=AsyncMock(return_value=SimpleNamespace(provider="openai", model="gpt-5.4-mini")),
+            ),
+            patch("services.inbound_message_service.ReplyParser", return_value=parser_instance),
+            patch("api.routes.ws.broadcast_event", new=AsyncMock()),
+        ):
+            resp = await client.post(
+                "/webhooks/unipile",
+                content=json.dumps(
+                    {
+                        "event": "mail_received",
+                        "account_id": "acc_mail_manual",
+                        "sender": {"attendee_provider_id": "lead.manual@empresa.com"},
+                        "message": {
+                            "id": "mail_reply_manual_1",
+                            "account_id": "acc_mail_manual",
+                            "account_type": "GMAIL",
+                            "subject": "Re: proposta",
+                            "body": "Tenho interesse, pode seguir.",
+                            "reply_to_message_id": "<manual-email@prospector.local>",
+                        },
+                    }
+                ),
+                headers={"Unipile-Auth": "secret-123"},
+            )
+    finally:
+        app.dependency_overrides.pop(get_session_no_auth, None)
+        app.dependency_overrides.pop(get_llm_registry, None)
+
+    assert resp.status_code == 200, resp.text
+
+    interaction_result = await db.execute(
+        select(Interaction).where(Interaction.unipile_message_id == "mail_reply_manual_1")
+    )
+    inbound_interaction = interaction_result.scalar_one()
+    await db.refresh(future_step)
+
+    assert inbound_interaction.manual_task_id == manual_task.id
+    assert inbound_interaction.reply_match_status == "matched"
+    assert inbound_interaction.reply_match_source == "email_message_id"
+    assert future_step.status == StepStatus.SKIPPED
+
+
+@pytest.mark.asyncio
+async def test_unipile_webhook_linkedin_reply_matches_manual_task_end_to_end(
+    client: AsyncClient,
+    db: AsyncSession,
+    tenant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lead = Lead(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Lead LinkedIn Manual",
+        linkedin_url=f"https://linkedin.com/in/{uuid.uuid4().hex[:8]}",
+        linkedin_profile_id="linkedin_manual_123",
+        status=LeadStatus.IN_CADENCE,
+        source="manual",
+    )
+    cadence = Cadence(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Cadência LinkedIn Manual",
+        is_active=True,
+        mode="semi_manual",
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    connect_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence.id,
+        channel=Channel.LINKEDIN_CONNECT,
+        step_number=1,
+        day_offset=0,
+        use_voice=False,
+        status=StepStatus.SENT,
+        scheduled_at=datetime.now(tz=UTC) - timedelta(days=2),
+        sent_at=datetime.now(tz=UTC) - timedelta(days=2),
+    )
+    future_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence.id,
+        channel=Channel.EMAIL,
+        step_number=3,
+        day_offset=3,
+        use_voice=False,
+        status=StepStatus.PENDING,
+        scheduled_at=datetime.now(tz=UTC) + timedelta(days=1),
+    )
+    manual_task = ManualTask(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        cadence_id=cadence.id,
+        lead_id=lead.id,
+        cadence_step_id=connect_step.id,
+        channel=Channel.LINKEDIN_DM,
+        step_number=2,
+        status=ManualTaskStatus.SENT,
+        edited_text="DM manual enviada.",
+        sent_at=datetime.now(tz=UTC) - timedelta(hours=3),
+        unipile_message_id="li_manual_msg_123",
+    )
+    outbound_interaction = Interaction(
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        manual_task_id=manual_task.id,
+        channel=Channel.LINKEDIN_DM,
+        direction="outbound",
+        unipile_message_id="li_manual_msg_123",
+        content_text="DM manual enviada.",
+        created_at=datetime.now(tz=UTC) - timedelta(hours=3),
+    )
+    db.add_all([lead, cadence, connect_step, future_step, manual_task])
+    await db.flush()
+    db.add(outbound_interaction)
+    await db.commit()
+
+    async def _override_session():
+        yield db
+
+    async def _fake_resolve(account_id: str, db_session, **kwargs):  # type: ignore[no-untyped-def]
+        assert account_id == "acc_li_manual"
+        return SimpleNamespace(tenant_id=tenant.id, channel=Channel.LINKEDIN_DM)
+
+    parser_instance = MagicMock()
+    parser_instance.classify = AsyncMock(
+        return_value={"intent": "NEUTRAL", "confidence": 0.84, "summary": "Resposta LinkedIn"}
+    )
+
+    monkeypatch.setattr(unipile_webhook.settings, "UNIPILE_WEBHOOK_SECRET", "secret-123")
+    monkeypatch.setattr(unipile_webhook.settings, "ENV", "prod")
+    monkeypatch.setattr(unipile_webhook, "resolve_unipile_account_context", _fake_resolve)
+    app.dependency_overrides[get_session_no_auth] = _override_session
+    app.dependency_overrides[get_llm_registry] = lambda: cast(LLMRegistry, SimpleNamespace())
+
+    try:
+        with (
+            patch(
+                "services.inbound_message_service.resolve_tenant_llm_config",
+                new=AsyncMock(return_value=SimpleNamespace(provider="openai", model="gpt-5.4-mini")),
+            ),
+            patch("services.inbound_message_service.ReplyParser", return_value=parser_instance),
+            patch("api.routes.ws.broadcast_event", new=AsyncMock()),
+        ):
+            resp = await client.post(
+                "/webhooks/unipile",
+                content=json.dumps(
+                    {
+                        "event": "message_received",
+                        "account_id": "acc_li_manual",
+                        "sender": {"attendee_provider_id": "linkedin_manual_123"},
+                        "message": {
+                            "id": "li_reply_manual_1",
+                            "account_id": "acc_li_manual",
+                            "account_type": "LINKEDIN",
+                            "message": "Vi sua mensagem e tenho interesse.",
+                            "reply_to_message_id": "li_manual_msg_123",
+                        },
+                    }
+                ),
+                headers={"Unipile-Auth": "secret-123"},
+            )
+    finally:
+        app.dependency_overrides.pop(get_session_no_auth, None)
+        app.dependency_overrides.pop(get_llm_registry, None)
+
+    assert resp.status_code == 200, resp.text
+
+    interaction_result = await db.execute(
+        select(Interaction).where(Interaction.unipile_message_id == "li_reply_manual_1")
+    )
+    inbound_interaction = interaction_result.scalar_one()
+    await db.refresh(future_step)
+
+    assert inbound_interaction.manual_task_id == manual_task.id
+    assert inbound_interaction.reply_match_status == "matched"
+    assert inbound_interaction.reply_match_source == "unipile_message_id"
+    assert future_step.status == StepStatus.SKIPPED
 
 
 @pytest.mark.asyncio

@@ -135,7 +135,8 @@ export default function CadenciaDetailPage() {
               <DialogHeader>
                 <DialogTitle>Janela de disparo</DialogTitle>
                 <DialogDescription>
-                  Tempos típicos considerando Beat e workers ativos.
+                  Como a cadência entra na fila, o que muda por canal e quando um lead pode ser
+                  pulado.
                 </DialogDescription>
               </DialogHeader>
 
@@ -147,6 +148,11 @@ export default function CadenciaDetailPage() {
                   <p className="mt-1">
                     A cadência processa o tick a cada 1 minuto. Quando você inicia, passos já
                     vencidos entram na fila no próximo ciclo, normalmente em até 1 minuto.
+                  </p>
+                  <p className="mt-2 text-xs text-(--text-tertiary)">
+                    Depois disso, o worker de dispatch consome a fila conforme disponibilidade. Ou
+                    seja: a entrada na fila é rápida, mas o envio real ainda depende da fila e do
+                    canal daquele passo.
                   </p>
                 </div>
 
@@ -160,6 +166,65 @@ export default function CadenciaDetailPage() {
                     dispatch.
                   </p>
                 </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="rounded-xl border border-(--border-subtle) bg-(--bg-overlay) px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-(--text-tertiary)">
+                      LinkedIn
+                    </p>
+                    <p className="mt-1">
+                      Convites, DMs, comentários, reações e InMail entram na mesma lógica de fila,
+                      mas cada ação respeita limite operacional diário por conta. Em prática, isso
+                      pode espalhar o envio ao longo do dia mesmo quando o passo já está vencido.
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-(--border-subtle) bg-(--bg-overlay) px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-(--text-tertiary)">
+                      E-mail
+                    </p>
+                    <p className="mt-1">
+                      E-mails também entram na fila do dispatch, mas usam as contas configuradas na
+                      cadência e aparecem depois nas métricas de abertura, bounce e resposta. O
+                      envio pode atrasar se houver backlog ou limite diário já perto do teto.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-(--border-subtle) bg-(--bg-overlay) px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-(--text-tertiary)">
+                    Quando um lead fica como pulado
+                  </p>
+                  <p className="mt-1">
+                    Pulado não é falha técnica. Normalmente significa que o lead saiu da cadência, a
+                    cadência foi pausada ou desativada, ou o passo deixou de ser elegível por uma
+                    regra operacional antes do envio acontecer.
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-(--border-subtle) bg-(--bg-overlay) px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-(--text-tertiary)">
+                    Falha vs. pulado
+                  </p>
+                  <p className="mt-1">
+                    Falha representa erro real de processamento ou envio. Pulado representa um passo
+                    que o sistema decidiu não executar. Na analytics por step, esses números agora
+                    aparecem separados para evitar leitura inflada de falhas.
+                  </p>
+                </div>
+
+                {cadence.mode === "semi_manual" ? (
+                  <div className="rounded-xl border border-(--warning-subtle-fg) bg-(--warning-subtle) px-4 py-3 text-(--warning-subtle-fg)">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em]">
+                      Cadência semi-automática
+                    </p>
+                    <p className="mt-1">
+                      Nos passos que dependem de ação manual, o sistema gera a tarefa e o disparo só
+                      acontece quando o operador revisa e envia. Nesse modo, o tempo final depende
+                      da fila e também da aprovação humana.
+                    </p>
+                  </div>
+                ) : null}
               </div>
             </DialogContent>
           </Dialog>

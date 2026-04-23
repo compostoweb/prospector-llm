@@ -12,11 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
 from models.email_account import EmailAccount
-from models.enums import Channel, Intent, LeadStatus, StepStatus
+from models.enums import Channel, Intent, LeadStatus, ManualTaskStatus, StepStatus
 from models.interaction import Interaction
 from models.lead import Lead
 from models.lead_email import LeadEmail
 from models.linkedin_account import LinkedInAccount
+from models.manual_task import ManualTask
 from models.tenant import TenantIntegration
 from services.inbound_message_service import (
     find_lead_by_email,
@@ -463,6 +464,106 @@ async def test_process_inbound_reply_matches_reply_to_exact_outbound_message(
 
     assert older_step.status == StepStatus.REPLIED
     assert latest_step.status == StepStatus.SENT
+    assert interaction.reply_match_status == "matched"
+    assert interaction.reply_match_source == "email_message_id"
+
+
+async def test_process_inbound_reply_matches_manual_task_reply_and_pauses_future_steps(
+    db: AsyncSession,
+    tenant,
+) -> None:
+    lead = _make_lead(tenant.id)
+    cadence = Cadence(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Cadência Manual Task",
+        is_active=True,
+        mode="semi_manual",
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    connect_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence.id,
+        channel=Channel.LINKEDIN_CONNECT,
+        step_number=1,
+        day_offset=0,
+        scheduled_at=datetime.now(tz=UTC) - timedelta(days=2),
+        sent_at=datetime.now(tz=UTC) - timedelta(days=2),
+        status=StepStatus.SENT,
+    )
+    future_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence.id,
+        channel=Channel.EMAIL,
+        step_number=3,
+        day_offset=3,
+        scheduled_at=datetime.now(tz=UTC) + timedelta(days=1),
+        status=StepStatus.PENDING,
+    )
+    manual_task = ManualTask(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        cadence_id=cadence.id,
+        lead_id=lead.id,
+        cadence_step_id=connect_step.id,
+        channel=Channel.EMAIL,
+        step_number=2,
+        status=ManualTaskStatus.SENT,
+        edited_text="Email manual enviado.",
+        sent_at=datetime.now(tz=UTC) - timedelta(hours=2),
+    )
+    outbound_interaction = Interaction(
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        manual_task_id=manual_task.id,
+        channel=Channel.EMAIL,
+        direction="outbound",
+        email_message_id="<manual-task-message@prospector.local>",
+        created_at=datetime.now(tz=UTC) - timedelta(hours=2),
+    )
+    db.add_all([lead, cadence, connect_step, future_step, manual_task])
+    await db.flush()
+    db.add(outbound_interaction)
+    await db.flush()
+
+    parser_instance = MagicMock()
+    parser_instance.classify = AsyncMock(
+        return_value={"intent": "NEUTRAL", "confidence": 0.81, "summary": "Resposta manual"}
+    )
+
+    with (
+        patch(
+            "services.inbound_message_service.resolve_tenant_llm_config",
+            new=AsyncMock(return_value=SimpleNamespace(provider="openai", model="gpt-5.4-mini")),
+        ),
+        patch("services.inbound_message_service.ReplyParser", return_value=parser_instance),
+        patch("api.routes.ws.broadcast_event", new=AsyncMock()),
+    ):
+        await process_inbound_reply(
+            db=db,
+            registry=MagicMock(),
+            tenant_id=tenant.id,
+            lead=lead,
+            channel=Channel.EMAIL,
+            reply_text="Respondendo a tarefa manual.",
+            external_message_id="reply_manual_task_1",
+            reply_to_message_ids=["<manual-task-message@prospector.local>"],
+        )
+
+    await db.refresh(future_step)
+    interaction_result = await db.execute(
+        select(Interaction).where(Interaction.unipile_message_id == "reply_manual_task_1")
+    )
+    interaction = interaction_result.scalar_one()
+
+    assert future_step.status == StepStatus.SKIPPED
+    assert interaction.cadence_step_id is None
+    assert interaction.manual_task_id == manual_task.id
     assert interaction.reply_match_status == "matched"
     assert interaction.reply_match_source == "email_message_id"
 

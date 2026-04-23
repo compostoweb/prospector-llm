@@ -13,7 +13,7 @@ Endpoints:
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, time, timedelta
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import UUID
 
 import structlog
@@ -25,10 +25,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.dependencies import get_effective_tenant_id, get_session_flexible
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
-from models.enums import Channel, InteractionDirection, LeadStatus, StepStatus
+from models.enums import Channel, InteractionDirection, LeadStatus, ManualTaskStatus, StepStatus
 from models.interaction import Interaction
 from models.lead import Lead
 from models.lead_email import LeadEmail
+from models.manual_task import ManualTask
 from services.cadence_manager import CadenceManager
 from services.reply_matching import (
     reliable_reply_interaction_condition,
@@ -40,6 +41,8 @@ router = APIRouter(prefix="/analytics", tags=["Analytics"])
 _cadence_manager = CadenceManager()
 
 _EMAIL_ONLY_CADENCE_TYPE = "email_only"
+_MANUAL_TASK_SENT_STATUSES = (ManualTaskStatus.SENT, ManualTaskStatus.DONE_EXTERNAL)
+_MANUAL_TASK_PENDING_STATUSES = (ManualTaskStatus.PENDING, ManualTaskStatus.CONTENT_GENERATED)
 
 
 # ── Schemas ───────────────────────────────────────────────────────────
@@ -214,12 +217,23 @@ def _cadence_step_period_expr():
     return func.coalesce(CadenceStep.sent_at, CadenceStep.scheduled_at)
 
 
+def _manual_task_period_expr():
+    return func.coalesce(ManualTask.sent_at, ManualTask.updated_at, ManualTask.created_at)
+
+
 def _interaction_matches_cadence_step():
     return CadenceStep.id == Interaction.cadence_step_id
 
 
 def _reliable_reply_interaction_condition():
     return reliable_reply_interaction_condition()
+
+
+def _reliable_manual_task_reply_condition():
+    return and_(
+        Interaction.direction == InteractionDirection.INBOUND,
+        Interaction.manual_task_id.is_not(None),
+    )
 
 
 def _first_reliable_reply_per_cadence_lead_subquery(
@@ -285,6 +299,82 @@ def _first_reliable_reply_per_cadence_lead_subquery(
         .where(ranked_replies_sq.c.reply_rank == 1)
         .subquery()
     )
+
+
+def _first_reliable_manual_task_reply_per_cadence_lead_subquery(
+    *,
+    tenant_id: UUID,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    cadence_id: UUID | None = None,
+    cadence_ids: list[UUID] | None = None,
+    channel: Channel | None = None,
+):
+    conditions = [
+        Interaction.tenant_id == tenant_id,
+        ManualTask.tenant_id == tenant_id,
+        _reliable_manual_task_reply_condition(),
+    ]
+    if since is not None:
+        conditions.append(Interaction.created_at >= since)
+    if until is not None:
+        conditions.append(Interaction.created_at < until)
+    if cadence_id is not None:
+        conditions.append(ManualTask.cadence_id == cadence_id)
+    if cadence_ids:
+        conditions.append(ManualTask.cadence_id.in_(cadence_ids))
+    if channel is not None:
+        conditions.extend(
+            [
+                Interaction.channel == channel,
+                ManualTask.channel == channel,
+            ]
+        )
+
+    ranked_reply_query = select(
+        Interaction.id.label("interaction_id"),
+        Interaction.lead_id.label("lead_id"),
+        Interaction.channel.label("channel"),
+        Interaction.created_at.label("replied_at"),
+        ManualTask.cadence_id.label("cadence_id"),
+        ManualTask.step_number.label("step_number"),
+        func.row_number()
+        .over(
+            partition_by=[ManualTask.cadence_id, Interaction.lead_id],
+            order_by=[Interaction.created_at.asc(), Interaction.id.asc()],
+        )
+        .label("reply_rank"),
+    ).join(ManualTask, ManualTask.id == Interaction.manual_task_id)
+
+    ranked_replies_sq = ranked_reply_query.where(*conditions).subquery()
+
+    return (
+        select(
+            ranked_replies_sq.c.interaction_id,
+            ranked_replies_sq.c.lead_id,
+            ranked_replies_sq.c.channel,
+            ranked_replies_sq.c.replied_at,
+            ranked_replies_sq.c.cadence_id,
+            ranked_replies_sq.c.step_number,
+        )
+        .where(ranked_replies_sq.c.reply_rank == 1)
+        .subquery()
+    )
+
+
+def _combined_first_reply_subquery(*reply_subqueries):
+    selects = [
+        select(
+            subquery.c.interaction_id.label("interaction_id"),
+            subquery.c.lead_id.label("lead_id"),
+            subquery.c.channel.label("channel"),
+            subquery.c.replied_at.label("replied_at"),
+            subquery.c.cadence_id.label("cadence_id"),
+            subquery.c.step_number.label("step_number"),
+        )
+        for subquery in reply_subqueries
+    ]
+    return selects[0].union_all(*selects[1:]).subquery()
 
 
 def _opened_email_interactions_subquery(
@@ -523,10 +613,30 @@ async def get_dashboard_stats(
         )
     )
     step_row = step_q.one()
-    steps_sent_today = step_row.today or 0
-    steps_sent_week = step_row.week or 0
-    steps_sent_period = step_row.period or 0
-    steps_prev_period = step_row.prev_period or 0
+    manual_step_q = await db.execute(
+        select(
+            func.count(ManualTask.id).filter(ManualTask.sent_at >= today_start).label("today"),
+            func.count(ManualTask.id).filter(ManualTask.sent_at >= week_ago).label("week"),
+            func.count(ManualTask.id)
+            .filter(ManualTask.sent_at >= period_start, ManualTask.sent_at < period_end)
+            .label("period"),
+            func.count(ManualTask.id)
+            .filter(
+                ManualTask.sent_at >= prev_period_start,
+                ManualTask.sent_at < prev_period_end,
+            )
+            .label("prev_period"),
+        ).where(
+            ManualTask.tenant_id == tenant_id,
+            ManualTask.status.in_(_MANUAL_TASK_SENT_STATUSES),
+            ManualTask.sent_at.is_not(None),
+        )
+    )
+    manual_step_row = manual_step_q.one()
+    steps_sent_today = (step_row.today or 0) + (manual_step_row.today or 0)
+    steps_sent_week = (step_row.week or 0) + (manual_step_row.week or 0)
+    steps_sent_period = (step_row.period or 0) + (manual_step_row.period or 0)
+    steps_prev_period = (step_row.prev_period or 0) + (manual_step_row.prev_period or 0)
 
     # Replies (inbound interactions) counts (today + week + period + prev)
     reply_q = await db.execute(
@@ -810,8 +920,7 @@ async def get_cadence_performance(
     """Retorna performance das cadências ativas (top N por steps enviados)."""
     since, until = _resolve_period_bounds(days=days, start_date=start_date, end_date=end_date)
 
-    # Steps sent & replied per cadence
-    steps_q = await db.execute(
+    cadence_step_q = await db.execute(
         select(
             CadenceStep.cadence_id,
             func.count(CadenceStep.id).label("sent"),
@@ -823,14 +932,37 @@ async def get_cadence_performance(
             CadenceStep.sent_at < until,
         )
         .group_by(CadenceStep.cadence_id)
-        .order_by(func.count(CadenceStep.id).desc())
-        .limit(limit)
     )
-    step_rows = steps_q.all()
-    if not step_rows:
+    manual_task_q = await db.execute(
+        select(
+            ManualTask.cadence_id,
+            func.count(ManualTask.id).label("sent"),
+        )
+        .where(
+            ManualTask.tenant_id == tenant_id,
+            ManualTask.status.in_(_MANUAL_TASK_SENT_STATUSES),
+            ManualTask.sent_at.is_not(None),
+            ManualTask.sent_at >= since,
+            ManualTask.sent_at < until,
+        )
+        .group_by(ManualTask.cadence_id)
+    )
+
+    sent_map: dict[UUID, int] = {}
+    for row in cadence_step_q.all():
+        sent_map[row.cadence_id] = sent_map.get(row.cadence_id, 0) + (row.sent or 0)
+    for row in manual_task_q.all():
+        sent_map[row.cadence_id] = sent_map.get(row.cadence_id, 0) + (row.sent or 0)
+
+    if not sent_map:
         return []
 
-    cadence_ids = [row.cadence_id for row in step_rows]
+    cadence_ids = [
+        cadence_id
+        for cadence_id, _ in sorted(sent_map.items(), key=lambda item: item[1], reverse=True)[
+            :limit
+        ]
+    ]
 
     # Get cadence names
     cadences_q = await db.execute(
@@ -844,11 +976,21 @@ async def get_cadence_performance(
         until=until,
         cadence_ids=cadence_ids,
     )
+    first_manual_task_replies_sq = _first_reliable_manual_task_reply_per_cadence_lead_subquery(
+        tenant_id=tenant_id,
+        since=since,
+        until=until,
+        cadence_ids=cadence_ids,
+    )
+    combined_replies_sq = _combined_first_reply_subquery(
+        first_replies_sq,
+        first_manual_task_replies_sq,
+    )
     replies_q = await db.execute(
         select(
-            first_replies_sq.c.cadence_id,
-            func.count(first_replies_sq.c.interaction_id).label("replied"),
-        ).group_by(first_replies_sq.c.cadence_id)
+            combined_replies_sq.c.cadence_id,
+            func.count(combined_replies_sq.c.interaction_id).label("replied"),
+        ).group_by(combined_replies_sq.c.cadence_id)
     )
     reply_map = {row.cadence_id: row.replied for row in replies_q.all()}
 
@@ -883,16 +1025,16 @@ async def get_cadence_performance(
     active_map = {row.cadence_id: row.active for row in active_q.all()}
 
     result = []
-    for row in step_rows:
-        sent = row.sent or 0
-        replied = reply_map.get(row.cadence_id, 0)
+    for cadence_id in cadence_ids:
+        sent = sent_map.get(cadence_id, 0)
+        replied = reply_map.get(cadence_id, 0)
         rate = round((replied / sent) * 100, 1) if sent > 0 else 0.0
         result.append(
             CadencePerformanceItem(
-                cadence_id=str(row.cadence_id),
-                cadence_name=name_map.get(row.cadence_id, "—"),
-                total_leads=total_leads_map.get(row.cadence_id, 0),
-                leads_active=active_map.get(row.cadence_id, 0),
+                cadence_id=str(cadence_id),
+                cadence_name=name_map.get(cadence_id, "—"),
+                total_leads=total_leads_map.get(cadence_id, 0),
+                leads_active=active_map.get(cadence_id, 0),
                 steps_sent=sent,
                 replies=replied,
                 reply_rate=rate,
@@ -941,13 +1083,21 @@ async def get_cadences_overview(
         tenant_id=tenant_id,
         cadence_ids=cadence_ids,
     )
+    first_manual_task_replies_sq = _first_reliable_manual_task_reply_per_cadence_lead_subquery(
+        tenant_id=tenant_id,
+        cadence_ids=cadence_ids,
+    )
+    combined_replies_sq = _combined_first_reply_subquery(
+        first_replies_sq,
+        first_manual_task_replies_sq,
+    )
     reply_progress_sq = (
         select(
-            first_replies_sq.c.cadence_id.label("cadence_id"),
-            first_replies_sq.c.lead_id.label("lead_id"),
-            func.count(first_replies_sq.c.interaction_id).label("reply_count"),
+            combined_replies_sq.c.cadence_id.label("cadence_id"),
+            combined_replies_sq.c.lead_id.label("lead_id"),
+            func.count(combined_replies_sq.c.interaction_id).label("reply_count"),
         )
-        .group_by(first_replies_sq.c.cadence_id, first_replies_sq.c.lead_id)
+        .group_by(combined_replies_sq.c.cadence_id, combined_replies_sq.c.lead_id)
         .subquery()
     )
 
@@ -1105,12 +1255,48 @@ async def get_cadence_analytics(
         )
     )
     step_summary = step_summary_q.one()
+    manual_task_summary_q = await db.execute(
+        select(
+            func.count(ManualTask.id)
+            .filter(
+                ManualTask.status.in_(_MANUAL_TASK_SENT_STATUSES),
+                ManualTask.sent_at.is_not(None),
+                ManualTask.sent_at >= since,
+                ManualTask.sent_at < until,
+            )
+            .label("sent"),
+            func.count(ManualTask.id)
+            .filter(ManualTask.status.in_(_MANUAL_TASK_PENDING_STATUSES))
+            .label("pending"),
+            func.count(ManualTask.id)
+            .filter(
+                ManualTask.status == ManualTaskStatus.SKIPPED,
+                _manual_task_period_expr() >= since,
+                _manual_task_period_expr() < until,
+            )
+            .label("skipped"),
+        ).where(
+            ManualTask.tenant_id == tenant_id,
+            ManualTask.cadence_id == cadence_id,
+        )
+    )
+    manual_task_summary = manual_task_summary_q.one()
 
     first_replies_sq = _first_reliable_reply_per_cadence_lead_subquery(
         tenant_id=tenant_id,
         since=since,
         until=until,
         cadence_id=cadence_id,
+    )
+    first_manual_task_replies_sq = _first_reliable_manual_task_reply_per_cadence_lead_subquery(
+        tenant_id=tenant_id,
+        since=since,
+        until=until,
+        cadence_id=cadence_id,
+    )
+    combined_replies_sq = _combined_first_reply_subquery(
+        first_replies_sq,
+        first_manual_task_replies_sq,
     )
     opened_email_sq = _opened_email_interactions_subquery(
         tenant_id=tenant_id,
@@ -1131,14 +1317,14 @@ async def get_cadence_analytics(
         cadence_id=cadence_id,
     )
     reply_summary_q = await db.execute(
-        select(func.count(first_replies_sq.c.interaction_id).label("replied"))
+        select(func.count(combined_replies_sq.c.interaction_id).label("replied"))
     )
     reply_summary = reply_summary_q.one()
 
-    steps_sent = step_summary.sent or 0
+    steps_sent = (step_summary.sent or 0) + (manual_task_summary.sent or 0)
     replies = reply_summary.replied or 0
-    pending_steps = step_summary.pending or 0
-    skipped_steps = step_summary.skipped or 0
+    pending_steps = (step_summary.pending or 0) + (manual_task_summary.pending or 0)
+    skipped_steps = (step_summary.skipped or 0) + (manual_task_summary.skipped or 0)
     failed_steps = step_summary.failed or 0
 
     channel_step_q = await db.execute(
@@ -1176,12 +1362,42 @@ async def get_cadence_analytics(
         .group_by(CadenceStep.channel)
         .order_by(CadenceStep.channel.asc())
     )
-    channel_rows = channel_step_q.all()
+    channel_rows = cast(list, channel_step_q.all())
+    manual_task_channel_q = await db.execute(
+        select(
+            ManualTask.channel,
+            func.count(ManualTask.id)
+            .filter(
+                ManualTask.status.in_(_MANUAL_TASK_SENT_STATUSES),
+                ManualTask.sent_at.is_not(None),
+                ManualTask.sent_at >= since,
+                ManualTask.sent_at < until,
+            )
+            .label("sent"),
+            func.count(ManualTask.id)
+            .filter(ManualTask.status.in_(_MANUAL_TASK_PENDING_STATUSES))
+            .label("pending"),
+            func.count(ManualTask.id)
+            .filter(
+                ManualTask.status == ManualTaskStatus.SKIPPED,
+                _manual_task_period_expr() >= since,
+                _manual_task_period_expr() < until,
+            )
+            .label("skipped"),
+        )
+        .where(
+            ManualTask.tenant_id == tenant_id,
+            ManualTask.cadence_id == cadence_id,
+        )
+        .group_by(ManualTask.channel)
+        .order_by(ManualTask.channel.asc())
+    )
+    manual_task_channel_rows = cast(list, manual_task_channel_q.all())
     channel_reply_q = await db.execute(
         select(
-            first_replies_sq.c.channel,
-            func.count(first_replies_sq.c.interaction_id).label("replied"),
-        ).group_by(first_replies_sq.c.channel)
+            combined_replies_sq.c.channel,
+            func.count(combined_replies_sq.c.interaction_id).label("replied"),
+        ).group_by(combined_replies_sq.c.channel)
     )
     channel_open_q = await db.execute(
         select(
@@ -1198,7 +1414,23 @@ async def get_cadence_analytics(
     channel_reply_map = {row.channel: row.replied for row in channel_reply_q.all()}
     channel_open_map = {row.channel: row.opened for row in channel_open_q.all()}
     channel_accept_map = {row.channel: row.accepted for row in channel_accept_q.all()}
-    channel_stats_map = {row.channel: row for row in channel_rows}
+    channel_stats_map: dict[Channel, dict[str, int]] = {
+        row.channel: {
+            "sent": row.sent or 0,
+            "pending": row.pending or 0,
+            "skipped": row.skipped or 0,
+            "failed": row.failed or 0,
+        }
+        for row in channel_rows
+    }
+    for row in manual_task_channel_rows:
+        stats = channel_stats_map.setdefault(
+            row.channel,
+            {"sent": 0, "pending": 0, "skipped": 0, "failed": 0},
+        )
+        stats["sent"] += row.sent or 0
+        stats["pending"] += row.pending or 0
+        stats["skipped"] += row.skipped or 0
     channel_breakdown = []
     for channel in sorted(
         channel_stats_map.keys()
@@ -1207,14 +1439,14 @@ async def get_cadence_analytics(
         | channel_accept_map.keys(),
         key=lambda item: item.value,
     ):
-        row = channel_stats_map.get(channel)
-        sent = row.sent if row is not None else 0
+        channel_stats = cast(dict[str, int] | None, channel_stats_map.get(channel))
+        sent = channel_stats["sent"] if channel_stats is not None else 0
         replied = channel_reply_map.get(channel, 0)
         opened = channel_open_map.get(channel, 0)
         accepted = channel_accept_map.get(channel, 0)
-        pending = row.pending if row is not None else 0
-        skipped = row.skipped if row is not None else 0
-        failed = row.failed if row is not None else 0
+        pending = channel_stats["pending"] if channel_stats is not None else 0
+        skipped = channel_stats["skipped"] if channel_stats is not None else 0
+        failed = channel_stats["failed"] if channel_stats is not None else 0
         channel_breakdown.append(
             CadenceAnalyticsChannelItem(
                 channel=channel.value if hasattr(channel, "value") else str(channel),
@@ -1267,13 +1499,44 @@ async def get_cadence_analytics(
         .group_by(CadenceStep.step_number, CadenceStep.channel)
         .order_by(CadenceStep.step_number.asc(), CadenceStep.channel.asc())
     )
-    step_rows = step_stats_q.all()
+    step_rows = cast(list, step_stats_q.all())
+    manual_task_step_q = await db.execute(
+        select(
+            ManualTask.step_number,
+            ManualTask.channel,
+            func.count(ManualTask.id)
+            .filter(
+                ManualTask.status.in_(_MANUAL_TASK_SENT_STATUSES),
+                ManualTask.sent_at.is_not(None),
+                ManualTask.sent_at >= since,
+                ManualTask.sent_at < until,
+            )
+            .label("sent"),
+            func.count(ManualTask.id)
+            .filter(ManualTask.status.in_(_MANUAL_TASK_PENDING_STATUSES))
+            .label("pending"),
+            func.count(ManualTask.id)
+            .filter(
+                ManualTask.status == ManualTaskStatus.SKIPPED,
+                _manual_task_period_expr() >= since,
+                _manual_task_period_expr() < until,
+            )
+            .label("skipped"),
+        )
+        .where(
+            ManualTask.tenant_id == tenant_id,
+            ManualTask.cadence_id == cadence_id,
+        )
+        .group_by(ManualTask.step_number, ManualTask.channel)
+        .order_by(ManualTask.step_number.asc(), ManualTask.channel.asc())
+    )
+    manual_task_step_rows = cast(list, manual_task_step_q.all())
     step_reply_q = await db.execute(
         select(
-            first_replies_sq.c.step_number,
-            first_replies_sq.c.channel,
-            func.count(first_replies_sq.c.interaction_id).label("replied"),
-        ).group_by(first_replies_sq.c.step_number, first_replies_sq.c.channel)
+            combined_replies_sq.c.step_number,
+            combined_replies_sq.c.channel,
+            func.count(combined_replies_sq.c.interaction_id).label("replied"),
+        ).group_by(combined_replies_sq.c.step_number, combined_replies_sq.c.channel)
     )
     step_open_q = await db.execute(
         select(
@@ -1300,7 +1563,23 @@ async def get_cadence_analytics(
     step_open_map = {(row.step_number, row.channel): row.opened for row in step_open_q.all()}
     step_bounce_map = {(row.step_number, row.channel): row.bounced for row in step_bounce_q.all()}
     step_accept_map = {(row.step_number, row.channel): row.accepted for row in step_accept_q.all()}
-    step_stats_map = {(row.step_number, row.channel): row for row in step_rows}
+    step_stats_map: dict[tuple[int, Channel], dict[str, int]] = {
+        (row.step_number, row.channel): {
+            "sent": row.sent or 0,
+            "pending": row.pending or 0,
+            "skipped": row.skipped or 0,
+            "failed": row.failed or 0,
+        }
+        for row in step_rows
+    }
+    for manual_task_step in manual_task_step_rows:
+        stats = step_stats_map.setdefault(
+            (manual_task_step.step_number, manual_task_step.channel),
+            {"sent": 0, "pending": 0, "skipped": 0, "failed": 0},
+        )
+        stats["sent"] += manual_task_step.sent or 0
+        stats["pending"] += manual_task_step.pending or 0
+        stats["skipped"] += manual_task_step.skipped or 0
     step_breakdown = []
     for step_number, channel in sorted(
         step_stats_map.keys()
@@ -1311,14 +1590,14 @@ async def get_cadence_analytics(
         key=lambda item: (item[0], item[1].value),
     ):
         step_row = step_stats_map.get((step_number, channel))
-        sent = step_row.sent if step_row is not None else 0
+        sent = step_row["sent"] if step_row is not None else 0
         replied = step_reply_map.get((step_number, channel), 0)
         opened = step_open_map.get((step_number, channel), 0)
         bounced = step_bounce_map.get((step_number, channel), 0)
         accepted = step_accept_map.get((step_number, channel), 0)
-        pending = step_row.pending if step_row is not None else 0
-        skipped = step_row.skipped if step_row is not None else 0
-        failed = step_row.failed if step_row is not None else 0
+        pending = step_row["pending"] if step_row is not None else 0
+        skipped = step_row["skipped"] if step_row is not None else 0
+        failed = step_row["failed"] if step_row is not None else 0
         lead_count = (sent or 0) + (pending or 0) + (skipped or 0) + (failed or 0)
         step_breakdown.append(
             CadenceAnalyticsStepItem(

@@ -53,6 +53,11 @@ class Interaction(Base, TenantMixin):
         nullable=True,
         index=True,
     )
+    manual_task_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("manual_tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     # ── Canal e direção ───────────────────────────────────────────────
     channel: Mapped[Channel] = mapped_column(

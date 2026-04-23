@@ -5,6 +5,7 @@ import {
   scoreVariant,
   truncate,
   channelLabel,
+  manualTaskTypeLabel,
   intentConfig,
   slugify,
   formatBRL,
@@ -133,6 +134,20 @@ describe("channelLabel", () => {
 
   it("retorna o próprio valor para canal desconhecido", () => {
     expect(channelLabel("whatsapp")).toBe("whatsapp")
+  })
+})
+
+describe("manualTaskTypeLabel", () => {
+  it("traduz ligação", () => {
+    expect(manualTaskTypeLabel("call")).toBe("Ligação")
+  })
+
+  it("traduz WhatsApp", () => {
+    expect(manualTaskTypeLabel("whatsapp")).toBe("WhatsApp")
+  })
+
+  it("retorna nulo se ausente", () => {
+    expect(manualTaskTypeLabel(null)).toBeNull()
   })
 })
 

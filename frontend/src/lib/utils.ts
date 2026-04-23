@@ -51,6 +51,21 @@ export function channelLabel(channel: string): string {
   return map[channel] ?? channel
 }
 
+export function manualTaskTypeLabel(value: string | null | undefined): string | null {
+  const map: Record<string, string> = {
+    call: "Ligação",
+    linkedin_post_comment: "Comentário em post",
+    whatsapp: "WhatsApp",
+    other: "Outro",
+  }
+
+  if (!value) {
+    return null
+  }
+
+  return map[value] ?? value
+}
+
 /** Origem do lead → label legível em português */
 export function leadSourceLabel(source: string): string {
   const map: Record<string, string> = {

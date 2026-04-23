@@ -199,6 +199,7 @@ class LeadStepResponse(BaseModel):
     sent_at: datetime | None
     message_content: str | None = None
     reply_content: str | None = None
+    reply_manual_task_id: uuid.UUID | None = None
     intent: str | None = None
     manual_task_id: uuid.UUID | None = None
     manual_task_type: str | None = None

@@ -12,21 +12,24 @@ Responsabilidades:
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time, timedelta
+from enum import Enum
 from typing import Any
 
 import structlog
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from integrations.llm import LLMRegistry
 from models.cadence import Cadence
+from models.cadence_step import CadenceStep
 from models.enums import Channel, InteractionDirection, ManualTaskStatus
 from models.interaction import Interaction
 from models.lead import Lead
 from models.manual_task import ManualTask
 from models.tenant import TenantIntegration
+from schemas.manual_task import ManualTaskSlaStatus
 from services.ai_composer import AIComposer
 from services.email_account_service import resolve_outbound_email_account
 from services.email_footer import inject_tracking
@@ -42,6 +45,16 @@ _POST_CONNECT_CHANNELS = {
 
 class ManualTaskService:
     """Gerenciador de tarefas manuais para cadência semi-automática."""
+
+    @staticmethod
+    def _apply_created_at_date_range(query, start_date: date | None, end_date: date | None):
+        if start_date is not None:
+            start_boundary = datetime.combine(start_date, time.min, tzinfo=UTC)
+            query = query.where(ManualTask.created_at >= start_boundary)
+        if end_date is not None:
+            end_boundary = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=UTC)
+            query = query.where(ManualTask.created_at < end_boundary)
+        return query
 
     async def create_tasks_for_lead(
         self,
@@ -66,6 +79,15 @@ class ManualTaskService:
         existing_keys = {
             (task.channel, task.step_number) for task in existing_result.scalars().all()
         }
+        source_step_result = await db.execute(
+            select(CadenceStep.id).where(
+                CadenceStep.tenant_id == lead.tenant_id,
+                CadenceStep.cadence_id == cadence.id,
+                CadenceStep.lead_id == lead.id,
+                CadenceStep.step_number == 1,
+            )
+        )
+        source_step_id = source_step_result.scalar_one_or_none()
 
         for default_step_number, item in enumerate(template, start=1):
             channel_str = item.get("channel", "")
@@ -91,6 +113,7 @@ class ManualTaskService:
                 tenant_id=lead.tenant_id,
                 cadence_id=cadence.id,
                 lead_id=lead.id,
+                cadence_step_id=source_step_id,
                 channel=channel,
                 step_number=step_number,
                 status=ManualTaskStatus.PENDING,
@@ -309,6 +332,7 @@ class ManualTaskService:
             id=uuid.uuid4(),
             tenant_id=lead.tenant_id,
             lead_id=lead.id,
+            manual_task_id=task.id,
             channel=task.channel,
             direction=InteractionDirection.OUTBOUND,
             content_text=text,
@@ -367,6 +391,34 @@ class ManualTaskService:
         logger.info("manual_task.skipped", task_id=str(task.id))
         return task
 
+    async def reopen(
+        self,
+        task_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        db: AsyncSession,
+    ) -> ManualTask:
+        """Reabre uma tarefa terminal reversível para voltar ao fluxo operacional."""
+        task = await self._get_task(task_id, db, tenant_id=tenant_id)
+
+        if task.status not in (ManualTaskStatus.DONE_EXTERNAL, ManualTaskStatus.SKIPPED):
+            raise ValueError("Apenas tarefas feitas externamente ou puladas podem ser reabertas")
+
+        task.status = (
+            ManualTaskStatus.CONTENT_GENERATED
+            if (task.edited_text or task.generated_text)
+            else ManualTaskStatus.PENDING
+        )
+        task.sent_at = None
+
+        if task.status == ManualTaskStatus.CONTENT_GENERATED and task.notes:
+            task.notes = None
+
+        await db.commit()
+        await db.refresh(task)
+
+        logger.info("manual_task.reopened", task_id=str(task.id), status=task.status.value)
+        return task
+
     async def regenerate_content(
         self,
         task_id: uuid.UUID,
@@ -389,19 +441,68 @@ class ManualTaskService:
         db: AsyncSession,
         cadence_id: uuid.UUID | None = None,
         status: ManualTaskStatus | None = None,
+        statuses: list[ManualTaskStatus] | None = None,
         channel: Channel | None = None,
+        sla: ManualTaskSlaStatus | None = None,
+        search: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        sort_by: str | Enum = "created_at",
+        sort_dir: str | Enum = "desc",
         page: int = 1,
         page_size: int = 20,
     ) -> dict:
         """Lista tarefas com filtros e paginação."""
-        query = select(ManualTask).where(ManualTask.tenant_id == tenant_id)
+        normalized_statuses = list(dict.fromkeys(statuses or []))
+        normalized_search = search.strip() if search else None
+        sort_field = sort_by.value if isinstance(sort_by, Enum) else sort_by
+        sort_direction = sort_dir.value if isinstance(sort_dir, Enum) else sort_dir
+
+        query = (
+            select(ManualTask)
+            .join(Lead, ManualTask.lead_id == Lead.id)
+            .join(Cadence, ManualTask.cadence_id == Cadence.id)
+            .options(
+                selectinload(ManualTask.lead),
+                selectinload(ManualTask.cadence),
+            )
+            .where(ManualTask.tenant_id == tenant_id)
+        )
 
         if cadence_id:
             query = query.where(ManualTask.cadence_id == cadence_id)
-        if status:
+        if normalized_statuses:
+            query = query.where(ManualTask.status.in_(normalized_statuses))
+        elif status:
             query = query.where(ManualTask.status == status)
         if channel:
             query = query.where(ManualTask.channel == channel)
+        if sla is not None:
+            now = datetime.now(tz=UTC)
+            attention_cutoff = now - timedelta(hours=24)
+            urgent_cutoff = now - timedelta(hours=72)
+            if sla == ManualTaskSlaStatus.FRESH:
+                query = query.where(ManualTask.created_at > attention_cutoff)
+            elif sla == ManualTaskSlaStatus.ATTENTION:
+                query = query.where(
+                    ManualTask.created_at <= attention_cutoff,
+                    ManualTask.created_at > urgent_cutoff,
+                )
+            elif sla == ManualTaskSlaStatus.URGENT:
+                query = query.where(ManualTask.created_at <= urgent_cutoff)
+        if normalized_search:
+            pattern = f"%{normalized_search}%"
+            query = query.where(
+                or_(
+                    Lead.name.ilike(pattern),
+                    Lead.company.ilike(pattern),
+                    Lead.email_corporate.ilike(pattern),
+                    Lead.email_personal.ilike(pattern),
+                    Cadence.name.ilike(pattern),
+                )
+            )
+
+        query = self._apply_created_at_date_range(query, start_date, end_date)
 
         # Contagem total
         count_query = select(func.count()).select_from(query.subquery())
@@ -409,7 +510,19 @@ class ManualTaskService:
         total = total_result.scalar() or 0
 
         # Paginação
-        query = query.order_by(ManualTask.created_at.desc())
+        sort_column_map = {
+            "created_at": ManualTask.created_at,
+            "updated_at": ManualTask.updated_at,
+            "sent_at": ManualTask.sent_at,
+            "lead_name": Lead.name,
+            "cadence_name": Cadence.name,
+            "step_number": ManualTask.step_number,
+            "status": ManualTask.status,
+            "channel": ManualTask.channel,
+        }
+        sort_column = sort_column_map.get(sort_field, ManualTask.created_at)
+        sort_expression = sort_column.asc() if sort_direction == "asc" else sort_column.desc()
+        query = query.order_by(sort_expression, ManualTask.id.asc())
         query = query.offset((page - 1) * page_size).limit(page_size)
 
         result = await db.execute(query)
@@ -426,9 +539,12 @@ class ManualTaskService:
         self,
         tenant_id: uuid.UUID,
         db: AsyncSession,
+        start_date: date | None = None,
+        end_date: date | None = None,
     ) -> dict:
         """Estatísticas de tarefas."""
         base = select(func.count()).where(ManualTask.tenant_id == tenant_id)
+        base = self._apply_created_at_date_range(base, start_date, end_date)
 
         pending = await db.execute(base.where(ManualTask.status == ManualTaskStatus.PENDING))
         generated = await db.execute(
@@ -436,12 +552,14 @@ class ManualTaskService:
         )
         sent = await db.execute(base.where(ManualTask.status == ManualTaskStatus.SENT))
         done_ext = await db.execute(base.where(ManualTask.status == ManualTaskStatus.DONE_EXTERNAL))
+        skipped = await db.execute(base.where(ManualTask.status == ManualTaskStatus.SKIPPED))
 
         return {
             "pending": pending.scalar() or 0,
             "content_generated": generated.scalar() or 0,
             "sent": sent.scalar() or 0,
             "done_external": done_ext.scalar() or 0,
+            "skipped": skipped.scalar() or 0,
         }
 
     # ── Private helpers ───────────────────────────────────────────────

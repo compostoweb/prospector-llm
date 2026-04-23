@@ -1,6 +1,11 @@
 "use client"
 
 import { BadgeChannel } from "@/components/shared/badge-channel"
+import {
+  TASK_SLA_CONFIG,
+  formatTaskAge,
+  getTaskSlaState,
+} from "@/components/tarefas/task-queue-utils"
 import { cn } from "@/lib/utils"
 import type { ManualTask, ManualTaskStatus } from "@/lib/api/hooks/use-manual-tasks"
 import { Clock, Sparkles, Send, CheckCircle, SkipForward } from "lucide-react"
@@ -8,6 +13,7 @@ import { Clock, Sparkles, Send, CheckCircle, SkipForward } from "lucide-react"
 interface TaskCardProps {
   task: ManualTask
   onClick: () => void
+  isSelected?: boolean
 }
 
 const STATUS_CONFIG: Record<
@@ -41,15 +47,20 @@ const STATUS_CONFIG: Record<
   },
 }
 
-export function TaskCard({ task, onClick }: TaskCardProps) {
+export function TaskCard({ task, onClick, isSelected = false }: TaskCardProps) {
   const config = STATUS_CONFIG[task.status]
   const StatusIcon = config.icon
+  const slaState = getTaskSlaState(task.created_at)
+  const slaConfig = TASK_SLA_CONFIG[slaState]
 
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex flex-col rounded-lg border border-(--border-default) bg-(--bg-surface) p-4 text-left shadow-(--shadow-sm) transition-colors hover:border-(--border-hover)"
+      className={cn(
+        "flex flex-col rounded-lg border border-(--border-default) bg-(--bg-surface) p-4 text-left shadow-(--shadow-sm) transition-colors hover:border-(--border-hover)",
+        isSelected && "border-(--accent) ring-1 ring-(--accent-subtle)",
+      )}
     >
       {/* Header: lead + status */}
       <div className="flex items-start justify-between gap-2">
@@ -76,6 +87,14 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
       <div className="mt-3 flex items-center gap-2">
         <BadgeChannel channel={task.channel} />
         <span className="text-xs text-(--text-tertiary)">Passo {task.step_number}</span>
+        <span
+          className={cn(
+            "inline-flex rounded-(--radius-full) px-2 py-0.5 text-[10px] font-medium",
+            slaConfig.badgeClassName,
+          )}
+        >
+          {slaConfig.label}
+        </span>
       </div>
 
       {/* Preview do conteúdo */}
@@ -84,6 +103,10 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
           {task.edited_text ?? task.generated_text}
         </p>
       )}
+
+      <p className="mt-3 text-[11px] text-(--text-tertiary)">
+        Na fila há {formatTaskAge(task.created_at)}
+      </p>
     </button>
   )
 }

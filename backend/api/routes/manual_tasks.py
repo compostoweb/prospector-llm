@@ -12,12 +12,14 @@ Endpoints:
   PATCH  /tasks/{id}      — atualizar texto editado
   POST   /tasks/{id}/send — enviar via sistema (Unipile)
   POST   /tasks/{id}/done — marcar como executada externamente
+    POST   /tasks/{id}/reopen — reabrir tarefa feita externamente ou pulada
   POST   /tasks/{id}/skip — pular tarefa
 """
 
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -30,6 +32,9 @@ from schemas.manual_task import (
     ManualTaskDoneExternalRequest,
     ManualTaskListResponse,
     ManualTaskResponse,
+    ManualTaskSlaStatus,
+    ManualTaskSortBy,
+    ManualTaskSortDir,
     ManualTaskStatsResponse,
     ManualTaskUpdateRequest,
 )
@@ -48,7 +53,14 @@ async def list_tasks(
     db: AsyncSession = Depends(get_session_flexible),
     cadence_id: uuid.UUID | None = Query(default=None),
     task_status: ManualTaskStatus | None = Query(default=None, alias="status"),
+    statuses: list[ManualTaskStatus] | None = Query(default=None),
     channel: Channel | None = Query(default=None),
+    sla: ManualTaskSlaStatus | None = Query(default=None),
+    search: str | None = Query(default=None, min_length=1),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    sort_by: ManualTaskSortBy = Query(default=ManualTaskSortBy.CREATED_AT),
+    sort_dir: ManualTaskSortDir = Query(default=ManualTaskSortDir.DESC),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> ManualTaskListResponse:
@@ -57,7 +69,14 @@ async def list_tasks(
         db=db,
         cadence_id=cadence_id,
         status=task_status,
+        statuses=statuses,
         channel=channel,
+        sla=sla,
+        search=search,
+        start_date=start_date,
+        end_date=end_date,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
         page=page,
         page_size=page_size,
     )
@@ -73,8 +92,10 @@ async def list_tasks(
 async def get_stats(
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
 ) -> ManualTaskStatsResponse:
-    stats = await _service.get_stats(tenant_id, db)
+    stats = await _service.get_stats(tenant_id, db, start_date=start_date, end_date=end_date)
     return ManualTaskStatsResponse(**stats)
 
 
@@ -173,4 +194,20 @@ async def skip_task(
         task = await _service.skip(task_id, tenant_id, db)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return ManualTaskResponse.model_validate(task)
+
+
+@router.post("/{task_id}/reopen", response_model=ManualTaskResponse)
+async def reopen_task(
+    task_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> ManualTaskResponse:
+    try:
+        task = await _service.reopen(task_id, tenant_id, db)
+    except ValueError as e:
+        error_message = str(e)
+        if "não encontrada" in error_message:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_message)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_message)
     return ManualTaskResponse.model_validate(task)

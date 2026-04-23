@@ -6,6 +6,7 @@ import { AlertTriangle, Clock3, Gauge, MessageSquare, Send, Users } from "lucide
 import { AnalyticsPeriodFilter } from "@/components/shared/analytics-period-filter"
 import { StatCard } from "@/components/dashboard/stat-card"
 import { BadgeChannel } from "@/components/shared/badge-channel"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type { Cadence } from "@/lib/api/hooks/use-cadences"
 import {
   buildDateFilterValue,
@@ -249,7 +250,8 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
                       </>
                     ) : null}
                     <MetricMini label="Pendentes" value={row.pending} />
-                    <MetricMini label="Falhas" value={row.failed + row.skipped} />
+                    <MetricMini label="Falhas" value={row.failed} />
+                    <MetricMini label="Pulados" value={row.skipped} />
                   </div>
                 </div>
               ))}
@@ -280,89 +282,151 @@ export function CadenceDetailAnalytics({ cadence }: CadenceDetailAnalyticsProps)
             </div>
           ) : data && data.step_breakdown.length > 0 ? (
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-(--border-subtle)">
-                    <th className="pb-2 pr-3 font-medium text-(--text-tertiary)">Step</th>
-                    <th className="pb-2 pr-3 font-medium text-(--text-tertiary)">Canal</th>
-                    <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
-                      Leads
-                    </th>
-                    <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
-                      Envios
-                    </th>
-                    <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
-                      Respostas
-                    </th>
-                    <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
-                      Tx. resp./envio
-                    </th>
-                    <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
-                      Tx. abertura
-                    </th>
-                    <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
-                      Bounce
-                    </th>
-                    <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
-                      Aceites
-                    </th>
-                    <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
-                      Tx. aceite
-                    </th>
-                    <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
-                      Pendentes
-                    </th>
-                    <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
-                      Falhas
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.step_breakdown.map((row) => (
-                    <tr
-                      key={`${row.step_number}-${row.channel}`}
-                      className="border-b border-(--border-subtle) last:border-0"
-                    >
-                      <td className="py-3 pr-3 font-medium text-(--text-primary)">
-                        #{row.step_number}
-                      </td>
-                      <td className="py-3 pr-3">
-                        <BadgeChannel channel={row.channel} />
-                      </td>
-                      <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
-                        {row.lead_count}
-                      </td>
-                      <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
-                        {row.sent}
-                      </td>
-                      <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
-                        {row.replied}
-                      </td>
-                      <td className="py-3 pr-3 text-right tabular-nums font-medium text-(--text-primary)">
-                        {row.reply_rate}%
-                      </td>
-                      <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
-                        {row.channel === "email" ? `${row.open_rate}%` : "—"}
-                      </td>
-                      <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
-                        {row.channel === "email" ? row.bounced : "—"}
-                      </td>
-                      <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
-                        {row.channel === "linkedin_connect" ? row.accepted : "—"}
-                      </td>
-                      <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
-                        {row.channel === "linkedin_connect" ? `${row.acceptance_rate}%` : "—"}
-                      </td>
-                      <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
-                        {row.pending}
-                      </td>
-                      <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
-                        {row.failed + row.skipped}
-                      </td>
+              <TooltipProvider delayDuration={120}>
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-(--border-subtle)">
+                      <th className="pb-2 pr-3 font-medium text-(--text-tertiary)">
+                        <AnalyticsColumnHeader
+                          label="Step"
+                          description="Posição do passo dentro da cadência, na ordem em que ele é tentado para cada lead."
+                        />
+                      </th>
+                      <th className="pb-2 pr-3 font-medium text-(--text-tertiary)">
+                        <AnalyticsColumnHeader
+                          label="Canal"
+                          description="Canal usado naquele passo, como conexão no LinkedIn, DM ou e-mail."
+                        />
+                      </th>
+                      <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
+                        <AnalyticsColumnHeader
+                          label="Leads"
+                          description="Quantidade de leads que chegaram a este passo dentro da janela analisada."
+                          align="right"
+                        />
+                      </th>
+                      <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
+                        <AnalyticsColumnHeader
+                          label="Envios"
+                          description="Execuções concluídas com envio efetivo neste passo, dentro do período selecionado."
+                          align="right"
+                        />
+                      </th>
+                      <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
+                        <AnalyticsColumnHeader
+                          label="Respostas"
+                          description="Replies atribuídos a mensagens enviadas por este passo."
+                          align="right"
+                        />
+                      </th>
+                      <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
+                        <AnalyticsColumnHeader
+                          label="Tx. resp./envio"
+                          description="Taxa de resposta calculada sobre os envios efetivamente realizados neste passo."
+                          align="right"
+                        />
+                      </th>
+                      <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
+                        <AnalyticsColumnHeader
+                          label="Tx. abertura"
+                          description="Taxa de abertura de e-mail. Só aparece para passos de e-mail."
+                          align="right"
+                        />
+                      </th>
+                      <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
+                        <AnalyticsColumnHeader
+                          label="Bounce"
+                          description="Quantidade de e-mails devolvidos ou rejeitados pelo destino. Só aparece em e-mail."
+                          align="right"
+                        />
+                      </th>
+                      <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
+                        <AnalyticsColumnHeader
+                          label="Aceites"
+                          description="Convites aceitos no LinkedIn originados por este passo. Só aparece em conexão."
+                          align="right"
+                        />
+                      </th>
+                      <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
+                        <AnalyticsColumnHeader
+                          label="Tx. aceite"
+                          description="Taxa de aceite sobre os convites enviados neste passo de conexão."
+                          align="right"
+                        />
+                      </th>
+                      <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
+                        <AnalyticsColumnHeader
+                          label="Pendentes"
+                          description="Leads já matriculados neste passo, mas ainda aguardando a vez de processar ou enviar."
+                          align="right"
+                        />
+                      </th>
+                      <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
+                        <AnalyticsColumnHeader
+                          label="Falhas"
+                          description="Erros reais de processamento ou envio. Não inclui leads pulados por regra operacional."
+                          align="right"
+                        />
+                      </th>
+                      <th className="pb-2 pr-3 text-right font-medium text-(--text-tertiary)">
+                        <AnalyticsColumnHeader
+                          label="Pulados"
+                          description="Leads que não foram enviados neste passo por regra ou estado, como saída da cadência, pausa ou outra condição operacional."
+                          align="right"
+                        />
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {data.step_breakdown.map((row) => (
+                      <tr
+                        key={`${row.step_number}-${row.channel}`}
+                        className="border-b border-(--border-subtle) last:border-0"
+                      >
+                        <td className="py-3 pr-3 font-medium text-(--text-primary)">
+                          #{row.step_number}
+                        </td>
+                        <td className="py-3 pr-3">
+                          <BadgeChannel channel={row.channel} />
+                        </td>
+                        <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
+                          {row.lead_count}
+                        </td>
+                        <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
+                          {row.sent}
+                        </td>
+                        <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
+                          {row.replied}
+                        </td>
+                        <td className="py-3 pr-3 text-right tabular-nums font-medium text-(--text-primary)">
+                          {row.reply_rate}%
+                        </td>
+                        <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
+                          {row.channel === "email" ? `${row.open_rate}%` : "—"}
+                        </td>
+                        <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
+                          {row.channel === "email" ? row.bounced : "—"}
+                        </td>
+                        <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
+                          {row.channel === "linkedin_connect" ? row.accepted : "—"}
+                        </td>
+                        <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
+                          {row.channel === "linkedin_connect" ? `${row.acceptance_rate}%` : "—"}
+                        </td>
+                        <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
+                          {row.pending}
+                        </td>
+                        <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
+                          {row.failed}
+                        </td>
+                        <td className="py-3 pr-3 text-right tabular-nums text-(--text-secondary)">
+                          {row.skipped}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </TooltipProvider>
             </div>
           ) : (
             <p className="py-8 text-center text-sm text-(--text-tertiary)">
@@ -471,6 +535,34 @@ function MetricMini({ label, value }: { label: string; value: number | string })
       <p className="text-[11px] uppercase tracking-wide text-(--text-tertiary)">{label}</p>
       <p className="mt-1 text-lg font-semibold tabular-nums text-(--text-primary)">{value}</p>
     </div>
+  )
+}
+
+function AnalyticsColumnHeader({
+  label,
+  description,
+  align = "left",
+}: {
+  label: string
+  description: string
+  align?: "left" | "right"
+}) {
+  const alignmentClass = align === "right" ? "justify-end text-right" : "justify-start text-left"
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className={`inline-flex w-full items-center gap-1 border-b border-dotted border-(--border-strong) pb-0.5 text-inherit transition-colors hover:text-(--text-primary) ${alignmentClass}`}
+        >
+          <span className="truncate">{label}</span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-64 text-xs leading-relaxed">
+        {description}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 

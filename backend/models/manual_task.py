@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
@@ -85,3 +86,30 @@ class ManualTask(Base, TenantMixin, TimestampMixin):
     # ── Relationships ─────────────────────────────────────────────────
     lead = relationship("Lead", lazy="selectin")
     cadence = relationship("Cadence", lazy="selectin")
+
+    @property
+    def cadence_name(self) -> str | None:
+        return self.cadence.name if self.cadence is not None else None
+
+    @property
+    def manual_task_type(self) -> str | None:
+        return self._template_step_value("manual_task_type")
+
+    @property
+    def manual_task_detail(self) -> str | None:
+        return self._template_step_value("manual_task_detail")
+
+    def _template_step_value(self, key: str) -> str | None:
+        if self.cadence is None:
+            return None
+
+        from services.cadence_manager import get_template_step_config
+
+        step_config = get_template_step_config(self.cadence, self.step_number)
+        value: Any = step_config.get(key) if step_config else None
+        if value is None:
+            return None
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned or None
+        return str(value)

@@ -788,13 +788,20 @@ async def list_lead_steps(
     # Usa cadence_step_id para evitar casar replies apenas por ordem/canal.
     outbound_by_step_id: dict[uuid.UUID, Interaction] = {}
     inbound_by_step_id: dict[uuid.UUID, Interaction] = {}
+    outbound_by_manual_task_id: dict[uuid.UUID, Interaction] = {}
+    inbound_by_manual_task_id: dict[uuid.UUID, Interaction] = {}
     for ix in interactions:
-        if ix.cadence_step_id is None:
-            continue
-        if ix.direction.value == "outbound":
-            outbound_by_step_id[ix.cadence_step_id] = ix
-        elif is_reliable_reply_interaction(ix):
-            inbound_by_step_id[ix.cadence_step_id] = ix
+        if ix.cadence_step_id is not None:
+            if ix.direction.value == "outbound":
+                outbound_by_step_id[ix.cadence_step_id] = ix
+            elif is_reliable_reply_interaction(ix):
+                inbound_by_step_id[ix.cadence_step_id] = ix
+
+        if ix.manual_task_id is not None:
+            if ix.direction.value == "outbound":
+                outbound_by_manual_task_id[ix.manual_task_id] = ix
+            elif is_reliable_reply_interaction(ix):
+                inbound_by_manual_task_id[ix.manual_task_id] = ix
 
     timeline_items: list[tuple[datetime, LeadStepResponse]] = []
 
@@ -813,8 +820,13 @@ async def list_lead_steps(
 
         inbound_interaction = inbound_by_step_id.get(step.id)
         reply_content = inbound_interaction.content_text if inbound_interaction else None
+        reply_manual_task_id = (
+            inbound_interaction.manual_task_id if inbound_interaction is not None else None
+        )
         interaction_intent = inbound_interaction.intent if inbound_interaction is not None else None
-        intent: str | None = interaction_intent.value if interaction_intent is not None else None
+        step_reply_intent: str | None = (
+            interaction_intent.value if interaction_intent is not None else None
+        )
         display_status = step.status
         if display_status == StepStatus.REPLIED and inbound_interaction is None:
             display_status = StepStatus.SENT
@@ -842,7 +854,8 @@ async def list_lead_steps(
                     sent_at=step.sent_at,
                     message_content=message_content,
                     reply_content=reply_content,
-                    intent=intent,
+                    reply_manual_task_id=reply_manual_task_id,
+                    intent=step_reply_intent,
                     manual_task_type=manual_task_type,
                     manual_task_detail=manual_task_detail,
                 ),
@@ -852,7 +865,18 @@ async def list_lead_steps(
     for task in manual_tasks:
         cadence = task.cadence
         step_config = get_template_step_config(cadence, task.step_number) if cadence else None
-        message_content = task.edited_text or task.generated_text or None
+        outbound_interaction = outbound_by_manual_task_id.get(task.id)
+        message_content = (
+            task.edited_text
+            or task.generated_text
+            or (outbound_interaction.content_text if outbound_interaction is not None else None)
+        )
+        inbound_interaction = inbound_by_manual_task_id.get(task.id)
+        reply_content = inbound_interaction.content_text if inbound_interaction is not None else None
+        interaction_intent = inbound_interaction.intent if inbound_interaction is not None else None
+        reply_intent: str | None = (
+            interaction_intent.value if interaction_intent is not None else None
+        )
         manual_task_detail = _normalize_manual_task_detail(
             step_config.get("manual_task_detail") if step_config else None
         )
@@ -876,6 +900,9 @@ async def list_lead_steps(
                     scheduled_at=task.created_at,
                     sent_at=task.sent_at,
                     message_content=message_content,
+                    reply_content=reply_content,
+                    reply_manual_task_id=task.id if inbound_interaction is not None else None,
+                    intent=reply_intent,
                     manual_task_id=task.id,
                     manual_task_type=_normalize_manual_task_type(
                         step_config.get("manual_task_type") if step_config else None

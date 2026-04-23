@@ -18,7 +18,10 @@ def reply_candidate_step_channels(channel: Channel) -> tuple[Channel, ...]:
 def reliable_reply_interaction_condition():
     return and_(
         Interaction.direction == InteractionDirection.INBOUND,
-        Interaction.cadence_step_id.is_not(None),
+        or_(
+            Interaction.cadence_step_id.is_not(None),
+            Interaction.manual_task_id.is_not(None),
+        ),
         or_(
             Interaction.channel != Channel.EMAIL,
             Interaction.reply_match_source.is_(None),
@@ -38,7 +41,10 @@ def is_low_confidence_email_reply_interaction(interaction: Interaction) -> bool:
 def is_reliable_reply_interaction(interaction: Interaction) -> bool:
     return (
         interaction.direction == InteractionDirection.INBOUND
-        and interaction.cadence_step_id is not None
+        and (
+            interaction.cadence_step_id is not None
+            or interaction.manual_task_id is not None
+        )
         and not is_low_confidence_email_reply_interaction(interaction)
     )
 
