@@ -15,8 +15,10 @@ const OPTIONS: AnalyticsDateFilterOption[] = [
   { id: "last_90_days", label: "90 dias", days: 90 },
 ]
 
+const DEFAULT_OPTION: AnalyticsDateFilterOption = { id: "last_30_days", label: "30 dias", days: 30 }
+
 export function PeriodFilter({ value, onChange, className }: PeriodFilterProps) {
-  const selectedOption = OPTIONS.find((option) => option.days === value) ?? OPTIONS[1]
+  const selectedOption = OPTIONS.find((option) => option.days === value) ?? DEFAULT_OPTION
   const optionalProps = className ? { className } : {}
 
   return (
