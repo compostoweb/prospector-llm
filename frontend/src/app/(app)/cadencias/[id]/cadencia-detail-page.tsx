@@ -131,7 +131,7 @@ export default function CadenciaDetailPage() {
               </button>
             </DialogTrigger>
 
-            <DialogContent className="max-w-xl">
+            <DialogContent className="w-[min(92vw,56rem)] max-w-4xl max-h-[88vh] overflow-y-auto p-5 sm:p-6">
               <DialogHeader>
                 <DialogTitle>Janela de disparo</DialogTitle>
                 <DialogDescription>

@@ -1,15 +1,14 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
 import Link from "next/link"
+import { useState, useMemo } from "react"
+import { useSearchParams } from "next/navigation"
 import {
   Mail,
   Send,
   Eye,
   MessageSquare,
   AlertCircle,
-  Plus,
-  Sparkles,
   Loader2,
   Pause,
   Play,
@@ -37,18 +36,6 @@ import {
 import type { EmailAnalyticsRange, EmailOverTimeItem } from "@/lib/api/hooks/use-email-analytics"
 import { useCadences } from "@/lib/api/hooks/use-cadences"
 import { useCadenceOverview } from "@/lib/api/hooks/use-cadence-analytics"
-import { useTenant, useUpdateIntegrations } from "@/lib/api/hooks/use-tenant"
-import { AnalyticsPeriodFilter } from "@/components/shared/analytics-period-filter"
-import { LLMConfigForm, type LLMConfig } from "@/components/cadencias/llm-config-form"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { useSession } from "next-auth/react"
 import { createBrowserClient } from "@/lib/api/client"
@@ -57,8 +44,10 @@ import {
   buildDateFilterValue,
   getRangeQueryFromFilter,
   parseInputDate,
+  resolveDateFilterValue,
   type AnalyticsDateFilterValue,
 } from "@/lib/analytics-period"
+import { toast } from "sonner"
 
 const coldEmailAxisDateFormatter = new Intl.DateTimeFormat("pt-BR", {
   day: "2-digit",
@@ -82,7 +71,6 @@ function formatColdEmailDate(value: string, mode: "axis" | "tooltip" = "axis"): 
     ? coldEmailTooltipDateFormatter.format(parsed)
     : coldEmailAxisDateFormatter.format(parsed)
 }
-
 
 function buildColdEmailChartData(
   startDate: string,
@@ -111,13 +99,6 @@ function buildColdEmailChartData(
   return timeline
 }
 
-const DEFAULT_COLD_EMAIL_LLM = {
-  llm_provider: "openai" as const,
-  llm_model: "gpt-5.4-mini",
-  llm_temperature: 0.7,
-  llm_max_tokens: 512,
-}
-
 function KPICard({
   icon: Icon,
   label,
@@ -129,101 +110,88 @@ function KPICard({
   label: string
   value: string | number
   sub?: string | undefined
-  variant?: "default" | "accent" | "danger"
+  variant?: "default" | "accent" | "danger" | "success" | "info" | "warning"
 }) {
-  const valueClass =
-    variant === "accent"
-      ? "text-(--accent)"
-      : variant === "danger"
-        ? "text-red-500"
-        : "text-(--text-primary)"
-
-  return (
-    <div className="rounded-lg border border-(--border-default) bg-(--bg-surface) p-4">
-      <div className="flex items-center gap-2 text-(--text-secondary)">
-        <Icon size={14} aria-hidden="true" />
-        <span className="text-xs">{label}</span>
-      </div>
-      <p className={cn("mt-2 text-2xl font-bold", valueClass)}>{value}</p>
-      {sub && <p className="mt-0.5 text-xs text-(--text-tertiary)">{sub}</p>}
-    </div>
-  )
-}
-
-// ── Modal de configuração de IA ────────────────────────────────────────
-
-function ColdEmailAIModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { data: tenant } = useTenant()
-  const updateIntegrations = useUpdateIntegrations()
-  const integration = tenant?.integration
-
-  const [llmConfig, setLlmConfig] = useState<LLMConfig>(DEFAULT_COLD_EMAIL_LLM)
-
-  // Sincroniza quando os dados do tenant carregam
-  useEffect(() => {
-    if (integration) {
-      setLlmConfig({
-        llm_provider: (integration.cold_email_llm_provider ??
-          DEFAULT_COLD_EMAIL_LLM.llm_provider) as LLMConfig["llm_provider"],
-        llm_model: integration.cold_email_llm_model ?? DEFAULT_COLD_EMAIL_LLM.llm_model,
-        llm_temperature:
-          integration.cold_email_llm_temperature ?? DEFAULT_COLD_EMAIL_LLM.llm_temperature,
-        llm_max_tokens:
-          integration.cold_email_llm_max_tokens ?? DEFAULT_COLD_EMAIL_LLM.llm_max_tokens,
-      })
+  const styles: Record<
+    NonNullable<typeof variant>,
+    {
+      card: string
+      badge: string
+      dot: string
+      value: string
+      icon: string
+      sub: string
     }
-  }, [integration])
-
-  async function handleSave() {
-    try {
-      await updateIntegrations.mutateAsync({
-        cold_email_llm_provider: llmConfig.llm_provider,
-        cold_email_llm_model: llmConfig.llm_model,
-        cold_email_llm_temperature: llmConfig.llm_temperature,
-        cold_email_llm_max_tokens: llmConfig.llm_max_tokens,
-      })
-      toast.success("Configuração de IA para Cold Email salva.")
-      onClose()
-    } catch {
-      toast.error("Erro ao salvar configuração.")
-    }
+  > = {
+    default: {
+      card: "border-(--border-default) bg-(--bg-surface)",
+      badge: "bg-(--bg-overlay) text-(--text-secondary)",
+      dot: "bg-(--text-tertiary)",
+      value: "text-(--text-primary)",
+      icon: "text-(--text-secondary)",
+      sub: "text-(--text-tertiary)",
+    },
+    accent: {
+      card: "border-(--accent-subtle-fg)/15 bg-(--bg-surface)",
+      badge: "bg-(--accent-subtle) text-(--accent-subtle-fg)",
+      dot: "bg-(--accent)",
+      value: "text-(--accent)",
+      icon: "text-(--accent)",
+      sub: "text-(--text-tertiary)",
+    },
+    success: {
+      card: "border-(--success)/15 bg-(--bg-surface)",
+      badge: "bg-(--success-subtle) text-(--success-subtle-fg)",
+      dot: "bg-(--success)",
+      value: "text-(--success)",
+      icon: "text-(--success)",
+      sub: "text-(--text-tertiary)",
+    },
+    info: {
+      card: "border-(--info)/15 bg-(--bg-surface)",
+      badge: "bg-(--info-subtle) text-(--info-subtle-fg)",
+      dot: "bg-(--info)",
+      value: "text-(--info)",
+      icon: "text-(--info)",
+      sub: "text-(--text-tertiary)",
+    },
+    warning: {
+      card: "border-(--warning)/15 bg-(--bg-surface)",
+      badge: "bg-(--warning-subtle) text-(--warning-subtle-fg)",
+      dot: "bg-(--warning)",
+      value: "text-(--warning)",
+      icon: "text-(--warning)",
+      sub: "text-(--text-tertiary)",
+    },
+    danger: {
+      card: "border-(--danger-subtle-fg)/15 bg-(--bg-surface)",
+      badge: "bg-(--danger-subtle) text-(--danger-subtle-fg)",
+      dot: "bg-(--danger-subtle-fg)",
+      value: "text-(--danger-subtle-fg)",
+      icon: "text-(--danger-subtle-fg)",
+      sub: "text-(--text-tertiary)",
+    },
   }
 
+  const tone = styles[variant]
+
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl p-5 sm:p-6">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Sparkles size={16} className="text-(--accent)" />
-            IA — Cold Email
-          </DialogTitle>
-          <DialogDescription className="text-sm leading-6">
-            Modelo padrão usado ao criar novas campanhas de e-mail.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="py-1">
-          <LLMConfigForm value={llmConfig} onChange={setLlmConfig} variant="dialog" />
-        </div>
-        <DialogFooter className="pt-1">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md border border-(--border-default) px-4 py-2 text-sm text-(--text-secondary) hover:bg-(--bg-overlay)"
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={updateIntegrations.isPending}
-            className="flex items-center gap-1.5 rounded-md bg-(--accent) px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
-          >
-            {updateIntegrations.isPending ? <Loader2 size={14} className="animate-spin" /> : null}
-            Salvar configuração
-          </button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <div className={cn("rounded-lg border px-4 py-3 shadow-(--shadow-sm)", tone.card)}>
+      <div className="flex items-start justify-between gap-3">
+        <span
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-semibold",
+            tone.badge,
+          )}
+        >
+          <span className={cn("h-1.5 w-1.5 rounded-full", tone.dot)} />
+          <Icon size={12} aria-hidden="true" className={tone.icon} />
+          {label}
+        </span>
+      </div>
+      <p className={cn("mt-3 text-2xl font-semibold tracking-tight", tone.value)}>{value}</p>
+      {sub ? <p className={cn("mt-1 text-xs", tone.sub)}>{sub}</p> : null}
+    </div>
   )
 }
 
@@ -424,11 +392,21 @@ function ABResultsSection({
 // ── Página principal ──────────────────────────────────────────────────
 
 export default function ColdEmailPage() {
-  const [dateFilter, setDateFilter] = useState<AnalyticsDateFilterValue>(() =>
-    buildDateFilterValue({ id: "last_30_days", label: "30 dias", days: 30 }),
+  const searchParams = useSearchParams()
+  const dateFilter = useMemo<AnalyticsDateFilterValue>(() => {
+    const startDate = searchParams.get("start_date")
+    const endDate = searchParams.get("end_date")
+
+    if (startDate && endDate) {
+      return resolveDateFilterValue({ startDate, endDate })
+    }
+
+    return buildDateFilterValue({ id: "last_30_days", label: "30 dias", days: 30 })
+  }, [searchParams])
+  const analyticsRange = useMemo<EmailAnalyticsRange>(
+    () => getRangeQueryFromFilter(dateFilter),
+    [dateFilter],
   )
-  const [aiModalOpen, setAiModalOpen] = useState(false)
-  const analyticsRange = useMemo<EmailAnalyticsRange>(() => getRangeQueryFromFilter(dateFilter), [dateFilter])
   const {
     data: stats,
     isLoading: loadingStats,
@@ -474,34 +452,7 @@ export default function ColdEmailPage() {
   }))
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold text-(--text-primary)">Cold Email</h1>
-          <p className="text-sm text-(--text-secondary)">Cadências de prospecção por e-mail</p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setAiModalOpen(true)}
-            className="flex items-center gap-1.5 rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-sm font-medium text-(--text-primary) transition-colors hover:bg-(--bg-overlay)"
-          >
-            <Sparkles size={14} aria-hidden="true" />
-            IA
-          </button>
-          <Link
-            href="/cold-email/nova-campanha"
-            className="flex items-center gap-1.5 rounded-md bg-(--accent) px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90"
-          >
-            <Plus size={14} aria-hidden="true" />
-            Nova campanha e-mail
-          </Link>
-        </div>
-      </div>
-
-      <ColdEmailAIModal open={aiModalOpen} onClose={() => setAiModalOpen(false)} />
-
+    <div className="space-y-3">
       {hasColdEmailError ? (
         <div className="flex items-start gap-3 rounded-lg border border-(--warning) bg-(--warning-subtle) px-4 py-3 text-sm text-(--warning-subtle-fg)">
           <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
@@ -513,9 +464,6 @@ export default function ColdEmailPage() {
           </div>
         </div>
       ) : null}
-
-      <AnalyticsPeriodFilter value={dateFilter} onChange={setDateFilter} />
-
       {/* KPIs */}
       {loadingStats ? (
         <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
@@ -525,7 +473,7 @@ export default function ColdEmailPage() {
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
-          <KPICard icon={Send} label="Enviados" value={stats?.sent ?? 0} />
+          <KPICard icon={Send} label="Enviados" value={stats?.sent ?? 0} variant="default" />
           <KPICard
             icon={Eye}
             label="Taxa de abertura"
@@ -538,19 +486,21 @@ export default function ColdEmailPage() {
             label="Taxa de resposta"
             value={`${stats?.reply_rate ?? 0}%`}
             sub={`${stats?.replied ?? 0} respostas`}
+            variant="success"
           />
           <KPICard
             icon={Mail}
             label="Total de respostas"
             value={stats?.replied ?? 0}
             sub="Todas as cadências de email puro"
+            variant="info"
           />
           <KPICard
             icon={AlertCircle}
             label="Bounce rate"
             value={`${stats?.bounce_rate ?? 0}%`}
             sub={`${stats?.bounced ?? 0} bounces`}
-            variant={(stats?.bounce_rate ?? 0) > 2 ? "danger" : "default"}
+            variant="danger"
           />
         </div>
       )}
