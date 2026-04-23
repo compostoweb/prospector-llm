@@ -1,6 +1,5 @@
 "use client"
 
-import Image from "next/image"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import {
   ArrowRight,
