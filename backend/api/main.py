@@ -12,6 +12,7 @@ Responsabilidades:
 
 from __future__ import annotations
 
+import mimetypes
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -304,6 +305,8 @@ app.include_router(sendpulse_webhook.router)
 
 _ASSETS_DIR = Path(__file__).resolve().parents[1] / "assets"
 if _ASSETS_DIR.exists():
+    # Alguns ambientes Linux não registram .webp corretamente e o arquivo é servido como texto.
+    mimetypes.add_type("image/webp", ".webp")
     app.mount("/assets", StaticFiles(directory=str(_ASSETS_DIR)), name="assets")
 
 

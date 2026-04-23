@@ -13,6 +13,7 @@ import {
   Users,
 } from "lucide-react"
 import { env } from "@/env"
+import { CompostoWebBrandLogo } from "@/components/content/inbound/composto-web-brand-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type {
@@ -23,8 +24,6 @@ import type {
 interface Props {
   page: LandingPagePublicData
 }
-
-const BRAND_LOGO_SRC = `${env.NEXT_PUBLIC_API_URL}/assets/branding/compostoweb-logo-primary-transparent.webp`
 
 export default function LandingPublicPage({ page }: Props) {
   const [error, setError] = useState<string | null>(null)
@@ -160,14 +159,7 @@ export default function LandingPublicPage({ page }: Props) {
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10 lg:px-8 lg:py-14">
           {/* Logo + Social proof */}
           <div className="flex flex-col gap-3">
-            <Image
-              src={BRAND_LOGO_SRC}
-              alt="Composto Web"
-              width={208}
-              height={48}
-              unoptimized
-              className="h-auto w-52 object-contain"
-            />
+            <CompostoWebBrandLogo className="w-fit" />
 
             <div className="flex flex-wrap items-center gap-3">
               {page.social_proof_count > 0 && (
@@ -294,14 +286,7 @@ export default function LandingPublicPage({ page }: Props) {
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10 lg:px-8 lg:py-14">
           {/* Logo + Social proof */}
           <div className="flex flex-col gap-3">
-            <Image
-              src={BRAND_LOGO_SRC}
-              alt="Composto Web"
-              width={208}
-              height={48}
-              unoptimized
-              className="h-auto w-52 object-contain"
-            />
+            <CompostoWebBrandLogo className="w-fit" />
             <div className="flex flex-wrap items-center gap-3">
               {page.social_proof_count > 0 && (
                 <div className="inline-flex items-center gap-2.5 rounded-full border border-(--border-default) bg-(--bg-surface) px-3 py-1.5 shadow-sm">
@@ -427,14 +412,7 @@ export default function LandingPublicPage({ page }: Props) {
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10 lg:px-8 lg:py-14">
         {/* Logo + Social proof */}
         <div className="flex flex-col gap-3">
-          <Image
-            src={BRAND_LOGO_SRC}
-            alt="Composto Web"
-            width={208}
-            height={48}
-            unoptimized
-            className="h-auto w-52 object-contain"
-          />
+          <CompostoWebBrandLogo className="w-fit" />
           <div className="flex flex-wrap items-center gap-3">
             {page.social_proof_count > 0 && (
               <div className="inline-flex items-center gap-2.5 rounded-full border border-(--border-default) bg-(--bg-surface) px-3 py-1.5 shadow-sm">

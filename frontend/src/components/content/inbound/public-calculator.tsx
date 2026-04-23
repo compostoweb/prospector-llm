@@ -26,6 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { CompostoWebBrandLogo } from "@/components/content/inbound/composto-web-brand-logo"
 import { env } from "@/env"
 import type {
   CalculatorCalculateInput,
@@ -329,14 +330,7 @@ export default function PublicCalculator({ leadMagnetId }: Props) {
     <div className="min-h-screen bg-(--bg-page) bg-[radial-gradient(circle_at_top_right,color-mix(in_srgb,var(--accent)_14%,transparent),transparent_38%),radial-gradient(circle_at_top_left,color-mix(in_srgb,var(--info)_12%,transparent),transparent_34%),linear-gradient(180deg,var(--bg-page)_0%,var(--bg-surface)_100%)] text-(--text-primary)">
       <div className="mx-auto flex w-full max-w-380 flex-col gap-8 px-6 py-10 lg:px-8 lg:py-14 2xl:max-w-420 2xl:px-10">
         <header className="flex flex-col gap-5">
-          <Image
-            src={`${env.NEXT_PUBLIC_API_URL}/assets/branding/compostoweb-logo-primary-transparent.webp`}
-            alt="Composto Web"
-            width={192}
-            height={44}
-            unoptimized
-            className="h-auto w-48 object-contain"
-          />
+          <CompostoWebBrandLogo className="w-fit" />
           <Badge className="w-fit px-3 py-1 text-[11px] uppercase tracking-[0.18em]">
             Calculadora de ROI
           </Badge>
