@@ -773,12 +773,14 @@ export function useAnalyzeReferenceUrl() {
 export type ImageStyle = "clean" | "with_text" | "infographic"
 export type ImageSubType = "metrics" | "steps" | "comparison"
 export type ImageAspectRatio = "4:5" | "1:1" | "16:9"
+export type ImageVisualDirection = "auto" | "editorial" | "minimal" | "bold" | "organic"
 
 export interface GeneratePostImageRequest {
   post_id: string
   style: ImageStyle
   aspect_ratio?: ImageAspectRatio
   sub_type?: ImageSubType | null
+  visual_direction?: ImageVisualDirection | null
   custom_prompt?: string | null
 }
 

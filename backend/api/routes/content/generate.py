@@ -537,7 +537,7 @@ async def generate_post_image(
     Retorna image_url e o prompt usado (para referência ou regeneração).
     """
     from integrations.s3_client import S3Client
-    from services.content.image_generator import generate_post_image as svc_generate_image
+    from services.content import image_generator as image_generator_service
 
     result = await db.execute(
         select(ContentPost).where(
@@ -557,12 +557,13 @@ async def generate_post_image(
             pass
 
     try:
-        image_bytes, prompt_used = await svc_generate_image(
+        image_bytes, prompt_used = await image_generator_service.generate_post_image(
             post=post,
             style=body.style,
             registry=registry,
             aspect_ratio=body.aspect_ratio,
             sub_type=body.sub_type,
+            visual_direction=body.visual_direction,
             custom_prompt=body.custom_prompt,
         )
     except ValueError as exc:
@@ -603,6 +604,7 @@ async def generate_post_image(
         tenant_id=str(tenant_id),
         style=body.style,
         aspect_ratio=body.aspect_ratio,
+        visual_direction=body.visual_direction,
     )
 
     return GeneratePostImageResponse(image_url=image_url, image_prompt=prompt_used)

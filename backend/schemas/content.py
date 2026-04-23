@@ -437,6 +437,7 @@ class DetectHookResponse(BaseModel):
 ImageStyle = Literal["clean", "with_text", "infographic"]
 ImageSubType = Literal["metrics", "steps", "comparison"]
 ImageAspectRatio = Literal["4:5", "1:1", "16:9"]
+ImageVisualDirection = Literal["auto", "editorial", "minimal", "bold", "organic"]
 
 
 class GeneratePostImageRequest(BaseModel):
@@ -444,6 +445,7 @@ class GeneratePostImageRequest(BaseModel):
     style: ImageStyle
     aspect_ratio: ImageAspectRatio = "4:5"
     sub_type: ImageSubType | None = None
+    visual_direction: ImageVisualDirection = "auto"
     custom_prompt: str | None = Field(default=None, max_length=1000)
 
 

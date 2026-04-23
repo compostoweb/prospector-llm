@@ -37,6 +37,7 @@ import {
   type ImageStyle,
   type ImageSubType,
   type ImageAspectRatio,
+  type ImageVisualDirection,
 } from "@/lib/api/hooks/use-content"
 import {
   Dialog,
@@ -66,7 +67,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { resolvePostImageUrl, resolvePostVideoUrl } from "@/lib/content/post-media"
+import {
+  getPostImageProxyUrl,
+  resolvePostImageUrl,
+  resolvePostVideoUrl,
+  withMediaCacheBuster,
+} from "@/lib/content/post-media"
 
 const DAY_NAMES: Record<number, string> = {
   0: "Domingo",
@@ -137,6 +143,7 @@ export function CreatePostDialog({
   const [imageStyle, setImageStyle] = useState<ImageStyle>("clean")
   const [imageSubType, setImageSubType] = useState<ImageSubType>("metrics")
   const [imageAspect, setImageAspect] = useState<ImageAspectRatio>("4:5")
+  const [imageVisualDirection, setImageVisualDirection] = useState<ImageVisualDirection>("auto")
   const [customPrompt, setCustomPrompt] = useState("")
   const [localImage, setLocalImage] = useState<{ url: string; prompt: string } | null>(null)
   const [localUploadedImage, setLocalUploadedImage] = useState<{
@@ -422,12 +429,23 @@ export function CreatePostDialog({
       style: imageStyle,
       aspect_ratio: imageAspect,
       sub_type: imageStyle === "infographic" ? imageSubType : null,
+      visual_direction: imageVisualDirection,
       custom_prompt: customPrompt || null,
     })
 
+    setDraft({
+      ...ensuredPost,
+      image_url: result.image_url,
+      image_s3_key: "__generated__",
+      image_prompt: result.image_prompt,
+      image_style: imageStyle,
+      image_aspect_ratio: imageAspect,
+      image_filename: null,
+      image_size_bytes: null,
+    })
     setImageDeleted(false)
     setLocalImage({
-      url: resolvePostImageUrl(ensuredPost, { cacheBuster: Date.now() }) ?? "",
+      url: getPostImageProxyUrl(ensuredPost.id, { cacheBuster: Date.now() }),
       prompt: result.image_prompt,
     })
     setLocalUploadedImage(null)
@@ -586,7 +604,10 @@ export function CreatePostDialog({
     Boolean(draftPost?.image_s3_key) ||
     Boolean(draftPost?.video_s3_key)
 
-  function handleDialogInteractOutside(event: { preventDefault: () => void; target: EventTarget | null }) {
+  function handleDialogInteractOutside(event: {
+    preventDefault: () => void
+    target: EventTarget | null
+  }) {
     if (!hasUnsavedChanges) return
     if (isMediaPreviewOpen) {
       event.preventDefault()
@@ -976,7 +997,12 @@ export function CreatePostDialog({
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={localImage?.url ?? localUploadedImage?.url ?? persistedImageUrl ?? undefined}
+                          src={
+                            localImage?.url ??
+                            localUploadedImage?.url ??
+                            persistedImageUrl ??
+                            undefined
+                          }
                           alt="Imagem do post"
                           className="w-full max-h-64 rounded object-contain bg-(--bg-subtle) hover:opacity-90 transition-opacity"
                         />
@@ -1154,6 +1180,34 @@ export function CreatePostDialog({
                           </div>
 
                           <div className="grid gap-1.5">
+                            <Label className="text-xs">Direção visual</Label>
+                            <div className="flex gap-2 flex-wrap">
+                              {(
+                                [
+                                  ["auto", "Auto"],
+                                  ["editorial", "Editorial"],
+                                  ["minimal", "Minimalista"],
+                                  ["bold", "Impactante"],
+                                  ["organic", "Orgânica"],
+                                ] as const
+                              ).map(([value, label]) => (
+                                <button
+                                  key={value}
+                                  type="button"
+                                  onClick={() => setImageVisualDirection(value)}
+                                  className={`rounded px-2.5 py-1 text-xs border transition-colors ${
+                                    imageVisualDirection === value
+                                      ? "border-(--accent) bg-(--accent)/10 text-(--accent)"
+                                      : "border-(--border-subtle) text-(--text-secondary) hover:border-(--accent)/50"
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="grid gap-1.5">
                             <Label className="text-xs text-(--text-secondary)">
                               Instrução adicional{" "}
                               <span className="text-(--text-tertiary)">(opcional)</span>
@@ -1161,7 +1215,7 @@ export function CreatePostDialog({
                             <Input
                               value={customPrompt}
                               onChange={(e) => setCustomPrompt(e.target.value)}
-                              placeholder="Ex: use tons de verde e inclua gráfico de barras"
+                              placeholder="Ex: fundo claro, sem amarelo, mais cara de revista executiva"
                               className="text-xs h-8"
                             />
                           </div>

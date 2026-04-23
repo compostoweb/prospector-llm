@@ -44,6 +44,7 @@ import {
   type ImageStyle,
   type ImageSubType,
   type ImageAspectRatio,
+  type ImageVisualDirection,
 } from "@/lib/api/hooks/use-content"
 import {
   Dialog,
@@ -73,7 +74,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { resolvePostImageUrl, resolvePostVideoUrl } from "@/lib/content/post-media"
+import {
+  getPostImageProxyUrl,
+  resolvePostImageUrl,
+  resolvePostVideoUrl,
+  withMediaCacheBuster,
+} from "@/lib/content/post-media"
 
 const DAY_NAMES: Record<number, string> = {
   0: "Domingo",
@@ -140,6 +146,7 @@ export function EditPostDialog({
   const [imageStyle, setImageStyle] = useState<ImageStyle>("clean")
   const [imageSubType, setImageSubType] = useState<ImageSubType>("metrics")
   const [imageAspect, setImageAspect] = useState<ImageAspectRatio>("4:5")
+  const [imageVisualDirection, setImageVisualDirection] = useState<ImageVisualDirection>("auto")
   const [customPrompt, setCustomPrompt] = useState("")
   const [localImage, setLocalImage] = useState<{ url: string; prompt: string } | null>(null)
   const [localUploadedImage, setLocalUploadedImage] = useState<{
@@ -188,11 +195,12 @@ export function EditPostDialog({
       style: imageStyle,
       aspect_ratio: imageAspect,
       sub_type: imageStyle === "infographic" ? imageSubType : null,
+      visual_direction: imageVisualDirection,
       custom_prompt: customPrompt || null,
     })
     setImageDeleted(false)
     setLocalImage({
-      url: resolvePostImageUrl(post, { cacheBuster: Date.now() }) ?? "",
+      url: getPostImageProxyUrl(post.id, { cacheBuster: Date.now() }),
       prompt: result.image_prompt,
     })
     setLocalUploadedImage(null)
@@ -365,7 +373,10 @@ export function EditPostDialog({
       localUploadedImage !== null ||
       localVideoUrl !== null)
 
-  function handleDialogInteractOutside(event: { preventDefault: () => void; target: EventTarget | null }) {
+  function handleDialogInteractOutside(event: {
+    preventDefault: () => void
+    target: EventTarget | null
+  }) {
     if (!hasUnsavedChanges) return
     if (isMediaPreviewOpen) {
       event.preventDefault()
@@ -653,7 +664,12 @@ export function EditPostDialog({
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={localImage?.url ?? localUploadedImage?.url ?? persistedImageUrl ?? undefined}
+                          src={
+                            localImage?.url ??
+                            localUploadedImage?.url ??
+                            persistedImageUrl ??
+                            undefined
+                          }
                           alt="Imagem do post"
                           className="w-full max-h-64 rounded object-contain bg-(--bg-subtle) hover:opacity-90 transition-opacity"
                         />
@@ -839,6 +855,34 @@ export function EditPostDialog({
                             </div>
                           </div>
 
+                          <div className="grid gap-1.5">
+                            <Label className="text-xs">Direção visual</Label>
+                            <div className="flex gap-2 flex-wrap">
+                              {(
+                                [
+                                  ["auto", "Auto"],
+                                  ["editorial", "Editorial"],
+                                  ["minimal", "Minimalista"],
+                                  ["bold", "Impactante"],
+                                  ["organic", "Orgânica"],
+                                ] as const
+                              ).map(([value, label]) => (
+                                <button
+                                  key={value}
+                                  type="button"
+                                  onClick={() => setImageVisualDirection(value)}
+                                  className={`rounded px-2.5 py-1 text-xs border transition-colors ${
+                                    imageVisualDirection === value
+                                      ? "border-(--accent) bg-(--accent)/10 text-(--accent)"
+                                      : "border-(--border-subtle) text-(--text-secondary) hover:border-(--accent)/50"
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
                           {/* Prompt personalizado (opcional) */}
                           <div className="grid gap-1.5">
                             <Label className="text-xs text-(--text-secondary)">
@@ -848,7 +892,7 @@ export function EditPostDialog({
                             <Input
                               value={customPrompt}
                               onChange={(e) => setCustomPrompt(e.target.value)}
-                              placeholder="Ex: use tons de verde e inclua gráfico de barras"
+                              placeholder="Ex: fundo claro, sem amarelo, mais cara de revista executiva"
                               className="text-xs h-8"
                             />
                           </div>
