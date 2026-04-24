@@ -4,7 +4,6 @@ import { useState, useMemo } from "react"
 import {
   endOfDay,
   format,
-  isAfter,
   isWithinInterval,
   parseISO,
   startOfDay,
@@ -46,7 +45,12 @@ import {
   Bookmark,
   RefreshCw,
 } from "lucide-react"
-import { useContentPosts, useContentSettings, useSyncVoyager, type ContentPost } from "@/lib/api/hooks/use-content"
+import {
+  useContentPosts,
+  useContentSettings,
+  useSyncVoyager,
+  type ContentPost,
+} from "@/lib/api/hooks/use-content"
 import { PillarBadge } from "@/components/content/post-badges"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -87,23 +91,93 @@ interface StatCardProps {
   label: string
   value: string
   sub?: string
-  accent?: boolean
+  tone?: "neutral" | "accent" | "info" | "success" | "warning" | "violet" | "danger"
 }
 
-function StatCard({ icon, label, value, sub, accent }: StatCardProps) {
+function StatCard({ icon, label, value, sub, tone = "neutral" }: StatCardProps) {
+  const styles: Record<
+    NonNullable<StatCardProps["tone"]>,
+    {
+      card: string
+      badge: string
+      dot: string
+      value: string
+      sub: string
+    }
+  > = {
+    neutral: {
+      card: "border-(--border-default) bg-(--bg-surface)",
+      badge: "bg-(--bg-overlay) text-(--text-secondary)",
+      dot: "bg-(--text-tertiary)",
+      value: "text-(--text-primary)",
+      sub: "text-(--text-tertiary)",
+    },
+    accent: {
+      card: "border-(--border-default) bg-(--bg-surface)",
+      badge:
+        "bg-[color:color-mix(in_srgb,var(--accent-subtle)_58%,var(--success-subtle)_42%)] text-[color:color-mix(in_srgb,var(--accent-subtle-fg)_55%,var(--success-subtle-fg)_45%)]",
+      dot: "bg-[color:color-mix(in_srgb,var(--accent)_52%,var(--success)_48%)]",
+      value: "text-[color:color-mix(in_srgb,var(--accent)_38%,var(--success-subtle-fg)_62%)]",
+      sub: "text-(--text-tertiary)",
+    },
+    info: {
+      card: "border-(--info)/15 bg-(--bg-surface)",
+      badge: "bg-(--info-subtle) text-(--info-subtle-fg)",
+      dot: "bg-(--info)",
+      value: "text-(--info)",
+      sub: "text-(--text-tertiary)",
+    },
+    success: {
+      card: "border-(--success)/15 bg-(--bg-surface)",
+      badge: "bg-(--success-subtle) text-(--success-subtle-fg)",
+      dot: "bg-(--success)",
+      value: "text-(--success)",
+      sub: "text-(--text-tertiary)",
+    },
+    warning: {
+      card: "border-(--warning)/15 bg-(--bg-surface)",
+      badge: "bg-(--warning-subtle) text-(--warning-subtle-fg)",
+      dot: "bg-(--warning)",
+      value: "text-(--warning)",
+      sub: "text-(--text-tertiary)",
+    },
+    violet: {
+      card: "border-(--border-default) bg-(--bg-surface)",
+      badge:
+        "bg-[color:color-mix(in_srgb,var(--info-subtle)_62%,var(--danger-subtle)_38%)] text-[color:color-mix(in_srgb,var(--info-subtle-fg)_55%,var(--danger-subtle-fg)_45%)]",
+      dot: "bg-[color:color-mix(in_srgb,var(--info)_55%,var(--danger)_45%)]",
+      value: "text-[color:color-mix(in_srgb,var(--info)_45%,var(--danger-subtle-fg)_55%)]",
+      sub: "text-(--text-tertiary)",
+    },
+    danger: {
+      card: "border-(--danger-subtle-fg)/15 bg-(--bg-surface)",
+      badge: "bg-(--danger-subtle) text-(--danger-subtle-fg)",
+      dot: "bg-(--danger-subtle-fg)",
+      value: "text-(--danger-subtle-fg)",
+      sub: "text-(--text-tertiary)",
+    },
+  }
+
+  const toneStyle = styles[tone]
+
   return (
-    <div
-      className={cn(
-        "rounded-lg border border-(--border-default) bg-(--bg-surface) p-4 flex flex-col gap-2 shadow-sm",
-        accent && "border-(--accent)/30 bg-(--accent)/5",
-      )}
-    >
-      <div className="flex items-center gap-2 text-(--text-tertiary)">
-        {icon}
-        <span className="text-xs font-medium uppercase tracking-wide">{label}</span>
+    <div className={cn("rounded-lg border p-4 shadow-sm", toneStyle.card)}>
+      <div className="flex items-start justify-between gap-3">
+        <span
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-semibold uppercase tracking-wide",
+            toneStyle.badge,
+          )}
+        >
+          <span className={cn("h-1.5 w-1.5 rounded-full", toneStyle.dot)} />
+          {icon}
+          {label}
+        </span>
       </div>
-      <p className="text-2xl font-bold text-(--text-primary) leading-none">{value}</p>
-      {sub && <p className="text-xs text-(--text-tertiary)">{sub}</p>}
+      <p className={cn("mt-3 text-2xl font-semibold leading-none tracking-tight", toneStyle.value)}>
+        {value}
+      </p>
+      {sub ? <p className={cn("mt-2 text-sm leading-5", toneStyle.sub)}>{sub}</p> : null}
     </div>
   )
 }
@@ -164,19 +238,40 @@ function CustomTooltip({
 }
 
 // ── Main component ────────────────────────────────────────────────────
-type PeriodKey = "all" | "today" | "yesterday" | "7d" | "30d" | "60d" | "90d" | "180d" | "365d"
+type PeriodKey =
+  | "all"
+  | "today"
+  | "yesterday"
+  | "7d"
+  | "15d"
+  | "30d"
+  | "60d"
+  | "90d"
+  | "180d"
+  | "365d"
 
 const PERIOD_OPTIONS: { key: PeriodKey; label: string }[] = [
   { key: "all", label: "Todo o período" },
   { key: "today", label: "Hoje" },
   { key: "yesterday", label: "Ontem" },
   { key: "7d", label: "7 dias" },
+  { key: "15d", label: "15 dias" },
   { key: "30d", label: "30 dias" },
   { key: "60d", label: "60 dias" },
   { key: "90d", label: "90 dias" },
   { key: "180d", label: "180 dias" },
   { key: "365d", label: "365 dias" },
 ]
+
+const PERIOD_DAY_MAP: Record<Exclude<PeriodKey, "all" | "today" | "yesterday">, number> = {
+  "7d": 7,
+  "15d": 15,
+  "30d": 30,
+  "60d": 60,
+  "90d": 90,
+  "180d": 180,
+  "365d": 365,
+}
 
 function filterByPeriod(posts: ContentPost[], period: PeriodKey): ContentPost[] {
   if (period === "all") return posts
@@ -204,11 +299,15 @@ function filterByPeriod(posts: ContentPost[], period: PeriodKey): ContentPost[] 
     })
   }
 
-  const days = parseInt(period, 10)
-  const cutoff = subDays(new Date(), days)
-  return posts.filter((p) => {
-    const d = p.published_at ?? p.created_at
-    return isAfter(parseISO(d), cutoff)
+  const days = PERIOD_DAY_MAP[period]
+  const interval = {
+    start: startOfDay(subDays(now, days - 1)),
+    end: endOfDay(now),
+  }
+
+  return posts.filter((post) => {
+    const publishedAt = post.published_at ?? post.created_at
+    return isWithinInterval(parseISO(publishedAt), interval)
   })
 }
 
@@ -392,7 +491,7 @@ export default function ContentDashboardPage() {
                 className={cn(
                   "h-full bg-(--bg-surface) px-3 text-xs font-medium transition-colors",
                   period === opt.key
-                    ? "bg-(--accent) text-white"
+                    ? "bg-(--accent) rounded-sm text-white"
                     : "text-(--text-secondary) hover:bg-(--bg-overlay)",
                 )}
               >
@@ -409,7 +508,8 @@ export default function ContentDashboardPage() {
           onClick={() =>
             syncVoyager.mutate(undefined, {
               onSuccess: () => toast.success("Métricas sincronizadas"),
-              onError: (err) => toast.error(err instanceof Error ? err.message : "Erro ao sincronizar"),
+              onError: (err) =>
+                toast.error(err instanceof Error ? err.message : "Erro ao sincronizar"),
             })
           }
         >
@@ -425,44 +525,57 @@ export default function ContentDashboardPage() {
           label="Total de posts"
           value={String(stats.totalPosts)}
           sub="criados"
+          tone="neutral"
         />
         <StatCard
           icon={<Send className="h-3.5 w-3.5" />}
           label="Publicados"
           value={String(stats.totalPublished)}
           sub={`de ${stats.totalPosts} posts`}
-          accent
+          tone="accent"
         />
         <StatCard
           icon={<CalendarClock className="h-3.5 w-3.5" />}
           label="Agendados"
           value={String(stats.totalScheduled)}
           sub="para publicar"
+          tone="warning"
         />
         <StatCard
           icon={<Eye className="h-3.5 w-3.5" />}
           label="Impressões"
           value={fmt(stats.totalImpressions)}
           sub="total acumulado"
+          tone="info"
         />
         <StatCard
           icon={<Heart className="h-3.5 w-3.5" />}
           label="Likes"
           value={fmt(stats.totalLikes)}
           sub="total acumulado"
+          tone="success"
         />
         <StatCard
           icon={<MessageCircle className="h-3.5 w-3.5" />}
           label="Comentários"
           value={fmt(stats.totalComments)}
           sub="total acumulado"
+          tone="violet"
         />
         <StatCard
           icon={<TrendingUp className="h-3.5 w-3.5" />}
           label="Eng. Rate médio"
           value={fmtPct(stats.avgEngagement)}
           sub="posts publicados"
-          accent={stats.avgEngagement != null && stats.avgEngagement > 3}
+          tone={
+            stats.avgEngagement == null
+              ? "neutral"
+              : stats.avgEngagement > 3
+                ? "success"
+                : stats.avgEngagement >= 1
+                  ? "info"
+                  : "danger"
+          }
         />
       </div>
 
