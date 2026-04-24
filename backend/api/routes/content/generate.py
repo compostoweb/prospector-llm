@@ -495,7 +495,7 @@ async def detect_hook(
         provider=provider,
         model=model,
         temperature=0.1,
-        max_tokens=8,
+        max_tokens=64,
         usage_context=LLMUsageContext(
             tenant_id=str(tenant_id),
             module="content_hub",

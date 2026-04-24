@@ -19,11 +19,11 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-import httpx
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from integrations.s3_client import S3Client
 from models.content_linkedin_account import ContentLinkedInAccount
 from models.content_post import ContentPost
 from models.content_publish_log import ContentPublishLog
@@ -55,14 +55,6 @@ def _maybe_decrypt(value: str) -> str:
 
 
 # ── Helpers internos ──────────────────────────────────────────────────
-
-
-async def _download_url(url: str) -> bytes:
-    """Baixa conteúdo de uma URL pública (ex: MinIO) para bytes."""
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        return response.content
 
 
 async def _load_post_and_account(
@@ -156,36 +148,34 @@ async def publish_now(
             media_category: str = "NONE"
 
             if post.image_url and not post.linkedin_image_urn:
-                try:
-                    image_bytes = await _download_url(post.image_url)
-                    post.linkedin_image_urn = await client.upload_image(image_bytes)
-                    logger.info(
-                        "content.publisher.image_uploaded",
-                        post_id=str(post_id),
-                        urn=post.linkedin_image_urn,
+                if not post.image_s3_key:
+                    raise ValueError(
+                        "Post possui image_url mas image_s3_key está ausente. "
+                        "Não é possível recuperar a imagem para upload."
                     )
-                except Exception as exc:
-                    logger.warning(
-                        "content.publisher.image_upload_failed",
-                        post_id=str(post_id),
-                        error=str(exc),
-                    )
+                image_bytes, _ = S3Client().get_bytes(post.image_s3_key)
+                post.linkedin_image_urn = await client.upload_image(image_bytes)
+                await db.commit()
+                logger.info(
+                    "content.publisher.image_uploaded",
+                    post_id=str(post_id),
+                    urn=post.linkedin_image_urn,
+                )
 
             if post.video_url and not post.linkedin_video_urn:
-                try:
-                    video_bytes = await _download_url(post.video_url)
-                    post.linkedin_video_urn = await client.upload_video(video_bytes)
-                    logger.info(
-                        "content.publisher.video_uploaded",
-                        post_id=str(post_id),
-                        urn=post.linkedin_video_urn,
+                if not post.video_s3_key:
+                    raise ValueError(
+                        "Post possui video_url mas video_s3_key está ausente. "
+                        "Não é possível recuperar o vídeo para upload."
                     )
-                except Exception as exc:
-                    logger.warning(
-                        "content.publisher.video_upload_failed",
-                        post_id=str(post_id),
-                        error=str(exc),
-                    )
+                video_bytes, _ = S3Client().get_bytes(post.video_s3_key)
+                post.linkedin_video_urn = await client.upload_video(video_bytes)
+                await db.commit()
+                logger.info(
+                    "content.publisher.video_uploaded",
+                    post_id=str(post_id),
+                    urn=post.linkedin_video_urn,
+                )
 
             # Prioriza vídeo sobre imagem se ambos existirem
             if post.linkedin_video_urn:

@@ -17,6 +17,7 @@ import {
   X,
   Upload,
   Maximize2,
+  Download,
 } from "lucide-react"
 import {
   getDayOfMonthFromLocalDateTime,
@@ -78,7 +79,6 @@ import {
   getPostImageProxyUrl,
   resolvePostImageUrl,
   resolvePostVideoUrl,
-  withMediaCacheBuster,
 } from "@/lib/content/post-media"
 
 const DAY_NAMES: Record<number, string> = {
@@ -597,11 +597,6 @@ export function EditPostDialog({
                   value={publishDate}
                   onChange={(e) => setPublishDate(e.target.value)}
                 />
-                {hasPastPublishDateSelection && (
-                  <p className="text-xs text-(--warning-subtle-fg)">
-                    A data escolhida já passou. Para agendar, ajuste também o dia, não só a hora.
-                  </p>
-                )}
               </div>
 
               <div className="grid gap-1.5">
@@ -617,6 +612,11 @@ export function EditPostDialog({
                 />
               </div>
             </div>
+            {hasPastPublishDateSelection && (
+              <p className="text-base flex pl-2 text-(--warning-subtle-fg)">
+                A data escolhida já passou. Para agendar, ajuste também o dia, não só a hora.
+              </p>
+            )}
 
             <div className="grid gap-1.5">
               <Label htmlFor="edit-hashtags">Hashtags</Label>
@@ -706,6 +706,42 @@ export function EditPostDialog({
                       )}
 
                       <div className="flex gap-2">
+                        {/* Baixar imagem */}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs gap-1"
+                          onClick={async () => {
+                            const imageUrl =
+                              localImage?.url ?? localUploadedImage?.url ?? persistedImageUrl
+                            if (!imageUrl) return
+
+                            const fileName =
+                              post?.image_filename ?? localUploadedImage?.name ?? "imagem-post.png"
+
+                            try {
+                              const response = await fetch(imageUrl)
+                              if (!response.ok) throw new Error("Falha ao baixar imagem")
+                              const blob = await response.blob()
+                              const blobUrl = URL.createObjectURL(blob)
+                              const a = document.createElement("a")
+                              a.href = blobUrl
+                              a.download = fileName
+                              document.body.appendChild(a)
+                              a.click()
+                              document.body.removeChild(a)
+                              URL.revokeObjectURL(blobUrl)
+                            } catch {
+                              // fallback: abre em nova aba se fetch falhar
+                              window.open(imageUrl, "_blank")
+                            }
+                          }}
+                        >
+                          <Download className="h-3 w-3" />
+                          Baixar
+                        </Button>
+
                         {/* Regenerar — apenas para imagens geradas por IA */}
                         {(localImage || (!localUploadedImage && post?.image_prompt)) && (
                           <Button

@@ -71,7 +71,6 @@ import {
   getPostImageProxyUrl,
   resolvePostImageUrl,
   resolvePostVideoUrl,
-  withMediaCacheBuster,
 } from "@/lib/content/post-media"
 
 const DAY_NAMES: Record<number, string> = {
@@ -134,6 +133,7 @@ export function CreatePostDialog({
   const [freeTheme, setFreeTheme] = useState("")
   const [themeSource, setThemeSource] = useState<"bank" | "free">("bank")
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
+  const [validationMessage, setValidationMessage] = useState<string | null>(null)
 
   const [draftPost, setDraftPost] = useState<ContentPost | null>(null)
   const draftPostIdRef = useRef<string | null>(null)
@@ -178,6 +178,12 @@ export function CreatePostDialog({
   const uploadVideo = useUploadPostVideo()
   const deleteVideo = useDeletePostVideo()
   const { data: availableThemes } = useContentThemes({ used: false })
+
+  useEffect(() => {
+    if (open) return
+    createPost.reset()
+    updatePost.reset()
+  }, [open, createPost, updatePost])
 
   useEffect(() => {
     if (defaultPublishDate) setPublishDate(defaultPublishDate)
@@ -248,6 +254,8 @@ export function CreatePostDialog({
   }
 
   function resetForm() {
+    createPost.reset()
+    updatePost.reset()
     setTitle("")
     setBody("")
     setPillar("authority")
@@ -261,6 +269,8 @@ export function CreatePostDialog({
     setSelectedThemeId(null)
     setFreeTheme("")
     setThemeSource("bank")
+    setValidationMessage(null)
+    setShowCloseConfirm(false)
     setDraft(null)
 
     setImageOpen(false)
@@ -329,7 +339,9 @@ export function CreatePostDialog({
     e.preventDefault()
 
     if (publishDate && !canAutoScheduleAtSelectedTime) {
-      alert("A data de publicação está no passado. Ajuste também o dia para agendar.")
+      setValidationMessage(
+        "A data de publicação está no passado. Ajuste também o dia para agendar.",
+      )
       return
     }
 
@@ -914,44 +926,46 @@ export function CreatePostDialog({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5">
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="publish_date">Data de publicação</Label>
-                  {publishDate && (
-                    <span
-                      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-semibold leading-none ${DAY_COLORS[new Date(publishDate).getDay()]}`}
-                    >
-                      {DAY_NAMES[new Date(publishDate).getDay()]}
-                    </span>
-                  )}
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-1.5">
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="publish_date">Data de publicação</Label>
+                    {publishDate && (
+                      <span
+                        className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-semibold leading-none ${DAY_COLORS[new Date(publishDate).getDay()]}`}
+                      >
+                        {DAY_NAMES[new Date(publishDate).getDay()]}
+                      </span>
+                    )}
+                  </div>
+                  <Input
+                    id="publish_date"
+                    type="datetime-local"
+                    value={publishDate}
+                    onChange={(e) => setPublishDate(e.target.value)}
+                  />
                 </div>
-                <Input
-                  id="publish_date"
-                  type="datetime-local"
-                  value={publishDate}
-                  onChange={(e) => setPublishDate(e.target.value)}
-                />
-                {hasPastPublishDateSelection && (
-                  <p className="text-xs text-(--warning-subtle-fg)">
-                    A data escolhida já passou. Para agendar, ajuste também o dia, não só a hora.
-                  </p>
-                )}
-              </div>
 
-              <div className="grid gap-1.5">
-                <Label htmlFor="week_number">Semana do mês</Label>
-                <Input
-                  id="week_number"
-                  type="number"
-                  min={1}
-                  max={54}
-                  value={weekNumber}
-                  onChange={(e) => setWeekNumber(e.target.value)}
-                  placeholder="1–54"
-                />
+                <div className="grid gap-1.5">
+                  <Label htmlFor="week_number">Semana do mês</Label>
+                  <Input
+                    id="week_number"
+                    type="number"
+                    min={1}
+                    max={54}
+                    value={weekNumber}
+                    onChange={(e) => setWeekNumber(e.target.value)}
+                    placeholder="1–54"
+                  />
+                </div>
               </div>
-            </div>
+              {hasPastPublishDateSelection && (
+                <p className="pl-2 text-base text-(--warning-subtle-fg)">
+                  A data escolhida já passou. Para agendar, ajuste também o dia, não só a hora.
+                </p>
+              )}
+            </>
 
             <div className="grid gap-1.5">
               <Label htmlFor="hashtags">Hashtags</Label>
@@ -1436,6 +1450,23 @@ export function CreatePostDialog({
             >
               Fechar sem salvar
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={validationMessage !== null}
+        onOpenChange={(open) => {
+          if (!open) setValidationMessage(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Data de publicação inválida</AlertDialogTitle>
+            <AlertDialogDescription>{validationMessage}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setValidationMessage(null)}>OK</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
