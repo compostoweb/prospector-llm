@@ -39,7 +39,11 @@ export function CompostoWebBrandLogo({ className }: CompostoWebBrandLogoProps) {
   const [useFallback, setUseFallback] = useState(false)
 
   if (useFallback) {
-    return className ? <CompostoWebBrandWordmark className={className} /> : <CompostoWebBrandWordmark />
+    return className ? (
+      <CompostoWebBrandWordmark className={className} />
+    ) : (
+      <CompostoWebBrandWordmark />
+    )
   }
 
   return (
