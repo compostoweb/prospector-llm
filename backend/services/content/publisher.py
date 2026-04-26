@@ -16,6 +16,7 @@ por endpoints HTTP de publicacao imediata.
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import UTC, datetime
 
@@ -30,6 +31,11 @@ from models.content_publish_log import ContentPublishLog
 from services.content.linkedin_client import LinkedInClient, LinkedInClientError
 
 logger = structlog.get_logger()
+_HASHTAG_RE = re.compile(r"#[\w-]+", re.UNICODE)
+_TRAILING_HASHTAG_BLOCK_RE = re.compile(
+    r"\s+(?:#[\w-]+(?:\s+#[\w-]+)*)\s*$",
+    re.UNICODE,
+)
 
 
 # ── Decriptacao de token ──────────────────────────────────────────────
@@ -113,6 +119,29 @@ def _write_publish_log(
     return log
 
 
+def _normalize_hashtags(hashtags: str | None) -> str:
+    """Normaliza hashtags para uma linha unica separada por espacos."""
+    if not hashtags:
+        return ""
+
+    return " ".join(dict.fromkeys(_HASHTAG_RE.findall(hashtags)))
+
+
+def _compose_linkedin_post_text(body: str, hashtags: str | None) -> str:
+    """Monta o texto final enviado ao LinkedIn com hashtags no fim."""
+    normalized_body = body.strip()
+    normalized_hashtags = _normalize_hashtags(hashtags)
+
+    if not normalized_hashtags:
+        return normalized_body
+
+    body_without_trailing_hashtags = _TRAILING_HASHTAG_BLOCK_RE.sub("", normalized_body).strip()
+    if not body_without_trailing_hashtags:
+        return normalized_hashtags
+
+    return f"{body_without_trailing_hashtags}\n\n{normalized_hashtags}"
+
+
 # ── Funcoes publicas ──────────────────────────────────────────────────
 
 
@@ -186,7 +215,7 @@ async def publish_now(
                 media_category = "IMAGE"
 
             li_response = await client.create_post(
-                post.body,
+                _compose_linkedin_post_text(post.body, post.hashtags),
                 media_urn=media_urn,
                 media_category=media_category,
             )

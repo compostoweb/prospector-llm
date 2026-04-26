@@ -72,6 +72,7 @@ import {
   resolvePostImageUrl,
   resolvePostVideoUrl,
 } from "@/lib/content/post-media"
+import { buildGeneratedTitle, extractGeneratedPostParts } from "@/lib/content/generated-post"
 
 const DAY_NAMES: Record<number, string> = {
   0: "Domingo",
@@ -398,16 +399,16 @@ export function CreatePostDialog({
 
     const variation = result.variations[0]
     if (variation) {
-      setBody(variation.text)
+      const generatedParts = extractGeneratedPostParts(variation.text)
+      setBody(generatedParts.body || variation.text)
+      setHashtags(generatedParts.hashtags)
       if (variation.hook_type_used && variation.hook_type_used !== "auto") {
         setHookType(variation.hook_type_used as HookType)
       }
       if (selectedTheme) {
         setPillar(selectedTheme.pillar)
       }
-      if (!title.trim()) {
-        setTitle(themeText.slice(0, 80))
-      }
+      setTitle(buildGeneratedTitle(generatedParts.body || variation.text, themeText))
     }
 
     setGenerateOpen(false)
@@ -416,7 +417,13 @@ export function CreatePostDialog({
   async function handleImprove() {
     if (!instruction.trim()) return
     const result = await improvePost.mutateAsync({ body, instruction })
-    setBody(result.text)
+    const improvedParts = extractGeneratedPostParts(result.text)
+    const improvedBody = improvedParts.body || result.text
+    setBody(improvedBody)
+    if (improvedParts.hashtags) {
+      setHashtags(improvedParts.hashtags)
+    }
+    setTitle(buildGeneratedTitle(improvedBody, title))
     setImproveOpen(false)
     setInstruction("")
   }
@@ -620,6 +627,11 @@ export function CreatePostDialog({
     preventDefault: () => void
     target: EventTarget | null
   }) {
+    if (validationMessage || showCloseConfirm) {
+      event.preventDefault()
+      return
+    }
+
     if (!hasUnsavedChanges) return
     if (isMediaPreviewOpen) {
       event.preventDefault()
@@ -627,7 +639,10 @@ export function CreatePostDialog({
     }
 
     const target = event.target
-    if (target instanceof HTMLElement && target.closest('[role="dialog"]')) {
+    if (
+      target instanceof HTMLElement &&
+      (target.closest('[role="dialog"]') || target.closest('[role="alertdialog"]'))
+    ) {
       event.preventDefault()
       return
     }
@@ -654,6 +669,10 @@ export function CreatePostDialog({
           className="max-w-2xl max-h-[90vh] overflow-y-auto"
           onInteractOutside={handleDialogInteractOutside}
           onEscapeKeyDown={(event) => {
+            if (validationMessage || showCloseConfirm) {
+              event.preventDefault()
+              return
+            }
             if (!hasUnsavedChanges) return
             event.preventDefault()
             setShowCloseConfirm(true)
@@ -1143,6 +1162,12 @@ export function CreatePostDialog({
                                 ),
                               )}
                             </div>
+                            {imageStyle === "with_text" && (
+                              <p className="text-[11px] text-(--text-tertiary)">
+                                Referência deste modo: capa editorial limpa, texto como foco
+                                principal, fundo azul escuro #051932 e poucos elementos de apoio.
+                              </p>
+                            )}
                           </div>
 
                           {imageStyle === "infographic" && (
@@ -1229,7 +1254,11 @@ export function CreatePostDialog({
                             <Input
                               value={customPrompt}
                               onChange={(e) => setCustomPrompt(e.target.value)}
-                              placeholder="Ex: fundo claro, sem amarelo, mais cara de revista executiva"
+                              placeholder={
+                                imageStyle === "with_text"
+                                  ? "Ex: fundo #051932, tipografia branca de alto contraste, uma faixa de destaque, sem elementos extras"
+                                  : "Ex: fundo claro, sem amarelo, mais cara de revista executiva"
+                              }
                               className="text-xs h-8"
                             />
                           </div>

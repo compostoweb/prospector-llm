@@ -207,12 +207,16 @@ async def approve_post(
     db: AsyncSession = Depends(get_session_flexible),
 ) -> ContentPostResponse:
     post = await _get_post_or_404(post_id, tenant_id, db)
-    if post.status != "draft":
+    if post.status not in ("draft", "failed"):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Apenas posts em 'draft' podem ser aprovados. Status atual: '{post.status}'.",
+            detail=(
+                f"Apenas posts em 'draft' ou 'failed' podem ser aprovados. "
+                f"Status atual: '{post.status}'."
+            ),
         )
     post.status = "approved"
+    post.error_message = None
     await db.commit()
     await db.refresh(post)
     logger.info("content.post_approved", post_id=str(post_id), tenant_id=str(tenant_id))

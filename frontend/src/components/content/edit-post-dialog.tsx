@@ -80,6 +80,7 @@ import {
   resolvePostImageUrl,
   resolvePostVideoUrl,
 } from "@/lib/content/post-media"
+import { buildGeneratedTitle, extractGeneratedPostParts } from "@/lib/content/generated-post"
 
 const DAY_NAMES: Record<number, string> = {
   0: "Domingo",
@@ -340,7 +341,13 @@ export function EditPostDialog({
   async function handleImprove() {
     if (!instruction.trim()) return
     const result = await improvePost.mutateAsync({ body, instruction })
-    setBody(result.text)
+    const improvedParts = extractGeneratedPostParts(result.text)
+    const improvedBody = improvedParts.body || result.text
+    setBody(improvedBody)
+    if (improvedParts.hashtags) {
+      setHashtags(improvedParts.hashtags)
+    }
+    setTitle(buildGeneratedTitle(improvedBody, title))
     setImproveOpen(false)
     setInstruction("")
   }
@@ -841,6 +848,12 @@ export function EditPostDialog({
                                 </button>
                               ))}
                             </div>
+                            {imageStyle === "with_text" && (
+                              <p className="text-[11px] text-(--text-tertiary)">
+                                Referência deste modo: capa editorial limpa, texto como foco
+                                principal, fundo azul escuro #051932 e poucos elementos de apoio.
+                              </p>
+                            )}
                           </div>
 
                           {/* Sub-tipo (apenas para infográfico) */}
@@ -928,7 +941,11 @@ export function EditPostDialog({
                             <Input
                               value={customPrompt}
                               onChange={(e) => setCustomPrompt(e.target.value)}
-                              placeholder="Ex: fundo claro, sem amarelo, mais cara de revista executiva"
+                              placeholder={
+                                imageStyle === "with_text"
+                                  ? "Ex: fundo #051932, tipografia branca de alto contraste, uma faixa de destaque, sem elementos extras"
+                                  : "Ex: fundo claro, sem amarelo, mais cara de revista executiva"
+                              }
                               className="text-xs h-8"
                             />
                           </div>

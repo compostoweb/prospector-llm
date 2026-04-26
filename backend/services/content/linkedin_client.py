@@ -15,6 +15,7 @@ Uso:
 from __future__ import annotations
 
 import asyncio
+import json
 
 import httpx
 import structlog
@@ -124,6 +125,7 @@ class LinkedInClient:
             "registerUploadRequest": {
                 "owner": self._person_urn,
                 "recipes": ["urn:li:digitalmediaRecipe:feedshare-image"],
+                "supportedUploadMechanism": ["SYNCHRONOUS_UPLOAD"],
                 "serviceRelationships": [
                     {
                         "relationshipType": "OWNER",
@@ -149,10 +151,26 @@ class LinkedInClient:
             put_response = await raw_client.put(
                 upload_url,
                 content=image_bytes,
-                headers={"Content-Type": "application/octet-stream"},
+                headers={
+                    "Authorization": self._client.headers["Authorization"],
+                    "Content-Type": "application/octet-stream",
+                },
             )
         if put_response.status_code not in (200, 201):
             raise LinkedInClientError(put_response.status_code, put_response.text)
+
+        try:
+            await self._wait_for_image_asset_available(asset_urn)
+        except LinkedInClientError as exc:
+            if self._should_ignore_image_asset_poll_error(exc):
+                logger.warning(
+                    "linkedin.image_asset_status_check_skipped",
+                    asset_urn=asset_urn,
+                    status_code=exc.status_code,
+                    error=exc.detail,
+                )
+            else:
+                raise
 
         logger.info("linkedin.image_uploaded", asset_urn=asset_urn)
         return asset_urn
@@ -279,6 +297,55 @@ class LinkedInClient:
         response = await self._client.get(f"/ugcPosts/{encoded_urn}")
         self._raise_for_status(response)
         return response.json()
+
+    async def _wait_for_image_asset_available(self, asset_urn: str) -> None:
+        asset_id = asset_urn.rsplit(":", 1)[-1]
+
+        async with httpx.AsyncClient(
+            base_url=_LINKEDIN_REST_BASE,
+            headers={
+                "Authorization": self._client.headers["Authorization"],
+                "Linkedin-Version": _LINKEDIN_VERSION,
+                "X-Restli-Protocol-Version": "2.0.0",
+            },
+            timeout=30.0,
+        ) as rest_client:
+            for _ in range(12):
+                response = await rest_client.get(f"/assets/{asset_id}")
+                self._raise_for_status(response)
+                payload = response.json()
+                recipes = payload.get("recipes", [])
+                recipe_statuses = {
+                    recipe.get("status") for recipe in recipes if recipe.get("status")
+                }
+                asset_status = payload.get("status")
+
+                if asset_status == "ALLOWED" and (
+                    not recipe_statuses or "AVAILABLE" in recipe_statuses
+                ):
+                    return
+                if "CLIENT_ERROR" in recipe_statuses or "SERVER_ERROR" in recipe_statuses:
+                    raise LinkedInClientError(422, f"Image asset processing failed: {payload}")
+
+                await asyncio.sleep(1)
+
+        raise LinkedInClientError(
+            504, f"Timed out waiting for image asset availability: {asset_urn}"
+        )
+
+    @staticmethod
+    def _should_ignore_image_asset_poll_error(exc: LinkedInClientError) -> bool:
+        if exc.status_code != 403:
+            return False
+
+        try:
+            payload = json.loads(exc.detail)
+        except json.JSONDecodeError:
+            return False
+
+        return payload.get("code") == "ACCESS_DENIED" and "partnerApiAssets.GET" in payload.get(
+            "message", ""
+        )
 
     # ── OAuth helpers (sem instancia autenticada) ─────────────────────
 

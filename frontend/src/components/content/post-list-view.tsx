@@ -145,7 +145,7 @@ export function PostListView({ posts, sortBy, onSortChange }: PostListViewProps)
 
   async function bulkApprove() {
     const ids = sortedPosts
-      .filter((p) => selectedIds.has(p.id) && p.status === "draft")
+      .filter((p) => selectedIds.has(p.id) && (p.status === "draft" || p.status === "failed"))
       .map((p) => p.id)
     await Promise.all(ids.map((id) => approveMut.mutateAsync(id)))
     setSelectedIds(new Set())
@@ -174,7 +174,9 @@ export function PostListView({ posts, sortBy, onSortChange }: PostListViewProps)
     setShowDeleteConfirm(false)
   }
 
-  const canApprove = sortedPosts.some((p) => selectedIds.has(p.id) && p.status === "draft")
+  const canApprove = sortedPosts.some(
+    (p) => selectedIds.has(p.id) && (p.status === "draft" || p.status === "failed"),
+  )
   const canSchedule = sortedPosts.some(
     (p) => selectedIds.has(p.id) && p.status === "approved" && !!p.publish_date,
   )
@@ -560,7 +562,7 @@ const STATUS_TRANSITIONS: Record<
     { label: "Publicar agora", icon: <Send className="h-3.5 w-3.5 mr-2" />, action: "publish" },
   ],
   published: [],
-  failed: [],
+  failed: [{ label: "Reaprovar", icon: <Check className="h-3.5 w-3.5 mr-2" />, action: "approve" }],
 }
 
 function PostRow({
@@ -750,7 +752,7 @@ function PostRow({
             <TooltipContent side="bottom">Editar</TooltipContent>
           </Tooltip>
 
-          {post.status === "draft" && (
+          {(post.status === "draft" || post.status === "failed") && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -762,7 +764,9 @@ function PostRow({
                   <Check className="h-3.5 w-3.5" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="bottom">Aprovar</TooltipContent>
+              <TooltipContent side="bottom">
+                {post.status === "failed" ? "Reaprovar" : "Aprovar"}
+              </TooltipContent>
             </Tooltip>
           )}
 
