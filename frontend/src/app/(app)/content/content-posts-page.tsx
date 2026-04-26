@@ -170,7 +170,7 @@ export default function ContentPostsPage() {
           <Button
             variant="outline"
             size="sm"
-            className="h-8 text-xs gap-1.5"
+            className="h-8 text-xs gap-1.5 hover:bg-(--accent)/85 hover:text-white"
             disabled={syncVoyager.isPending}
             onClick={() =>
               syncVoyager.mutate(undefined, {
@@ -183,7 +183,12 @@ export default function ContentPostsPage() {
             <RefreshCw className={`h-3.5 w-3.5 ${syncVoyager.isPending ? "animate-spin" : ""}`} />
             {syncVoyager.isPending ? "Sincronizando…" : "Sincronizar métricas"}
           </Button>
-          <Button asChild variant="outline" size="sm" className="h-8 text-xs gap-1.5">
+          <Button
+            asChild
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs gap-1.5 hover:bg-(--accent)/85 hover:text-white"
+          >
             <Link href="/content/gerar">
               <Sparkles className="h-3.5 w-3.5" />
               Gerar com IA
@@ -197,7 +202,7 @@ export default function ContentPostsPage() {
             <Button
               variant="outline"
               size="sm"
-              className="h-8 text-xs gap-1.5"
+              className="h-8 text-xs gap-1.5 hover:bg-(--accent)/85 hover:text-white"
               onClick={() => setNotionOpen(true)}
             >
               <NotionLogo className="h-3.5 w-3.5" />

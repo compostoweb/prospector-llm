@@ -66,6 +66,33 @@ interface PostListViewProps {
   onSortChange: (key: SortKey) => void
 }
 
+function HoverTooltip({
+  content,
+  children,
+}: {
+  content: React.ReactNode
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <Tooltip open={open}>
+      <TooltipTrigger asChild>
+        <span
+          className="inline-flex"
+          onMouseEnter={() => setOpen(true)}
+          onMouseLeave={() => setOpen(false)}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
+        >
+          {children}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{content}</TooltipContent>
+    </Tooltip>
+  )
+}
+
 function sortPosts(posts: ContentPost[], sortBy: SortKey, sortDir: SortDir): ContentPost[] {
   const sorted = [...posts]
   const dir = sortDir === "asc" ? 1 : -1
@@ -724,15 +751,19 @@ function PostRow({
       {/* LinkedIn link */}
       <div className="flex justify-center">
         {linkedInUrl ? (
-          <a
-            href={linkedInUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-(--text-tertiary) hover:text-(--accent) transition-colors"
-            title="Abrir no LinkedIn"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-          </a>
+          <TooltipProvider delayDuration={200}>
+            <HoverTooltip content="Abrir no LinkedIn">
+              <a
+                href={linkedInUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-(--text-tertiary) hover:text-(--accent) transition-colors"
+                aria-label="Abrir publicação no LinkedIn"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </HoverTooltip>
+          </TooltipProvider>
         ) : (
           <span className="text-(--text-tertiary) opacity-30">
             <ExternalLink className="h-3.5 w-3.5" />
@@ -743,109 +774,91 @@ function PostRow({
       {/* Actions — visible icon buttons */}
       <TooltipProvider delayDuration={200}>
         <div className="flex items-center gap-0.5">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit}>
-                <Pencil className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Editar</TooltipContent>
-          </Tooltip>
+          <HoverTooltip content="Editar post">
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit}>
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          </HoverTooltip>
 
           {(post.status === "draft" || post.status === "failed") && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-(--success-subtle-fg)"
-                  onClick={() => approvePost.mutate(post.id)}
-                >
-                  <Check className="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                {post.status === "failed" ? "Reaprovar" : "Aprovar"}
-              </TooltipContent>
-            </Tooltip>
+            <HoverTooltip content={post.status === "failed" ? "Reaprovar post" : "Aprovar post"}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-(--success-subtle-fg)"
+                onClick={() => approvePost.mutate(post.id)}
+              >
+                <Check className="h-3.5 w-3.5" />
+              </Button>
+            </HoverTooltip>
           )}
 
           {post.status === "approved" && (
             <>
-              <Tooltip>
-                <TooltipTrigger asChild>
+              <HoverTooltip content={canSchedulePost ? "Agendar post" : "Agendamento indisponível"}>
+                {canSchedulePost ? (
                   <Button
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7"
                     onClick={() => schedulePost.mutate(post.id)}
-                    disabled={!canSchedulePost}
                   >
                     <Clock className="h-3.5 w-3.5" />
                   </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Agendar</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={() => publishNowPost.mutate(post.id)}
-                  >
-                    <Send className="h-3.5 w-3.5" />
+                ) : (
+                  <Button variant="ghost" size="icon" className="h-7 w-7" disabled>
+                    <Clock className="h-3.5 w-3.5" />
                   </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Publicar agora</TooltipContent>
-              </Tooltip>
+                )}
+              </HoverTooltip>
+              <HoverTooltip content="Publicar agora">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => publishNowPost.mutate(post.id)}
+                >
+                  <Send className="h-3.5 w-3.5" />
+                </Button>
+              </HoverTooltip>
             </>
           )}
 
           {post.status === "scheduled" && (
             <>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={() => cancelSchedulePost.mutate(post.id)}
-                  >
-                    <XCircle className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Cancelar agendamento</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={() => publishNowPost.mutate(post.id)}
-                  >
-                    <Send className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Publicar agora</TooltipContent>
-              </Tooltip>
+              <HoverTooltip content="Cancelar agendamento">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => cancelSchedulePost.mutate(post.id)}
+                >
+                  <XCircle className="h-3.5 w-3.5" />
+                </Button>
+              </HoverTooltip>
+              <HoverTooltip content="Publicar agora">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => publishNowPost.mutate(post.id)}
+                >
+                  <Send className="h-3.5 w-3.5" />
+                </Button>
+              </HoverTooltip>
             </>
           )}
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-red-500 hover:text-red-600"
-                onClick={() => deletePostMut.mutate(post.id)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Excluir</TooltipContent>
-          </Tooltip>
+          <HoverTooltip content="Excluir post">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-red-500 hover:text-red-600"
+              onClick={() => deletePostMut.mutate(post.id)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </HoverTooltip>
         </div>
       </TooltipProvider>
     </div>

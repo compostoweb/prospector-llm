@@ -16,8 +16,14 @@ const TooltipContent = React.forwardRef<
     <TooltipPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
+      style={{
+        boxShadow: "var(--tooltip-shadow)",
+        background:
+          "linear-gradient(180deg, var(--tooltip-bg) 0%, var(--tooltip-bg-secondary) 100%)",
+      }}
       className={cn(
-        "z-50 max-w-56 overflow-hidden rounded-xl border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-xs font-medium text-(--text-primary) shadow-(--shadow-lg) backdrop-blur-sm",
+        "z-50 max-w-72 overflow-hidden rounded-[14px] border px-3 py-2 text-sm leading-snug font-medium tracking-[-0.01em] backdrop-blur-md",
+        "border-(--tooltip-border) text-(--tooltip-text) ring-1 ring-white/55",
         "origin-[--radix-tooltip-content-transform-origin] duration-150",
         "data-[state=open]:animate-in data-[state=closed]:animate-out",
         "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0",
@@ -27,7 +33,10 @@ const TooltipContent = React.forwardRef<
         className,
       )}
       {...props}
-    />
+    >
+      <div>{props.children}</div>
+      <TooltipPrimitive.Arrow className="fill-(--tooltip-bg)" width={12} height={6} />
+    </TooltipPrimitive.Content>
   </TooltipPrimitive.Portal>
 ))
 TooltipContent.displayName = TooltipPrimitive.Content.displayName

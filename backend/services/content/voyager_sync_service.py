@@ -35,6 +35,7 @@ from models.content_post import ContentPost
 from models.content_publish_log import ContentPublishLog
 from models.content_theme import ContentTheme
 from models.linkedin_account import LinkedInAccount
+from services.content.post_text import compose_linkedin_post_text
 
 logger = structlog.get_logger()
 
@@ -631,7 +632,8 @@ def _post_matches_body_and_time(
     candidate_published_at = _coerce_datetime(candidate.published_at)
     if candidate_published_at is None:
         return False
-    if _normalize_post_body(candidate.body) != normalized_body:
+    published_text = compose_linkedin_post_text(candidate.body, candidate.hashtags)
+    if _normalize_post_body(published_text) != normalized_body:
         return False
     return abs(candidate_published_at - published_at) <= _POST_RECONCILIATION_WINDOW
 

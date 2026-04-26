@@ -535,6 +535,90 @@ async def test_sync_voyager_reconciles_content_hub_post_when_unipile_returns_act
     assert posts[0].comments == 1
 
 
+async def test_sync_voyager_reconciles_content_hub_post_when_unipile_text_includes_hashtags(
+    db,
+    tenant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    account = LinkedInAccount(
+        tenant_id=tenant.id,
+        display_name="Conta principal",
+        linkedin_username="adrianovaladao",
+        provider_type="unipile",
+        unipile_account_id="acc-reconcile-hashtags",
+        is_active=True,
+    )
+    db.add(account)
+
+    existing_post = ContentPost(
+        tenant_id=tenant.id,
+        title="Tecnologia não é o fim. É o meio.",
+        body=(
+            "Quando essa resposta fica clara, a tecnologia deixa de ser aposta e vira alavanca.\n\n"
+            "É aí que o negócio ganha velocidade de verdade.\n\n"
+            "Na sua empresa, a discussão ainda começa pela ferramenta ou pelo processo?"
+        ),
+        pillar="authority",
+        status="published",
+        linkedin_post_urn="urn:li:share:7450905912996786177",
+        published_at=datetime.fromisoformat("2026-04-26T14:00:01+00:00"),
+        hashtags="#gestao #processos #tecnologia #negocios #lideranca",
+        impressions=0,
+        likes=0,
+        comments=0,
+        shares=0,
+        saves=0,
+    )
+    db.add(existing_post)
+    await db.flush()
+
+    fake_client = _FakeUnipileClient(
+        own_profile={
+            "provider_id": "ACoAAA67iMoBbojHonHEtRD-byA0CEuERMcFRCQ",
+            "public_identifier": "adrianovaladao",
+        },
+        posts_by_identifier={
+            "ACoAAA67iMoBbojHonHEtRD-byA0CEuERMcFRCQ": [
+                {
+                    "id": "unipile-post-activity-hashtag",
+                    "social_id": "urn:li:activity:7450905913617522688",
+                    "text": (
+                        "Quando essa resposta fica clara, a tecnologia deixa de ser aposta e vira alavanca.\n\n"
+                        "É aí que o negócio ganha velocidade de verdade.\n\n"
+                        "Na sua empresa, a discussão ainda começa pela ferramenta ou pelo processo?\n\n"
+                        "#gestao #processos #tecnologia #negocios #lideranca"
+                    ),
+                    "impressions_counter": 11,
+                    "reaction_counter": 2,
+                    "comment_counter": 1,
+                    "repost_counter": 0,
+                    "save_counter": 0,
+                    "parsed_datetime": "2026-04-26T14:00:00.944000+00:00",
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(voyager_sync_service, "UnipileClient", lambda: fake_client)
+
+    result = await voyager_sync_service.sync_voyager_for_tenant(str(tenant.id), db)
+
+    assert result.success is True
+    assert result.posts_created == 0
+    assert result.posts_updated == 1
+
+    posts = (
+        (await db.execute(select(ContentPost).where(ContentPost.tenant_id == tenant.id)))
+        .scalars()
+        .all()
+    )
+    assert len(posts) == 1
+    assert posts[0].id == existing_post.id
+    assert posts[0].title == "Tecnologia não é o fim. É o meio."
+    assert posts[0].impressions == 11
+    assert posts[0].likes == 2
+    assert posts[0].comments == 1
+
+
 async def test_sync_voyager_preserves_content_hub_post_when_legacy_duplicate_already_exists(
     db,
     tenant,
