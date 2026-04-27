@@ -46,7 +46,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { resolvePostImageUrl } from "@/lib/content/post-media"
+import { resolveGalleryImageUrl, resolvePostImageUrl } from "@/lib/content/post-media"
 import {
   type GalleryImage,
   ImageAspectRatio,
@@ -64,9 +64,19 @@ const GALLERY_GRID_CLASS =
   "grid grid-cols-[repeat(auto-fit,minmax(168px,220px))] justify-start gap-4"
 
 function getImageSrc(image: GalleryImage): string {
+  if (image.linked_post_id) {
+    return (
+      resolvePostImageUrl({
+        id: image.linked_post_id,
+        image_url: image.image_url,
+        image_s3_key: image.image_s3_key,
+      }) ?? ""
+    )
+  }
+
   return (
-    resolvePostImageUrl({
-      id: image.post_id,
+    resolveGalleryImageUrl({
+      id: image.id,
       image_url: image.image_url,
       image_s3_key: image.image_s3_key,
     }) ?? ""
@@ -127,12 +137,10 @@ export default function GaleriaPage() {
   const confirmDeleteImage = useCallback(() => {
     if (!imagePendingDelete) return
 
-    deleteMutation.mutate(imagePendingDelete.post_id, {
+    deleteMutation.mutate(imagePendingDelete.id, {
       onSuccess: () => {
         toast.success("Imagem excluída")
-        setLightboxImage((current) =>
-          current?.post_id === imagePendingDelete.post_id ? null : current,
-        )
+        setLightboxImage((current) => (current?.id === imagePendingDelete.id ? null : current))
         setDownloadDialogOpen(false)
       },
       onError: (err) => toast.error(err instanceof Error ? err.message : "Erro ao excluir"),
@@ -400,7 +408,7 @@ export default function GaleriaPage() {
           <div className={GALLERY_GRID_CLASS}>
             {data.images.map((image) => (
               <GalleryCard
-                key={image.post_id}
+                key={image.id}
                 image={image}
                 onView={() => setLightboxImage(image)}
                 onDelete={(e) => handleDelete(image, e)}
@@ -494,16 +502,18 @@ export default function GaleriaPage() {
             <div className="flex flex-col" style={{ maxHeight: "85vh" }}>
               <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-3 py-2">
                 <span className="max-w-[60%] truncate text-xs font-medium text-white">
-                  {lightboxImage.post_title}
+                  {lightboxImage.title}
                 </span>
                 <div className="flex shrink-0 items-center gap-1">
-                  <Link
-                    href={`/content/posts?edit=${lightboxImage.post_id}` as Route}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/12 text-white/70 transition-colors hover:bg-white/22 hover:text-white"
-                    title="Editar post"
-                  >
-                    <ExternalLink className="h-4.5 w-4.5" />
-                  </Link>
+                  {lightboxImage.linked_post_id && (
+                    <Link
+                      href={`/content/posts?edit=${lightboxImage.linked_post_id}` as Route}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/12 text-white/70 transition-colors hover:bg-white/22 hover:text-white"
+                      title="Editar post"
+                    >
+                      <ExternalLink className="h-4.5 w-4.5" />
+                    </Link>
+                  )}
                   <button
                     type="button"
                     onClick={openDownloadDialog}
@@ -530,7 +540,7 @@ export default function GaleriaPage() {
               <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
                 <img
                   src={getImageSrc(lightboxImage)}
-                  alt={lightboxImage.post_title}
+                  alt={lightboxImage.title}
                   className="object-contain"
                   style={{ maxWidth: "100%", maxHeight: "calc(85vh - 70px)" }}
                 />
@@ -688,7 +698,7 @@ function GalleryCard({
     >
       <img
         src={getImageSrc(image)}
-        alt={image.post_title}
+        alt={image.title}
         className="h-full w-full object-cover"
         loading="lazy"
       />
@@ -734,7 +744,7 @@ function GalleryCard({
 
       <div className="absolute inset-x-0 bottom-0 flex flex-col gap-1.5 p-3">
         <span className="line-clamp-2 text-sm font-semibold leading-tight text-white drop-shadow-sm">
-          {image.post_title}
+          {image.title}
         </span>
         <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-white/78">
           <span className="rounded-full bg-black/35 px-2 py-1 backdrop-blur-sm">
@@ -936,10 +946,10 @@ function GenerateImageDialog({
 }
 
 function getDeleteDialogDescription(image: GalleryImage): string {
-  const title = image.post_title.trim() || "este post"
+  const title = image.title.trim() || "esta imagem"
 
   if (isDeleteBlockedForImage(image)) {
-    return `A imagem do post \"${title}\" esta com status ${getGalleryPostStatusLabel(image.post_status).toLowerCase()} e nao pode ser removida da galeria agora. Altere o status do post antes de excluir a imagem.`
+    return `A imagem do post \"${title}\" esta com status ${getGalleryPostStatusLabel(image.post_status ?? "draft").toLowerCase()} e nao pode ser removida da galeria agora. Altere o status do post antes de excluir a imagem.`
   }
 
   if (hasLinkedPostWarning(image)) {
@@ -954,7 +964,7 @@ function isDeleteBlockedForImage(image: GalleryImage): boolean {
 }
 
 function hasLinkedPostWarning(image: GalleryImage): boolean {
-  return image.post_status !== "draft"
+  return Boolean(image.linked_post_id)
 }
 
 function getGalleryPostStatusLabel(status: string): string {
@@ -980,7 +990,7 @@ function formatBytes(bytes: number): string {
 }
 
 function getDownloadBaseName(image: GalleryImage): string {
-  const rawName = image.image_filename ?? image.post_title ?? "imagem-galeria"
+  const rawName = image.image_filename ?? image.title ?? "imagem-galeria"
   return sanitizeFileName(stripFileExtension(rawName))
 }
 

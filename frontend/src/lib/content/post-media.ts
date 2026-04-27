@@ -6,6 +6,12 @@ interface PostImageMediaSource {
   image_s3_key?: string | null
 }
 
+interface GalleryImageMediaSource {
+  id: string
+  image_url?: string | null
+  image_s3_key?: string | null
+}
+
 interface PostVideoMediaSource {
   id: string
   video_url?: string | null
@@ -28,6 +34,16 @@ export function getPostImageProxyUrl(
   )
 }
 
+export function getGalleryImageProxyUrl(
+  imageId: string,
+  options?: { cacheBuster?: number | string | null },
+): string {
+  return withMediaCacheBuster(
+    `${env.NEXT_PUBLIC_API_URL}/api/content/images/${imageId}/file`,
+    options?.cacheBuster ?? null,
+  )
+}
+
 export function resolvePostImageUrl(
   post: PostImageMediaSource | null | undefined,
   options?: { cacheBuster?: number | string | null },
@@ -35,6 +51,18 @@ export function resolvePostImageUrl(
   if (!post) return null
 
   const baseUrl = post.image_s3_key ? getPostImageProxyUrl(post.id) : (post.image_url ?? null)
+
+  if (!baseUrl) return null
+  return withMediaCacheBuster(baseUrl, options?.cacheBuster ?? null)
+}
+
+export function resolveGalleryImageUrl(
+  image: GalleryImageMediaSource | null | undefined,
+  options?: { cacheBuster?: number | string | null },
+): string | null {
+  if (!image) return null
+
+  const baseUrl = image.image_s3_key ? getGalleryImageProxyUrl(image.id) : (image.image_url ?? null)
 
   if (!baseUrl) return null
   return withMediaCacheBuster(baseUrl, options?.cacheBuster ?? null)

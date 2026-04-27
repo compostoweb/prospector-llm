@@ -551,9 +551,10 @@ export function useUpdateContentSettings() {
 // ── Galeria de Imagens ────────────────────────────────────────────────
 
 export interface GalleryImage {
-  post_id: string
-  post_title: string
-  post_status: string
+  id: string
+  linked_post_id: string | null
+  title: string
+  post_status: string | null
   post_pillar: string | null
   image_url: string | null
   image_s3_key: string | null
@@ -621,7 +622,7 @@ export interface GenerateStandaloneImageRequest {
 export interface GenerateStandaloneImageResponse {
   image_url: string
   image_prompt: string
-  post_id: string | null
+  image_id: string
 }
 
 export function useGenerateStandaloneImage() {
@@ -654,7 +655,7 @@ export interface UploadStandaloneImageResponse {
   image_url: string
   filename: string
   size_bytes: number
-  post_id: string
+  image_id: string
 }
 
 export function useUploadStandaloneImage() {
@@ -686,9 +687,9 @@ export function useDeleteGalleryImage() {
   const { data: session } = useSession()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (postId: string) => {
+    mutationFn: async (imageId: string) => {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/images/${postId}`,
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/images/${imageId}`,
         {
           method: "DELETE",
           headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
