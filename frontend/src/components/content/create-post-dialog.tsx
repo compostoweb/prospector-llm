@@ -6,6 +6,7 @@ import {
   Check,
   Wand2,
   RefreshCw,
+  Download,
   ChevronDown,
   ChevronUp,
   ImageIcon,
@@ -72,6 +73,7 @@ import {
   resolvePostImageUrl,
   resolvePostVideoUrl,
 } from "@/lib/content/post-media"
+import { downloadMediaFile, getDownloadBaseName } from "@/lib/content/media-download"
 import { buildGeneratedTitle, extractGeneratedPostParts } from "@/lib/content/generated-post"
 
 const DAY_NAMES: Record<number, string> = {
@@ -154,6 +156,9 @@ export function CreatePostDialog({
   } | null>(null)
   const [imageDeleted, setImageDeleted] = useState(false)
   const [lightboxOpen, setLightboxOpen] = useState(false)
+  const [downloadImageDialogOpen, setDownloadImageDialogOpen] = useState(false)
+  const [downloadImageName, setDownloadImageName] = useState("")
+  const [isDownloadingImage, setIsDownloadingImage] = useState(false)
   const imageUploadInputRef = useRef<HTMLInputElement>(null)
 
   const [videoOpen, setVideoOpen] = useState(false)
@@ -284,6 +289,9 @@ export function CreatePostDialog({
     setLocalUploadedImage(null)
     setImageDeleted(false)
     setLightboxOpen(false)
+    setDownloadImageDialogOpen(false)
+    setDownloadImageName("")
+    setIsDownloadingImage(false)
 
     setVideoOpen(false)
     setLocalVideoUrl(null)
@@ -588,6 +596,35 @@ export function CreatePostDialog({
           }
         : draftPost,
     )
+  }
+
+  function getCurrentImageUrl() {
+    return localImage?.url ?? localUploadedImage?.url ?? persistedImageUrl ?? null
+  }
+
+  function getCurrentImageSuggestedName() {
+    return getDownloadBaseName(localUploadedImage?.name ?? draftPost?.image_filename, title)
+  }
+
+  function openImageDownloadDialog() {
+    if (!getCurrentImageUrl()) return
+    setDownloadImageName(getCurrentImageSuggestedName())
+    setDownloadImageDialogOpen(true)
+  }
+
+  async function handleDownloadImage() {
+    const imageUrl = getCurrentImageUrl()
+    if (!imageUrl) return
+
+    try {
+      setIsDownloadingImage(true)
+      await downloadMediaFile(imageUrl, downloadImageName || getCurrentImageSuggestedName())
+      setDownloadImageDialogOpen(false)
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Falha ao baixar imagem")
+    } finally {
+      setIsDownloadingImage(false)
+    }
   }
 
   const charCount = body.length
@@ -1073,6 +1110,16 @@ export function CreatePostDialog({
                       )}
 
                       <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs gap-1"
+                          onClick={openImageDownloadDialog}
+                        >
+                          <Download className="h-3 w-3" />
+                          Baixar
+                        </Button>
                         {(localImage || (!localUploadedImage && draftPost?.image_prompt)) && (
                           <Button
                             type="button"
@@ -1511,6 +1558,48 @@ export function CreatePostDialog({
             alt="Imagem do post"
             className="w-full max-h-[85vh] object-contain rounded"
           />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={downloadImageDialogOpen} onOpenChange={setDownloadImageDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Nome do arquivo para download</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 pt-2">
+            <div className="grid gap-2">
+              <Label htmlFor="create-post-image-download-name">Nome da imagem</Label>
+              <Input
+                id="create-post-image-download-name"
+                value={downloadImageName}
+                onChange={(e) => setDownloadImageName(e.target.value)}
+                placeholder="Digite o nome do arquivo"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    void handleDownloadImage()
+                  }
+                }}
+                autoFocus
+              />
+              <p className="text-xs text-(--text-secondary)">
+                A extensão será mantida automaticamente no download.
+              </p>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDownloadImageDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={() => void handleDownloadImage()} disabled={isDownloadingImage}>
+                {isDownloadingImage ? (
+                  <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                {isDownloadingImage ? "Baixando..." : "Baixar imagem"}
+              </Button>
+            </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 

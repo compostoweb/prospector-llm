@@ -80,6 +80,7 @@ import {
   resolvePostImageUrl,
   resolvePostVideoUrl,
 } from "@/lib/content/post-media"
+import { downloadMediaFile, getDownloadBaseName } from "@/lib/content/media-download"
 import { buildGeneratedTitle, extractGeneratedPostParts } from "@/lib/content/generated-post"
 
 const DAY_NAMES: Record<number, string> = {
@@ -157,6 +158,9 @@ export function EditPostDialog({
   } | null>(null)
   const [imageDeleted, setImageDeleted] = useState(false)
   const [lightboxOpen, setLightboxOpen] = useState(false)
+  const [downloadImageDialogOpen, setDownloadImageDialogOpen] = useState(false)
+  const [downloadImageName, setDownloadImageName] = useState("")
+  const [isDownloadingImage, setIsDownloadingImage] = useState(false)
   const imageUploadInputRef = useRef<HTMLInputElement>(null)
 
   // Vídeo
@@ -290,6 +294,9 @@ export function EditPostDialog({
     setLocalImage(null)
     setLocalUploadedImage(null)
     setImageDeleted(false)
+    setDownloadImageDialogOpen(false)
+    setDownloadImageName("")
+    setIsDownloadingImage(false)
     setLocalVideoDeleted(false)
   }, [post, defaultImproveOpen])
 
@@ -314,6 +321,35 @@ export function EditPostDialog({
       prevPostIdRef.current = post.id
     }
   }, [post])
+
+  function getCurrentImageUrl() {
+    return localImage?.url ?? localUploadedImage?.url ?? persistedImageUrl ?? null
+  }
+
+  function getCurrentImageSuggestedName() {
+    return getDownloadBaseName(localUploadedImage?.name ?? post?.image_filename, title)
+  }
+
+  function openImageDownloadDialog() {
+    if (!getCurrentImageUrl()) return
+    setDownloadImageName(getCurrentImageSuggestedName())
+    setDownloadImageDialogOpen(true)
+  }
+
+  async function handleDownloadImage() {
+    const imageUrl = getCurrentImageUrl()
+    if (!imageUrl) return
+
+    try {
+      setIsDownloadingImage(true)
+      await downloadMediaFile(imageUrl, downloadImageName || getCurrentImageSuggestedName())
+      setDownloadImageDialogOpen(false)
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Falha ao baixar imagem")
+    } finally {
+      setIsDownloadingImage(false)
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -719,31 +755,7 @@ export function EditPostDialog({
                           variant="outline"
                           size="sm"
                           className="h-7 text-xs gap-1"
-                          onClick={async () => {
-                            const imageUrl =
-                              localImage?.url ?? localUploadedImage?.url ?? persistedImageUrl
-                            if (!imageUrl) return
-
-                            const fileName =
-                              post?.image_filename ?? localUploadedImage?.name ?? "imagem-post.png"
-
-                            try {
-                              const response = await fetch(imageUrl)
-                              if (!response.ok) throw new Error("Falha ao baixar imagem")
-                              const blob = await response.blob()
-                              const blobUrl = URL.createObjectURL(blob)
-                              const a = document.createElement("a")
-                              a.href = blobUrl
-                              a.download = fileName
-                              document.body.appendChild(a)
-                              a.click()
-                              document.body.removeChild(a)
-                              URL.revokeObjectURL(blobUrl)
-                            } catch {
-                              // fallback: abre em nova aba se fetch falhar
-                              window.open(imageUrl, "_blank")
-                            }
-                          }}
+                          onClick={openImageDownloadDialog}
                         >
                           <Download className="h-3 w-3" />
                           Baixar
@@ -1304,6 +1316,48 @@ export function EditPostDialog({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={downloadImageDialogOpen} onOpenChange={setDownloadImageDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Nome do arquivo para download</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 pt-2">
+            <div className="grid gap-2">
+              <Label htmlFor="edit-post-image-download-name">Nome da imagem</Label>
+              <Input
+                id="edit-post-image-download-name"
+                value={downloadImageName}
+                onChange={(e) => setDownloadImageName(e.target.value)}
+                placeholder="Digite o nome do arquivo"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    void handleDownloadImage()
+                  }
+                }}
+                autoFocus
+              />
+              <p className="text-xs text-(--text-secondary)">
+                A extensão será mantida automaticamente no download.
+              </p>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDownloadImageDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={() => void handleDownloadImage()} disabled={isDownloadingImage}>
+                {isDownloadingImage ? (
+                  <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                {isDownloadingImage ? "Baixando..." : "Baixar imagem"}
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Lightbox de imagem ── */}
       <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>

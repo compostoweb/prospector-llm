@@ -548,6 +548,158 @@ export function useUpdateContentSettings() {
   })
 }
 
+// ── Galeria de Imagens ────────────────────────────────────────────────
+
+export interface GalleryImage {
+  post_id: string
+  post_title: string
+  post_status: string
+  post_pillar: string | null
+  image_url: string | null
+  image_s3_key: string | null
+  image_style: string | null
+  image_prompt: string | null
+  image_aspect_ratio: string | null
+  image_filename: string | null
+  image_size_bytes: number | null
+  source: "generated" | "uploaded"
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface GalleryImagesResponse {
+  images: GalleryImage[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface GalleryImagesFilters {
+  page?: number | undefined
+  page_size?: number | undefined
+  source?: "generated" | "uploaded" | undefined
+  style?: ImageStyle | undefined
+  pillar?: PostPillar | undefined
+  status?: PostStatus | undefined
+  search?: string | undefined
+}
+
+export function useContentImages(filters?: GalleryImagesFilters) {
+  const { data: session } = useSession()
+  const params = new URLSearchParams()
+  if (filters?.page) params.set("page", String(filters.page))
+  if (filters?.page_size) params.set("page_size", String(filters.page_size))
+  if (filters?.source) params.set("source", filters.source)
+  if (filters?.style) params.set("style", filters.style)
+  if (filters?.pillar) params.set("pillar", filters.pillar)
+  if (filters?.status) params.set("status", filters.status)
+  if (filters?.search) params.set("search", filters.search)
+  const qs = params.toString()
+  return useQuery({
+    queryKey: [...contentKeys.all, "images", filters],
+    queryFn: async () => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/images${qs ? `?${qs}` : ""}`,
+        {
+          headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
+        },
+      )
+      if (!res.ok) throw new Error("Erro ao carregar galeria de imagens")
+      return res.json() as Promise<GalleryImagesResponse>
+    },
+  })
+}
+
+export interface GenerateStandaloneImageRequest {
+  prompt: string
+  style: ImageStyle
+  aspect_ratio?: ImageAspectRatio
+  sub_type?: ImageSubType | null
+  visual_direction?: ImageVisualDirection | null
+}
+
+export interface GenerateStandaloneImageResponse {
+  image_url: string
+  image_prompt: string
+  post_id: string | null
+}
+
+export function useGenerateStandaloneImage() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: GenerateStandaloneImageRequest) => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/images/generate`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session?.accessToken ?? ""}`,
+          },
+          body: JSON.stringify(body),
+        },
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { detail?: string }).detail ?? "Erro ao gerar imagem")
+      }
+      return res.json() as Promise<GenerateStandaloneImageResponse>
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...contentKeys.all, "images"] }),
+  })
+}
+
+export interface UploadStandaloneImageResponse {
+  image_url: string
+  filename: string
+  size_bytes: number
+  post_id: string
+}
+
+export function useUploadStandaloneImage() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData()
+      formData.append("file", file)
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/images/upload`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
+          body: formData,
+        },
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { detail?: string }).detail ?? "Erro ao fazer upload da imagem")
+      }
+      return res.json() as Promise<UploadStandaloneImageResponse>
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...contentKeys.all, "images"] }),
+  })
+}
+
+export function useDeleteGalleryImage() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (postId: string) => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/images/${postId}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
+        },
+      )
+      if (!res.ok) throw await buildApiError(res, "Erro ao excluir imagem")
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...contentKeys.all, "images"] }),
+  })
+}
+
 // ── LinkedIn Account ──────────────────────────────────────────────────
 
 export function useLinkedInContentAccount() {

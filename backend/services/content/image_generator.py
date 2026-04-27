@@ -246,3 +246,125 @@ async def generate_post_image(
         image_size=image_size,
     )
     return image_bytes, prompt
+
+
+async def generate_standalone_image(
+    prompt: str,
+    style: str,
+    registry: LLMRegistry,
+    *,
+    aspect_ratio: str = "4:5",
+    sub_type: str | None = None,
+    visual_direction: str = "auto",
+    image_size: str = "1K",
+) -> tuple[bytes, str]:
+    """
+    Gera imagem standalone (sem vínculo com post) a partir de um prompt customizado.
+
+    Constrói um prompt de geração baseado nos parâmetros fornecidos,
+    sem depender de um ContentPost para título ou pilar.
+
+    Retorna (image_bytes, prompt_used).
+    """
+    mood = _PILLAR_MOOD.get("authority", _PILLAR_MOOD["authority"])
+
+    direction = (
+        _WITH_TEXT_AUTO_BRIEF
+        if style == "with_text" and visual_direction == "auto"
+        else _VISUAL_DIRECTION_BRIEF.get(visual_direction, _VISUAL_DIRECTION_BRIEF["auto"])
+    )
+
+    constraints = _build_general_constraints(style)
+
+    if style == "clean":
+        full_prompt = (
+            f"Minimalist professional LinkedIn post cover image representing the concept of '{prompt}'. "
+            f"Brand mood: {mood}. "
+            f"Art direction: {direction}. "
+            "Use abstract geometric shapes, light iconography, or a single dominant concept illustration. "
+            "Keep the layout clean with ample negative space and a distinctive composition. "
+            "Do not render the title text itself. Do not place any headline or written element in the artwork. "
+            f"{constraints}"
+        )
+    elif style == "with_text":
+        aspect_ratio_brief = _build_with_text_aspect_ratio_brief(aspect_ratio)
+        full_prompt = (
+            f"LinkedIn post cover with bold headline text and a premium editorial look. "
+            f"Main title: '{prompt}'. "
+            f"Aspect ratio: {aspect_ratio}. "
+            f"Brand mood: {mood}. "
+            f"Art direction: {direction}. "
+            f"Use a dark navy background anchored around {_WITH_TEXT_BACKGROUND_HEX} as the main base color. "
+            "Use a text-first composition where the headline is the clear focal point and occupies most of the attention. "
+            "Prefer a solid or softly graded background, very restrained geometry, and only a few large supporting shapes. "
+            "Large, bold, clearly readable sans-serif typography with strong spacing and ample margins. "
+            "The headline text must be perfectly legible and visually dominant. "
+            "Adapt the headline colors for high contrast on the dark navy base, using mostly white or off-white text and, if needed, one contrasting accent color for a short emphasized phrase. "
+            "If the title is long, break the exact same title into 2 to 4 short lines for readability, without changing any words. "
+            "Optionally emphasize only one short phrase with a flat highlight strip or simple color block. "
+            f"{aspect_ratio_brief} "
+            "Render only the exact requested title as text. "
+            "Do not rewrite the title, do not shorten it, do not expand it, and do not introduce any additional words. "
+            "Avoid dense patterns, many small shapes, overlapping collage elements, illustrative scenes, and busy high-tech backgrounds. "
+            "Do not add supporting copy, subtitles, labels, metrics, footer text, CTA, URL, logo, watermark, or contact details. "
+            f"{constraints}"
+        )
+    elif style == "infographic":
+        if sub_type == "metrics":
+            full_prompt = (
+                f"Clean data infographic for LinkedIn post about '{prompt}'. "
+                f"Brand mood: {mood}. "
+                f"Art direction: {direction}. "
+                "Contains: large KPI numbers (placeholder values), bar charts or donut charts, "
+                "clean data labels, minimal grid lines. "
+                "Layout: 2-3 key metrics with icons above each number. "
+                "If text is used, keep it limited to the requested infographic title and short metric labels only. "
+                f"{constraints}"
+            )
+        elif sub_type == "steps":
+            full_prompt = (
+                f"Step-by-step process infographic for LinkedIn post about '{prompt}'. "
+                f"Brand mood: {mood}. "
+                f"Art direction: {direction}. "
+                "Contains: 3 to 5 numbered steps in vertical or horizontal flow, "
+                "simple flat icons per step, arrow connectors between steps, short text labels. "
+                "Clean minimal layout with clear visual hierarchy. "
+                "If text is used, keep it limited to the requested infographic title and very short step labels only. "
+                f"{constraints}"
+            )
+        elif sub_type == "comparison":
+            full_prompt = (
+                f"Two-column comparison infographic for LinkedIn post about '{prompt}'. "
+                f"Brand mood: {mood}. "
+                f"Art direction: {direction}. "
+                "Left column: labeled 'Antes' or 'Opção A' with a contrasting background color. "
+                "Right column: labeled 'Depois' or 'Opção B' with an accent color background. "
+                "Each column has 3-4 bullet points with flat icons. "
+                "Bold divider line in the center, clear column headers. "
+                "If text is used, keep it limited to the requested infographic title, column headers, and short bullet labels only. "
+                f"{constraints}"
+            )
+        else:
+            full_prompt = (
+                f"Professional LinkedIn infographic for '{prompt}'. "
+                f"Brand mood: {mood}. "
+                f"Art direction: {direction}. "
+                "Clean visual hierarchy, icons, and data elements. "
+                "If text is used, keep it minimal and directly tied to the requested infographic content only. "
+                f"{constraints}"
+            )
+    else:
+        full_prompt = (
+            f"Professional LinkedIn post cover image for '{prompt}'. "
+            f"Brand mood: {mood}. "
+            f"Art direction: {direction}. "
+            "Clean and professional composition. "
+            f"{constraints}"
+        )
+
+    image_bytes = await registry.generate_image(
+        prompt=full_prompt,
+        aspect_ratio=aspect_ratio,
+        image_size=image_size,
+    )
+    return image_bytes, full_prompt
