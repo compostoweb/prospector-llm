@@ -232,6 +232,10 @@ export interface GeneratedLeadPreviewItem {
   source: string
   origin_key: string
   origin_label: string
+  li_verified: boolean
+  li_current_title: string | null
+  li_current_company: string | null
+  li_outdated: boolean
 }
 
 export interface GenerateLeadsPreviewRequest {
@@ -249,6 +253,27 @@ export interface GenerateLeadsPreviewRequest {
   email_status?: string[]
   linkedin_urls?: string[]
   negative_terms?: string[]
+  b2b_actor_key?: string
+  verify_linkedin?: boolean
+}
+
+export interface B2bActorInfo {
+  id: string
+  name: string
+  description: string
+  pricing: string
+  runner: string
+}
+
+export function useB2bActors() {
+  return useQuery<B2bActorInfo[]>({
+    queryKey: ["b2b-actors"],
+    queryFn: async () => {
+      const resp = await apiClient.get("/leads/b2b-actors")
+      return resp.data as B2bActorInfo[]
+    },
+    staleTime: Infinity,
+  })
 }
 
 export interface GenerateLeadsPreviewResponse {
@@ -711,7 +736,10 @@ export function useGenerateLeadsPreview() {
       const { data, error } = await client.POST("/leads/generate-preview" as never, {
         body: body as never,
       })
-      if (error) throw new Error("Falha ao gerar preview de leads")
+      if (error) {
+        const detail = (error as { detail?: string })?.detail
+        throw new Error(detail ?? "Falha ao gerar preview de leads")
+      }
       return data as GenerateLeadsPreviewResponse
     },
   })

@@ -515,7 +515,7 @@ class UnipileClient:
         """
         import re as _re
 
-        m = _re.search(r"/in/([a-zA-Z0-9_%-]+)", linkedin_url)
+        m = _re.search(r"/in/([^/?&#\s]+)", linkedin_url)
         if not m:
             logger.warning(
                 "unipile.get_profile.bad_url",

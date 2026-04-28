@@ -5,17 +5,20 @@ import Link from "next/link"
 import {
   ArrowRight,
   CalendarClock,
+  CheckCircle2,
   CheckSquare,
   Clock,
   Download,
   Eye,
   FileSpreadsheet,
   Layers,
+  Loader2,
   MailSearch,
   MapPinned,
   Pause,
   Pencil,
   Play,
+  RefreshCcw,
   RefreshCw,
   Save,
   Settings2,
@@ -83,6 +86,10 @@ interface PreviewRow {
   phone: string | null
   linkedinUrl: string | null
   originLabel: string
+  liVerified: boolean
+  liCurrentTitle: string | null
+  liCurrentCompany: string | null
+  liOutdated: boolean
   generatedItem?: GeneratedLeadPreviewItem
 }
 
@@ -135,11 +142,18 @@ export default function GerarLeadsPage() {
   const [b2bSizes, setB2bSizes] = useState("")
   const [b2bLimit, setB2bLimit] = useState("50")
   const [b2bNegativeTerms, setB2bNegativeTerms] = useState("")
+  const [b2bActorKey, setB2bActorKey] = useState("pipelinelabs")
+  const [b2bVerifyLinkedIn, setB2bVerifyLinkedIn] = useState(false)
 
   const [enrichmentUrls, setEnrichmentUrls] = useState("")
   const [enrichmentLimit, setEnrichmentLimit] = useState("")
 
   const [generatedPreview, setGeneratedPreview] = useState<GeneratedLeadPreviewItem[]>([])
+  const [importResult, setImportResult] = useState<{
+    created: number
+    updated: number
+    listName: string | null
+  } | null>(null)
 
   const { data: leadLists } = useLeadLists()
   const createLeadList = useCreateLeadList()
@@ -170,12 +184,30 @@ export default function GerarLeadsPage() {
       phone: item.phone,
       linkedinUrl: item.linkedin_url,
       originLabel: item.origin_label,
+      liVerified: item.li_verified ?? false,
+      liCurrentTitle: item.li_current_title ?? null,
+      liCurrentCompany: item.li_current_company ?? null,
+      liOutdated: item.li_outdated ?? false,
       generatedItem: item,
     }))
   }, [generatedPreview])
 
   const selectedRows = previewRows.filter((row) => selectedIds.includes(row.id))
   const allSelected = previewRows.length > 0 && previewRows.length === selectedIds.length
+
+  function handleApplyLinkedInData(previewId: string) {
+    setGeneratedPreview((prev) =>
+      prev.map((item) => {
+        if (item.preview_id !== previewId) return item
+        return {
+          ...item,
+          job_title: item.li_current_title ?? item.job_title,
+          company: item.li_current_company ?? item.company,
+          li_outdated: false,
+        }
+      }),
+    )
+  }
 
   async function handlePreview() {
     try {
@@ -200,6 +232,8 @@ export default function GerarLeadsPage() {
           company_sizes: splitLines(b2bSizes),
           email_status: ["validated"],
           negative_terms: splitLines(b2bNegativeTerms),
+          b2b_actor_key: b2bActorKey,
+          verify_linkedin: b2bVerifyLinkedIn,
         })
         setGeneratedPreview(result.items)
       } else if (source === "linkedin_enrichment") {
@@ -241,8 +275,16 @@ export default function GerarLeadsPage() {
         ...(listId ? { list_id: listId } : {}),
         merge_duplicates: mergeDuplicates,
       })
-      toast.success(`${result.created} leads criados e ${result.updated} atualizados`)
 
+      const resolvedListName =
+        existingListId !== "none"
+          ? (leadLists?.find((l) => l.id === existingListId)?.name ?? null)
+          : newListName.trim() || null
+      setImportResult({
+        created: result.created,
+        updated: result.updated,
+        listName: resolvedListName,
+      })
       setSelectedIds([])
       setNewListName("")
     } catch (error) {
@@ -455,7 +497,7 @@ export default function GerarLeadsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Filtros da fonte</CardTitle>
-                <CardDescription>
+                <CardDescription className="text-secondary text-sm">
                   Ajuste os parâmetros da captura antes de rodar o preview.
                 </CardDescription>
               </CardHeader>
@@ -538,6 +580,7 @@ export default function GerarLeadsPage() {
 
                 {source === "b2b_database" && (
                   <>
+                    <B2bActorSelector value={b2bActorKey} onChange={setB2bActorKey} />
                     <Field
                       label="Cargos alvo"
                       hint="Um por linha. Serão buscados como OR. Ex.: Head de Marketing, CMO, Gerente de Vendas."
@@ -551,7 +594,7 @@ export default function GerarLeadsPage() {
                     </Field>
                     <Field
                       label="Localizações (país / estado)"
-                      hint="Um por linha. Use nomes em inglês para melhor precisão. Ex.: Brasil, United States, São Paulo."
+                      hint="Um por linha. Use nomes em inglês e minúsculas. Ex.: brazil, united states, argentina."
                     >
                       <Textarea
                         value={b2bLocations}
@@ -573,12 +616,12 @@ export default function GerarLeadsPage() {
                     </Field>
                     <Field
                       label="Indústrias"
-                      hint="Um por linha. Filtra pelo setor da empresa. Ex.: Software, Marketing & Advertising, Financial Services."
+                      hint="Um por linha. Use inglês em minúsculas. Ex.: law practice, legal services, computer software, marketing & advertising."
                     >
                       <Textarea
                         value={b2bIndustries}
                         onChange={(e) => setB2bIndustries(e.target.value)}
-                        placeholder={"Software\nMarketing & Advertising"}
+                        placeholder={"law practice\nlegal services\ncomputer software"}
                         rows={3}
                       />
                     </Field>
@@ -595,12 +638,12 @@ export default function GerarLeadsPage() {
                     </Field>
                     <Field
                       label="Faixas de tamanho de empresa"
-                      hint="Uma por linha. Opções: 1, 2-10, 11-50, 51-200, 201-500, 501-1000, 1001-5000, 5001-10000, 10001+."
+                      hint="Uma por linha. Valores exatos aceitos: 1-10, 11-20, 21-50, 51-100, 101-200, 201-500, 501-1000, 1001-2000, 2001-5000, 5001-10000, 10001-20000, 20001-50000, 50000+."
                     >
                       <Textarea
                         value={b2bSizes}
                         onChange={(e) => setB2bSizes(e.target.value)}
-                        placeholder={"11-50\n51-200"}
+                        placeholder={"11-20\n21-50\n51-100"}
                         rows={2}
                       />
                     </Field>
@@ -630,6 +673,22 @@ export default function GerarLeadsPage() {
                         max={200}
                       />
                     </Field>
+                    <label className="flex cursor-pointer items-start gap-3 rounded-(--radius) border border-(--border-subtle) p-3 hover:bg-(--bg-overlay)">
+                      <Checkbox
+                        checked={b2bVerifyLinkedIn}
+                        onCheckedChange={(v) => setB2bVerifyLinkedIn(v === true)}
+                        className="mt-0.5"
+                      />
+                      <div>
+                        <p className="text-sm font-medium text-(--text-primary)">
+                          Verificar cargo atual no LinkedIn
+                        </p>
+                        <p className="mt-0.5 text-xs text-(--text-tertiary)">
+                          Após buscar na base B2B, scrapa cada perfil do LinkedIn para confirmar o
+                          cargo atual. Leva mais tempo (~1–3 min) e gera custo adicional no Apify.
+                        </p>
+                      </div>
+                    </label>
                     <Button
                       type="button"
                       variant="outline"
@@ -759,13 +818,13 @@ export default function GerarLeadsPage() {
               </CardContent>
             </Card>
 
-            <div className="space-y-6">
+            <div className="space-y-3">
               <Card>
                 <CardHeader>
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div>
                       <CardTitle>Preview</CardTitle>
-                      <CardDescription>
+                      <CardDescription className="text-secondary text-sm mt-2">
                         {previewRows.length} resultados prontos para revisão e importação.
                       </CardDescription>
                     </div>
@@ -815,11 +874,43 @@ export default function GerarLeadsPage() {
                           createLeadList.isPending
                         }
                       >
-                        <ArrowRight size={14} aria-hidden="true" />
-                        Importar {selectedRows.length > 0 ? selectedRows.length : "selecionados"}
+                        {importGeneratedLeads.isPending || createLeadList.isPending ? (
+                          <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                        ) : (
+                          <ArrowRight size={14} aria-hidden="true" />
+                        )}
+                        {importGeneratedLeads.isPending || createLeadList.isPending
+                          ? "Importando…"
+                          : `Importar ${selectedRows.length > 0 ? selectedRows.length : "selecionados"}`}
                       </Button>
                     </div>
                   </div>
+
+                  {importResult && (
+                    <div className="flex items-start gap-3 rounded-lg border border-green-300 bg-green-50 px-4 py-3">
+                      <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-green-800">
+                          Importação concluída com sucesso!
+                        </p>
+                        <p className="mt-0.5 text-sm text-green-700">
+                          {importResult.created} lead{importResult.created !== 1 ? "s" : ""} criado
+                          {importResult.created !== 1 ? "s" : ""}
+                          {importResult.updated > 0 &&
+                            ` · ${importResult.updated} atualizado${importResult.updated !== 1 ? "s" : ""}`}
+                          {importResult.listName && ` na lista "${importResult.listName}"`}.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setImportResult(null)}
+                        className="text-green-500 hover:text-green-700"
+                        aria-label="Fechar"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  )}
 
                   {previewRows.length === 0 ? (
                     <div className="rounded-lg border border-dashed border-(--border-default) bg-(--bg-overlay) p-8 text-center">
@@ -878,7 +969,11 @@ export default function GerarLeadsPage() {
                                 <p className="font-medium text-(--text-primary)">{row.name}</p>
                                 {row.linkedinUrl && (
                                   <a
-                                    href={row.linkedinUrl}
+                                    href={
+                                      row.linkedinUrl?.startsWith("http")
+                                        ? row.linkedinUrl
+                                        : `https://${row.linkedinUrl}`
+                                    }
                                     target="_blank"
                                     rel="noreferrer"
                                     className="mt-1 inline-flex text-xs text-(--accent) hover:underline"
@@ -898,6 +993,41 @@ export default function GerarLeadsPage() {
                                   <p className="mt-1 text-xs text-(--text-tertiary)">
                                     {row.location}
                                   </p>
+                                )}
+                                {row.liVerified && !row.liOutdated && (
+                                  <span className="mt-1 inline-flex items-center gap-1 rounded-(--radius-full) bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+                                    ✓ Cargo atual confirmado
+                                  </span>
+                                )}
+                                {row.liOutdated && (
+                                  <div className="mt-1 rounded-(--radius) border border-amber-300 bg-amber-50 px-2 py-1">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div>
+                                        <p className="text-xs font-semibold text-amber-700">
+                                          ⚠ Dado desatualizado
+                                        </p>
+                                        {row.liCurrentTitle && (
+                                          <p className="text-xs text-amber-700">
+                                            Cargo atual: {row.liCurrentTitle}
+                                          </p>
+                                        )}
+                                        {row.liCurrentCompany && (
+                                          <p className="text-xs text-amber-700">
+                                            Empresa atual: {row.liCurrentCompany}
+                                          </p>
+                                        )}
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleApplyLinkedInData(row.id)}
+                                        title="Substituir cargo e empresa pelos dados atuais do LinkedIn"
+                                        className="mt-0.5 flex shrink-0 items-center gap-1 rounded-(--radius) bg-blue-700 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-blue-500 transition-colors"
+                                      >
+                                        <RefreshCcw size={11} />
+                                        Usar dados atuais
+                                      </button>
+                                    </div>
+                                  </div>
                                 )}
                               </td>
                               <td className="px-4 py-3 text-(--text-secondary)">
@@ -1370,6 +1500,55 @@ function ScheduleDetailModal({
         )}
       </TabsContent>
     </Tabs>
+  )
+}
+
+const B2B_ACTOR_OPTIONS = [
+  {
+    runner: "pipelinelabs",
+    name: "Pipeline Labs — 250M+ Leads",
+    pricing: "$1.50–$2.00 / 1k leads",
+    badge: "Recomendado",
+  },
+  {
+    runner: "braveleads",
+    name: "Brave Leads — Leads Finder",
+    pricing: "$1.50 / 1k leads",
+    badge: undefined,
+  },
+  {
+    runner: "code_crafter",
+    name: "Code Crafter — Leads Finder",
+    pricing: "Plano pago Apify",
+    badge: undefined,
+  },
+] as const
+
+function B2bActorSelector({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <Field
+      label="Fonte de dados B2B"
+      hint="Selecione o provedor que será consultado para esta busca."
+    >
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger>
+          <SelectValue placeholder="Selecionar fonte" />
+        </SelectTrigger>
+        <SelectContent>
+          {B2B_ACTOR_OPTIONS.map((actor) => (
+            <SelectItem key={actor.runner} value={actor.runner}>
+              {actor.name}
+              {actor.badge && (
+                <span className="ml-2 rounded-sm bg-emerald-100 px-1 py-0.5 text-[10px] font-medium text-emerald-700">
+                  {actor.badge}
+                </span>
+              )}
+              <span className="ml-2 text-xs text-muted-foreground">{actor.pricing}</span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
   )
 }
 

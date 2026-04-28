@@ -158,7 +158,7 @@ class Settings(BaseSettings):
     APIFY_API_TOKEN: str | None = None
     APIFY_GOOGLE_MAPS_ACTOR_ID: str = "compass/google-maps-extractor"
     APIFY_B2B_LEADS_ACTOR_ID: str = "code_crafter/leads-finder"
-    APIFY_LINKEDIN_ENRICH_ACTOR_ID: str = "anchor/linkedin-profile-enrichment"
+    APIFY_LINKEDIN_ENRICH_ACTOR_ID: str = "harvestapi/linkedin-profile-scraper"
     # Defaults para captura agendada (beat) — JSON list em env var
     # Ex: APIFY_DEFAULT_MAPS_QUERIES='["academias São Paulo", "clínicas odontológicas SP"]'
     APIFY_DEFAULT_MAPS_QUERIES: list[str] = []
@@ -168,6 +168,9 @@ class Settings(BaseSettings):
     APIFY_DEFAULT_LINKEDIN_LOCATIONS: list[str] = []
     APIFY_DEFAULT_MAX_ITEMS_MAPS: int = 100
     APIFY_DEFAULT_MAX_ITEMS_LINKEDIN: int = 50
+    # Limite de cobrança para atores PAY_PER_EVENT (ex: code_crafter/leads-finder)
+    # $0.002/lead + $0.02 start; 5.0 cobre até ~2490 leads por run
+    APIFY_B2B_MAX_CHARGE_USD: float = 5.0
 
     # ── Email finders ─────────────────────────────────────────────────
     PROSPEO_API_KEY: str | None = None

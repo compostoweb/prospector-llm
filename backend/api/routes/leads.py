@@ -872,7 +872,9 @@ async def list_lead_steps(
             or (outbound_interaction.content_text if outbound_interaction is not None else None)
         )
         inbound_interaction = inbound_by_manual_task_id.get(task.id)
-        reply_content = inbound_interaction.content_text if inbound_interaction is not None else None
+        reply_content = (
+            inbound_interaction.content_text if inbound_interaction is not None else None
+        )
         interaction_intent = inbound_interaction.intent if inbound_interaction is not None else None
         reply_intent: str | None = (
             interaction_intent.value if interaction_intent is not None else None
@@ -1071,6 +1073,17 @@ async def import_leads(
     )
 
 
+@router.get("/b2b-actors", response_model=list[dict])
+async def list_b2b_actors(
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+) -> list[dict]:
+    """Retorna a lista de atores Apify disponíveis para a fonte B2B."""
+    del tenant_id
+    from integrations.apify_client import B2B_ACTORS
+
+    return B2B_ACTORS
+
+
 @router.post("/generate-preview", response_model=LeadGenerationPreviewResponse)
 async def generate_leads_preview(
     body: LeadGenerationPreviewRequest,
@@ -1080,7 +1093,7 @@ async def generate_leads_preview(
     del tenant_id, db
     try:
         items = await preview_generated_leads(body)
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),

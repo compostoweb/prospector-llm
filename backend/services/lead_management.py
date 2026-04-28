@@ -23,9 +23,9 @@ from models.lead_tag import LeadTag
 from models.manual_task import ManualTask
 from models.sandbox import SandboxStep
 from schemas.lead import (
+    LeadActiveCadenceSummary,
     LeadEmailInput,
     LeadEmailResponse,
-    LeadActiveCadenceSummary,
     LeadGeneratedPreviewItem,
     LeadListSummary,
     LeadResponse,
@@ -478,6 +478,36 @@ def candidate_to_lead_source(source: str) -> LeadSource:
     return LeadSource.API
 
 
+_FIELD_MAX_LEN: dict[str, int] = {
+    "name": 300,
+    "first_name": 150,
+    "last_name": 150,
+    "job_title": 200,
+    "company": 300,
+    "company_domain": 500,
+    "website": 500,
+    "industry": 200,
+    "company_size": 50,
+    "linkedin_url": 500,
+    "linkedin_profile_id": 200,
+    "city": 200,
+    "location": 500,
+    "segment": 200,
+    "phone": 50,
+    "email_corporate": 255,
+    "email_personal": 255,
+}
+
+
+def _trunc(field_name: str, value: str | None) -> str | None:
+    if value is None:
+        return None
+    limit = _FIELD_MAX_LEN.get(field_name)
+    if limit and len(value) > limit:
+        return value[:limit]
+    return value
+
+
 def apply_candidate_to_lead(
     lead: Lead,
     item: LeadGeneratedPreviewItem,
@@ -510,7 +540,7 @@ def apply_candidate_to_lead(
         current = getattr(lead, field_name, None)
         if overwrite_missing_only and current not in (None, ""):
             continue
-        setattr(lead, field_name, value)
+        setattr(lead, field_name, _trunc(field_name, value))
 
     if item.email_corporate:
         lead.email_corporate_source = _candidate_email_source(source)

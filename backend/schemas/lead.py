@@ -292,6 +292,15 @@ class LeadGeneratedPreviewItem(BaseModel):
     source: LeadSource
     origin_key: str
     origin_label: str
+    # Campos preenchidos quando verify_linkedin=True no request
+    li_verified: bool = False
+    """True quando o perfil foi confirmado via scraping do LinkedIn."""
+    li_current_title: str | None = None
+    """Cargo atual conforme LinkedIn (pode diferir da base B2B)."""
+    li_current_company: str | None = None
+    """Empresa atual conforme LinkedIn (pode diferir da base B2B)."""
+    li_outdated: bool = False
+    """True quando cargo ou empresa atual difere significativamente da base B2B."""
 
 
 class LeadGenerationPreviewRequest(BaseModel):
@@ -312,6 +321,11 @@ class LeadGenerationPreviewRequest(BaseModel):
     linkedin_urls: list[str] | None = None
     negative_terms: list[str] | None = None
     """Termos negativos: leads com qualquer desses termos no cargo ou keyword da empresa são descartados do preview."""
+    b2b_actor_key: str = "pipelinelabs"
+    """Chave do ator Apify B2B a usar. Default: pipelinelabs. Opções: pipelinelabs, code_crafter, braveleads."""
+    verify_linkedin: bool = False
+    """Se True (apenas para b2b_database), scrapa os perfis LinkedIn dos leads retornados
+    para verificar cargo atual e detectar dados desatualizados."""
 
     @model_validator(mode="after")
     def validate_source_payload(self) -> LeadGenerationPreviewRequest:
