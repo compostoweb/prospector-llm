@@ -16,6 +16,7 @@ por endpoints HTTP de publicacao imediata.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, datetime
 
@@ -24,11 +25,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from integrations.s3_client import S3Client
+from models.content_gallery_image import ContentGalleryImage
 from models.content_linkedin_account import ContentLinkedInAccount
 from models.content_post import ContentPost
 from models.content_publish_log import ContentPublishLog
 from services.content.linkedin_client import LinkedInClient, LinkedInClientError
 from services.content.post_text import compose_linkedin_post_text
+from services.content.revision_service import REASON_PRE_PUBLISH, snapshot_post
 
 logger = structlog.get_logger()
 
@@ -114,6 +117,91 @@ def _write_publish_log(
     return log
 
 
+# Limita uploads paralelos para nao estourar rate limit do LinkedIn
+_CAROUSEL_UPLOAD_CONCURRENCY = 3
+# Tentativas por imagem com backoff exponencial: 1s, 2s, 4s
+_UPLOAD_MAX_ATTEMPTS = 3
+_UPLOAD_BASE_DELAY = 1.0
+
+
+async def _upload_image_with_retry(
+    client: LinkedInClient,
+    image_bytes: bytes,
+    *,
+    post_id: uuid.UUID,
+    image_id: uuid.UUID,
+) -> str:
+    """Upload de imagem com retry exponencial (3 tentativas)."""
+    last_exc: Exception | None = None
+    for attempt in range(_UPLOAD_MAX_ATTEMPTS):
+        try:
+            return await client.upload_image(image_bytes)
+        except (LinkedInClientError, Exception) as exc:
+            last_exc = exc
+            if attempt + 1 >= _UPLOAD_MAX_ATTEMPTS:
+                break
+            delay = _UPLOAD_BASE_DELAY * (2**attempt)
+            logger.warning(
+                "content.publisher.image_upload_retry",
+                post_id=str(post_id),
+                image_id=str(image_id),
+                attempt=attempt + 1,
+                delay=delay,
+                error=str(exc),
+            )
+            await asyncio.sleep(delay)
+    assert last_exc is not None
+    raise last_exc
+
+
+async def _upload_carousel_images(
+    *,
+    db: AsyncSession,
+    client: LinkedInClient,
+    images: list[ContentGalleryImage],
+    post_id: uuid.UUID,
+) -> list[str]:
+    """
+    Faz upload das imagens do carrossel que ainda nao tem linkedin_image_urn.
+
+    Limita concorrencia a 3 uploads em paralelo (Semaphore) para evitar
+    throttling. Retry exponencial por imagem (3 tentativas). Se qualquer
+    imagem falhar definitivamente, propaga excecao — carrossel parcial nunca eh publicado.
+    Retorna lista de URNs ordenada por position. Persiste cada URN no banco.
+    """
+    semaphore = asyncio.Semaphore(_CAROUSEL_UPLOAD_CONCURRENCY)
+
+    async def _upload_one(image: ContentGalleryImage) -> tuple[ContentGalleryImage, str]:
+        if image.linkedin_image_urn:
+            return image, image.linkedin_image_urn
+        if not image.image_s3_key:
+            raise ValueError(
+                f"Imagem {image.id} do carrossel sem image_s3_key — upload impossivel."
+            )
+        async with semaphore:
+            image_bytes, _ = S3Client().get_bytes(image.image_s3_key)
+            urn = await _upload_image_with_retry(
+                client, image_bytes, post_id=post_id, image_id=image.id
+            )
+        return image, urn
+
+    results = await asyncio.gather(*[_upload_one(img) for img in images])
+
+    # Persiste URNs em uma transacao
+    for image, urn in results:
+        if image.linkedin_image_urn != urn:
+            image.linkedin_image_urn = urn
+    await db.commit()
+
+    logger.info(
+        "content.publisher.carousel_uploaded",
+        post_id=str(post_id),
+        image_count=len(images),
+    )
+    # Retorna na ordem de position (já vieram ordenadas)
+    return [urn for _img, urn in results]
+
+
 # ── Funcoes publicas ──────────────────────────────────────────────────
 
 
@@ -137,7 +225,17 @@ async def publish_now(
             f"Post deve estar aprovado ou agendado para publicar. Status atual: {post.status}"
         )
 
-    access_token = _maybe_decrypt(account.access_token)
+    # Snapshot pre-publish (Phase 3D)
+    await snapshot_post(db, post=post, reason=REASON_PRE_PUBLISH)
+
+    # Garantir token fresh (Phase 3B) — renova proativamente se < 10min para expirar
+    from services.content.token_refresh import (
+        ensure_fresh_token,
+        is_token_expired_error,
+        refresh_and_persist,
+    )
+
+    access_token = await ensure_fresh_token(db, account)
 
     try:
         async with LinkedInClient(
@@ -146,70 +244,145 @@ async def publish_now(
         ) as client:
             # ── Upload de mídia (se necessário) ──────────────────────
             media_urn: str | None = None
+            media_urns: list[str] | None = None
             media_category: str = "NONE"
 
-            if post.image_url and not post.linkedin_image_urn:
-                if not post.image_s3_key:
-                    raise ValueError(
-                        "Post possui image_url mas image_s3_key está ausente. "
-                        "Não é possível recuperar a imagem para upload."
+            if post.media_kind == "carousel":
+                # Carregar imagens do carrossel ordenadas por position
+                carousel_result = await db.execute(
+                    select(ContentGalleryImage)
+                    .where(
+                        ContentGalleryImage.linked_post_id == post.id,
+                        ContentGalleryImage.tenant_id == tenant_id,
+                        ContentGalleryImage.position.isnot(None),
                     )
-                image_bytes, _ = S3Client().get_bytes(post.image_s3_key)
-                post.linkedin_image_urn = await client.upload_image(image_bytes)
-                await db.commit()
-                logger.info(
-                    "content.publisher.image_uploaded",
-                    post_id=str(post_id),
-                    urn=post.linkedin_image_urn,
+                    .order_by(ContentGalleryImage.position.asc())
                 )
+                carousel_images = list(carousel_result.scalars().all())
+                if len(carousel_images) < 2:
+                    raise ValueError("Carrossel requer pelo menos 2 imagens vinculadas ao post.")
+                if len(carousel_images) > 9:
+                    raise ValueError("Carrossel suporta no máximo 9 imagens (limite do LinkedIn).")
 
-            if post.video_url and not post.linkedin_video_urn:
-                if not post.video_s3_key:
-                    raise ValueError(
-                        "Post possui video_url mas video_s3_key está ausente. "
-                        "Não é possível recuperar o vídeo para upload."
-                    )
-                video_bytes, _ = S3Client().get_bytes(post.video_s3_key)
-                post.linkedin_video_urn = await client.upload_video(video_bytes)
-                await db.commit()
-                logger.info(
-                    "content.publisher.video_uploaded",
-                    post_id=str(post_id),
-                    urn=post.linkedin_video_urn,
+                media_urns = await _upload_carousel_images(
+                    db=db, client=client, images=carousel_images, post_id=post_id
                 )
-
-            # Prioriza vídeo sobre imagem se ambos existirem
-            if post.linkedin_video_urn:
-                media_urn = post.linkedin_video_urn
-                media_category = "VIDEO"
-            elif post.linkedin_image_urn:
-                media_urn = post.linkedin_image_urn
                 media_category = "IMAGE"
+            else:
+                if post.image_url and not post.linkedin_image_urn:
+                    if not post.image_s3_key:
+                        raise ValueError(
+                            "Post possui image_url mas image_s3_key está ausente. "
+                            "Não é possível recuperar a imagem para upload."
+                        )
+                    image_bytes, _ = S3Client().get_bytes(post.image_s3_key)
+                    post.linkedin_image_urn = await client.upload_image(image_bytes)
+                    await db.commit()
+                    logger.info(
+                        "content.publisher.image_uploaded",
+                        post_id=str(post_id),
+                        urn=post.linkedin_image_urn,
+                    )
+
+                if post.video_url and not post.linkedin_video_urn:
+                    if not post.video_s3_key:
+                        raise ValueError(
+                            "Post possui video_url mas video_s3_key está ausente. "
+                            "Não é possível recuperar o vídeo para upload."
+                        )
+                    video_bytes, _ = S3Client().get_bytes(post.video_s3_key)
+                    post.linkedin_video_urn = await client.upload_video(video_bytes)
+                    await db.commit()
+                    logger.info(
+                        "content.publisher.video_uploaded",
+                        post_id=str(post_id),
+                        urn=post.linkedin_video_urn,
+                    )
+
+                # Prioriza vídeo sobre imagem se ambos existirem
+                if post.linkedin_video_urn:
+                    media_urn = post.linkedin_video_urn
+                    media_category = "VIDEO"
+                elif post.linkedin_image_urn:
+                    media_urn = post.linkedin_image_urn
+                    media_category = "IMAGE"
 
             li_response = await client.create_post(
                 compose_linkedin_post_text(post.body, post.hashtags),
                 media_urn=media_urn,
+                media_urns=media_urns,
                 media_category=media_category,
             )
     except LinkedInClientError as exc:
-        # Grava falha e propaga
-        post.status = "failed"
-        post.error_message = f"LinkedIn API {exc.status_code}: {exc.detail}"
-        _write_publish_log(
-            db,
-            post_id=post_id,
-            tenant_id=tenant_id,
-            action="fail",
-            error_detail=post.error_message,
-        )
-        await db.commit()
-        logger.error(
-            "content.publisher.publish_failed",
-            post_id=str(post_id),
-            tenant_id=str(tenant_id),
-            error=exc.detail,
-        )
-        raise
+        # Phase 3B: 401 → tenta refresh + retry uma vez
+        if is_token_expired_error(exc) and account.refresh_token:
+            logger.info(
+                "content.publisher.token_401_refreshing",
+                post_id=str(post_id),
+                tenant_id=str(tenant_id),
+            )
+            try:
+                access_token = await refresh_and_persist(db, account)
+            except (LinkedInClientError, ValueError) as refresh_exc:
+                post.status = "failed"
+                post.error_message = (
+                    "LinkedIn token expirado e refresh falhou. Reconecte a conta. "
+                    f"Detalhe: {refresh_exc}"
+                )
+                _write_publish_log(
+                    db,
+                    post_id=post_id,
+                    tenant_id=tenant_id,
+                    action="fail",
+                    error_detail=post.error_message,
+                )
+                await db.commit()
+                raise
+            # Retry uma vez com token novo
+            try:
+                async with LinkedInClient(
+                    access_token=access_token,
+                    person_urn=account.person_urn,
+                ) as client:
+                    li_response = await client.create_post(
+                        compose_linkedin_post_text(post.body, post.hashtags),
+                        media_urn=media_urn,
+                        media_urns=media_urns,
+                        media_category=media_category,
+                    )
+            except LinkedInClientError as retry_exc:
+                post.status = "failed"
+                post.error_message = (
+                    f"LinkedIn API {retry_exc.status_code} (após refresh): {retry_exc.detail}"
+                )
+                _write_publish_log(
+                    db,
+                    post_id=post_id,
+                    tenant_id=tenant_id,
+                    action="fail",
+                    error_detail=post.error_message,
+                )
+                await db.commit()
+                raise
+        else:
+            # Grava falha e propaga
+            post.status = "failed"
+            post.error_message = f"LinkedIn API {exc.status_code}: {exc.detail}"
+            _write_publish_log(
+                db,
+                post_id=post_id,
+                tenant_id=tenant_id,
+                action="fail",
+                error_detail=post.error_message,
+            )
+            await db.commit()
+            logger.error(
+                "content.publisher.publish_failed",
+                post_id=str(post_id),
+                tenant_id=str(tenant_id),
+                error=exc.detail,
+            )
+            raise
 
     # Extrai URN da resposta: header X-RestLi-Id ou campo id
     post_urn = li_response.get("id") or li_response.get("value", {}).get("id") or ""

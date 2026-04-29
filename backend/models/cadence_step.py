@@ -98,6 +98,17 @@ class CadenceStep(Base, TenantMixin):
     )
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # ── Hold operacional por auditoria de reply ambígua ───────────────
+    reply_hold_interaction_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("interactions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    reply_hold_reason: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    reply_hold_previous_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    reply_hold_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # ── A/B de assunto (cold email) ───────────────────────────────────
     subject_used: Mapped[str | None] = mapped_column(
         String(500),

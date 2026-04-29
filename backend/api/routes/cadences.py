@@ -21,7 +21,7 @@ from typing import Any, Literal, cast
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import exists, select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -30,7 +30,7 @@ from integrations.llm import LLMRegistry
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
 from models.email_template import EmailTemplate
-from models.enums import Channel, InteractionDirection, StepType
+from models.enums import Channel, InteractionDirection, StepStatus, StepType
 from models.interaction import Interaction
 from models.lead import Lead
 from models.tenant import TenantIntegration
@@ -38,6 +38,7 @@ from schemas.cadence import (
     CadenceCreateRequest,
     CadenceDeliveryBudgetItemResponse,
     CadenceDeliveryBudgetResponse,
+    CadenceReplyAuditCandidateStepResponse,
     CadenceReplyAuditItemResponse,
     CadenceReplyEventResponse,
     CadenceReplyManagementResponse,
@@ -72,6 +73,7 @@ from services.message_template_renderer import (
 from services.reply_matching import (
     LOW_CONFIDENCE_EMAIL_REPLY_SOURCE,
     pending_reply_audit_interaction_condition,
+    reply_candidate_step_channels,
 )
 from services.test_email_service import send_test_email
 
@@ -283,6 +285,35 @@ async def get_cadence_reply_management(
             lead_ids=lead_ids,
         )
 
+    candidate_steps_by_lead: dict[uuid.UUID, list[CadenceReplyAuditCandidateStepResponse]] = {}
+    if lead_ids:
+        candidate_steps_q = await db.execute(
+            select(CadenceStep, Cadence.name)
+            .join(Cadence, Cadence.id == CadenceStep.cadence_id)
+            .where(
+                CadenceStep.tenant_id == tenant_id,
+                CadenceStep.lead_id.in_(lead_ids),
+                or_(
+                    CadenceStep.sent_at.is_not(None),
+                    CadenceStep.status == StepStatus.REPLIED,
+                ),
+            )
+            .order_by(CadenceStep.sent_at.desc().nulls_last(), CadenceStep.scheduled_at.desc())
+        )
+        for step, cadence_name in candidate_steps_q.all():
+            candidate_steps_by_lead.setdefault(step.lead_id, []).append(
+                CadenceReplyAuditCandidateStepResponse(
+                    id=step.id,
+                    cadence_id=step.cadence_id,
+                    cadence_name=cadence_name,
+                    step_number=step.step_number,
+                    channel=step.channel,
+                    status=step.status.value,
+                    scheduled_at=step.scheduled_at,
+                    sent_at=step.sent_at,
+                )
+            )
+
     replies = [
         CadenceReplyEventResponse(
             interaction_id=interaction.id,
@@ -296,6 +327,11 @@ async def get_cadence_reply_management(
             intent=interaction.intent.value if interaction.intent else None,
             reply_text=interaction.content_text,
             reply_match_source=interaction.reply_match_source,
+            pipedrive_sync_status=interaction.pipedrive_sync_status,
+            pipedrive_person_id=interaction.pipedrive_person_id,
+            pipedrive_deal_id=interaction.pipedrive_deal_id,
+            pipedrive_synced_at=interaction.pipedrive_synced_at,
+            pipedrive_sync_error=interaction.pipedrive_sync_error,
         )
         for interaction, step_number in reply_rows
         if interaction.lead_id in lead_map
@@ -317,6 +353,11 @@ async def get_cadence_reply_management(
             reply_match_source=interaction.reply_match_source,
             reply_match_sent_cadence_count=interaction.reply_match_sent_cadence_count,
             content_text=interaction.content_text,
+            candidate_steps=[
+                step
+                for step in candidate_steps_by_lead.get(interaction.lead_id, [])
+                if step.channel in reply_candidate_step_channels(interaction.channel)
+            ][:10],
         )
         for interaction in audit_items
         if interaction.lead_id in lead_map

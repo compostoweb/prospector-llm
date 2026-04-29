@@ -451,15 +451,44 @@ async def test_review_lead_reply_audit_marks_interaction_as_reviewed(
     ).json()
 
     interaction = Interaction(
+        id=uuid.uuid4(),
         tenant_id=uuid.UUID(created["tenant_id"]),
         lead_id=uuid.UUID(created["id"]),
         channel=Channel.EMAIL,
         direction="inbound",
         content_text="Recebi aqui, mas não sei a qual cadência pertence.",
         reply_match_status="ambiguous",
+        reply_match_source="ambiguous_reply_hold",
         reply_match_sent_cadence_count=2,
     )
     db.add(interaction)
+    await db.flush()
+
+    cadence = Cadence(
+        tenant_id=uuid.UUID(created["tenant_id"]),
+        name="Cadência Hold Revisão",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    db.add(cadence)
+    await db.flush()
+    held_step = CadenceStep(
+        tenant_id=uuid.UUID(created["tenant_id"]),
+        cadence_id=cadence.id,
+        lead_id=uuid.UUID(created["id"]),
+        channel=Channel.EMAIL,
+        step_number=2,
+        day_offset=1,
+        use_voice=False,
+        status=StepStatus.SKIPPED,
+        scheduled_at=datetime.now(tz=UTC),
+        reply_hold_interaction_id=interaction.id,
+        reply_hold_reason="ambiguous_reply",
+        reply_hold_previous_status="pending",
+        reply_hold_created_at=datetime.now(tz=UTC),
+    )
+    db.add(held_step)
     await db.commit()
 
     resp = await client.post(
@@ -472,7 +501,11 @@ async def test_review_lead_reply_audit_marks_interaction_as_reviewed(
     assert data["reply_reviewed_at"] is not None
 
     await db.refresh(interaction)
+    await db.refresh(held_step)
     assert interaction.reply_reviewed_at is not None
+    assert held_step.status == StepStatus.PENDING
+    assert held_step.reply_hold_interaction_id is None
+    assert held_step.reply_hold_reason is None
 
 
 async def test_link_lead_reply_audit_links_interaction_and_skips_remaining_steps(
@@ -496,6 +529,15 @@ async def test_link_lead_reply_audit_links_interaction_and_skips_remaining_steps
         llm_model="gpt-5.4-mini",
     )
     db.add(cadence)
+    await db.flush()
+    other_cadence = Cadence(
+        tenant_id=tenant_id,
+        name="Cadência Deve Continuar",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    db.add(other_cadence)
     await db.flush()
 
     replied_step = CadenceStep(
@@ -522,10 +564,8 @@ async def test_link_lead_reply_audit_links_interaction_and_skips_remaining_steps
         scheduled_at=datetime.now(tz=UTC),
         sent_at=None,
     )
-    db.add_all([replied_step, pending_step])
-    await db.flush()
-
     interaction = Interaction(
+        id=uuid.uuid4(),
         tenant_id=tenant_id,
         lead_id=lead_id,
         channel=Channel.EMAIL,
@@ -533,9 +573,29 @@ async def test_link_lead_reply_audit_links_interaction_and_skips_remaining_steps
         content_text="Sim, quero entender melhor.",
         intent="interest",
         reply_match_status="ambiguous",
+        reply_match_source="ambiguous_reply_hold",
         reply_match_sent_cadence_count=2,
     )
     db.add(interaction)
+    await db.flush()
+
+    other_held_step = CadenceStep(
+        tenant_id=tenant_id,
+        cadence_id=other_cadence.id,
+        lead_id=lead_id,
+        channel=Channel.EMAIL,
+        step_number=2,
+        day_offset=1,
+        use_voice=False,
+        status=StepStatus.SKIPPED,
+        scheduled_at=datetime.now(tz=UTC),
+        sent_at=None,
+        reply_hold_interaction_id=interaction.id,
+        reply_hold_reason="ambiguous_reply",
+        reply_hold_previous_status="pending",
+        reply_hold_created_at=datetime.now(tz=UTC),
+    )
+    db.add_all([replied_step, pending_step, other_held_step])
     await db.commit()
 
     resp = await client.post(
@@ -554,6 +614,7 @@ async def test_link_lead_reply_audit_links_interaction_and_skips_remaining_steps
     await db.refresh(interaction)
     await db.refresh(replied_step)
     await db.refresh(pending_step)
+    await db.refresh(other_held_step)
 
     lead = await db.get(Lead, lead_id)
     assert lead is not None
@@ -563,6 +624,8 @@ async def test_link_lead_reply_audit_links_interaction_and_skips_remaining_steps
     assert interaction.reply_reviewed_at is not None
     assert replied_step.status == StepStatus.REPLIED
     assert pending_step.status == StepStatus.SKIPPED
+    assert other_held_step.status == StepStatus.PENDING
+    assert other_held_step.reply_hold_interaction_id is None
     assert lead.status == LeadStatus.CONVERTED
 
 

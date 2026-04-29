@@ -10,9 +10,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.email_unsubscribe import EmailUnsubscribe
-from models.enums import EmailProviderType
+from models.enums import (
+    ContactPointKind,
+    ContactQualityBucket,
+    EmailProviderType,
+    EmailType,
+    EmailVerificationStatus,
+)
 from models.interaction import Interaction
 from models.lead import Lead
+from models.lead_contact_point import LeadContactPoint
+from models.lead_email import LeadEmail
 
 logger = structlog.get_logger()
 
@@ -235,19 +243,135 @@ async def record_email_bounce(
         )
         return None
 
+    bounced_at = datetime.now(UTC)
+    await _mark_bounced_email_contact_point(
+        db,
+        lead=lead,
+        normalized_email=normalized_email,
+        bounced_at=bounced_at,
+        source=source,
+        bounce_type=bounce_type,
+    )
+    await _mark_bounced_lead_email(
+        db,
+        lead=lead,
+        normalized_email=normalized_email,
+    )
+
     if lead.email_bounced_at is None:
-        lead.email_bounced_at = datetime.now(UTC)
+        lead.email_bounced_at = bounced_at
         lead.email_bounce_type = bounce_type
-        await db.commit()
-        logger.info(
-            "email.bounce.recorded",
-            lead_id=str(lead.id),
-            bounced_email=normalized_email,
-            bounce_type=bounce_type,
-            source=source,
-        )
+
+    await db.commit()
+    logger.info(
+        "email.bounce.recorded",
+        lead_id=str(lead.id),
+        bounced_email=normalized_email,
+        bounce_type=bounce_type,
+        source=source,
+    )
 
     return lead
+
+
+async def _mark_bounced_email_contact_point(
+    db: AsyncSession,
+    *,
+    lead: Lead,
+    normalized_email: str,
+    bounced_at: datetime,
+    source: str,
+    bounce_type: str,
+) -> None:
+    result = await db.execute(
+        select(LeadContactPoint).where(
+            LeadContactPoint.tenant_id == lead.tenant_id,
+            LeadContactPoint.lead_id == lead.id,
+            LeadContactPoint.kind == ContactPointKind.EMAIL,
+            LeadContactPoint.normalized_value == normalized_email,
+        )
+    )
+    contact_point = result.scalar_one_or_none()
+    if contact_point is None:
+        contact_point = LeadContactPoint(
+            tenant_id=lead.tenant_id,
+            lead_id=lead.id,
+            kind=ContactPointKind.EMAIL,
+            value=normalized_email,
+            normalized_value=normalized_email,
+            source=source,
+            is_primary=_email_matches_primary_lead_slot(lead, normalized_email),
+        )
+        db.add(contact_point)
+
+    contact_point.verified = False
+    contact_point.verification_status = EmailVerificationStatus.INVALID.value
+    contact_point.quality_score = 0.0
+    contact_point.quality_bucket = ContactQualityBucket.RED
+    contact_point.metadata_json = _with_bounce_metadata(
+        contact_point.metadata_json,
+        bounced_at=bounced_at,
+        source=source,
+        bounce_type=bounce_type,
+    )
+
+
+async def _mark_bounced_lead_email(
+    db: AsyncSession,
+    *,
+    lead: Lead,
+    normalized_email: str,
+) -> None:
+    result = await db.execute(
+        select(LeadEmail).where(
+            LeadEmail.tenant_id == lead.tenant_id,
+            LeadEmail.lead_id == lead.id,
+            LeadEmail.email == normalized_email,
+        )
+    )
+    lead_email = result.scalar_one_or_none()
+    if lead_email is None:
+        lead_email = LeadEmail(
+            tenant_id=lead.tenant_id,
+            lead_id=lead.id,
+            email=normalized_email,
+            email_type=_email_type_for_lead_slot(lead, normalized_email),
+            source="bounce",
+            is_primary=_email_matches_primary_lead_slot(lead, normalized_email),
+        )
+        db.add(lead_email)
+
+    lead_email.verified = False
+    lead_email.verification_status = EmailVerificationStatus.INVALID
+    lead_email.quality_score = 0.0
+    lead_email.quality_bucket = ContactQualityBucket.RED
+
+
+def _with_bounce_metadata(
+    metadata: dict[str, object] | None,
+    *,
+    bounced_at: datetime,
+    source: str,
+    bounce_type: str,
+) -> dict[str, object]:
+    return {
+        **(metadata or {}),
+        "last_bounce_at": bounced_at.isoformat(),
+        "last_bounce_source": source,
+        "last_bounce_type": bounce_type,
+    }
+
+
+def _email_matches_primary_lead_slot(lead: Lead, normalized_email: str) -> bool:
+    return normalize_email_address(lead.email_corporate) == normalized_email
+
+
+def _email_type_for_lead_slot(lead: Lead, normalized_email: str) -> EmailType:
+    if normalize_email_address(lead.email_corporate) == normalized_email:
+        return EmailType.CORPORATE
+    if normalize_email_address(lead.email_personal) == normalized_email:
+        return EmailType.PERSONAL
+    return EmailType.UNKNOWN
 
 
 def _normalize_provider_type(provider_type: EmailProviderType | str | None) -> str:

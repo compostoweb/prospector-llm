@@ -69,8 +69,26 @@ class GalleryImage(BaseModel):
     source: str  # "generated" | "uploaded"
     created_at: str | None
     updated_at: str | None
+    # Carrossel
+    position: int | None = None
+    carousel_group_id: uuid.UUID | None = None
+    linkedin_image_urn: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class CarouselGroup(BaseModel):
+    """Grupo (pasta) de imagens de carrossel na galeria."""
+
+    carousel_group_id: uuid.UUID
+    linked_post_id: uuid.UUID | None = None
+    post_title: str | None = None
+    post_status: str | None = None
+    image_count: int
+    cover_image_url: str | None = None
+    images: list[GalleryImage]
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class GalleryImagesResponse(BaseModel):
@@ -78,6 +96,8 @@ class GalleryImagesResponse(BaseModel):
     total: int
     page: int
     page_size: int
+    # Quando group_by=carousel, retornamos tambem agrupamentos
+    carousel_groups: list[CarouselGroup] = []
 
 
 class GenerateStandaloneImageRequest(BaseModel):
@@ -210,6 +230,10 @@ async def list_gallery_images(
     pillar: str | None = Query(None, description="Filtrar por pilar do post"),
     status: str | None = Query(None, description="Filtrar por status do post"),
     search: str | None = Query(None, description="Busca em titulo, prompt, nome do arquivo"),
+    group_by: str | None = Query(
+        None,
+        description="Quando 'carousel', agrupa imagens por carousel_group_id em pastas",
+    ),
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> GalleryImagesResponse:
@@ -300,17 +324,67 @@ async def list_gallery_images(
                 source=asset.source,
                 created_at=asset.created_at.isoformat() if asset.created_at else None,
                 updated_at=asset.updated_at.isoformat() if asset.updated_at else None,
+                position=asset.position,
+                carousel_group_id=asset.carousel_group_id,
+                linkedin_image_urn=asset.linkedin_image_urn,
             )
         )
 
     images.sort(key=lambda image: image.updated_at or image.created_at or "", reverse=True)
     images = images[offset : offset + page_size]
 
+    carousel_groups: list[CarouselGroup] = []
+    if group_by == "carousel":
+        # Agrupa por carousel_group_id; itens sem grupo permanecem em `images`
+        groups_map: dict[uuid.UUID, list[GalleryImage]] = {}
+        standalone: list[GalleryImage] = []
+        for img in images:
+            if img.carousel_group_id is not None:
+                groups_map.setdefault(img.carousel_group_id, []).append(img)
+            else:
+                standalone.append(img)
+
+        # Carrega informacoes do post linkado para cada grupo (titulo/status)
+        post_ids = {
+            imgs[0].linked_post_id for imgs in groups_map.values() if imgs[0].linked_post_id
+        }
+        post_info: dict[uuid.UUID, ContentPost] = {}
+        if post_ids:
+            post_info_result = await db.execute(
+                select(ContentPost).where(
+                    ContentPost.tenant_id == tenant_id,
+                    ContentPost.id.in_(list(post_ids)),
+                )
+            )
+            post_info = {p.id: p for p in post_info_result.scalars().all()}
+
+        for group_id, group_imgs in groups_map.items():
+            sorted_imgs = sorted(group_imgs, key=lambda i: (i.position or 0))
+            cover = sorted_imgs[0]
+            linked = sorted_imgs[0].linked_post_id
+            linked_post: ContentPost | None = post_info.get(linked) if linked else None
+            carousel_groups.append(
+                CarouselGroup(
+                    carousel_group_id=group_id,
+                    linked_post_id=linked,
+                    post_title=linked_post.title if linked_post else None,
+                    post_status=linked_post.status if linked_post else None,
+                    image_count=len(sorted_imgs),
+                    cover_image_url=cover.image_url,
+                    images=sorted_imgs,
+                    created_at=cover.created_at,
+                    updated_at=cover.updated_at,
+                )
+            )
+        # Quando agrupado, `images` retorna apenas standalone
+        images = standalone
+
     return GalleryImagesResponse(
         images=images,
         total=total,
         page=page,
         page_size=page_size,
+        carousel_groups=carousel_groups,
     )
 
 

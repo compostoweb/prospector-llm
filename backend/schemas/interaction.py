@@ -35,6 +35,11 @@ class InteractionResponse(BaseModel):
     reply_match_source: str | None
     reply_match_sent_cadence_count: int | None
     reply_reviewed_at: datetime | None
+    pipedrive_sync_status: str | None
+    pipedrive_person_id: int | None
+    pipedrive_deal_id: int | None
+    pipedrive_synced_at: datetime | None
+    pipedrive_sync_error: str | None
     opened: bool
     created_at: datetime
 

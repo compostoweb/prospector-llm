@@ -3,11 +3,23 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.enums import Channel, EmailProviderType, InteractionDirection, LeadStatus
+from models.enums import (
+    Channel,
+    ContactPointKind,
+    ContactQualityBucket,
+    EmailProviderType,
+    EmailType,
+    EmailVerificationStatus,
+    InteractionDirection,
+    LeadStatus,
+)
 from models.interaction import Interaction
 from models.lead import Lead
+from models.lead_contact_point import LeadContactPoint
+from models.lead_email import LeadEmail
 from services.email_event_service import (
     build_outbound_email_delivery_observation,
     classify_inbound_email_event,
@@ -90,6 +102,117 @@ async def test_record_email_bounce_marks_matching_lead(
     assert lead.email_bounce_type == "hard"
 
 
+@pytest.mark.asyncio
+async def test_record_email_bounce_marks_only_bounced_contact_point_red(
+    db: AsyncSession,
+    tenant,
+) -> None:
+    lead = Lead(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Lead Bounce Contact",
+        email_corporate="bounce@empresa.com",
+        status=LeadStatus.IN_CADENCE,
+        source="manual",
+    )
+    bounced_email = LeadEmail(
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        email="bounce@empresa.com",
+        email_type=EmailType.CORPORATE,
+        verified=True,
+        verification_status=EmailVerificationStatus.VALID,
+        quality_bucket=ContactQualityBucket.GREEN,
+        quality_score=0.95,
+        is_primary=True,
+    )
+    bounced_contact = LeadContactPoint(
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        kind=ContactPointKind.EMAIL,
+        value="bounce@empresa.com",
+        normalized_value="bounce@empresa.com",
+        verified=True,
+        verification_status=EmailVerificationStatus.VALID.value,
+        quality_bucket=ContactQualityBucket.GREEN,
+        quality_score=0.95,
+        is_primary=True,
+    )
+    healthy_contact = LeadContactPoint(
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        kind=ContactPointKind.EMAIL,
+        value="alt@empresa.com",
+        normalized_value="alt@empresa.com",
+        verified=True,
+        verification_status=EmailVerificationStatus.VALID.value,
+        quality_bucket=ContactQualityBucket.GREEN,
+        quality_score=0.90,
+        is_primary=False,
+    )
+    db.add_all([lead, bounced_email, bounced_contact, healthy_contact])
+    await db.flush()
+
+    updated_lead = await record_email_bounce(
+        db,
+        tenant.id,
+        "bounce@empresa.com",
+        source="test",
+    )
+
+    assert updated_lead is not None
+    await db.refresh(bounced_email)
+    await db.refresh(bounced_contact)
+    await db.refresh(healthy_contact)
+
+    assert bounced_email.verified is False
+    assert bounced_email.verification_status == EmailVerificationStatus.INVALID
+    assert bounced_email.quality_bucket == ContactQualityBucket.RED
+    assert bounced_contact.verified is False
+    assert bounced_contact.verification_status == EmailVerificationStatus.INVALID.value
+    assert bounced_contact.quality_bucket == ContactQualityBucket.RED
+    assert bounced_contact.metadata_json is not None
+    assert bounced_contact.metadata_json["last_bounce_source"] == "test"
+    assert healthy_contact.quality_bucket == ContactQualityBucket.GREEN
+
+
+@pytest.mark.asyncio
+async def test_record_email_bounce_creates_red_contact_point_when_missing(
+    db: AsyncSession,
+    tenant,
+) -> None:
+    lead = Lead(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Lead Bounce Missing Contact",
+        email_corporate="missing@empresa.com",
+        status=LeadStatus.IN_CADENCE,
+        source="manual",
+    )
+    db.add(lead)
+    await db.flush()
+
+    updated_lead = await record_email_bounce(
+        db,
+        tenant.id,
+        "missing@empresa.com",
+        source="test",
+    )
+
+    assert updated_lead is not None
+    contact_result = await db.execute(
+        select(LeadContactPoint).where(
+            LeadContactPoint.lead_id == lead.id,
+            LeadContactPoint.normalized_value == "missing@empresa.com",
+        )
+    )
+    contact = contact_result.scalar_one()
+
+    assert contact.quality_bucket == ContactQualityBucket.RED
+    assert contact.verification_status == EmailVerificationStatus.INVALID.value
+    assert contact.is_primary is True
+
+
 def test_classify_inbound_email_event_detects_bounce() -> None:
     event = classify_inbound_email_event(
         from_email="mailer-daemon@googlemail.com",
@@ -117,10 +240,7 @@ def test_classify_inbound_email_event_extracts_gmail_friendly_bounce_body() -> N
     )
 
     assert event.kind == "bounce"
-    assert (
-        event.matched_email
-        == "bounce-test-1776892293@prospector-bounce-1776892293.invalid"
-    )
+    assert event.matched_email == "bounce-test-1776892293@prospector-bounce-1776892293.invalid"
 
 
 def test_email_provider_capabilities_do_not_fake_delivered() -> None:

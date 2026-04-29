@@ -54,6 +54,16 @@ class _FakeScalarResult:
     def scalar_one_or_none(self) -> object | None:
         return self._value
 
+    def scalars(self) -> _FakeScalarResult:
+        return self
+
+    def all(self) -> list[object]:
+        if self._value is None:
+            return []
+        if isinstance(self._value, list):
+            return self._value
+        return [self._value]
+
 
 class _SingleSessionIterator:
     def __init__(self, db: Any) -> None:
@@ -92,6 +102,8 @@ class FakeAsyncSession:
         for criterion in getattr(statement, "_where_criteria", ()):  # noqa: SLF001
             candidates = [item for item in candidates if _matches_criterion(item, criterion)]
 
+        if entity is LeadContactPoint:
+            return _FakeScalarResult(candidates)
         return _FakeScalarResult(candidates[0] if candidates else None)
 
     async def flush(self) -> None:
@@ -450,6 +462,9 @@ async def test_dispatch_linkedin_post_comment_uses_account_registry(
         patch("workers.dispatch.unipile_client") as mock_unipile,
         patch("workers.dispatch.LLMRegistry"),
         patch("integrations.linkedin.LinkedInRegistry") as mock_li_registry_cls,
+        patch(
+            "services.cadence_step_eligibility.LinkedInRegistry"
+        ) as mock_eligibility_registry_cls,
         patch("workers.dispatch.redis_client", new=_mock_redis()),
     ):
         mock_ctx.fetch_from_website = AsyncMock(return_value=None)
@@ -460,10 +475,12 @@ async def test_dispatch_linkedin_post_comment_uses_account_registry(
         mock_composer_cls.return_value = composer_instance
 
         registry_instance = MagicMock()
+        registry_instance.get_lead_posts = AsyncMock(return_value=[{"id": "post_1"}])
         registry_instance.comment_on_latest_post = AsyncMock(
             return_value=MagicMock(success=True, message_id="comment_msg_1")
         )
         mock_li_registry_cls.return_value = registry_instance
+        mock_eligibility_registry_cls.return_value = registry_instance
 
         task_mock = _make_task_mock()
         result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
@@ -704,6 +721,72 @@ async def test_dispatch_email_skips_when_only_available_emails_are_red(
     assert result["reason"] == "email_quality_red"
     composer_instance.compose_email.assert_not_awaited()
     mock_unipile.send_email.assert_not_called()
+
+
+async def test_dispatch_email_uses_non_red_canonical_email_when_snapshot_is_red(
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    tenant,
+) -> None:
+    from workers.dispatch import _dispatch_async
+
+    lead = _make_lead(tenant_id, email_corporate="joao@acme.com", email_personal=None)
+    lead.email_bounced_at = datetime.now(UTC)
+    lead.email_bounce_type = "hard"
+    cadence = _make_cadence(tenant_id)
+    step = _make_step(tenant_id, lead.id, cadence.id, channel=Channel.EMAIL)
+    db.add_all(
+        [
+            lead,
+            cadence,
+            step,
+            LeadContactPoint(
+                id=uuid.uuid4(),
+                tenant_id=tenant_id,
+                lead_id=lead.id,
+                kind=ContactPointKind.EMAIL,
+                value="joao@acme.com",
+                normalized_value="joao@acme.com",
+                quality_bucket=ContactQualityBucket.RED,
+                is_primary=True,
+            ),
+            LeadContactPoint(
+                id=uuid.uuid4(),
+                tenant_id=tenant_id,
+                lead_id=lead.id,
+                kind=ContactPointKind.EMAIL,
+                value="joao.alt@acme.com",
+                normalized_value="joao.alt@acme.com",
+                quality_bucket=ContactQualityBucket.GREEN,
+                is_primary=False,
+            ),
+        ]
+    )
+    await db.flush()
+
+    with (
+        patch("workers.dispatch.get_worker_session", new=_mock_worker_session(db)),
+        patch("workers.dispatch.context_fetcher") as mock_ctx,
+        patch("workers.dispatch.AIComposer") as mock_composer_cls,
+        patch("workers.dispatch.unipile_client") as mock_unipile,
+        patch("workers.dispatch.LLMRegistry"),
+        patch("workers.dispatch.redis_client", new=_mock_redis()),
+    ):
+        mock_ctx.fetch_from_website = AsyncMock(return_value=None)
+        mock_ctx.search_company = AsyncMock(return_value=None)
+
+        composer_instance = MagicMock()
+        composer_instance.compose_email = AsyncMock(
+            return_value=("Assunto gerado", "Corpo do email aqui.")
+        )
+        mock_composer_cls.return_value = composer_instance
+        mock_unipile.send_email = AsyncMock(return_value=_send_result("email_msg_alt"))
+
+        task_mock = _make_task_mock()
+        result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
+
+    assert result["status"] == "sent"
+    assert mock_unipile.send_email.call_args.kwargs["to_email"] == "joao.alt@acme.com"
 
 
 async def test_dispatch_email_manual_template_body_is_used(

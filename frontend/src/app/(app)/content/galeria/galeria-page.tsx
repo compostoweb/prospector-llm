@@ -49,6 +49,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { resolveGalleryImageUrl, resolvePostImageUrl } from "@/lib/content/post-media"
 import {
   type GalleryImage,
+  type CarouselGroup,
   ImageAspectRatio,
   ImageStyle,
   ImageSubType,
@@ -112,6 +113,7 @@ export default function GaleriaPage() {
       ? (status as "draft" | "approved" | "scheduled" | "published" | "failed")
       : undefined,
     search: debouncedSearch || undefined,
+    group_by: "carousel",
   })
 
   const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 0
@@ -405,6 +407,9 @@ export default function GaleriaPage() {
         </div>
       ) : data && data.images.length > 0 ? (
         <>
+          {data.carousel_groups && data.carousel_groups.length > 0 && (
+            <CarouselGroupsSection groups={data.carousel_groups} />
+          )}
           <div className={GALLERY_GRID_CLASS}>
             {data.images.map((image) => (
               <GalleryCard
@@ -1045,4 +1050,52 @@ function getExtensionFromMimeType(mimeType: string | undefined): string {
     default:
       return ""
   }
+}
+
+// ───────────────────────── Carousel Groups Section ─────────────────────────
+
+function CarouselGroupsSection({ groups }: { groups: CarouselGroup[] }) {
+  return (
+    <div className="mb-6 rounded-md border border-(--border-subtle) bg-(--bg-subtle)/30 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-medium text-(--text-primary)">Carrosséis ({groups.length})</h2>
+      </div>
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(168px,220px))] justify-start gap-4">
+        {groups.map((group) => (
+          <CarouselFolderCard key={group.carousel_group_id} group={group} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function CarouselFolderCard({ group }: { group: CarouselGroup }) {
+  const cover = group.cover_image_url ?? group.images[0]?.image_url ?? null
+  return (
+    <div className="group relative aspect-4/5 overflow-hidden rounded-lg border border-(--border-subtle) bg-(--bg-secondary)">
+      {cover ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={cover}
+          alt={group.post_title ?? "Carrossel"}
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-(--text-tertiary)">
+          Sem capa
+        </div>
+      )}
+      <div className="absolute right-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-xs font-medium text-white">
+        {group.image_count} imagens
+      </div>
+      <div className="absolute inset-x-0 bottom-0 bg-linear-to-t from-black/80 to-transparent p-2">
+        <p className="truncate text-xs font-medium text-white" title={group.post_title ?? ""}>
+          {group.post_title ?? "Sem post vinculado"}
+        </p>
+        {group.post_status && (
+          <p className="text-[10px] uppercase tracking-wide text-white/70">{group.post_status}</p>
+        )}
+      </div>
+    </div>
+  )
 }

@@ -24,6 +24,7 @@ from models.content_lm_post import ContentLMPost  # noqa: F401
 
 # Content Hub
 from models.content_post import ContentPost  # noqa: F401
+from models.content_post_revision import ContentPostRevision  # noqa: F401
 from models.content_publish_log import ContentPublishLog  # noqa: F401
 from models.content_reference import ContentReference  # noqa: F401
 from models.content_settings import ContentSettings  # noqa: F401

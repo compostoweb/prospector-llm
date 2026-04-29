@@ -13,12 +13,17 @@ para perfis pessoais. Para Company Pages, podem ser puxados via API.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base, TenantMixin, TimestampMixin
+
+if TYPE_CHECKING:
+    from models.content_gallery_image import ContentGalleryImage
 
 
 class ContentPost(Base, TenantMixin, TimestampMixin):
@@ -77,7 +82,7 @@ class ContentPost(Base, TenantMixin, TimestampMixin):
         server_default="draft",
         comment="draft | approved | scheduled | published | failed",
     )
-    publish_date: Mapped[str | None] = mapped_column(
+    publish_date: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         comment="Data/hora agendada para publicação, persistida em UTC e exibida em America/Sao_Paulo na UI",
@@ -111,9 +116,60 @@ class ContentPost(Base, TenantMixin, TimestampMixin):
         nullable=True,
         comment="Taxa de engajamento em % (calculada ou inserida manualmente)",
     )
-    metrics_updated_at: Mapped[str | None] = mapped_column(
+    metrics_updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
+    )
+
+    # ── Mídia: tipo ───────────────────────────────────────────────────
+    media_kind: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="none",
+        server_default="none",
+        comment="none | image | video | carousel",
+    )
+
+    # ── First comment + pin ───────────────────────────────────────────
+    first_comment_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    first_comment_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="pending",
+        server_default="pending",
+        comment="pending | posted | failed | skipped",
+    )
+    first_comment_pin_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="pending",
+        server_default="pending",
+        comment="pending | pinned | failed | not_supported",
+    )
+    first_comment_urn: Mapped[str | None] = mapped_column(Text, nullable=True)
+    first_comment_posted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    first_comment_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ── Idempotency lock (Phase 3A) ───────────────────────────────────
+    processing_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp inicio do processamento (NULL = livre)",
+    )
+    processing_lock_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        nullable=True,
+        comment="Token unico do worker que claim'ou o post",
+    )
+
+    # ── Soft delete (Phase 3C) ────────────────────────────────────────
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp da exclusao logica (NULL = ativo)",
     )
 
     # ── Mídia: Imagem ─────────────────────────────────────────────────
@@ -148,7 +204,7 @@ class ContentPost(Base, TenantMixin, TimestampMixin):
     linkedin_video_urn: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # ── Controle ──────────────────────────────────────────────────────
-    published_at: Mapped[str | None] = mapped_column(
+    published_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
@@ -164,4 +220,15 @@ class ContentPost(Base, TenantMixin, TimestampMixin):
         nullable=True,
         index=True,
         comment="Page ID do Notion de origem — evita reimportação duplicada",
+    )
+
+    # ── Carrossel (multi-imagem) ──────────────────────────────────────
+    carousel_images: Mapped[list[ContentGalleryImage]] = relationship(
+        "ContentGalleryImage",
+        primaryjoin=(
+            "and_(ContentPost.id==ContentGalleryImage.linked_post_id, "
+            "ContentGalleryImage.position.isnot(None))"
+        ),
+        order_by="ContentGalleryImage.position",
+        viewonly=True,
     )

@@ -167,7 +167,9 @@ export interface LeadInteraction {
     | "unipile_message_id"
     | "provider_thread_id"
     | "email_subject"
+    | "email_subject_similar"
     | "fallback_single_cadence"
+    | "ambiguous_reply_hold"
     | "manual_review"
     | null
   reply_match_sent_cadence_count: number | null
@@ -827,6 +829,27 @@ export function useGenerateLeadsPreview() {
         throw new Error(detail ?? "Falha ao gerar preview de leads")
       }
       return data as GenerateLeadsPreviewResponse
+    },
+  })
+}
+
+export function useRecalculateGeneratedLeadPreviewQuality() {
+  const { data: session, status } = useSession()
+
+  return useMutation({
+    mutationFn: async (body: GeneratedLeadPreviewItem): Promise<GeneratedLeadPreviewItem> => {
+      if (status !== "authenticated" || !session?.accessToken) {
+        throw new Error("Sessão não disponível. Recarregue a página.")
+      }
+      const client = createBrowserClient(session.accessToken)
+      const { data, error } = await client.POST("/leads/generate-preview/quality" as never, {
+        body: body as never,
+      })
+      if (error) {
+        const detail = (error as { detail?: string })?.detail
+        throw new Error(detail ?? "Falha ao recalcular qualidade do preview")
+      }
+      return data as GeneratedLeadPreviewItem
     },
   })
 }

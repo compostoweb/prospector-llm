@@ -5,7 +5,9 @@ export type ReplyMatchSource =
   | "unipile_message_id"
   | "provider_thread_id"
   | "email_subject"
+  | "email_subject_similar"
   | "fallback_single_cadence"
+  | "ambiguous_reply_hold"
   | "manual_review"
   | null
 
@@ -45,11 +47,25 @@ const REPLY_MATCH_SOURCE_META: Record<Exclude<ReplyMatchSource, null>, ReplyMatc
       "Sem referências técnicas, o vínculo foi inferido pelo assunto normalizado. É um sinal intermediário.",
     className: "border-(--warning) bg-(--warning-subtle) text-(--warning-subtle-fg)",
   },
+  email_subject_similar: {
+    shortLabel: "Match por assunto similar",
+    label: "Assunto similar",
+    description:
+      "Sem referências técnicas, o vínculo foi inferido por assunto muito parecido. Use a auditoria se o lead estiver em múltiplas cadências.",
+    className: "border-(--warning) bg-(--warning-subtle) text-(--warning-subtle-fg)",
+  },
   fallback_single_cadence: {
     shortLabel: "Fallback por cadência única",
     label: "Única cadência enviada",
     description:
       "Sem referências técnicas, havia só uma cadência elegível. Trate este vínculo como fraco.",
+    className: "border-(--warning) bg-(--warning-subtle) text-(--warning-subtle-fg)",
+  },
+  ambiguous_reply_hold: {
+    shortLabel: "Hold por ambiguidade",
+    label: "Cadência em hold",
+    description:
+      "O reply bateu com mais de uma cadência possível, então os próximos steps candidatos foram pausados até revisão.",
     className: "border-(--warning) bg-(--warning-subtle) text-(--warning-subtle-fg)",
   },
   manual_review: {

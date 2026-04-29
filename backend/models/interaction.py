@@ -94,6 +94,11 @@ class Interaction(Base, TenantMixin):
         index=True,
         comment="Timestamp em que um reply auditável foi revisado manualmente.",
     )
+    pipedrive_sync_status: Mapped[str | None] = mapped_column(String(30), index=True)
+    pipedrive_person_id: Mapped[int | None] = mapped_column(Integer)
+    pipedrive_deal_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    pipedrive_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pipedrive_sync_error: Mapped[str | None] = mapped_column(Text)
     opened: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     opened_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),

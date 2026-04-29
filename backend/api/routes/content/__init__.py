@@ -12,6 +12,7 @@ from fastapi import APIRouter
 from api.routes.content import (
     browser_extension,
     calculator,
+    carousel,
     engagement,
     generate,
     images,
@@ -29,6 +30,7 @@ from api.routes.content import (
 router = APIRouter(prefix="/content", tags=["Content Hub"])
 
 router.include_router(posts.router)
+router.include_router(carousel.router)
 router.include_router(themes.router)
 router.include_router(settings.router)
 router.include_router(references.router)

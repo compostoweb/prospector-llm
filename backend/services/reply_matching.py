@@ -7,6 +7,7 @@ from models.interaction import Interaction
 
 LOW_CONFIDENCE_EMAIL_REPLY_SOURCE = "fallback_single_cadence"
 MANUAL_REVIEW_REPLY_SOURCE = "manual_review"
+AMBIGUOUS_REPLY_HOLD_SOURCE = "ambiguous_reply_hold"
 
 
 def reply_candidate_step_channels(channel: Channel) -> tuple[Channel, ...]:
@@ -41,10 +42,7 @@ def is_low_confidence_email_reply_interaction(interaction: Interaction) -> bool:
 def is_reliable_reply_interaction(interaction: Interaction) -> bool:
     return (
         interaction.direction == InteractionDirection.INBOUND
-        and (
-            interaction.cadence_step_id is not None
-            or interaction.manual_task_id is not None
-        )
+        and (interaction.cadence_step_id is not None or interaction.manual_task_id is not None)
         and not is_low_confidence_email_reply_interaction(interaction)
     )
 

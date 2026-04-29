@@ -74,6 +74,11 @@ class ContentLinkedInAccount(Base, TenantMixin, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+    refresh_token_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Quando o refresh token expira (LinkedIn padrao: 365 dias)",
+    )
     scopes: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,

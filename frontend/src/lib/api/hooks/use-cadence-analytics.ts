@@ -106,6 +106,11 @@ export interface CadenceReplyEvent {
   intent: string | null
   reply_text: string | null
   reply_match_source: string | null
+  pipedrive_sync_status: string | null
+  pipedrive_person_id: number | null
+  pipedrive_deal_id: number | null
+  pipedrive_synced_at: string | null
+  pipedrive_sync_error: string | null
 }
 
 export interface CadenceReplyAuditItem {
@@ -117,6 +122,18 @@ export interface CadenceReplyAuditItem {
   reply_match_source: string | null
   reply_match_sent_cadence_count: number | null
   content_text: string | null
+  candidate_steps: CadenceReplyAuditCandidateStep[]
+}
+
+export interface CadenceReplyAuditCandidateStep {
+  id: string
+  cadence_id: string
+  cadence_name: string | null
+  step_number: number
+  channel: string
+  status: string
+  scheduled_at: string
+  sent_at: string | null
 }
 
 export interface CadenceReplyManagement {

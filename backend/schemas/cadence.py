@@ -425,6 +425,22 @@ class CadenceReplyEventResponse(BaseModel):
     intent: str | None = None
     reply_text: str | None = None
     reply_match_source: str | None = None
+    pipedrive_sync_status: str | None = None
+    pipedrive_person_id: int | None = None
+    pipedrive_deal_id: int | None = None
+    pipedrive_synced_at: datetime | None = None
+    pipedrive_sync_error: str | None = None
+
+
+class CadenceReplyAuditCandidateStepResponse(BaseModel):
+    id: uuid.UUID
+    cadence_id: uuid.UUID
+    cadence_name: str | None = None
+    step_number: int
+    channel: Channel
+    status: str
+    scheduled_at: datetime
+    sent_at: datetime | None = None
 
 
 class CadenceReplyAuditItemResponse(BaseModel):
@@ -436,6 +452,7 @@ class CadenceReplyAuditItemResponse(BaseModel):
     reply_match_source: str | None = None
     reply_match_sent_cadence_count: int | None = None
     content_text: str | None = None
+    candidate_steps: list[CadenceReplyAuditCandidateStepResponse] = Field(default_factory=list)
 
 
 class CadenceReplyManagementResponse(BaseModel):

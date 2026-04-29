@@ -81,6 +81,18 @@ CELERY_BEAT_SCHEDULE: dict = {
         "task": "workers.content_voyager.sync_all_voyager",
         "schedule": crontab(hour="20", minute="0"),
     },
+    # Content Hub — refresh proativo de access_tokens LinkedIn — diariamente 03h UTC
+    "content-refresh-linkedin-tokens": {
+        "task": "workers.content.refresh_linkedin_tokens",
+        "schedule": crontab(hour="3", minute="0"),
+        "options": {"queue": "content"},
+    },
+    # Content Hub — purge semanal de posts soft-deleted >30d — domingo 04h UTC
+    "content-purge-deleted-posts": {
+        "task": "workers.content.purge_old_deleted_posts",
+        "schedule": crontab(day_of_week="sunday", hour="4", minute="0"),
+        "options": {"queue": "content"},
+    },
     # Atualizar cache de parâmetros LinkedIn (LOCATION, INDUSTRY) — sábado 4h UTC
     "refresh-linkedin-search-params": {
         "task": "workers.linkedin_params_refresh.refresh_linkedin_search_params",

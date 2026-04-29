@@ -33,6 +33,7 @@ def _normalize_content_publish_date(value: datetime | None) -> datetime | None:
 PostPillar = Literal["authority", "case", "vision"]
 PostStatus = Literal["draft", "approved", "scheduled", "published", "failed"]
 HookType = Literal["loop_open", "contrarian", "identification", "shortcut", "benefit", "data"]
+MediaKind = Literal["none", "image", "video", "carousel"]
 PublishAction = Literal["schedule", "publish", "cancel", "fail"]
 ContentGoal = Literal["editorial", "lead_magnet_launch"]
 LMDistributionType = Literal["comment", "dm", "link_bio"]
@@ -52,6 +53,8 @@ class ContentPostCreate(BaseModel):
     character_count: int | None = None
     publish_date: datetime | None = None
     week_number: int | None = Field(default=None, ge=1, le=54)
+    media_kind: MediaKind = "none"
+    first_comment_text: str | None = Field(default=None, max_length=1250)
 
     @field_validator("publish_date")
     @classmethod
@@ -68,6 +71,8 @@ class ContentPostUpdate(BaseModel):
     character_count: int | None = None
     publish_date: datetime | None = None
     week_number: int | None = Field(default=None, ge=1, le=54)
+    media_kind: MediaKind | None = None
+    first_comment_text: str | None = Field(default=None, max_length=1250)
     error_message: str | None = None
 
     @field_validator("publish_date")
@@ -101,6 +106,7 @@ class ContentPostResponse(BaseModel):
     week_number: int | None
     linkedin_post_urn: str | None
     linkedin_scheduled_id: str | None
+    media_kind: str = "none"
     image_url: str | None
     image_s3_key: str | None
     image_style: str | None
@@ -128,6 +134,54 @@ class ContentPostResponse(BaseModel):
     updated_at: datetime
     # Preenchido apenas na resposta do PUT quando post já foi publicado no LinkedIn
     linkedin_sync_warning: str | None = None
+    # Imagens vinculadas ao carrossel (preenchido quando media_kind == "carousel")
+    carousel_images: list[CarouselImageItem] = []
+    # First comment + pin
+    first_comment_text: str | None = None
+    first_comment_status: str = "pending"
+    first_comment_pin_status: str = "pending"
+    first_comment_urn: str | None = None
+    first_comment_posted_at: datetime | None = None
+    first_comment_error: str | None = None
+
+
+class CarouselImageItem(BaseModel):
+    """Imagem vinculada a um post como item de carrossel."""
+
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    image_url: str
+    image_s3_key: str | None = None
+    position: int
+    linkedin_image_urn: str | None = None
+    carousel_group_id: uuid.UUID | None = None
+
+
+class CarouselReorderRequest(BaseModel):
+    """Body do PATCH /posts/{id}/carousel/reorder."""
+
+    order: list[uuid.UUID] = Field(..., min_length=2, max_length=9)
+
+
+class CarouselImportFromGalleryRequest(BaseModel):
+    """Body do POST /posts/{id}/carousel/images/from-gallery."""
+
+    image_ids: list[uuid.UUID] = Field(..., min_length=1, max_length=9)
+
+
+class ContentPostRevisionResponse(BaseModel):
+    """Snapshot historico de um ContentPost (Phase 3D)."""
+
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    post_id: uuid.UUID
+    tenant_id: uuid.UUID
+    snapshot: dict
+    reason: str
+    created_by: uuid.UUID | None = None
+    created_at: datetime
 
 
 # ─────────────────────────────────────────────────────────────────────

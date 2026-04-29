@@ -53,6 +53,7 @@ celery_app = Celery(
         "workers.content_engagement",
         "workers.enrichment_queue",
         "workers.linkedin_params_refresh",
+        "workers.pipedrive_sync",
     ],
 )
 
@@ -96,6 +97,7 @@ celery_app.conf.update(
         "workers.connection_check.*": {"queue": "cadence"},
         "workers.warmup.*": {"queue": "cadence"},
         "workers.dispatch.*": {"queue": "dispatch"},
+        "workers.pipedrive_sync.*": {"queue": "dispatch"},
         "workers.content.*": {"queue": "content"},
         "workers.content_lm_sync.*": {"queue": "content"},
         "workers.content_voyager.*": {"queue": "content"},

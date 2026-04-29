@@ -29,7 +29,7 @@ import asyncio
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 from sqlalchemy import select
@@ -66,6 +66,7 @@ from workers.celery_app import celery_app
 
 if TYPE_CHECKING:
     from models.lead import Lead
+    from models.lead_contact_point import LeadContactPoint
 
 logger = structlog.get_logger()
 
@@ -80,30 +81,56 @@ class _DispatchResult:
     message_id: str | None = None
 
 
-async def _get_contact_point_for_email(db, lead_id: uuid.UUID, email: str):  # type: ignore[no-untyped-def]
+async def _get_email_contact_points_for_lead(
+    db: Any,
+    lead_id: uuid.UUID,
+) -> list[LeadContactPoint]:
     from models.enums import ContactPointKind
     from models.lead_contact_point import LeadContactPoint
 
-    normalized_email = email.strip().lower()
     result = await db.execute(
         select(LeadContactPoint).where(
             LeadContactPoint.lead_id == lead_id,
             LeadContactPoint.kind == ContactPointKind.EMAIL,
-            LeadContactPoint.normalized_value == normalized_email,
         )
     )
-    return result.scalar_one_or_none()
+    return list(result.scalars().all())
 
 
-async def _resolve_dispatch_email(db, lead: Lead) -> tuple[str | None, str | None]:  # type: ignore[no-untyped-def]
+async def _resolve_dispatch_email(db: Any, lead: Lead) -> tuple[str | None, str | None]:
     from models.enums import ContactQualityBucket
 
-    red_email_found = False
-    for candidate in (lead.email_corporate, lead.email_personal):
-        if not candidate:
-            continue
+    contact_points = await _get_email_contact_points_for_lead(db, lead.id)
+    contact_points_by_value = {
+        str(point.normalized_value).casefold(): point for point in contact_points
+    }
+    ordered_candidates: list[tuple[str, LeadContactPoint | None]] = []
+    seen: set[str] = set()
 
-        contact_point = await _get_contact_point_for_email(db, lead.id, candidate)
+    for candidate in (lead.email_corporate, lead.email_personal):
+        normalized_candidate = (candidate or "").strip().lower()
+        if not normalized_candidate or normalized_candidate in seen:
+            continue
+        seen.add(normalized_candidate)
+        ordered_candidates.append(
+            (normalized_candidate, contact_points_by_value.get(normalized_candidate))
+        )
+
+    for point in sorted(
+        contact_points,
+        key=lambda item: (
+            not bool(getattr(item, "is_primary", False)),
+            _contact_quality_rank(getattr(item, "quality_bucket", None)),
+        ),
+    ):
+        normalized_value = str(point.normalized_value).casefold()
+        if not normalized_value or normalized_value in seen:
+            continue
+        seen.add(normalized_value)
+        ordered_candidates.append((str(point.value), point))
+
+    red_email_found = False
+    for candidate, contact_point in ordered_candidates:
         if contact_point is not None and contact_point.quality_bucket == ContactQualityBucket.RED:
             red_email_found = True
             continue
@@ -114,6 +141,37 @@ async def _resolve_dispatch_email(db, lead: Lead) -> tuple[str | None, str | Non
         return None, "email_quality_red"
 
     return None, None
+
+
+async def _has_non_red_contact_point_for_email(db: Any, lead_id: uuid.UUID, email: str) -> bool:
+    from models.enums import ContactPointKind, ContactQualityBucket
+    from models.lead_contact_point import LeadContactPoint
+
+    normalized_email = email.strip().lower()
+    if not normalized_email:
+        return False
+
+    result = await db.execute(
+        select(LeadContactPoint).where(
+            LeadContactPoint.lead_id == lead_id,
+            LeadContactPoint.kind == ContactPointKind.EMAIL,
+            LeadContactPoint.normalized_value == normalized_email,
+        )
+    )
+    contact_points = list(result.scalars().all())
+    return any(point.quality_bucket != ContactQualityBucket.RED for point in contact_points)
+
+
+def _contact_quality_rank(bucket: object | None) -> int:
+    from models.enums import ContactQualityBucket
+
+    if bucket == ContactQualityBucket.GREEN:
+        return 0
+    if bucket == ContactQualityBucket.ORANGE:
+        return 1
+    if bucket == ContactQualityBucket.RED:
+        return 3
+    return 2
 
 
 @celery_app.task(
@@ -497,8 +555,15 @@ async def _dispatch_inner(
                         "reason": email_skip_reason or "no_email",
                     }
 
-                # Verifica bounce
-                if lead.email_bounced_at is not None:
+                # Verifica bounce legado do lead, mas permite fallback para outro contato válido.
+                if (
+                    lead.email_bounced_at is not None
+                    and not await _has_non_red_contact_point_for_email(
+                        db,
+                        lead.id,
+                        email_to,
+                    )
+                ):
                     step.status = StepStatus.SKIPPED
                     await db.commit()
                     await _release_rate_limit_slot()

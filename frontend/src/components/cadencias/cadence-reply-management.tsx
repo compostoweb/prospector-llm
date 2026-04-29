@@ -87,6 +87,43 @@ function buildReplyPreview(replyText: string | null): string {
   return `${normalized.slice(0, 117)}...`
 }
 
+function renderPipedriveStatus(reply: CadenceReplyEvent) {
+  if (!reply.pipedrive_sync_status) {
+    return null
+  }
+
+  const statusMeta: Record<string, { label: string; className: string }> = {
+    synced: {
+      label: reply.pipedrive_deal_id ? `Pipedrive #${reply.pipedrive_deal_id}` : "Pipedrive ok",
+      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    },
+    syncing: {
+      label: "Pipedrive enviando",
+      className: "border-sky-200 bg-sky-50 text-sky-700",
+    },
+    failed: {
+      label: "Pipedrive falhou",
+      className: "border-rose-200 bg-rose-50 text-rose-700",
+    },
+    skipped: {
+      label: "Pipedrive ignorado",
+      className: "border-gray-200 bg-gray-50 text-gray-600",
+    },
+  }
+  const meta = statusMeta[reply.pipedrive_sync_status] ?? {
+    label: reply.pipedrive_sync_status,
+    className: "border-gray-200 bg-gray-50 text-gray-600",
+  }
+
+  return (
+    <span
+      className={`inline-flex rounded-(--radius-full) border px-2 py-0.5 text-xs ${meta.className}`}
+    >
+      {meta.label}
+    </span>
+  )
+}
+
 export function CadenceReplyManagement({ cadenceId }: CadenceReplyManagementProps) {
   const query = useCadenceReplyManagement(cadenceId)
   const replies = useMemo(() => query.data?.replies ?? [], [query.data?.replies])
@@ -108,6 +145,7 @@ export function CadenceReplyManagement({ cadenceId }: CadenceReplyManagementProp
         replyMatchSource: item.reply_match_source,
         replyMatchSentCadenceCount: item.reply_match_sent_cadence_count,
         contentText: item.content_text,
+        candidateSteps: item.candidate_steps,
       })),
     [auditItems],
   )
@@ -270,6 +308,7 @@ export function CadenceReplyManagement({ cadenceId }: CadenceReplyManagementProp
                                 ? (intentLabel[latestReply.intent] ?? latestReply.intent)
                                 : "Intent não classificado"}
                             </p>
+                            {renderPipedriveStatus(latestReply)}
                             <p className="text-xs text-(--text-tertiary)">
                               {sortedSteps.length > 0
                                 ? `Steps ${sortedSteps.map((step) => `#${step}`).join(", ")}`

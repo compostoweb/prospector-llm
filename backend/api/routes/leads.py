@@ -52,6 +52,7 @@ from schemas.interaction import (
 from schemas.lead import (
     LeadCreateRequest,
     LeadEnrollRequest,
+    LeadGeneratedPreviewItem,
     LeadGenerationImportRequest,
     LeadGenerationImportResponse,
     LeadGenerationPreviewRequest,
@@ -66,8 +67,11 @@ from schemas.lead import (
     LeadUpdateRequest,
 )
 from services.cadence_manager import CadenceManager, get_template_step_config
-from services.inbound_message_service import pause_remaining_cadence_steps_after_reply
-from services.lead_generation import preview_generated_leads
+from services.inbound_message_service import (
+    pause_remaining_cadence_steps_after_reply,
+    release_ambiguous_reply_hold,
+)
+from services.lead_generation import apply_preview_quality, preview_generated_leads
 from services.lead_management import (
     additional_lead_email_specs,
     apply_candidate_to_lead,
@@ -86,6 +90,7 @@ from services.lead_management import (
 )
 from services.lead_scorer import lead_scorer
 from services.reply_matching import (
+    AMBIGUOUS_REPLY_HOLD_SOURCE,
     MANUAL_REVIEW_REPLY_SOURCE,
     is_pending_reply_audit_interaction,
     is_reliable_reply_interaction,
@@ -699,7 +704,16 @@ async def review_lead_reply_audit(
             detail="Esta interação não está pendente de auditoria.",
         )
 
+    should_release_hold = interaction.reply_match_source == AMBIGUOUS_REPLY_HOLD_SOURCE
     interaction.reply_reviewed_at = datetime.now(UTC)
+    resumed_steps = 0
+    if should_release_hold:
+        resumed_steps = await release_ambiguous_reply_hold(
+            db=db,
+            tenant_id=tenant_id,
+            lead_id=lead_id,
+            interaction_id=interaction_id,
+        )
     await db.commit()
     await db.refresh(interaction)
 
@@ -707,6 +721,7 @@ async def review_lead_reply_audit(
         "lead.reply_audit_reviewed",
         lead_id=str(lead_id),
         interaction_id=str(interaction_id),
+        resumed_steps=resumed_steps,
         tenant_id=str(tenant_id),
     )
     return InteractionResponse.model_validate(interaction)
@@ -779,6 +794,8 @@ async def link_lead_reply_audit(
             detail="Somente steps já enviados podem receber vínculo manual de reply.",
         )
 
+    should_release_hold = interaction.reply_match_source == AMBIGUOUS_REPLY_HOLD_SOURCE
+
     interaction.cadence_step_id = step.id
     interaction.reply_match_status = "matched"
     interaction.reply_match_source = MANUAL_REVIEW_REPLY_SOURCE
@@ -795,6 +812,15 @@ async def link_lead_reply_audit(
         cadence_id=step.cadence_id,
         replied_step_id=step.id,
     )
+    resumed_steps = 0
+    if should_release_hold:
+        resumed_steps = await release_ambiguous_reply_hold(
+            db=db,
+            tenant_id=tenant_id,
+            lead_id=lead_id,
+            interaction_id=interaction_id,
+            keep_skipped_cadence_id=step.cadence_id,
+        )
 
     if interaction.intent == Intent.INTEREST:
         lead.status = LeadStatus.CONVERTED
@@ -804,6 +830,11 @@ async def link_lead_reply_audit(
     await db.commit()
     await db.refresh(interaction)
 
+    if interaction.intent in (Intent.INTEREST, Intent.OBJECTION):
+        from services.pipedrive_sync_service import enqueue_pipedrive_sync_for_reply
+
+        enqueue_pipedrive_sync_for_reply(interaction_id=interaction.id, tenant_id=tenant_id)
+
     logger.info(
         "lead.reply_audit_linked",
         lead_id=str(lead_id),
@@ -811,6 +842,7 @@ async def link_lead_reply_audit(
         cadence_step_id=str(step.id),
         cadence_id=str(step.cadence_id),
         paused_steps=paused_steps,
+        resumed_steps=resumed_steps,
         tenant_id=str(tenant_id),
     )
     return InteractionResponse.model_validate(interaction)
@@ -1175,6 +1207,15 @@ async def generate_leads_preview(
             detail=str(exc),
         ) from exc
     return LeadGenerationPreviewResponse(source=body.source, items=items, total=len(items))
+
+
+@router.post("/generate-preview/quality", response_model=LeadGeneratedPreviewItem)
+async def recalculate_generated_lead_preview_quality(
+    body: LeadGeneratedPreviewItem,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+) -> LeadGeneratedPreviewItem:
+    del tenant_id
+    return apply_preview_quality(body)
 
 
 @router.post(

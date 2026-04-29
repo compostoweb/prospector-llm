@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from difflib import SequenceMatcher
 
 import structlog
 from sqlalchemy import func, or_, select
@@ -11,16 +13,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from integrations.llm import LLMRegistry
 from models.cadence_step import CadenceStep
 from models.email_account import EmailAccount
-from models.enums import Channel, Intent, InteractionDirection, LeadStatus, StepStatus
+from models.enums import (
+    Channel,
+    ContactPointKind,
+    Intent,
+    InteractionDirection,
+    LeadStatus,
+    StepStatus,
+)
 from models.interaction import Interaction
 from models.lead import Lead
+from models.lead_contact_point import LeadContactPoint
 from models.lead_email import LeadEmail
 from models.linkedin_account import LinkedInAccount
 from models.manual_task import ManualTask
 from models.tenant import Tenant, TenantIntegration
 from services.llm_config import resolve_tenant_llm_config
 from services.message_quality import normalize_email_subject
-from services.reply_matching import reply_candidate_step_channels
+from services.reply_matching import AMBIGUOUS_REPLY_HOLD_SOURCE, reply_candidate_step_channels
 from services.reply_parser import ReplyParser
 
 logger = structlog.get_logger()
@@ -31,6 +41,9 @@ _EMAIL_REPLY_SUBJECT_PREFIX_RE = re.compile(
     r"^(?:(?:re|fw|fwd|aw|res)\s*:\s*)+",
     re.IGNORECASE,
 )
+_EMAIL_SUBJECT_SIMILARITY_THRESHOLD = 0.92
+_EMAIL_SUBJECT_MIN_SIMILAR_CHARS = 16
+_EMAIL_SUBJECT_MAX_LENGTH_DELTA_RATIO = 0.25
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +159,21 @@ async def find_lead_by_email(
         )
         .limit(1)
     )
+    lead = result.scalar_one_or_none()
+    if lead is not None:
+        return lead
+
+    result = await db.execute(
+        select(Lead)
+        .join(LeadContactPoint, LeadContactPoint.lead_id == Lead.id)
+        .where(
+            Lead.tenant_id == tenant_id,
+            LeadContactPoint.tenant_id == tenant_id,
+            LeadContactPoint.kind == ContactPointKind.EMAIL,
+            func.lower(LeadContactPoint.normalized_value) == normalized_email,
+        )
+        .limit(1)
+    )
     return result.scalar_one_or_none()
 
 
@@ -249,6 +277,7 @@ async def process_inbound_reply(
         ),
     )
     db.add(interaction)
+    await db.flush()
 
     paused_steps = 0
     if replied_step is not None:
@@ -267,13 +296,35 @@ async def process_inbound_reply(
             cadence_id=reply_resolution.manual_task.cadence_id,
             replied_step_number=reply_resolution.manual_task.step_number,
         )
+    elif reply_resolution.ambiguous:
+        paused_steps = await hold_cadence_steps_for_ambiguous_reply(
+            db=db,
+            tenant_id=tenant_id,
+            lead_id=lead.id,
+            cadence_ids=reply_resolution.candidate_cadence_ids,
+            interaction_id=interaction.id,
+        )
+        if paused_steps > 0:
+            interaction.reply_match_source = AMBIGUOUS_REPLY_HOLD_SOURCE
 
-    if (replied_step is not None or reply_resolution.manual_task is not None) and intent == Intent.INTEREST:
+    if (
+        replied_step is not None or reply_resolution.manual_task is not None
+    ) and intent == Intent.INTEREST:
         lead.status = LeadStatus.CONVERTED
-    elif (replied_step is not None or reply_resolution.manual_task is not None) and intent == Intent.NOT_INTERESTED:
+    elif (
+        replied_step is not None or reply_resolution.manual_task is not None
+    ) and intent == Intent.NOT_INTERESTED:
         lead.status = LeadStatus.ARCHIVED
 
     await db.commit()
+
+    if (replied_step is not None or reply_resolution.manual_task is not None) and intent in (
+        Intent.INTEREST,
+        Intent.OBJECTION,
+    ):
+        from services.pipedrive_sync_service import enqueue_pipedrive_sync_for_reply
+
+        enqueue_pipedrive_sync_for_reply(interaction_id=interaction.id, tenant_id=tenant_id)
 
     if intent in (Intent.INTEREST, Intent.OBJECTION):
         from services.notification import send_reply_notification
@@ -310,6 +361,7 @@ async def process_inbound_reply(
                 "lead_name": lead.name,
                 "channel": channel.value,
                 "sent_cadence_count": reply_resolution.sent_cadence_count,
+                "held_steps": paused_steps,
             },
         )
 
@@ -337,6 +389,7 @@ class RepliedStepResolution:
     sent_cadence_count: int = 0
     match_status: str = "unmatched"
     matched_via: str | None = None
+    candidate_cadence_ids: tuple[uuid.UUID, ...] = ()
 
 
 async def resolve_replied_step_for_inbound_message(
@@ -532,12 +585,21 @@ async def _resolve_email_step_from_subject(
         )
         .order_by(CadenceStep.sent_at.desc().nulls_last(), CadenceStep.scheduled_at.desc())
     )
+    sent_steps = list(result.scalars().all())
     subject_matches = [
         step
-        for step in result.scalars().all()
+        for step in sent_steps
         if _normalize_email_subject_for_matching(step.subject_used or step.composed_subject)
         == normalized_subject
     ]
+    matched_via = "email_subject"
+    if not subject_matches:
+        subject_matches = _find_similar_email_subject_steps(
+            sent_steps,
+            normalized_subject,
+        )
+        matched_via = "email_subject_similar"
+
     if not subject_matches:
         return None
 
@@ -545,7 +607,7 @@ async def _resolve_email_step_from_subject(
         return RepliedStepResolution(
             step=subject_matches[0],
             match_status="matched",
-            matched_via="email_subject",
+            matched_via=matched_via,
         )
 
     cadence_ids = {step.cadence_id for step in subject_matches}
@@ -562,6 +624,7 @@ async def _resolve_email_step_from_subject(
             ambiguous=True,
             sent_cadence_count=len(cadence_ids),
             match_status="ambiguous",
+            candidate_cadence_ids=tuple(cadence_ids),
         )
 
     logger.info(
@@ -653,6 +716,69 @@ async def pause_remaining_cadence_steps_after_manual_task_reply(
     return len(remaining_steps)
 
 
+async def hold_cadence_steps_for_ambiguous_reply(
+    *,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    lead_id: uuid.UUID,
+    cadence_ids: tuple[uuid.UUID, ...],
+    interaction_id: uuid.UUID,
+) -> int:
+    if not cadence_ids:
+        return 0
+
+    result = await db.execute(
+        select(CadenceStep).where(
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.lead_id == lead_id,
+            CadenceStep.cadence_id.in_(cadence_ids),
+            CadenceStep.status.in_((StepStatus.PENDING, StepStatus.DISPATCHING)),
+        )
+    )
+    held_steps = list(result.scalars().all())
+    held_at = datetime.now(UTC)
+    for step in held_steps:
+        step.reply_hold_interaction_id = interaction_id
+        step.reply_hold_reason = "ambiguous_reply"
+        step.reply_hold_previous_status = step.status.value
+        step.reply_hold_created_at = held_at
+        step.status = StepStatus.SKIPPED
+    return len(held_steps)
+
+
+async def release_ambiguous_reply_hold(
+    *,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    lead_id: uuid.UUID,
+    interaction_id: uuid.UUID,
+    keep_skipped_cadence_id: uuid.UUID | None = None,
+) -> int:
+    result = await db.execute(
+        select(CadenceStep).where(
+            CadenceStep.tenant_id == tenant_id,
+            CadenceStep.lead_id == lead_id,
+            CadenceStep.reply_hold_interaction_id == interaction_id,
+        )
+    )
+    held_steps = list(result.scalars().all())
+    resumed_steps = 0
+    for step in held_steps:
+        should_resume = (
+            keep_skipped_cadence_id is None or step.cadence_id != keep_skipped_cadence_id
+        )
+        if should_resume and step.status == StepStatus.SKIPPED:
+            step.status = StepStatus.PENDING
+            resumed_steps += 1
+
+        step.reply_hold_interaction_id = None
+        step.reply_hold_reason = None
+        step.reply_hold_previous_status = None
+        step.reply_hold_created_at = None
+
+    return resumed_steps
+
+
 async def _resolve_fallback_step_for_reply(
     *,
     lead_id: uuid.UUID,
@@ -689,6 +815,7 @@ async def _resolve_fallback_step_for_reply(
             ambiguous=True,
             sent_cadence_count=len(cadence_ids),
             match_status="ambiguous",
+            candidate_cadence_ids=tuple(cadence_ids),
         )
 
     if channel == Channel.EMAIL:
@@ -727,7 +854,42 @@ def _normalize_email_subject_for_matching(subject: str | None) -> str:
             break
         normalized = stripped
 
-    return normalize_email_subject(normalized)
+    return normalize_email_subject(normalized).casefold()
+
+
+def _find_similar_email_subject_steps(
+    steps: list[CadenceStep],
+    normalized_subject: str,
+) -> list[CadenceStep]:
+    scored_matches: list[tuple[CadenceStep, float]] = []
+    for step in steps:
+        step_subject = _normalize_email_subject_for_matching(
+            step.subject_used or step.composed_subject
+        )
+        similarity = _email_subject_similarity_score(step_subject, normalized_subject)
+        if similarity >= _EMAIL_SUBJECT_SIMILARITY_THRESHOLD:
+            scored_matches.append((step, similarity))
+
+    if not scored_matches:
+        return []
+
+    best_score = max(score for _step, score in scored_matches)
+    return [step for step, score in scored_matches if score == best_score]
+
+
+def _email_subject_similarity_score(left: str, right: str) -> float:
+    if not left or not right:
+        return 0.0
+    if left == right:
+        return 1.0
+    if min(len(left), len(right)) < _EMAIL_SUBJECT_MIN_SIMILAR_CHARS:
+        return 0.0
+
+    length_delta_ratio = abs(len(left) - len(right)) / max(len(left), len(right))
+    if length_delta_ratio > _EMAIL_SUBJECT_MAX_LENGTH_DELTA_RATIO:
+        return 0.0
+
+    return SequenceMatcher(None, left, right).ratio()
 
 
 async def _load_unipile_account_matches(

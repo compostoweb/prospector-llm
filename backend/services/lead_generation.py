@@ -79,7 +79,7 @@ async def preview_generated_leads(
     if body.source == "b2b_database" and body.verify_linkedin:
         items = await _verify_linkedin_positions(items)
 
-    items = [_apply_preview_quality(item) for item in items]
+    items = [apply_preview_quality(item) for item in items]
 
     return items
 
@@ -162,7 +162,7 @@ def _normalize_preview_item(
     )
 
 
-def _apply_preview_quality(item: LeadGeneratedPreviewItem) -> LeadGeneratedPreviewItem:
+def apply_preview_quality(item: LeadGeneratedPreviewItem) -> LeadGeneratedPreviewItem:
     quality_bucket, quality_score = _score_preview_contact_quality(item)
     return item.model_copy(
         update={
@@ -197,7 +197,7 @@ def _score_preview_contact_quality(
     if has_personal_email:
         return ContactQualityBucket.ORANGE, 0.50
 
-    return ContactQualityBucket.ORANGE, 0.45
+    return ContactQualityBucket.ORANGE, 0.50
 
 
 async def _verify_linkedin_positions(

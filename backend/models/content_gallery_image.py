@@ -54,3 +54,21 @@ class ContentGalleryImage(Base, TenantMixin, TimestampMixin):
     )
     image_filename: Mapped[str | None] = mapped_column(String(500), nullable=True)
     image_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # ── Carrossel ─────────────────────────────────────────────────────
+    position: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Ordem 0-based dentro do carrossel; NULL = imagem standalone/single.",
+    )
+    linkedin_image_urn: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="urn:li:digitalmediaAsset após upload (cache pré-publish).",
+    )
+    carousel_group_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        nullable=True,
+        index=True,
+        comment="Agrupador visual (pasta na galeria) das imagens do mesmo carrossel.",
+    )

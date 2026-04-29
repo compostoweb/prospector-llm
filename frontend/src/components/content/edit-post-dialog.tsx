@@ -10,6 +10,8 @@ import {
   XCircle,
   Trash2,
   ImageIcon,
+  Layers,
+  MessageSquare,
   VideoIcon,
   ChevronDown,
   ChevronUp,
@@ -18,6 +20,8 @@ import {
   Upload,
   Maximize2,
   Download,
+  History,
+  RotateCcw,
 } from "lucide-react"
 import {
   getDayOfMonthFromLocalDateTime,
@@ -39,6 +43,9 @@ import {
   useUploadPostImage,
   useUploadPostVideo,
   useDeletePostVideo,
+  useRetryFirstComment,
+  usePostRevisions,
+  useRestoreRevision,
   type ContentPost,
   type PostPillar,
   type HookType,
@@ -46,6 +53,7 @@ import {
   type ImageSubType,
   type ImageAspectRatio,
   type ImageVisualDirection,
+  type CarouselImageItem,
 } from "@/lib/api/hooks/use-content"
 import {
   Dialog,
@@ -65,6 +73,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { CarouselEditor, CAROUSEL_MIN_IMAGES } from "@/components/content/carousel-editor"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -137,6 +146,9 @@ export function EditPostDialog({
   const [hashtags, setHashtags] = useState("")
   const [publishDate, setPublishDate] = useState("")
   const [weekNumber, setWeekNumber] = useState("")
+  const [firstCommentText, setFirstCommentText] = useState("")
+  const [firstCommentOpen, setFirstCommentOpen] = useState(false)
+  const [revisionsOpen, setRevisionsOpen] = useState(false)
   const [syncWarning, setSyncWarning] = useState<string | null>(null)
   const [improveOpen, setImproveOpen] = useState(false)
   const [instruction, setInstruction] = useState("")
@@ -163,6 +175,9 @@ export function EditPostDialog({
   const [isDownloadingImage, setIsDownloadingImage] = useState(false)
   const imageUploadInputRef = useRef<HTMLInputElement>(null)
 
+  // Carrossel
+  const [carouselOpen, setCarouselOpen] = useState(false)
+
   // Vídeo
   const [videoOpen, setVideoOpen] = useState(false)
   const videoInputRef = useRef<HTMLInputElement>(null)
@@ -185,6 +200,9 @@ export function EditPostDialog({
   const uploadImage = useUploadPostImage()
   const uploadVideo = useUploadPostVideo()
   const deleteVideo = useDeletePostVideo()
+  const retryFirstComment = useRetryFirstComment()
+  const revisionsQuery = usePostRevisions(revisionsOpen && post ? post.id : null)
+  const restoreRevision = useRestoreRevision()
 
   const isActionPending =
     approvePost.isPending ||
@@ -288,6 +306,7 @@ export function EditPostDialog({
     setHashtags(post.hashtags ?? "")
     setPublishDate(utcToLocalDateTimeInputValue(post.publish_date))
     setWeekNumber(post.week_number ? String(post.week_number) : "")
+    setFirstCommentText(post.first_comment_text ?? "")
     setSyncWarning(null)
     setImproveOpen(defaultImproveOpen ?? false)
     setInstruction("")
@@ -365,6 +384,7 @@ export function EditPostDialog({
         character_count: body.length,
         publish_date: publishDate ? localDateToUTC(publishDate) : null,
         week_number: weekNumber ? parseInt(weekNumber, 10) : null,
+        first_comment_text: firstCommentText.trim() ? firstCommentText : null,
       },
     })
     if (result.linkedin_sync_warning) {
@@ -1025,6 +1045,205 @@ export function EditPostDialog({
                 </div>
               )}
             </div>
+
+            {/* ── Seção de carrossel ── */}
+            <div className="rounded-md border border-(--border-subtle)">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium"
+                onClick={() => setCarouselOpen((v) => !v)}
+              >
+                <span className="flex items-center gap-2">
+                  <Layers className="h-4 w-4 text-(--text-secondary)" />
+                  Carrossel
+                  {(post?.carousel_images?.length ?? 0) > 0 && (
+                    <span className="rounded-full bg-(--accent)/15 px-1.5 py-0.5 text-xs text-(--accent)">
+                      {post?.carousel_images?.length ?? 0} imagens
+                    </span>
+                  )}
+                  {post?.media_kind === "carousel" &&
+                    (post?.carousel_images?.length ?? 0) < CAROUSEL_MIN_IMAGES && (
+                      <span className="rounded-full bg-red-500/15 px-1.5 py-0.5 text-xs text-red-600">
+                        Mínimo {CAROUSEL_MIN_IMAGES}
+                      </span>
+                    )}
+                </span>
+                {carouselOpen ? (
+                  <ChevronUp className="h-4 w-4 text-(--text-tertiary)" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 text-(--text-tertiary)" />
+                )}
+              </button>
+
+              {carouselOpen && post && (
+                <div className="border-t border-(--border-subtle) p-3">
+                  <p className="mb-3 text-xs text-(--text-tertiary)">
+                    Carrossel multi-imagem (até 9). Mutualmente exclusivo com imagem única ou vídeo.
+                    Ao adicionar a primeira imagem, o tipo do post muda automaticamente para
+                    &quot;carrossel&quot;.
+                  </p>
+                  <CarouselEditor
+                    postId={post.id}
+                    images={(post.carousel_images ?? []) as CarouselImageItem[]}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* ── Seção de first comment ── */}
+            <div className="rounded-md border border-(--border-subtle)">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium"
+                onClick={() => setFirstCommentOpen((v) => !v)}
+              >
+                <span className="flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4 text-(--text-secondary)" />
+                  Primeiro comentário
+                  {firstCommentText.trim() && (
+                    <span className="rounded-full bg-(--accent)/15 px-1.5 py-0.5 text-xs text-(--accent)">
+                      Configurado
+                    </span>
+                  )}
+                  {post?.first_comment_status === "posted" && (
+                    <span className="rounded-full bg-green-500/15 px-1.5 py-0.5 text-xs text-green-600">
+                      Publicado
+                    </span>
+                  )}
+                  {post?.first_comment_status === "failed" && (
+                    <span className="rounded-full bg-red-500/15 px-1.5 py-0.5 text-xs text-red-600">
+                      Falhou
+                    </span>
+                  )}
+                </span>
+                {firstCommentOpen ? (
+                  <ChevronUp className="h-4 w-4 text-(--text-tertiary)" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 text-(--text-tertiary)" />
+                )}
+              </button>
+              {firstCommentOpen && (
+                <div className="border-t border-(--border-subtle) p-3 flex flex-col gap-2">
+                  <p className="text-xs text-(--text-tertiary)">
+                    Será publicado ~30s após o post ir ao ar. Pin não é suportado oficialmente pela
+                    API do LinkedIn — a feature ficará marcada como &quot;not_supported&quot;.
+                  </p>
+                  <Textarea
+                    value={firstCommentText}
+                    onChange={(e) => setFirstCommentText(e.target.value.slice(0, 1250))}
+                    placeholder="Ex.: Curtiu? Salva esse post! Quer mais conteúdo assim? Comenta aí 👇"
+                    rows={4}
+                    maxLength={1250}
+                  />
+                  <div className="flex items-center justify-between text-xs text-(--text-tertiary)">
+                    <span>{firstCommentText.length}/1250</span>
+                    {post?.first_comment_status === "failed" && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => post && retryFirstComment.mutate({ postId: post.id })}
+                        disabled={retryFirstComment.isPending}
+                      >
+                        {retryFirstComment.isPending ? "Re-tentando…" : "Re-tentar"}
+                      </Button>
+                    )}
+                  </div>
+                  {post?.first_comment_error && (
+                    <p className="text-xs text-red-600" title={post.first_comment_error}>
+                      Erro: {post.first_comment_error.slice(0, 200)}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* ── Seção de Histórico (revisões) ── */}
+            {post && (
+              <div className="rounded-md border border-(--border-subtle)">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium"
+                  onClick={() => setRevisionsOpen((v) => !v)}
+                >
+                  <span className="flex items-center gap-2">
+                    <History className="h-4 w-4 text-(--text-secondary)" />
+                    Histórico de revisões
+                    {revisionsQuery.data && revisionsQuery.data.length > 0 && (
+                      <span className="rounded-full bg-(--accent)/15 px-1.5 py-0.5 text-xs text-(--accent)">
+                        {revisionsQuery.data.length}
+                      </span>
+                    )}
+                  </span>
+                  {revisionsOpen ? (
+                    <ChevronUp className="h-4 w-4 text-(--text-tertiary)" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 text-(--text-tertiary)" />
+                  )}
+                </button>
+                {revisionsOpen && (
+                  <div className="border-t border-(--border-subtle) p-3 flex flex-col gap-2">
+                    {revisionsQuery.isLoading && (
+                      <p className="text-xs text-(--text-tertiary)">Carregando…</p>
+                    )}
+                    {revisionsQuery.data && revisionsQuery.data.length === 0 && (
+                      <p className="text-xs text-(--text-tertiary)">
+                        Nenhuma revisão registrada ainda. Edições e publicações geram snapshots
+                        automáticos.
+                      </p>
+                    )}
+                    {revisionsQuery.data?.map((rev) => {
+                      const reasonLabel: Record<string, string> = {
+                        manual_edit: "Edição manual",
+                        pre_publish: "Pré-publicação",
+                        restore: "Restauração",
+                        system: "Sistema",
+                      }
+                      const canRestore =
+                        post.status === "draft" ||
+                        post.status === "approved" ||
+                        post.status === "failed"
+                      return (
+                        <div
+                          key={rev.id}
+                          className="flex items-start justify-between gap-2 rounded-md border border-(--border-subtle) p-2 text-xs"
+                        >
+                          <div className="flex flex-col gap-1">
+                            <span className="font-medium text-(--text-primary)">
+                              {reasonLabel[rev.reason] ?? rev.reason}
+                            </span>
+                            <span className="text-(--text-tertiary)">
+                              {new Date(rev.created_at).toLocaleString("pt-BR")}
+                            </span>
+                            {rev.snapshot.title && (
+                              <span className="text-(--text-secondary) line-clamp-1">
+                                {rev.snapshot.title}
+                              </span>
+                            )}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={!canRestore || restoreRevision.isPending}
+                            onClick={() =>
+                              restoreRevision.mutate({ postId: post.id, revisionId: rev.id })
+                            }
+                            title={
+                              !canRestore
+                                ? "Só é possível restaurar em rascunho/aprovado/falhou"
+                                : "Restaurar este snapshot"
+                            }
+                          >
+                            <RotateCcw className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* ── Seção de vídeo ── */}
             <div className="rounded-md border border-(--border-subtle)">

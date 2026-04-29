@@ -18,7 +18,7 @@ POST   /content/posts/{id}/publish-now  — publica imediatamente (approved | sc
 from __future__ import annotations
 
 import uuid
-from datetime import UTC
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import (
@@ -35,6 +35,7 @@ from fastapi import (
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible, get_session_no_auth
 from models.content_post import ContentPost
@@ -42,6 +43,7 @@ from schemas.content import (
     ContentPostCreate,
     ContentPostMetricsUpdate,
     ContentPostResponse,
+    ContentPostRevisionResponse,
     ContentPostUpdate,
 )
 from services.content.linkedin_client import LinkedInClientError
@@ -61,7 +63,9 @@ async def _get_post_or_404(
     db: AsyncSession,
 ) -> ContentPost:
     result = await db.execute(
-        select(ContentPost).where(
+        select(ContentPost)
+        .options(selectinload(ContentPost.carousel_images))
+        .where(
             ContentPost.id == post_id,
             ContentPost.tenant_id == tenant_id,
         )
@@ -84,10 +88,17 @@ async def list_posts(
     ),
     pillar: str | None = Query(default=None, description="authority | case | vision"),
     week_number: int | None = Query(default=None, ge=1, le=54),
+    include_deleted: bool = Query(default=False),
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> list[ContentPostResponse]:
-    stmt = select(ContentPost).where(ContentPost.tenant_id == tenant_id)
+    stmt = (
+        select(ContentPost)
+        .options(selectinload(ContentPost.carousel_images))
+        .where(ContentPost.tenant_id == tenant_id)
+    )
+    if not include_deleted:
+        stmt = stmt.where(ContentPost.deleted_at.is_(None))
     if post_status:
         stmt = stmt.where(ContentPost.status == post_status)
     if pillar:
@@ -119,11 +130,12 @@ async def create_post(
         character_count=char_count,
         publish_date=body.publish_date,
         week_number=body.week_number,
+        media_kind=body.media_kind,
         status="draft",
     )
     db.add(post)
     await db.commit()
-    await db.refresh(post)
+    await db.refresh(post, attribute_names=["carousel_images"])
     logger.info("content.post_created", post_id=str(post.id), tenant_id=str(tenant_id))
     return ContentPostResponse.model_validate(post)
 
@@ -155,10 +167,22 @@ async def update_post(
 
     was_published = post.status == "published" and post.linkedin_post_urn is not None
 
-    for field, value in body.model_dump(exclude_unset=True).items():
+    update_data = body.model_dump(exclude_unset=True)
+    # Snapshot apenas se algum campo versionado mudou
+    versioned = {"title", "body", "hashtags", "pillar", "hook_type", "first_comment_text"}
+    has_versioned_change = any(
+        field in update_data and getattr(post, field, None) != update_data[field]
+        for field in versioned
+    )
+    if has_versioned_change:
+        from services.content.revision_service import REASON_MANUAL_EDIT, snapshot_post
+
+        await snapshot_post(db, post=post, reason=REASON_MANUAL_EDIT)
+
+    for field, value in update_data.items():
         setattr(post, field, value)
     await db.commit()
-    await db.refresh(post)
+    await db.refresh(post, attribute_names=["carousel_images"])
     logger.info("content.post_updated", post_id=str(post_id), tenant_id=str(tenant_id))
 
     response = ContentPostResponse.model_validate(post)
@@ -180,21 +204,138 @@ async def update_post(
 @router.delete("/{post_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_post(
     post_id: uuid.UUID,
+    hard: bool = Query(default=False, description="Se True, faz hard delete + remove no LinkedIn"),
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> None:
+    """Soft delete por padrão. ?hard=true mantém o comportamento antigo (hard delete + LinkedIn)."""
     post = await _get_post_or_404(post_id, tenant_id, db)
-    try:
-        await delete_from_linkedin(db, post=post, tenant_id=tenant_id)
-    except LinkedInClientError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Erro ao deletar post no LinkedIn (API {exc.status_code}): {exc.detail}. "
-            "O post local não foi removido.",
-        ) from exc
-    await db.delete(post)
+
+    if hard:
+        try:
+            await delete_from_linkedin(db, post=post, tenant_id=tenant_id)
+        except LinkedInClientError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Erro ao deletar post no LinkedIn (API {exc.status_code}): {exc.detail}. "
+                "O post local não foi removido.",
+            ) from exc
+        await db.delete(post)
+        await db.commit()
+        logger.info("content.post_hard_deleted", post_id=str(post_id), tenant_id=str(tenant_id))
+        return
+
+    if post.deleted_at is not None:
+        # Idempotente
+        return
+    post.deleted_at = datetime.now(UTC)
     await db.commit()
-    logger.info("content.post_deleted", post_id=str(post_id), tenant_id=str(tenant_id))
+    logger.info("content.post_soft_deleted", post_id=str(post_id), tenant_id=str(tenant_id))
+
+
+@router.post("/{post_id}/restore", response_model=ContentPostResponse)
+async def restore_post(
+    post_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> ContentPostResponse:
+    """Restaura um post soft-deleted (deleted_at IS NOT NULL)."""
+    result = await db.execute(
+        select(ContentPost)
+        .where(ContentPost.id == post_id, ContentPost.tenant_id == tenant_id)
+        .options(selectinload(ContentPost.carousel_images))
+    )
+    post = result.scalar_one_or_none()
+    if post is None:
+        raise HTTPException(status_code=404, detail="Post não encontrado")
+    if post.deleted_at is None:
+        raise HTTPException(status_code=409, detail="Post não está deletado")
+    post.deleted_at = None
+    await db.commit()
+    await db.refresh(post)
+    logger.info("content.post_restored", post_id=str(post_id), tenant_id=str(tenant_id))
+    return ContentPostResponse.model_validate(post)
+
+
+# ── Revisões (Phase 3D) ───────────────────────────────────────────────
+
+
+@router.get("/{post_id}/revisions", response_model=list[ContentPostRevisionResponse])
+async def list_post_revisions(
+    post_id: uuid.UUID,
+    limit: int = Query(default=50, ge=1, le=200),
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> list[ContentPostRevisionResponse]:
+    """Lista revisões (snapshots) de um post, mais recentes primeiro."""
+    from models.content_post_revision import ContentPostRevision
+
+    # Confirma ownership
+    await _get_post_or_404(post_id, tenant_id, db)
+
+    result = await db.execute(
+        select(ContentPostRevision)
+        .where(
+            ContentPostRevision.post_id == post_id,
+            ContentPostRevision.tenant_id == tenant_id,
+        )
+        .order_by(ContentPostRevision.created_at.desc())
+        .limit(limit)
+    )
+    revisions = list(result.scalars().all())
+    return [ContentPostRevisionResponse.model_validate(r) for r in revisions]
+
+
+@router.post("/{post_id}/revisions/{revision_id}/restore", response_model=ContentPostResponse)
+async def restore_post_revision(
+    post_id: uuid.UUID,
+    revision_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> ContentPostResponse:
+    """Aplica snapshot de revisão antiga ao post.
+
+    Cria nova revisão com reason='restore' antes de aplicar.
+    Permitido apenas em status draft|approved|failed (nunca published/scheduled).
+    """
+    from models.content_post_revision import ContentPostRevision
+    from services.content.revision_service import (
+        REASON_RESTORE,
+        apply_snapshot,
+        snapshot_post,
+    )
+
+    post = await _get_post_or_404(post_id, tenant_id, db)
+    if post.status not in ("draft", "approved", "failed"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Restauração não permitida em status {post.status}",
+        )
+
+    rev_result = await db.execute(
+        select(ContentPostRevision).where(
+            ContentPostRevision.id == revision_id,
+            ContentPostRevision.post_id == post_id,
+            ContentPostRevision.tenant_id == tenant_id,
+        )
+    )
+    revision = rev_result.scalar_one_or_none()
+    if revision is None:
+        raise HTTPException(status_code=404, detail="Revisão não encontrada")
+
+    # Snapshot do estado atual antes de aplicar
+    await snapshot_post(db, post=post, reason=REASON_RESTORE)
+    changed = apply_snapshot(post, dict(revision.snapshot))
+    await db.commit()
+    await db.refresh(post, attribute_names=["carousel_images"])
+    logger.info(
+        "content.post_revision_restored",
+        post_id=str(post_id),
+        revision_id=str(revision_id),
+        changed_fields=changed,
+        tenant_id=str(tenant_id),
+    )
+    return ContentPostResponse.model_validate(post)
 
 
 # ── Aprovacao ─────────────────────────────────────────────────────────
@@ -327,6 +468,50 @@ async def publish_now(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     logger.info("content.post_published_api", post_id=str(post_id), tenant_id=str(tenant_id))
+    return ContentPostResponse.model_validate(post)
+
+
+# ── First comment retry ──────────────────────────────────────────────
+
+
+@router.post("/{post_id}/first-comment/retry", response_model=ContentPostResponse)
+async def retry_first_comment(
+    post_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> ContentPostResponse:
+    """
+    Re-tenta postar o first comment de um post ja publicado.
+
+    Aceita posts com first_comment_status == "failed" ou "pending".
+    Recarrega post com carousel_images apos atualizacao.
+    """
+    from services.content.comment_publisher import post_first_comment
+    from services.content.linkedin_client import LinkedInClientError
+
+    try:
+        await post_first_comment(db, post_id=post_id, tenant_id=tenant_id)
+    except LinkedInClientError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"LinkedIn API error {exc.status_code}: {exc.detail}",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+
+    # Reload com carousel_images para resposta consistente
+    result = await db.execute(
+        select(ContentPost)
+        .where(ContentPost.id == post_id, ContentPost.tenant_id == tenant_id)
+        .options(selectinload(ContentPost.carousel_images))
+    )
+    post = result.scalar_one()
+    logger.info(
+        "content.first_comment_retried",
+        post_id=str(post_id),
+        tenant_id=str(tenant_id),
+        status=post.first_comment_status,
+    )
     return ContentPostResponse.model_validate(post)
 
 

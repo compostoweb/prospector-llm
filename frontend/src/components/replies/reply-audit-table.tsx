@@ -58,6 +58,18 @@ export interface ReplyAuditTableItem {
   replyMatchSource: string | null
   replyMatchSentCadenceCount: number | null
   contentText: string | null
+  candidateSteps?: ReplyAuditCandidateStep[]
+}
+
+export interface ReplyAuditCandidateStep {
+  id: string
+  cadence_id: string
+  cadence_name: string | null
+  step_number: number
+  channel: string
+  status: string
+  scheduled_at: string
+  sent_at: string | null
 }
 
 interface ReplyAuditTableProps {
@@ -131,6 +143,10 @@ function getReplyAuditChannelFilterLabel(filter: ReplyAuditChannelFilter): strin
   return formatChannelLabel(filter)
 }
 
+function isAmbiguousHold(item: ReplyAuditTableItem): boolean {
+  return item.replyMatchStatus === "ambiguous" && item.replyMatchSource === "ambiguous_reply_hold"
+}
+
 export function ReplyAuditTable({
   items,
   emptyTitle,
@@ -190,7 +206,19 @@ export function ReplyAuditTable({
   }, [auditRows])
 
   const candidateSteps = useMemo(() => {
-    if (!selectedItem || !stepsQuery.data) {
+    if (!selectedItem) {
+      return []
+    }
+
+    if (selectedItem.candidateSteps && selectedItem.candidateSteps.length > 0) {
+      return [...selectedItem.candidateSteps].sort((left, right) => {
+        const leftTime = new Date(left.sent_at ?? left.scheduled_at).getTime()
+        const rightTime = new Date(right.sent_at ?? right.scheduled_at).getTime()
+        return rightTime - leftTime
+      })
+    }
+
+    if (!stepsQuery.data) {
       return []
     }
 
@@ -429,12 +457,17 @@ export function ReplyAuditTable({
                       <BadgeChannel channel={item.channel} />
                     </td>
                     <td className="px-4 py-3 align-top">
-                      <span
-                        className={`inline-flex items-center gap-1 rounded-(--radius-full) border px-2 py-0.5 text-xs font-medium ${statusClass[item.replyMatchStatus]}`}
-                      >
-                        <AlertTriangle size={12} aria-hidden="true" />
-                        {statusLabel[item.replyMatchStatus]}
-                      </span>
+                      <div className="space-y-1">
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-(--radius-full) border px-2 py-0.5 text-xs font-medium ${statusClass[item.replyMatchStatus]}`}
+                        >
+                          <AlertTriangle size={12} aria-hidden="true" />
+                          {statusLabel[item.replyMatchStatus]}
+                        </span>
+                        {isAmbiguousHold(item) ? (
+                          <p className="text-xs text-(--warning)">Próximos steps em hold</p>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="px-4 py-3 align-top text-xs text-(--text-tertiary)">
                       <time dateTime={item.createdAt}>{formatRelativeTime(item.createdAt)}</time>
@@ -488,6 +521,11 @@ export function ReplyAuditTable({
                     <AlertTriangle size={12} aria-hidden="true" />
                     {statusLabel[item.replyMatchStatus]}
                   </span>
+                  {isAmbiguousHold(item) ? (
+                    <span className="inline-flex rounded-(--radius-full) border border-(--warning) bg-(--warning-subtle) px-2 py-0.5 text-xs font-medium text-(--warning-subtle-fg)">
+                      Steps em hold
+                    </span>
+                  ) : null}
                 </div>
                 <div className="mt-2 flex items-center justify-between gap-3 text-xs text-(--text-tertiary)">
                   <time dateTime={item.createdAt}>{formatRelativeTime(item.createdAt)}</time>

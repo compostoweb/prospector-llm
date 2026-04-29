@@ -10,6 +10,7 @@ export type PostPillar = "authority" | "case" | "vision"
 export type PostStatus = "draft" | "approved" | "scheduled" | "published" | "failed"
 export type ContentGoal = "editorial" | "lead_magnet_launch"
 export type LMDistributionType = "comment" | "dm" | "link_bio"
+export type MediaKind = "none" | "image" | "video" | "carousel"
 export type HookType =
   | "loop_open"
   | "contrarian"
@@ -60,6 +61,26 @@ export interface ContentPost {
   created_at: string
   updated_at: string
   linkedin_sync_warning?: string | null
+  // Tipo de mídia (none/image/video/carousel)
+  media_kind?: MediaKind
+  // Imagens do carrossel (preenchido quando media_kind === 'carousel')
+  carousel_images?: CarouselImageItem[]
+  // First comment + pin
+  first_comment_text?: string | null
+  first_comment_status?: "pending" | "posted" | "failed" | "skipped"
+  first_comment_pin_status?: "pending" | "pinned" | "failed" | "not_supported"
+  first_comment_urn?: string | null
+  first_comment_posted_at?: string | null
+  first_comment_error?: string | null
+}
+
+export interface CarouselImageItem {
+  id: string
+  image_url: string
+  image_s3_key: string | null
+  position: number
+  linkedin_image_urn: string | null
+  carousel_group_id: string | null
 }
 
 export interface ContentTheme {
@@ -376,6 +397,8 @@ export interface ContentPostUpdateBody {
   character_count?: number | null
   publish_date?: string | null
   week_number?: number | null
+  media_kind?: MediaKind | null
+  first_comment_text?: string | null
 }
 
 export function useUpdatePost() {
@@ -566,6 +589,21 @@ export interface GalleryImage {
   source: "generated" | "uploaded"
   created_at: string | null
   updated_at: string | null
+  position?: number | null
+  carousel_group_id?: string | null
+  linkedin_image_urn?: string | null
+}
+
+export interface CarouselGroup {
+  carousel_group_id: string
+  linked_post_id: string | null
+  post_title: string | null
+  post_status: string | null
+  image_count: number
+  cover_image_url: string | null
+  images: GalleryImage[]
+  created_at: string | null
+  updated_at: string | null
 }
 
 export interface GalleryImagesResponse {
@@ -573,6 +611,7 @@ export interface GalleryImagesResponse {
   total: number
   page: number
   page_size: number
+  carousel_groups?: CarouselGroup[]
 }
 
 export interface GalleryImagesFilters {
@@ -583,6 +622,7 @@ export interface GalleryImagesFilters {
   pillar?: PostPillar | undefined
   status?: PostStatus | undefined
   search?: string | undefined
+  group_by?: "carousel" | undefined
 }
 
 export function useContentImages(filters?: GalleryImagesFilters) {
@@ -595,6 +635,7 @@ export function useContentImages(filters?: GalleryImagesFilters) {
   if (filters?.pillar) params.set("pillar", filters.pillar)
   if (filters?.status) params.set("status", filters.status)
   if (filters?.search) params.set("search", filters.search)
+  if (filters?.group_by) params.set("group_by", filters.group_by)
   const qs = params.toString()
   return useQuery({
     queryKey: [...contentKeys.all, "images", filters],
@@ -1175,5 +1216,233 @@ export function useSaveNotionMappings() {
       return res.json() as Promise<{ ok: boolean; fields_mapped: string[] }>
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: contentKeys.settings() }),
+  })
+}
+
+// ── Carrossel ─────────────────────────────────────────────────────────
+
+export function useAddCarouselImage() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ postId, file }: { postId: string; file: File }) => {
+      const formData = new FormData()
+      formData.append("file", file)
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/posts/${postId}/carousel/images`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
+          body: formData,
+        },
+      )
+      if (!res.ok) throw await buildApiError(res, "Erro ao adicionar imagem ao carrossel")
+      return res.json() as Promise<CarouselImageItem[]>
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: contentKeys.post(vars.postId) })
+      qc.invalidateQueries({ queryKey: contentKeys.posts() })
+      qc.invalidateQueries({ queryKey: [...contentKeys.all, "images"] })
+    },
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "Erro ao adicionar imagem"),
+  })
+}
+
+export function useImportCarouselFromGallery() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ postId, imageIds }: { postId: string; imageIds: string[] }) => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/posts/${postId}/carousel/images/from-gallery`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session?.accessToken ?? ""}`,
+          },
+          body: JSON.stringify({ image_ids: imageIds }),
+        },
+      )
+      if (!res.ok) throw await buildApiError(res, "Erro ao importar imagens")
+      return res.json() as Promise<CarouselImageItem[]>
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: contentKeys.post(vars.postId) })
+      qc.invalidateQueries({ queryKey: contentKeys.posts() })
+      qc.invalidateQueries({ queryKey: [...contentKeys.all, "images"] })
+    },
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "Erro ao importar imagens"),
+  })
+}
+
+export function useRemoveCarouselImage() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ postId, imageId }: { postId: string; imageId: string }) => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/posts/${postId}/carousel/images/${imageId}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
+        },
+      )
+      if (!res.ok) throw await buildApiError(res, "Erro ao remover imagem do carrossel")
+      return res.json() as Promise<CarouselImageItem[]>
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: contentKeys.post(vars.postId) })
+      qc.invalidateQueries({ queryKey: contentKeys.posts() })
+      qc.invalidateQueries({ queryKey: [...contentKeys.all, "images"] })
+    },
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "Erro ao remover imagem"),
+  })
+}
+
+export function useReorderCarousel() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ postId, order }: { postId: string; order: string[] }) => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/posts/${postId}/carousel/reorder`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session?.accessToken ?? ""}`,
+          },
+          body: JSON.stringify({ order }),
+        },
+      )
+      if (!res.ok) throw await buildApiError(res, "Erro ao reordenar carrossel")
+      return res.json() as Promise<CarouselImageItem[]>
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: contentKeys.post(vars.postId) })
+      qc.invalidateQueries({ queryKey: contentKeys.posts() })
+    },
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "Erro ao reordenar carrossel"),
+  })
+}
+export function useRetryFirstComment() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ postId }: { postId: string }) => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/posts/${postId}/first-comment/retry`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session?.accessToken ?? ""}`,
+          },
+        },
+      )
+      if (!res.ok) throw await buildApiError(res, "Erro ao re-tentar first comment")
+      return res.json() as Promise<ContentPost>
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: contentKeys.post(vars.postId) })
+      qc.invalidateQueries({ queryKey: contentKeys.posts() })
+      toast.success("First comment publicado")
+    },
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "Erro ao re-tentar first comment"),
+  })
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Revisões (Phase 3D)
+// ─────────────────────────────────────────────────────────────────────
+
+export interface ContentPostRevision {
+  id: string
+  post_id: string
+  tenant_id: string
+  snapshot: {
+    title?: string | null
+    body?: string | null
+    hashtags?: string | null
+    pillar?: string | null
+    hook_type?: string | null
+    first_comment_text?: string | null
+  }
+  reason: string
+  created_by: string | null
+  created_at: string
+}
+
+export function usePostRevisions(postId: string | null | undefined) {
+  const { data: session } = useSession()
+  return useQuery({
+    queryKey: ["content", "revisions", postId],
+    queryFn: async () => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/posts/${postId}/revisions`,
+        {
+          headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
+        },
+      )
+      if (!res.ok) throw await buildApiError(res, "Erro ao carregar revisões")
+      return res.json() as Promise<ContentPostRevision[]>
+    },
+    enabled: !!postId && !!session?.accessToken,
+  })
+}
+
+export function useRestoreRevision() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ postId, revisionId }: { postId: string; revisionId: string }) => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/posts/${postId}/revisions/${revisionId}/restore`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
+        },
+      )
+      if (!res.ok) throw await buildApiError(res, "Erro ao restaurar revisão")
+      return res.json() as Promise<ContentPost>
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: contentKeys.post(vars.postId) })
+      qc.invalidateQueries({ queryKey: contentKeys.posts() })
+      qc.invalidateQueries({ queryKey: ["content", "revisions", vars.postId] })
+      toast.success("Revisão restaurada")
+    },
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "Erro ao restaurar revisão"),
+  })
+}
+
+export function useRestorePost() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ postId }: { postId: string }) => {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/posts/${postId}/restore`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` },
+        },
+      )
+      if (!res.ok) throw await buildApiError(res, "Erro ao restaurar post")
+      return res.json() as Promise<ContentPost>
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: contentKeys.post(vars.postId) })
+      qc.invalidateQueries({ queryKey: contentKeys.posts() })
+      toast.success("Post restaurado")
+    },
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "Erro ao restaurar post"),
   })
 }

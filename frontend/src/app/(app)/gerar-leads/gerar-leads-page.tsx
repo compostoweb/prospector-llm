@@ -28,10 +28,10 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import {
-  type ContactQualityBucket,
   type GeneratedLeadPreviewItem,
   useGenerateLeadsImport,
   useGenerateLeadsPreview,
+  useRecalculateGeneratedLeadPreviewQuality,
 } from "@/lib/api/hooks/use-leads"
 import { ContactQualityBadge } from "@/components/leads/contact-quality-badge"
 import { useCreateLeadList, useLeadLists } from "@/lib/api/hooks/use-lead-lists"
@@ -96,6 +96,8 @@ interface PreviewRow {
   qualityScore: number | null
   generatedItem?: GeneratedLeadPreviewItem
 }
+
+type ContactQualityBucket = GeneratedLeadPreviewItem["quality_bucket"]
 
 const sourceOptions: Array<{
   id: LeadGeneratorSource
@@ -162,6 +164,7 @@ export default function GerarLeadsPage() {
   const { data: leadLists } = useLeadLists()
   const createLeadList = useCreateLeadList()
   const previewGeneratedLeads = useGenerateLeadsPreview()
+  const recalculatePreviewQuality = useRecalculateGeneratedLeadPreviewQuality()
   const importGeneratedLeads = useGenerateLeadsImport()
   const saveMapsSchedule = useUpsertCaptureSchedule("google_maps")
   const saveB2BSchedule = useUpsertCaptureSchedule("b2b_database")
@@ -201,22 +204,25 @@ export default function GerarLeadsPage() {
   const selectedRows = previewRows.filter((row) => selectedIds.includes(row.id))
   const allSelected = previewRows.length > 0 && previewRows.length === selectedIds.length
 
-  function handleApplyLinkedInData(previewId: string) {
-    setGeneratedPreview((prev) =>
-      prev.map((item) => {
-        if (item.preview_id !== previewId) return item
-        return {
-          ...item,
-          job_title: item.li_current_title ?? item.job_title,
-          company: item.li_current_company ?? item.company,
-          li_outdated: false,
-          ...recomputePreviewQuality({
-            ...item,
-            li_outdated: false,
-          }),
-        }
-      }),
-    )
+  async function handleApplyLinkedInData(previewId: string) {
+    const currentItem = generatedPreview.find((item) => item.preview_id === previewId)
+    if (!currentItem) return
+
+    const updatedItem = {
+      ...currentItem,
+      job_title: currentItem.li_current_title ?? currentItem.job_title,
+      company: currentItem.li_current_company ?? currentItem.company,
+      li_outdated: false,
+    }
+
+    try {
+      const qualityUpdatedItem = await recalculatePreviewQuality.mutateAsync(updatedItem)
+      setGeneratedPreview((prev) =>
+        prev.map((item) => (item.preview_id === previewId ? qualityUpdatedItem : item)),
+      )
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao recalcular qualidade")
+    }
   }
 
   async function handlePreview() {
@@ -1218,31 +1224,6 @@ export default function GerarLeadsPage() {
       </AlertDialog>
     </div>
   )
-}
-
-function recomputePreviewQuality(item: GeneratedLeadPreviewItem): {
-  quality_bucket: ContactQualityBucket | null
-  quality_score: number | null
-} {
-  if (!item.email_corporate && !item.email_personal && !item.phone) {
-    return { quality_bucket: null, quality_score: null }
-  }
-  if (item.li_outdated && (item.email_corporate || item.email_personal)) {
-    return { quality_bucket: "red", quality_score: 0.2 }
-  }
-  if (item.email_corporate && item.li_verified) {
-    return { quality_bucket: "green", quality_score: 0.85 }
-  }
-  if (item.email_corporate) {
-    return { quality_bucket: "orange", quality_score: 0.65 }
-  }
-  if (item.email_personal && item.li_verified) {
-    return { quality_bucket: "orange", quality_score: 0.55 }
-  }
-  if (item.email_personal) {
-    return { quality_bucket: "orange", quality_score: 0.5 }
-  }
-  return { quality_bucket: "orange", quality_score: 0.45 }
 }
 
 function ScheduleDetailModal({

@@ -383,6 +383,23 @@ async def test_get_cadence_reply_management_returns_replies_and_audit_items(
         item for item in data["audit_items"] if item["reply_match_status"] == "low_confidence"
     )
     assert low_confidence_item["content_text"] == "Backup realizado com sucesso."
+    ambiguous_item = next(
+        item for item in data["audit_items"] if item["reply_match_status"] == "ambiguous"
+    )
+    assert replied_step.scheduled_at is not None
+    assert replied_step.sent_at is not None
+    assert ambiguous_item["candidate_steps"] == [
+        {
+            "id": str(replied_step.id),
+            "cadence_id": str(cadence_id),
+            "cadence_name": created["name"],
+            "step_number": 1,
+            "channel": "email",
+            "status": "replied",
+            "scheduled_at": replied_step.scheduled_at.isoformat().replace("+00:00", "Z"),
+            "sent_at": replied_step.sent_at.isoformat().replace("+00:00", "Z"),
+        }
+    ]
 
 
 async def test_get_cadence_reply_management_excludes_reviewed_audit_items(

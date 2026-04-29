@@ -335,6 +335,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/analytics/linkedin/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Linkedin Stats
+         * @description Estatísticas gerais de LinkedIn separadas entre convite e DM.
+         */
+        get: operations["get_linkedin_stats_analytics_linkedin_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/analytics/email/cadences": {
         parameters: {
             query?: never;
@@ -1062,6 +1082,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/leads/b2b-actors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List B2B Actors
+         * @description Retorna a lista de atores Apify disponíveis para a fonte B2B.
+         */
+        get: operations["list_b2b_actors_leads_b2b_actors_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/leads/generate-preview": {
         parameters: {
             query?: never;
@@ -1073,6 +1113,23 @@ export interface paths {
         put?: never;
         /** Generate Leads Preview */
         post: operations["generate_leads_preview_leads_generate_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/leads/generate-preview/quality": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Recalculate Generated Lead Preview Quality */
+        post: operations["recalculate_generated_lead_preview_quality_leads_generate_preview_quality_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1984,6 +2041,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{task_id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reopen Task */
+        post: operations["reopen_task_tasks__task_id__reopen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/inbox/sync": {
         parameters: {
             query?: never;
@@ -2779,8 +2853,74 @@ export interface paths {
         /** Update Post */
         put: operations["update_post_api_content_posts__post_id__put"];
         post?: never;
-        /** Delete Post */
+        /**
+         * Delete Post
+         * @description Soft delete por padrão. ?hard=true mantém o comportamento antigo (hard delete + LinkedIn).
+         */
         delete: operations["delete_post_api_content_posts__post_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/posts/{post_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Post
+         * @description Restaura um post soft-deleted (deleted_at IS NOT NULL).
+         */
+        post: operations["restore_post_api_content_posts__post_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/posts/{post_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Post Revisions
+         * @description Lista revisões (snapshots) de um post, mais recentes primeiro.
+         */
+        get: operations["list_post_revisions_api_content_posts__post_id__revisions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/posts/{post_id}/revisions/{revision_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Post Revision
+         * @description Aplica snapshot de revisão antiga ao post.
+         *
+         *     Cria nova revisão com reason='restore' antes de aplicar.
+         *     Permitido apenas em status draft|approved|failed (nunca published/scheduled).
+         */
+        post: operations["restore_post_revision_api_content_posts__post_id__revisions__revision_id__restore_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2875,6 +3015,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/content/posts/{post_id}/first-comment/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry First Comment
+         * @description Re-tenta postar o first comment de um post ja publicado.
+         *
+         *     Aceita posts com first_comment_status == "failed" ou "pending".
+         *     Recarrega post com carousel_images apos atualizacao.
+         */
+        post: operations["retry_first_comment_api_content_posts__post_id__first_comment_retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/content/posts/{post_id}/image": {
         parameters: {
             query?: never;
@@ -2951,6 +3114,74 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/content/posts/{post_id}/carousel/images": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Faz upload de uma imagem e adiciona ao final do carrossel do post */
+        post: operations["add_carousel_image_api_content_posts__post_id__carousel_images_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/posts/{post_id}/carousel/images/from-gallery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Vincula imagens da galeria ao carrossel do post */
+        post: operations["import_carousel_images_from_gallery_api_content_posts__post_id__carousel_images_from_gallery_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/posts/{post_id}/carousel/images/{image_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove uma imagem do carrossel e recompacta posições */
+        delete: operations["remove_carousel_image_api_content_posts__post_id__carousel_images__image_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/posts/{post_id}/carousel/reorder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Reordena as imagens do carrossel */
+        patch: operations["reorder_carousel_api_content_posts__post_id__carousel_reorder_patch"];
         trace?: never;
     };
     "/api/content/themes": {
@@ -4134,6 +4365,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/content/images/{image_id}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retorna a imagem standalone da galeria via proxy do S3 privado
+         * @description Faz proxy da imagem standalone da galeria quando o bucket e privado.
+         */
+        get: operations["get_gallery_image_file_api_content_images__image_id__file_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/images": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lista imagens da galeria com filtros e paginacao
+         * @description Retorna imagens da galeria unindo posts reais e assets standalone.
+         */
+        get: operations["list_gallery_images_api_content_images_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/images/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Gera imagem standalone com IA sem criar post
+         * @description Gera uma imagem com IA e salva como asset independente da galeria.
+         */
+        post: operations["generate_standalone_image_api_content_images_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/images/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload de imagem standalone para a galeria
+         * @description Faz upload de uma imagem para a galeria como asset independente.
+         */
+        post: operations["upload_standalone_image_api_content_images_upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/images/{image_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove uma imagem da galeria
+         * @description Remove uma imagem da galeria, seja asset standalone ou imagem de post.
+         */
+        delete: operations["delete_gallery_image_api_content_images__image_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/content/sendpulse/test-connection": {
         parameters: {
             query?: never;
@@ -4436,6 +4767,14 @@ export interface components {
             /** Created At */
             created_at: string | null;
         };
+        /** Body_add_carousel_image_api_content_posts__post_id__carousel_images_post */
+        Body_add_carousel_image_api_content_posts__post_id__carousel_images_post: {
+            /**
+             * File
+             * Format: binary
+             */
+            file: string;
+        };
         /** Body_create_voice_tts_voices__provider__post */
         Body_create_voice_tts_voices__provider__post: {
             /** Name */
@@ -4524,6 +4863,14 @@ export interface components {
         };
         /** Body_upload_post_video_api_content_posts__post_id__upload_video_post */
         Body_upload_post_video_api_content_posts__post_id__upload_video_post: {
+            /**
+             * File
+             * Format: binary
+             */
+            file: string;
+        };
+        /** Body_upload_standalone_image_api_content_images_upload_post */
+        Body_upload_standalone_image_api_content_images_upload_post: {
             /**
              * File
              * Format: binary
@@ -5137,6 +5484,11 @@ export interface components {
             /** Cadence Name */
             cadence_name: string;
             /**
+             * Total Leads
+             * @default 0
+             */
+            total_leads: number;
+            /**
              * Leads Active
              * @default 0
              */
@@ -5156,6 +5508,33 @@ export interface components {
              * @default 0
              */
             reply_rate: number;
+        };
+        /** CadenceReplyAuditCandidateStepResponse */
+        CadenceReplyAuditCandidateStepResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Cadence Id
+             * Format: uuid
+             */
+            cadence_id: string;
+            /** Cadence Name */
+            cadence_name?: string | null;
+            /** Step Number */
+            step_number: number;
+            channel: components["schemas"]["Channel"];
+            /** Status */
+            status: string;
+            /**
+             * Scheduled At
+             * Format: date-time
+             */
+            scheduled_at: string;
+            /** Sent At */
+            sent_at?: string | null;
         };
         /** CadenceReplyAuditItemResponse */
         CadenceReplyAuditItemResponse: {
@@ -5179,6 +5558,8 @@ export interface components {
             reply_match_sent_cadence_count?: number | null;
             /** Content Text */
             content_text?: string | null;
+            /** Candidate Steps */
+            candidate_steps?: components["schemas"]["CadenceReplyAuditCandidateStepResponse"][];
         };
         /** CadenceReplyEventResponse */
         CadenceReplyEventResponse: {
@@ -5202,6 +5583,16 @@ export interface components {
             reply_text?: string | null;
             /** Reply Match Source */
             reply_match_source?: string | null;
+            /** Pipedrive Sync Status */
+            pipedrive_sync_status?: string | null;
+            /** Pipedrive Person Id */
+            pipedrive_person_id?: number | null;
+            /** Pipedrive Deal Id */
+            pipedrive_deal_id?: number | null;
+            /** Pipedrive Synced At */
+            pipedrive_synced_at?: string | null;
+            /** Pipedrive Sync Error */
+            pipedrive_sync_error?: string | null;
         };
         /** CadenceReplyManagementResponse */
         CadenceReplyManagementResponse: {
@@ -5590,6 +5981,70 @@ export interface components {
             b2b_company_sizes?: string[];
         };
         /**
+         * CarouselGroup
+         * @description Grupo (pasta) de imagens de carrossel na galeria.
+         */
+        CarouselGroup: {
+            /**
+             * Carousel Group Id
+             * Format: uuid
+             */
+            carousel_group_id: string;
+            /** Linked Post Id */
+            linked_post_id?: string | null;
+            /** Post Title */
+            post_title?: string | null;
+            /** Post Status */
+            post_status?: string | null;
+            /** Image Count */
+            image_count: number;
+            /** Cover Image Url */
+            cover_image_url?: string | null;
+            /** Images */
+            images: components["schemas"]["GalleryImage"][];
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * CarouselImageItem
+         * @description Imagem vinculada a um post como item de carrossel.
+         */
+        CarouselImageItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Image Url */
+            image_url: string;
+            /** Image S3 Key */
+            image_s3_key?: string | null;
+            /** Position */
+            position: number;
+            /** Linkedin Image Urn */
+            linkedin_image_urn?: string | null;
+            /** Carousel Group Id */
+            carousel_group_id?: string | null;
+        };
+        /**
+         * CarouselImportFromGalleryRequest
+         * @description Body do POST /posts/{id}/carousel/images/from-gallery.
+         */
+        CarouselImportFromGalleryRequest: {
+            /** Image Ids */
+            image_ids: string[];
+        };
+        /**
+         * CarouselReorderRequest
+         * @description Body do PATCH /posts/{id}/carousel/reorder.
+         */
+        CarouselReorderRequest: {
+            /** Order */
+            order: string[];
+        };
+        /**
          * Channel
          * @description Canais de comunicação disponíveis.
          * @enum {string}
@@ -5725,6 +6180,18 @@ export interface components {
                 [key: string]: unknown;
             } | null;
         };
+        /**
+         * ContactPointKind
+         * @description Tipo canônico de ponto de contato do lead.
+         * @enum {string}
+         */
+        ContactPointKind: "email" | "phone";
+        /**
+         * ContactQualityBucket
+         * @description Bucket visual de qualidade do contato.
+         * @enum {string}
+         */
+        ContactQualityBucket: "red" | "orange" | "green";
         /** ContentLMLeadConvertResponse */
         ContentLMLeadConvertResponse: {
             /**
@@ -6217,6 +6684,14 @@ export interface components {
             publish_date?: string | null;
             /** Week Number */
             week_number?: number | null;
+            /**
+             * Media Kind
+             * @default none
+             * @enum {string}
+             */
+            media_kind: "none" | "image" | "video" | "carousel";
+            /** First Comment Text */
+            first_comment_text?: string | null;
         };
         /** ContentPostMetricsUpdate */
         ContentPostMetricsUpdate: {
@@ -6282,6 +6757,11 @@ export interface components {
             linkedin_post_urn: string | null;
             /** Linkedin Scheduled Id */
             linkedin_scheduled_id: string | null;
+            /**
+             * Media Kind
+             * @default none
+             */
+            media_kind: string;
             /** Image Url */
             image_url: string | null;
             /** Image S3 Key */
@@ -6340,6 +6820,63 @@ export interface components {
             updated_at: string;
             /** Linkedin Sync Warning */
             linkedin_sync_warning?: string | null;
+            /**
+             * Carousel Images
+             * @default []
+             */
+            carousel_images: components["schemas"]["CarouselImageItem"][];
+            /** First Comment Text */
+            first_comment_text?: string | null;
+            /**
+             * First Comment Status
+             * @default pending
+             */
+            first_comment_status: string;
+            /**
+             * First Comment Pin Status
+             * @default pending
+             */
+            first_comment_pin_status: string;
+            /** First Comment Urn */
+            first_comment_urn?: string | null;
+            /** First Comment Posted At */
+            first_comment_posted_at?: string | null;
+            /** First Comment Error */
+            first_comment_error?: string | null;
+        };
+        /**
+         * ContentPostRevisionResponse
+         * @description Snapshot historico de um ContentPost (Phase 3D).
+         */
+        ContentPostRevisionResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Post Id
+             * Format: uuid
+             */
+            post_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Snapshot */
+            snapshot: {
+                [key: string]: unknown;
+            };
+            /** Reason */
+            reason: string;
+            /** Created By */
+            created_by?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** ContentPostUpdate */
         ContentPostUpdate: {
@@ -6359,6 +6896,10 @@ export interface components {
             publish_date?: string | null;
             /** Week Number */
             week_number?: number | null;
+            /** Media Kind */
+            media_kind?: ("none" | "image" | "video" | "carousel") | null;
+            /** First Comment Text */
+            first_comment_text?: string | null;
             /** Error Message */
             error_message?: string | null;
         };
@@ -7143,6 +7684,12 @@ export interface components {
          * @enum {string}
          */
         EmailType: "corporate" | "personal" | "unknown";
+        /**
+         * EmailVerificationStatus
+         * @description Status normalizado de verificação de e-mail entre provedores.
+         * @enum {string}
+         */
+        EmailVerificationStatus: "valid" | "accept_all" | "unknown" | "invalid" | "disposable" | "abuse" | "do_not_mail" | "spamtrap" | "webmail";
         /** EngagementCommentResponse */
         EngagementCommentResponse: {
             /**
@@ -7499,6 +8046,67 @@ export interface components {
              */
             percentage: number;
         };
+        /**
+         * GalleryImage
+         * @description Imagem exibida na galeria.
+         */
+        GalleryImage: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Linked Post Id */
+            linked_post_id?: string | null;
+            /** Title */
+            title: string;
+            /** Post Status */
+            post_status?: string | null;
+            /** Post Pillar */
+            post_pillar: string | null;
+            /** Image Url */
+            image_url: string | null;
+            /** Image S3 Key */
+            image_s3_key: string | null;
+            /** Image Style */
+            image_style: string | null;
+            /** Image Prompt */
+            image_prompt: string | null;
+            /** Image Aspect Ratio */
+            image_aspect_ratio: string | null;
+            /** Image Filename */
+            image_filename: string | null;
+            /** Image Size Bytes */
+            image_size_bytes: number | null;
+            /** Source */
+            source: string;
+            /** Created At */
+            created_at: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** Position */
+            position?: number | null;
+            /** Carousel Group Id */
+            carousel_group_id?: string | null;
+            /** Linkedin Image Urn */
+            linkedin_image_urn?: string | null;
+        };
+        /** GalleryImagesResponse */
+        GalleryImagesResponse: {
+            /** Images */
+            images: components["schemas"]["GalleryImage"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /**
+             * Carousel Groups
+             * @default []
+             */
+            carousel_groups: components["schemas"]["CarouselGroup"][];
+        };
         /** GeneratePostImageRequest */
         GeneratePostImageRequest: {
             /**
@@ -7519,6 +8127,12 @@ export interface components {
             aspect_ratio: "4:5" | "1:1" | "16:9";
             /** Sub Type */
             sub_type?: ("metrics" | "steps" | "comparison") | null;
+            /**
+             * Visual Direction
+             * @default auto
+             * @enum {string}
+             */
+            visual_direction: "auto" | "editorial" | "minimal" | "bold" | "organic";
             /** Custom Prompt */
             custom_prompt?: string | null;
         };
@@ -7591,6 +8205,49 @@ export interface components {
             hook_type_used: string;
             /** Violations */
             violations?: string[];
+        };
+        /**
+         * GenerateStandaloneImageRequest
+         * @description Geracao de imagem standalone sem vinculo obrigatorio com post existente.
+         */
+        GenerateStandaloneImageRequest: {
+            /**
+             * Prompt
+             * @description Prompt descritivo para a imagem
+             */
+            prompt: string;
+            /**
+             * Style
+             * @default clean
+             * @enum {string}
+             */
+            style: "clean" | "with_text" | "infographic";
+            /**
+             * Aspect Ratio
+             * @default 4:5
+             * @enum {string}
+             */
+            aspect_ratio: "4:5" | "1:1" | "16:9";
+            /** Sub Type */
+            sub_type?: ("metrics" | "steps" | "comparison") | null;
+            /**
+             * Visual Direction
+             * @default auto
+             * @enum {string}
+             */
+            visual_direction: "auto" | "editorial" | "minimal" | "bold" | "organic";
+        };
+        /** GenerateStandaloneImageResponse */
+        GenerateStandaloneImageResponse: {
+            /** Image Url */
+            image_url: string;
+            /** Image Prompt */
+            image_prompt: string;
+            /**
+             * Image Id
+             * Format: uuid
+             */
+            image_id: string;
         };
         /**
          * GmailSignatureResponse
@@ -7799,6 +8456,16 @@ export interface components {
             reply_match_sent_cadence_count: number | null;
             /** Reply Reviewed At */
             reply_reviewed_at: string | null;
+            /** Pipedrive Sync Status */
+            pipedrive_sync_status: string | null;
+            /** Pipedrive Person Id */
+            pipedrive_person_id: number | null;
+            /** Pipedrive Deal Id */
+            pipedrive_deal_id: number | null;
+            /** Pipedrive Synced At */
+            pipedrive_synced_at: string | null;
+            /** Pipedrive Sync Error */
+            pipedrive_sync_error: string | null;
             /** Opened */
             opened: boolean;
             /**
@@ -8091,6 +8758,48 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** LeadContactPointResponse */
+        LeadContactPointResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            kind: components["schemas"]["ContactPointKind"];
+            /** Value */
+            value: string;
+            /** Normalized Value */
+            normalized_value: string;
+            /** Source */
+            source: string | null;
+            /** Verified */
+            verified: boolean;
+            /** Verification Status */
+            verification_status: string | null;
+            /** Quality Score */
+            quality_score: number | null;
+            quality_bucket: components["schemas"]["ContactQualityBucket"] | null;
+            /** Evidence Json */
+            evidence_json: {
+                [key: string]: unknown;
+            } | null;
+            /** Metadata Json */
+            metadata_json: {
+                [key: string]: unknown;
+            } | null;
+            /** Is Primary */
+            is_primary: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /**
          * LeadCreateRequest
          * @description Criação manual de lead (canal: api ou import).
@@ -8148,6 +8857,10 @@ export interface components {
              * @default false
              */
             verified: boolean;
+            verification_status?: components["schemas"]["EmailVerificationStatus"] | null;
+            /** Quality Score */
+            quality_score?: number | null;
+            quality_bucket?: components["schemas"]["ContactQualityBucket"] | null;
             /**
              * Is Primary
              * @default false
@@ -8168,6 +8881,10 @@ export interface components {
             source: string | null;
             /** Verified */
             verified: boolean;
+            verification_status: components["schemas"]["EmailVerificationStatus"] | null;
+            /** Quality Score */
+            quality_score: number | null;
+            quality_bucket: components["schemas"]["ContactQualityBucket"] | null;
             /** Is Primary */
             is_primary: boolean;
             /**
@@ -8263,6 +8980,23 @@ export interface components {
             origin_key: string;
             /** Origin Label */
             origin_label: string;
+            quality_bucket?: components["schemas"]["ContactQualityBucket"] | null;
+            /** Quality Score */
+            quality_score?: number | null;
+            /**
+             * Li Verified
+             * @default false
+             */
+            li_verified: boolean;
+            /** Li Current Title */
+            li_current_title?: string | null;
+            /** Li Current Company */
+            li_current_company?: string | null;
+            /**
+             * Li Outdated
+             * @default false
+             */
+            li_outdated: boolean;
         };
         /**
          * LeadGenerationImportRequest
@@ -8341,6 +9075,16 @@ export interface components {
             linkedin_urls?: string[] | null;
             /** Negative Terms */
             negative_terms?: string[] | null;
+            /**
+             * B2B Actor Key
+             * @default pipelinelabs
+             */
+            b2b_actor_key: string;
+            /**
+             * Verify Linkedin
+             * @default false
+             */
+            verify_linkedin: boolean;
         };
         /**
          * LeadGenerationPreviewResponse
@@ -8623,6 +9367,12 @@ export interface components {
             linkedin_connection_status?: string | null;
             /** Linkedin Connected At */
             linkedin_connected_at?: string | null;
+            /** Linkedin Current Company */
+            linkedin_current_company?: string | null;
+            /** Linkedin Checked At */
+            linkedin_checked_at?: string | null;
+            /** Linkedin Mismatch */
+            linkedin_mismatch?: boolean | null;
             /** City */
             city: string | null;
             /** Location */
@@ -8645,6 +9395,8 @@ export interface components {
             email_personal_source: string | null;
             /** Emails */
             emails?: components["schemas"]["LeadEmailResponse"][];
+            /** Contact Points */
+            contact_points?: components["schemas"]["LeadContactPointResponse"][];
             /** Phone */
             phone: string | null;
             /** Enriched At */
@@ -8750,6 +9502,8 @@ export interface components {
             message_content?: string | null;
             /** Reply Content */
             reply_content?: string | null;
+            /** Reply Manual Task Id */
+            reply_manual_task_id?: string | null;
             /** Intent */
             intent?: string | null;
             /** Manual Task Id */
@@ -8973,6 +9727,39 @@ export interface components {
             /** Cursor */
             cursor?: string | null;
         };
+        /** LinkedInStatsResponse */
+        LinkedInStatsResponse: {
+            /**
+             * Connect Sent
+             * @default 0
+             */
+            connect_sent: number;
+            /**
+             * Connect Accepted
+             * @default 0
+             */
+            connect_accepted: number;
+            /**
+             * Connect Acceptance Rate
+             * @default 0
+             */
+            connect_acceptance_rate: number;
+            /**
+             * Dm Sent
+             * @default 0
+             */
+            dm_sent: number;
+            /**
+             * Dm Replied
+             * @default 0
+             */
+            dm_replied: number;
+            /**
+             * Dm Reply Rate
+             * @default 0
+             */
+            dm_reply_rate: number;
+        };
         /**
          * ManualTaskDoneExternalRequest
          * @description Marcar tarefa como executada externamente.
@@ -9015,6 +9802,8 @@ export interface components {
              * Format: uuid
              */
             cadence_id: string;
+            /** Cadence Name */
+            cadence_name?: string | null;
             /**
              * Lead Id
              * Format: uuid
@@ -9023,6 +9812,10 @@ export interface components {
             /** Cadence Step Id */
             cadence_step_id?: string | null;
             channel: components["schemas"]["Channel"];
+            /** Manual Task Type */
+            manual_task_type?: string | null;
+            /** Manual Task Detail */
+            manual_task_detail?: string | null;
             /** Step Number */
             step_number: number;
             status: components["schemas"]["ManualTaskStatus"];
@@ -9051,6 +9844,21 @@ export interface components {
             lead?: components["schemas"]["LeadResponse"] | null;
         };
         /**
+         * ManualTaskSlaStatus
+         * @enum {string}
+         */
+        ManualTaskSlaStatus: "fresh" | "attention" | "urgent";
+        /**
+         * ManualTaskSortBy
+         * @enum {string}
+         */
+        ManualTaskSortBy: "created_at" | "updated_at" | "sent_at" | "lead_name" | "cadence_name" | "step_number" | "status" | "channel";
+        /**
+         * ManualTaskSortDir
+         * @enum {string}
+         */
+        ManualTaskSortDir: "asc" | "desc";
+        /**
          * ManualTaskStatsResponse
          * @description Estatísticas de tarefas manuais.
          */
@@ -9075,6 +9883,11 @@ export interface components {
              * @default 0
              */
             done_external: number;
+            /**
+             * Skipped
+             * @default 0
+             */
+            skipped: number;
         };
         /**
          * ManualTaskStatus
@@ -10494,6 +11307,20 @@ export interface components {
             /** Ready */
             ready: boolean;
         };
+        /** UploadStandaloneImageResponse */
+        UploadStandaloneImageResponse: {
+            /** Image Url */
+            image_url: string;
+            /** Filename */
+            filename: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /**
+             * Image Id
+             * Format: uuid
+             */
+            image_id: string;
+        };
         /**
          * UserCreateRequest
          * @description Adiciona um email à allowlist de acesso.
@@ -11084,6 +11911,8 @@ export interface operations {
         parameters: {
             query?: {
                 days?: number;
+                start_date?: string | null;
+                end_date?: string | null;
             };
             header?: never;
             path?: never;
@@ -11115,6 +11944,8 @@ export interface operations {
         parameters: {
             query?: {
                 days?: number;
+                start_date?: string | null;
+                end_date?: string | null;
             };
             header?: never;
             path?: never;
@@ -11177,6 +12008,8 @@ export interface operations {
         parameters: {
             query?: {
                 days?: number;
+                start_date?: string | null;
+                end_date?: string | null;
             };
             header?: never;
             path?: never;
@@ -11228,6 +12061,8 @@ export interface operations {
         parameters: {
             query?: {
                 days?: number;
+                start_date?: string | null;
+                end_date?: string | null;
                 limit?: number;
             };
             header?: never;
@@ -11280,6 +12115,8 @@ export interface operations {
         parameters: {
             query?: {
                 days?: number;
+                start_date?: string | null;
+                end_date?: string | null;
             };
             header?: never;
             path: {
@@ -11313,6 +12150,8 @@ export interface operations {
         parameters: {
             query?: {
                 days?: number;
+                start_date?: string | null;
+                end_date?: string | null;
             };
             header?: never;
             path?: never;
@@ -11340,10 +12179,45 @@ export interface operations {
             };
         };
     };
+    get_linkedin_stats_analytics_linkedin_stats_get: {
+        parameters: {
+            query?: {
+                days?: number;
+                start_date?: string | null;
+                end_date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkedInStatsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_email_cadences_stats_analytics_email_cadences_get: {
         parameters: {
             query?: {
                 days?: number;
+                start_date?: string | null;
+                end_date?: string | null;
             };
             header?: never;
             path?: never;
@@ -11375,6 +12249,8 @@ export interface operations {
         parameters: {
             query?: {
                 days?: number;
+                start_date?: string | null;
+                end_date?: string | null;
             };
             header?: never;
             path?: never;
@@ -11410,6 +12286,8 @@ export interface operations {
                 /** @description Número do step */
                 step_number: number;
                 days?: number;
+                start_date?: string | null;
+                end_date?: string | null;
             };
             header?: never;
             path?: never;
@@ -12402,6 +13280,10 @@ export interface operations {
                 list_id?: string | null;
                 segment?: string | null;
                 search?: string | null;
+                email_quality?: components["schemas"]["ContactQualityBucket"] | null;
+                has_verified_email?: boolean | null;
+                has_mobile?: boolean | null;
+                linkedin_mismatch?: boolean | null;
             };
             header?: never;
             path?: never;
@@ -12597,7 +13479,10 @@ export interface operations {
     };
     enrich_lead_manually_leads__lead_id__enrich_post: {
         parameters: {
-            query?: never;
+            query?: {
+                include_mobile?: boolean;
+                force_refresh?: boolean;
+            };
             header?: never;
             path: {
                 lead_id: string;
@@ -12893,6 +13778,28 @@ export interface operations {
             };
         };
     };
+    list_b2b_actors_leads_b2b_actors_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
     generate_leads_preview_leads_generate_preview_post: {
         parameters: {
             query?: never;
@@ -12913,6 +13820,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LeadGenerationPreviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recalculate_generated_lead_preview_quality_leads_generate_preview_quality_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeadGeneratedPreviewItem"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeadGeneratedPreviewItem"];
                 };
             };
             /** @description Validation Error */
@@ -14595,7 +15535,14 @@ export interface operations {
             query?: {
                 cadence_id?: string | null;
                 status?: components["schemas"]["ManualTaskStatus"] | null;
+                statuses?: components["schemas"]["ManualTaskStatus"][] | null;
                 channel?: components["schemas"]["Channel"] | null;
+                sla?: components["schemas"]["ManualTaskSlaStatus"] | null;
+                search?: string | null;
+                start_date?: string | null;
+                end_date?: string | null;
+                sort_by?: components["schemas"]["ManualTaskSortBy"];
+                sort_dir?: components["schemas"]["ManualTaskSortDir"];
                 page?: number;
                 page_size?: number;
             };
@@ -14627,7 +15574,10 @@ export interface operations {
     };
     get_stats_tasks_stats_get: {
         parameters: {
-            query?: never;
+            query?: {
+                start_date?: string | null;
+                end_date?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14641,6 +15591,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ManualTaskStatsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -14840,6 +15799,37 @@ export interface operations {
         };
     };
     skip_task_tasks__task_id__skip_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManualTaskResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reopen_task_tasks__task_id__reopen_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -16467,6 +17457,7 @@ export interface operations {
                 /** @description authority | case | vision */
                 pillar?: string | null;
                 week_number?: number | null;
+                include_deleted?: boolean;
             };
             header?: never;
             path?: never;
@@ -16595,7 +17586,10 @@ export interface operations {
     };
     delete_post_api_content_posts__post_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Se True, faz hard delete + remove no LinkedIn */
+                hard?: boolean;
+            };
             header?: never;
             path: {
                 post_id: string;
@@ -16610,6 +17604,102 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_post_api_content_posts__post_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                post_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentPostResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_post_revisions_api_content_posts__post_id__revisions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                post_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentPostRevisionResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_post_revision_api_content_posts__post_id__revisions__revision_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                post_id: string;
+                revision_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentPostResponse"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -16751,6 +17841,37 @@ export interface operations {
         };
     };
     publish_now_api_content_posts__post_id__publish_now_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                post_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentPostResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_first_comment_api_content_posts__post_id__first_comment_retry_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -16957,6 +18078,143 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_carousel_image_api_content_posts__post_id__carousel_images_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                post_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_add_carousel_image_api_content_posts__post_id__carousel_images_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CarouselImageItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_carousel_images_from_gallery_api_content_posts__post_id__carousel_images_from_gallery_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                post_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CarouselImportFromGalleryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CarouselImageItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_carousel_image_api_content_posts__post_id__carousel_images__image_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                post_id: string;
+                image_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CarouselImageItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reorder_carousel_api_content_posts__post_id__carousel_reorder_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                post_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CarouselReorderRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CarouselImageItem"][];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -19119,6 +20377,178 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EngagementPostResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_gallery_image_file_api_content_images__image_id__file_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                image_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_gallery_images_api_content_images_get: {
+        parameters: {
+            query?: {
+                /** @description Numero da pagina */
+                page?: number;
+                /** @description Itens por pagina */
+                page_size?: number;
+                /** @description Filtrar por origem: generated | uploaded */
+                source?: string | null;
+                /** @description Filtrar por estilo: clean | with_text | infographic */
+                style?: string | null;
+                /** @description Filtrar por pilar do post */
+                pillar?: string | null;
+                /** @description Filtrar por status do post */
+                status?: string | null;
+                /** @description Busca em titulo, prompt, nome do arquivo */
+                search?: string | null;
+                /** @description Quando 'carousel', agrupa imagens por carousel_group_id em pastas */
+                group_by?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GalleryImagesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_standalone_image_api_content_images_generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerateStandaloneImageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerateStandaloneImageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_standalone_image_api_content_images_upload_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_standalone_image_api_content_images_upload_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadStandaloneImageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_gallery_image_api_content_images__image_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                image_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

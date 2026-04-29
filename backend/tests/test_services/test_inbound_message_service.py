@@ -175,6 +175,10 @@ async def test_process_inbound_reply_marks_connect_step_replied_for_linkedin_dm(
         patch("services.inbound_message_service.ReplyParser", return_value=parser_instance),
         patch("services.notification.send_reply_notification", new=AsyncMock()),
         patch("api.routes.ws.broadcast_event", new=AsyncMock()),
+        patch(
+            "services.pipedrive_sync_service.enqueue_pipedrive_sync_for_reply",
+            return_value=True,
+        ) as enqueue_pipedrive_sync,
     ):
         result = await process_inbound_reply(
             db=db,
@@ -198,6 +202,10 @@ async def test_process_inbound_reply_marks_connect_step_replied_for_linkedin_dm(
     assert lead.status == "converted"
     assert interaction is not None
     assert interaction.channel == Channel.LINKEDIN_DM
+    enqueue_pipedrive_sync.assert_called_once_with(
+        interaction_id=interaction.id,
+        tenant_id=tenant.id,
+    )
 
 
 async def test_process_inbound_reply_pauses_remaining_steps_on_neutral_reply(
@@ -613,7 +621,29 @@ async def test_process_inbound_reply_does_not_pick_cadence_when_multiple_sent_an
         sent_at=datetime.now(tz=UTC) - timedelta(hours=1),
         status=StepStatus.SENT,
     )
-    db.add_all([lead, cadence_a, cadence_b, step_a, step_b])
+    future_step_a = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence_a.id,
+        channel=Channel.LINKEDIN_DM,
+        step_number=2,
+        day_offset=2,
+        scheduled_at=datetime.now(tz=UTC) + timedelta(days=1),
+        status=StepStatus.PENDING,
+    )
+    future_step_b = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence_b.id,
+        channel=Channel.EMAIL,
+        step_number=2,
+        day_offset=2,
+        scheduled_at=datetime.now(tz=UTC) + timedelta(days=1),
+        status=StepStatus.DISPATCHING,
+    )
+    db.add_all([lead, cadence_a, cadence_b, step_a, step_b, future_step_a, future_step_b])
     await db.flush()
 
     parser_instance = MagicMock()
@@ -642,6 +672,8 @@ async def test_process_inbound_reply_does_not_pick_cadence_when_multiple_sent_an
 
     await db.refresh(step_a)
     await db.refresh(step_b)
+    await db.refresh(future_step_a)
+    await db.refresh(future_step_b)
     await db.refresh(lead)
     interaction_result = await db.execute(
         select(Interaction).where(Interaction.unipile_message_id == "reply_msg_2")
@@ -650,8 +682,15 @@ async def test_process_inbound_reply_does_not_pick_cadence_when_multiple_sent_an
 
     assert step_a.status == StepStatus.SENT
     assert step_b.status == StepStatus.SENT
+    assert future_step_a.status == StepStatus.SKIPPED
+    assert future_step_b.status == StepStatus.SKIPPED
     assert interaction.reply_match_status == "ambiguous"
+    assert interaction.reply_match_source == "ambiguous_reply_hold"
     assert interaction.reply_match_sent_cadence_count == 2
+    assert future_step_a.reply_hold_interaction_id == interaction.id
+    assert future_step_b.reply_hold_interaction_id == interaction.id
+    assert future_step_a.reply_hold_previous_status == "pending"
+    assert future_step_b.reply_hold_previous_status == "dispatching"
     assert lead.status == LeadStatus.IN_CADENCE
 
 
@@ -832,6 +871,84 @@ async def test_process_inbound_reply_matches_email_by_subject_when_unique(
     assert interaction.cadence_step_id == target_step.id
     assert interaction.reply_match_status == "matched"
     assert interaction.reply_match_source == "email_subject"
+
+
+async def test_process_inbound_reply_matches_email_by_similar_subject_when_unique(
+    db: AsyncSession,
+    tenant,
+) -> None:
+    lead = _make_lead(tenant.id)
+    cadence = Cadence(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Cadência Similar Subject",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    target_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence.id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        scheduled_at=datetime.now(tz=UTC) - timedelta(days=2),
+        sent_at=datetime.now(tz=UTC) - timedelta(hours=5),
+        status=StepStatus.SENT,
+        subject_used="Acme: processo manual ou automatizado?",
+    )
+    future_step = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence.id,
+        channel=Channel.EMAIL,
+        step_number=2,
+        day_offset=1,
+        scheduled_at=datetime.now(tz=UTC) + timedelta(days=1),
+        status=StepStatus.PENDING,
+    )
+    db.add_all([lead, cadence, target_step, future_step])
+    await db.flush()
+
+    parser_instance = MagicMock()
+    parser_instance.classify = AsyncMock(
+        return_value={"intent": "NEUTRAL", "confidence": 0.74, "summary": "Resposta direta"}
+    )
+
+    with (
+        patch(
+            "services.inbound_message_service.resolve_tenant_llm_config",
+            new=AsyncMock(return_value=SimpleNamespace(provider="openai", model="gpt-5.4-mini")),
+        ),
+        patch("services.inbound_message_service.ReplyParser", return_value=parser_instance),
+        patch("api.routes.ws.broadcast_event", new=AsyncMock()),
+    ):
+        await process_inbound_reply(
+            db=db,
+            registry=MagicMock(),
+            tenant_id=tenant.id,
+            lead=lead,
+            channel=Channel.EMAIL,
+            reply_text="Respondendo pelo assunto quase igual.",
+            external_message_id="reply_msg_subject_similar_1",
+            inbound_subject="Re: Acme: processo manual ou automatizado?!",
+        )
+
+    await db.refresh(target_step)
+    await db.refresh(future_step)
+    interaction_result = await db.execute(
+        select(Interaction).where(Interaction.unipile_message_id == "reply_msg_subject_similar_1")
+    )
+    interaction = interaction_result.scalar_one()
+
+    assert target_step.status == StepStatus.REPLIED
+    assert future_step.status == StepStatus.SKIPPED
+    assert interaction.cadence_step_id == target_step.id
+    assert interaction.reply_match_status == "matched"
+    assert interaction.reply_match_source == "email_subject_similar"
 
 
 async def test_process_inbound_reply_does_not_match_email_by_subject_when_non_unique_same_cadence(
