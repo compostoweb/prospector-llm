@@ -272,8 +272,9 @@ export function useB2bActors() {
     queryKey: ["b2b-actors"],
     queryFn: async () => {
       const client = createBrowserClient(session?.accessToken)
-      const resp = await client.get("/leads/b2b-actors")
-      return resp.data as B2bActorInfo[]
+      const { data, error } = await client.GET("/leads/b2b-actors" as never)
+      if (error) throw new Error("Falha ao carregar atores B2B")
+      return data as B2bActorInfo[]
     },
     staleTime: Infinity,
   })
