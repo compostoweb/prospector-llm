@@ -266,10 +266,13 @@ export interface B2bActorInfo {
 }
 
 export function useB2bActors() {
+  const { data: session } = useSession()
+
   return useQuery<B2bActorInfo[]>({
     queryKey: ["b2b-actors"],
     queryFn: async () => {
-      const resp = await apiClient.get("/leads/b2b-actors")
+      const client = createBrowserClient(session?.accessToken)
+      const resp = await client.get("/leads/b2b-actors")
       return resp.data as B2bActorInfo[]
     },
     staleTime: Infinity,
