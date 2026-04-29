@@ -156,16 +156,12 @@ export default function ListaDetailPage() {
   }
 
   function handleEditSave() {
-    updateList(
-      {
-        id: listId,
-        body: {
-          name: editName.trim() || undefined,
-          description: editDescription.trim() || undefined,
-        },
-      },
-      { onSuccess: () => setEditOpen(false) },
-    )
+    const body: import("@/lib/api/hooks/use-lead-lists").UpdateLeadListBody = {}
+    const trimmedName = editName.trim()
+    const trimmedDesc = editDescription.trim()
+    if (trimmedName) body.name = trimmedName
+    if (trimmedDesc) body.description = trimmedDesc
+    updateList({ id: listId, body }, { onSuccess: () => setEditOpen(false) })
   }
 
   // ── Loading / Error ──

@@ -64,16 +64,12 @@ export default function LeadListsPage() {
 
   function handleEditSave() {
     if (!editingList) return
-    updateList(
-      {
-        id: editingList.id,
-        body: {
-          name: editName.trim() || undefined,
-          description: editDescription.trim() || undefined,
-        },
-      },
-      { onSuccess: () => setEditOpen(false) },
-    )
+    const body: import("@/lib/api/hooks/use-lead-lists").UpdateLeadListBody = {}
+    const trimmedName = editName.trim()
+    const trimmedDesc = editDescription.trim()
+    if (trimmedName) body.name = trimmedName
+    if (trimmedDesc) body.description = trimmedDesc
+    updateList({ id: editingList.id, body }, { onSuccess: () => setEditOpen(false) })
   }
 
   function handleCreate(e: React.FormEvent) {
