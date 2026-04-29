@@ -7,7 +7,7 @@ import structlog
 from core.config import settings
 from integrations.apify_client import ApifyLeadRaw, apify_client
 from integrations.unipile_client import unipile_client
-from models.enums import LeadSource
+from models.enums import ContactQualityBucket, LeadSource
 from schemas.lead import LeadGeneratedPreviewItem, LeadGenerationPreviewRequest
 from services.lead_management import candidate_origin_label
 
@@ -78,6 +78,8 @@ async def preview_generated_leads(
 
     if body.source == "b2b_database" and body.verify_linkedin:
         items = await _verify_linkedin_positions(items)
+
+    items = [_apply_preview_quality(item) for item in items]
 
     return items
 
@@ -158,6 +160,44 @@ def _normalize_preview_item(
         origin_key=source_key,
         origin_label=candidate_origin_label(source_key),
     )
+
+
+def _apply_preview_quality(item: LeadGeneratedPreviewItem) -> LeadGeneratedPreviewItem:
+    quality_bucket, quality_score = _score_preview_contact_quality(item)
+    return item.model_copy(
+        update={
+            "quality_bucket": quality_bucket,
+            "quality_score": quality_score,
+        }
+    )
+
+
+def _score_preview_contact_quality(
+    item: LeadGeneratedPreviewItem,
+) -> tuple[ContactQualityBucket | None, float | None]:
+    has_corporate_email = bool(item.email_corporate)
+    has_personal_email = bool(item.email_personal)
+    has_phone = bool(item.phone)
+
+    if not has_corporate_email and not has_personal_email and not has_phone:
+        return None, None
+
+    if item.li_outdated and (has_corporate_email or has_personal_email):
+        return ContactQualityBucket.RED, 0.20
+
+    if has_corporate_email and item.li_verified:
+        return ContactQualityBucket.GREEN, 0.85
+
+    if has_corporate_email:
+        return ContactQualityBucket.ORANGE, 0.65
+
+    if has_personal_email and item.li_verified:
+        return ContactQualityBucket.ORANGE, 0.55
+
+    if has_personal_email:
+        return ContactQualityBucket.ORANGE, 0.50
+
+    return ContactQualityBucket.ORANGE, 0.45
 
 
 async def _verify_linkedin_positions(

@@ -269,7 +269,11 @@ async def get_cadence_reply_management(
         leads_q = await db.execute(
             select(Lead)
             .where(Lead.tenant_id == tenant_id, Lead.id.in_(lead_ids))
-            .options(selectinload(Lead.lists), selectinload(Lead.emails))
+            .options(
+                selectinload(Lead.lists),
+                selectinload(Lead.emails),
+                selectinload(Lead.contact_points),
+            )
         )
         leads = leads_q.scalars().all()
         lead_map = {lead.id: lead for lead in leads}

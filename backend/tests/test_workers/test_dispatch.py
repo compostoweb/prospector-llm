@@ -37,9 +37,10 @@ from models.cadence import Cadence
 from models.cadence_step import CadenceStep
 from models.email_account import EmailAccount
 from models.email_template import EmailTemplate
-from models.enums import Channel, LeadStatus, StepStatus
+from models.enums import Channel, ContactPointKind, ContactQualityBucket, LeadStatus, StepStatus
 from models.interaction import Interaction
 from models.lead import Lead
+from models.lead_contact_point import LeadContactPoint
 from models.linkedin_account import LinkedInAccount
 from models.tenant import Tenant, TenantIntegration
 
@@ -634,6 +635,75 @@ async def test_dispatch_email_sent(
     assert call_kwargs["to_email"] == "joao@acme.com"
     assert call_kwargs["subject"] == "Assunto gerado"
     assert "body_html" in call_kwargs
+
+
+async def test_dispatch_email_skips_when_only_available_emails_are_red(
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    tenant,
+) -> None:
+    from workers.dispatch import _dispatch_async
+
+    lead = _make_lead(
+        tenant_id,
+        email_corporate="joao@acme.com",
+        email_personal="joao@gmail.com",
+    )
+    cadence = _make_cadence(tenant_id)
+    step = _make_step(tenant_id, lead.id, cadence.id, channel=Channel.EMAIL)
+    db.add_all(
+        [
+            lead,
+            cadence,
+            step,
+            LeadContactPoint(
+                id=uuid.uuid4(),
+                tenant_id=tenant_id,
+                lead_id=lead.id,
+                kind=ContactPointKind.EMAIL,
+                value="joao@acme.com",
+                normalized_value="joao@acme.com",
+                quality_bucket=ContactQualityBucket.RED,
+                is_primary=True,
+            ),
+            LeadContactPoint(
+                id=uuid.uuid4(),
+                tenant_id=tenant_id,
+                lead_id=lead.id,
+                kind=ContactPointKind.EMAIL,
+                value="joao@gmail.com",
+                normalized_value="joao@gmail.com",
+                quality_bucket=ContactQualityBucket.RED,
+                is_primary=False,
+            ),
+        ]
+    )
+    await db.flush()
+
+    with (
+        patch("workers.dispatch.get_worker_session", new=_mock_worker_session(db)),
+        patch("workers.dispatch.context_fetcher") as mock_ctx,
+        patch("workers.dispatch.AIComposer") as mock_composer_cls,
+        patch("workers.dispatch.unipile_client") as mock_unipile,
+        patch("workers.dispatch.LLMRegistry"),
+        patch("workers.dispatch.redis_client", new=_mock_redis()),
+    ):
+        mock_ctx.fetch_from_website = AsyncMock(return_value=None)
+        mock_ctx.search_company = AsyncMock(return_value=None)
+
+        composer_instance = MagicMock()
+        composer_instance.compose_email = AsyncMock(
+            return_value=("Assunto gerado", "Corpo do email aqui.")
+        )
+        mock_composer_cls.return_value = composer_instance
+
+        task_mock = _make_task_mock()
+        result = await _dispatch_async(str(step.id), str(tenant_id), task_mock)
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "email_quality_red"
+    composer_instance.compose_email.assert_not_awaited()
+    mock_unipile.send_email.assert_not_called()
 
 
 async def test_dispatch_email_manual_template_body_is_used(

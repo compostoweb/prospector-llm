@@ -28,10 +28,12 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import {
+  type ContactQualityBucket,
   type GeneratedLeadPreviewItem,
   useGenerateLeadsImport,
   useGenerateLeadsPreview,
 } from "@/lib/api/hooks/use-leads"
+import { ContactQualityBadge } from "@/components/leads/contact-quality-badge"
 import { useCreateLeadList, useLeadLists } from "@/lib/api/hooks/use-lead-lists"
 import {
   useCaptureExecutionHistory,
@@ -90,6 +92,8 @@ interface PreviewRow {
   liCurrentTitle: string | null
   liCurrentCompany: string | null
   liOutdated: boolean
+  qualityBucket: ContactQualityBucket | null
+  qualityScore: number | null
   generatedItem?: GeneratedLeadPreviewItem
 }
 
@@ -188,6 +192,8 @@ export default function GerarLeadsPage() {
       liCurrentTitle: item.li_current_title ?? null,
       liCurrentCompany: item.li_current_company ?? null,
       liOutdated: item.li_outdated ?? false,
+      qualityBucket: item.quality_bucket ?? null,
+      qualityScore: item.quality_score ?? null,
       generatedItem: item,
     }))
   }, [generatedPreview])
@@ -204,6 +210,10 @@ export default function GerarLeadsPage() {
           job_title: item.li_current_title ?? item.job_title,
           company: item.li_current_company ?? item.company,
           li_outdated: false,
+          ...recomputePreviewQuality({
+            ...item,
+            li_outdated: false,
+          }),
         }
       }),
     )
@@ -1032,6 +1042,15 @@ export default function GerarLeadsPage() {
                               </td>
                               <td className="px-4 py-3 text-(--text-secondary)">
                                 <p>{row.email ?? "Sem email"}</p>
+                                <div className="mt-1">
+                                  <ContactQualityBadge
+                                    compact
+                                    qualityBucket={row.qualityBucket}
+                                    qualityScore={row.qualityScore}
+                                    verificationStatus={null}
+                                    source={row.liVerified ? "linkedin-preview" : row.originLabel}
+                                  />
+                                </div>
                                 <p className="mt-1 text-xs text-(--text-tertiary)">
                                   {row.phone ?? "Sem telefone"}
                                 </p>
@@ -1199,6 +1218,31 @@ export default function GerarLeadsPage() {
       </AlertDialog>
     </div>
   )
+}
+
+function recomputePreviewQuality(item: GeneratedLeadPreviewItem): {
+  quality_bucket: ContactQualityBucket | null
+  quality_score: number | null
+} {
+  if (!item.email_corporate && !item.email_personal && !item.phone) {
+    return { quality_bucket: null, quality_score: null }
+  }
+  if (item.li_outdated && (item.email_corporate || item.email_personal)) {
+    return { quality_bucket: "red", quality_score: 0.2 }
+  }
+  if (item.email_corporate && item.li_verified) {
+    return { quality_bucket: "green", quality_score: 0.85 }
+  }
+  if (item.email_corporate) {
+    return { quality_bucket: "orange", quality_score: 0.65 }
+  }
+  if (item.email_personal && item.li_verified) {
+    return { quality_bucket: "orange", quality_score: 0.55 }
+  }
+  if (item.email_personal) {
+    return { quality_bucket: "orange", quality_score: 0.5 }
+  }
+  return { quality_bucket: "orange", quality_score: 0.45 }
 }
 
 function ScheduleDetailModal({

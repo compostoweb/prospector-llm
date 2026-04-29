@@ -23,16 +23,25 @@ from typing import Annotated, Any, cast
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
-from models.enums import Channel, Intent, LeadSource, LeadStatus, StepStatus
+from models.enums import (
+    Channel,
+    ContactPointKind,
+    ContactQualityBucket,
+    Intent,
+    LeadSource,
+    LeadStatus,
+    StepStatus,
+)
 from models.interaction import Interaction
 from models.lead import Lead
+from models.lead_contact_point import LeadContactPoint
 from models.lead_list import LeadList
 from models.manual_task import ManualTask
 from schemas.interaction import (
@@ -73,6 +82,7 @@ from services.lead_management import (
     reload_lead_for_output,
     replace_lead_email_records,
     serialize_lead,
+    sync_lead_contact_points_from_state,
 )
 from services.lead_scorer import lead_scorer
 from services.reply_matching import (
@@ -105,13 +115,21 @@ async def list_leads(
     list_id: uuid.UUID | None = Query(default=None),
     segment: Annotated[str | None, Query(max_length=200)] = None,
     search: Annotated[str | None, Query(max_length=200)] = None,
+    email_quality: ContactQualityBucket | None = Query(default=None),
+    has_verified_email: bool | None = Query(default=None),
+    has_mobile: bool | None = Query(default=None),
+    linkedin_mismatch: bool | None = Query(default=None),
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> LeadListResponse:
     query = (
         select(Lead)
         .where(Lead.tenant_id == tenant_id)
-        .options(selectinload(Lead.lists), selectinload(Lead.emails))
+        .options(
+            selectinload(Lead.lists),
+            selectinload(Lead.emails),
+            selectinload(Lead.contact_points),
+        )
     )  # type: ignore[arg-type]
     effective_min_score = score_min if score_min is not None else min_score
 
@@ -146,6 +164,45 @@ async def list_leads(
                 Lead.job_title.ilike(pattern),
             )
         )
+    if email_quality is not None:
+        query = query.where(
+            Lead.contact_points.any(
+                and_(
+                    LeadContactPoint.kind == ContactPointKind.EMAIL,
+                    LeadContactPoint.quality_bucket == email_quality,
+                )
+            )
+        )
+    if has_verified_email is True:
+        query = query.where(
+            Lead.contact_points.any(
+                and_(
+                    LeadContactPoint.kind == ContactPointKind.EMAIL,
+                    LeadContactPoint.verified.is_(True),
+                )
+            )
+        )
+    elif has_verified_email is False:
+        query = query.where(
+            not_(
+                Lead.contact_points.any(
+                    and_(
+                        LeadContactPoint.kind == ContactPointKind.EMAIL,
+                        LeadContactPoint.verified.is_(True),
+                    )
+                )
+            )
+        )
+    if has_mobile is True:
+        query = query.where(
+            Lead.contact_points.any(LeadContactPoint.kind == ContactPointKind.PHONE)
+        )
+    elif has_mobile is False:
+        query = query.where(
+            not_(Lead.contact_points.any(LeadContactPoint.kind == ContactPointKind.PHONE))
+        )
+    if linkedin_mismatch is not None:
+        query = query.where(Lead.linkedin_mismatch.is_(linkedin_mismatch))
 
     count_q = select(func.count()).select_from(query.subquery())
     total = (await db.execute(count_q)).scalar_one()
@@ -227,6 +284,7 @@ async def create_lead(
             extra_emails=body.emails,
         ),
     )
+    await sync_lead_contact_points_from_state(db, lead=lead)
     lead.score = float(lead_scorer.score(lead))
     await db.commit()
     await db.refresh(lead)
@@ -394,6 +452,7 @@ async def update_lead(
                 extra_emails=email_updates,
             ),
         )
+        await sync_lead_contact_points_from_state(db, lead=lead)
     elif "email_corporate" in updates or "email_personal" in updates:
         await replace_lead_email_records(
             db,
@@ -407,6 +466,10 @@ async def update_lead(
                 extra_emails=additional_lead_email_specs(lead),
             ),
         )
+        await sync_lead_contact_points_from_state(db, lead=lead)
+
+    if "phone" in updates and email_updates is None:
+        await sync_lead_contact_points_from_state(db, lead=lead)
 
     if _should_recalculate_score(updates) or email_updates is not None:
         lead.score = float(lead_scorer.score(lead))
@@ -426,13 +489,26 @@ async def update_lead(
 @router.post("/{lead_id}/enrich")
 async def enrich_lead_manually(
     lead_id: uuid.UUID,
+    include_mobile: bool = Query(default=True),
+    force_refresh: bool = Query(default=False),
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> dict[str, str]:
     lead = await _get_lead_or_404(lead_id, tenant_id, db)
     enrichment_task = import_module("workers.enrich").enrich_lead
-    enrichment_task.delay(str(lead.id), str(tenant_id))
-    logger.info("lead.enrich_queued", lead_id=str(lead.id), tenant_id=str(tenant_id))
+    enrichment_task.delay(
+        str(lead.id),
+        str(tenant_id),
+        include_mobile=include_mobile,
+        force_refresh=force_refresh,
+    )
+    logger.info(
+        "lead.enrich_queued",
+        lead_id=str(lead.id),
+        tenant_id=str(tenant_id),
+        include_mobile=include_mobile,
+        force_refresh=force_refresh,
+    )
     return {"status": "queued", "lead_id": str(lead.id)}
 
 
@@ -1145,6 +1221,8 @@ async def generate_leads_import(
                         extra_emails=additional_lead_email_specs(existing),
                     ),
                 )
+                await sync_lead_contact_points_from_state(db, lead=existing)
+                existing.score = float(lead_scorer.score(existing))
                 updated += 1
                 if existing.id not in lead_ids:
                     lead_ids.append(existing.id)
@@ -1172,6 +1250,8 @@ async def generate_leads_import(
                 email_personal_source=lead.email_personal_source,
             ),
         )
+        await sync_lead_contact_points_from_state(db, lead=lead)
+        lead.score = float(lead_scorer.score(lead))
         if target_list is not None:
             await ensure_list_membership(db, lead_id=lead.id, list_id=target_list.id)
         lead_ids.append(lead.id)

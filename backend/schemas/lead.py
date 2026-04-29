@@ -13,7 +13,14 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from models.enums import EmailType, LeadSource, LeadStatus
+from models.enums import (
+    ContactPointKind,
+    ContactQualityBucket,
+    EmailType,
+    EmailVerificationStatus,
+    LeadSource,
+    LeadStatus,
+)
 
 
 class LeadListSummary(BaseModel):
@@ -35,6 +42,9 @@ class LeadEmailInput(BaseModel):
     email_type: EmailType = EmailType.UNKNOWN
     source: str | None = Field(default=None, max_length=100)
     verified: bool = False
+    verification_status: EmailVerificationStatus | None = None
+    quality_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    quality_bucket: ContactQualityBucket | None = None
     is_primary: bool = False
 
     @field_validator("email")
@@ -51,6 +61,28 @@ class LeadEmailResponse(BaseModel):
     email_type: EmailType
     source: str | None
     verified: bool
+    verification_status: EmailVerificationStatus | None
+    quality_score: float | None
+    quality_bucket: ContactQualityBucket | None
+    is_primary: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class LeadContactPointResponse(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    kind: ContactPointKind
+    value: str
+    normalized_value: str
+    source: str | None
+    verified: bool
+    verification_status: str | None
+    quality_score: float | None
+    quality_bucket: ContactQualityBucket | None
+    evidence_json: dict[str, object] | None
+    metadata_json: dict[str, object] | None
     is_primary: bool
     created_at: datetime
     updated_at: datetime
@@ -137,6 +169,9 @@ class LeadResponse(BaseModel):
     linkedin_profile_id: str | None
     linkedin_connection_status: str | None = None
     linkedin_connected_at: datetime | None = None
+    linkedin_current_company: str | None = None
+    linkedin_checked_at: datetime | None = None
+    linkedin_mismatch: bool | None = None
     city: str | None
     location: str | None
     segment: str | None
@@ -149,6 +184,7 @@ class LeadResponse(BaseModel):
     email_personal: str | None
     email_personal_source: str | None
     emails: list[LeadEmailResponse] = Field(default_factory=list)
+    contact_points: list[LeadContactPointResponse] = Field(default_factory=list)
     phone: str | None
     enriched_at: datetime | None
     notes: str | None
@@ -292,6 +328,8 @@ class LeadGeneratedPreviewItem(BaseModel):
     source: LeadSource
     origin_key: str
     origin_label: str
+    quality_bucket: ContactQualityBucket | None = None
+    quality_score: float | None = None
     # Campos preenchidos quando verify_linkedin=True no request
     li_verified: bool = False
     """True quando o perfil foi confirmado via scraping do LinkedIn."""

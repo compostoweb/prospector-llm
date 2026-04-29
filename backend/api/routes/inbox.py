@@ -73,6 +73,7 @@ from services.lead_management import (
     preferred_lead_email,
     reload_lead_for_output,
     replace_lead_email_records,
+    sync_lead_contact_points_from_state,
 )
 from services.llm_config import resolve_tenant_llm_config
 
@@ -580,6 +581,7 @@ async def quick_create_lead(
             email_personal_source=lead.email_personal_source,
         ),
     )
+    await sync_lead_contact_points_from_state(db, lead=lead)
     await db.commit()
     lead_with_emails = await reload_lead_for_output(db, lead=lead)
 

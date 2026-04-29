@@ -26,6 +26,7 @@ import {
   Loader2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import {
@@ -58,6 +59,19 @@ const SOURCE_OPTIONS = [
   { value: "api", label: "Ferramenta interna/API" },
 ]
 
+const EMAIL_QUALITY_OPTIONS = [
+  { value: "", label: "Qualquer qualidade" },
+  { value: "green", label: "Email verde" },
+  { value: "orange", label: "Email laranja" },
+  { value: "red", label: "Email vermelho" },
+]
+
+const BOOLEAN_FILTER_OPTIONS = [
+  { value: "", label: "Todos" },
+  { value: "true", label: "Sim" },
+  { value: "false", label: "Não" },
+]
+
 export default function LeadsPage() {
   const { activeFilters, setFilter, clearFilters } = useUIStore()
   const { data: lists } = useLeadLists()
@@ -66,6 +80,8 @@ export default function LeadsPage() {
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([])
   const [showMergeDialog, setShowMergeDialog] = useState(false)
   const [enrichingIds, setEnrichingIds] = useState<Set<string>>(new Set())
+  const [includeMobileOnEnrich, setIncludeMobileOnEnrich] = useState(true)
+  const [forceRefreshOnEnrich, setForceRefreshOnEnrich] = useState(false)
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
   const [bulkPending, setBulkPending] = useState(false)
   const prevStatusRef = useRef<Map<string, string>>(new Map())
@@ -83,6 +99,14 @@ export default function LeadsPage() {
       ...(activeFilters.segment ? { segment: activeFilters.segment } : {}),
       ...(activeFilters.score_min != null ? { score_min: activeFilters.score_min } : {}),
       ...(activeFilters.score_max != null ? { score_max: activeFilters.score_max } : {}),
+      ...(activeFilters.email_quality ? { email_quality: activeFilters.email_quality } : {}),
+      ...(activeFilters.has_verified_email != null
+        ? { has_verified_email: activeFilters.has_verified_email }
+        : {}),
+      ...(activeFilters.has_mobile != null ? { has_mobile: activeFilters.has_mobile } : {}),
+      ...(activeFilters.linkedin_mismatch != null
+        ? { linkedin_mismatch: activeFilters.linkedin_mismatch }
+        : {}),
       ...(search ? { search } : {}),
     },
     { refetchInterval: enrichingIds.size > 0 ? 5000 : false },
@@ -95,6 +119,10 @@ export default function LeadsPage() {
     !!activeFilters.segment ||
     activeFilters.score_min != null ||
     activeFilters.score_max != null ||
+    !!activeFilters.email_quality ||
+    activeFilters.has_verified_email != null ||
+    activeFilters.has_mobile != null ||
+    activeFilters.linkedin_mismatch != null ||
     !!search
   const selectedLeads = (data?.items ?? []).filter((lead) => selectedLeadIds.includes(lead.id))
   const overlappingCadenceLeads = (data?.items ?? []).filter(
@@ -144,7 +172,15 @@ export default function LeadsPage() {
     setBulkPending(true)
     toast.loading(`Iniciando enriquecimento…`, { id: "bulk-enrich" })
     setEnrichingIds((curr) => new Set([...curr, ...ids]))
-    const results = await Promise.allSettled(ids.map((id) => enrichLead.mutateAsync(id)))
+    const results = await Promise.allSettled(
+      ids.map((id) =>
+        enrichLead.mutateAsync({
+          leadId: id,
+          include_mobile: includeMobileOnEnrich,
+          force_refresh: forceRefreshOnEnrich,
+        }),
+      ),
+    )
     const succeeded = results.filter((r) => r.status === "fulfilled").length
     toast.success(`${succeeded} de ${ids.length} leads enviados para enriquecimento`, {
       id: "bulk-enrich",
@@ -283,6 +319,49 @@ export default function LeadsPage() {
             }}
           />
 
+          <FilterSelect
+            label="Qualidade do email"
+            value={activeFilters.email_quality ?? ""}
+            onChange={(value) => {
+              setFilter(
+                "email_quality",
+                value === "" ? undefined : (value as "red" | "orange" | "green"),
+              )
+              setPage(1)
+            }}
+            options={EMAIL_QUALITY_OPTIONS}
+          />
+
+          <FilterSelect
+            label="Email verificado"
+            value={serializeBooleanFilter(activeFilters.has_verified_email)}
+            onChange={(value) => {
+              setFilter("has_verified_email", parseBooleanFilter(value))
+              setPage(1)
+            }}
+            options={BOOLEAN_FILTER_OPTIONS}
+          />
+
+          <FilterSelect
+            label="Tem mobile"
+            value={serializeBooleanFilter(activeFilters.has_mobile)}
+            onChange={(value) => {
+              setFilter("has_mobile", parseBooleanFilter(value))
+              setPage(1)
+            }}
+            options={BOOLEAN_FILTER_OPTIONS}
+          />
+
+          <FilterSelect
+            label="Mismatch LinkedIn"
+            value={serializeBooleanFilter(activeFilters.linkedin_mismatch)}
+            onChange={(value) => {
+              setFilter("linkedin_mismatch", parseBooleanFilter(value))
+              setPage(1)
+            }}
+            options={BOOLEAN_FILTER_OPTIONS}
+          />
+
           {hasFilters && (
             <button
               type="button"
@@ -329,6 +408,24 @@ export default function LeadsPage() {
             {selectedLeadIds.length !== 1 ? "s" : ""}
           </span>
           <div className="h-4 w-px bg-white/30" />
+          <div className="flex flex-wrap items-center gap-3 text-xs text-white/90">
+            <label className="inline-flex items-center gap-2">
+              <Checkbox
+                checked={includeMobileOnEnrich}
+                onCheckedChange={(checked) => setIncludeMobileOnEnrich(checked === true)}
+                className="border-white/50 data-[state=checked]:bg-white data-[state=checked]:text-(--accent)"
+              />
+              Buscar mobile
+            </label>
+            <label className="inline-flex items-center gap-2">
+              <Checkbox
+                checked={forceRefreshOnEnrich}
+                onCheckedChange={(checked) => setForceRefreshOnEnrich(checked === true)}
+                className="border-white/50 data-[state=checked]:bg-white data-[state=checked]:text-(--accent)"
+              />
+              Forçar refresh
+            </label>
+          </div>
           <div className="flex flex-wrap items-center gap-1.5">
             {selectedLeadIds.length >= 2 && (
               <Button
@@ -412,6 +509,10 @@ export default function LeadsPage() {
         onLeadDeleted={() => setSelectedLeadIds([])}
         enrichingLeadIds={enrichingIds}
         onEnrich={handleEnrichStart}
+        enrichOptions={{
+          include_mobile: includeMobileOnEnrich,
+          force_refresh: forceRefreshOnEnrich,
+        }}
       />
 
       <LeadMergeDialog
@@ -485,6 +586,18 @@ export default function LeadsPage() {
       )}
     </div>
   )
+}
+
+function parseBooleanFilter(value: string): boolean | undefined {
+  if (value === "true") return true
+  if (value === "false") return false
+  return undefined
+}
+
+function serializeBooleanFilter(value: boolean | undefined): string {
+  if (value === true) return "true"
+  if (value === false) return "false"
+  return ""
 }
 
 interface FilterSelectProps {

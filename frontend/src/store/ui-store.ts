@@ -21,6 +21,10 @@ interface ActiveFilters {
   search?: string
   score_min?: number
   score_max?: number
+  email_quality?: "red" | "orange" | "green"
+  has_verified_email?: boolean
+  has_mobile?: boolean
+  linkedin_mismatch?: boolean
 }
 
 interface UIState {

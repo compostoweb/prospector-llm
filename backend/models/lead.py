@@ -24,6 +24,7 @@ from models.base import Base, TenantMixin, TimestampMixin
 from models.enums import LeadSource, LeadStatus
 
 if TYPE_CHECKING:
+    from models.lead_contact_point import LeadContactPoint
     from models.lead_email import LeadEmail
     from models.lead_list import LeadList
 
@@ -65,6 +66,13 @@ class Lead(Base, TenantMixin, TimestampMixin):
         nullable=True,
         default=None,
     )
+    linkedin_current_company: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    linkedin_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
+    linkedin_mismatch: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
 
     # ── Localização / Segmentação ─────────────────────────────────────
     city: Mapped[str | None] = mapped_column(String(200))
@@ -177,7 +185,14 @@ class Lead(Base, TenantMixin, TimestampMixin):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+    contact_points: Mapped[list[LeadContactPoint]] = relationship(  # type: ignore[name-defined]
+        "LeadContactPoint",
+        back_populates="lead",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
 
 # Importa o model relacionado em runtime para registrar "LeadEmail" no mapper.
+from models.lead_contact_point import LeadContactPoint  # noqa: E402,F401
 from models.lead_email import LeadEmail  # noqa: E402,F401

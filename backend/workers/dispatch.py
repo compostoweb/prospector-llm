@@ -80,6 +80,42 @@ class _DispatchResult:
     message_id: str | None = None
 
 
+async def _get_contact_point_for_email(db, lead_id: uuid.UUID, email: str):  # type: ignore[no-untyped-def]
+    from models.enums import ContactPointKind
+    from models.lead_contact_point import LeadContactPoint
+
+    normalized_email = email.strip().lower()
+    result = await db.execute(
+        select(LeadContactPoint).where(
+            LeadContactPoint.lead_id == lead_id,
+            LeadContactPoint.kind == ContactPointKind.EMAIL,
+            LeadContactPoint.normalized_value == normalized_email,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def _resolve_dispatch_email(db, lead: Lead) -> tuple[str | None, str | None]:  # type: ignore[no-untyped-def]
+    from models.enums import ContactQualityBucket
+
+    red_email_found = False
+    for candidate in (lead.email_corporate, lead.email_personal):
+        if not candidate:
+            continue
+
+        contact_point = await _get_contact_point_for_email(db, lead.id, candidate)
+        if contact_point is not None and contact_point.quality_bucket == ContactQualityBucket.RED:
+            red_email_found = True
+            continue
+
+        return candidate, None
+
+    if red_email_found:
+        return None, "email_quality_red"
+
+    return None, None
+
+
 @celery_app.task(
     bind=True,
     name="workers.dispatch.dispatch_step",
@@ -450,12 +486,16 @@ async def _dispatch_inner(
                 from models.email_unsubscribe import EmailUnsubscribe  # noqa: PLC0415
                 from services.email_footer import inject_tracking  # noqa: PLC0415
 
-                email_to = lead.email_corporate or lead.email_personal or ""
+                email_to, email_skip_reason = await _resolve_dispatch_email(db, lead)
                 if not email_to:
                     step.status = StepStatus.SKIPPED
                     await db.commit()
                     await _release_rate_limit_slot()
-                    return {"step_id": step_id, "status": "skipped", "reason": "no_email"}
+                    return {
+                        "step_id": step_id,
+                        "status": "skipped",
+                        "reason": email_skip_reason or "no_email",
+                    }
 
                 # Verifica bounce
                 if lead.email_bounced_at is not None:

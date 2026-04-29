@@ -21,6 +21,9 @@ export interface Lead {
   industry: string | null
   linkedin_url: string | null
   linkedin_profile_id: string | null
+  linkedin_current_company: string | null
+  linkedin_checked_at: string | null
+  linkedin_mismatch: boolean | null
   city: string | null
   location: string | null
   segment: string | null
@@ -33,6 +36,7 @@ export interface Lead {
   email_personal: string | null
   email_personal_source: string | null
   emails: LeadEmail[]
+  contact_points: LeadContactPoint[]
   phone: string | null
   enriched_at: string | null
   notes: string | null
@@ -53,12 +57,47 @@ export interface Lead {
   updated_at: string
 }
 
+export type ContactQualityBucket = "red" | "orange" | "green"
+
+export type ContactPointKind = "email" | "phone"
+
+export type EmailVerificationStatus =
+  | "valid"
+  | "accept_all"
+  | "unknown"
+  | "invalid"
+  | "disposable"
+  | "abuse"
+  | "do_not_mail"
+  | "spamtrap"
+  | "webmail"
+
 export interface LeadEmail {
   id: string
   email: string
   email_type: "corporate" | "personal" | "unknown"
   source: string | null
   verified: boolean
+  verification_status: EmailVerificationStatus | null
+  quality_score: number | null
+  quality_bucket: ContactQualityBucket | null
+  is_primary: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface LeadContactPoint {
+  id: string
+  kind: ContactPointKind
+  value: string
+  normalized_value: string
+  source: string | null
+  verified: boolean
+  verification_status: string | null
+  quality_score: number | null
+  quality_bucket: ContactQualityBucket | null
+  evidence_json: Record<string, unknown> | null
+  metadata_json: Record<string, unknown> | null
   is_primary: boolean
   created_at: string
   updated_at: string
@@ -69,6 +108,9 @@ export interface LeadEmailPayload {
   email_type?: "corporate" | "personal" | "unknown"
   source?: string | null
   verified?: boolean
+  verification_status?: EmailVerificationStatus | null
+  quality_score?: number | null
+  quality_bucket?: ContactQualityBucket | null
   is_primary?: boolean
 }
 
@@ -232,6 +274,8 @@ export interface GeneratedLeadPreviewItem {
   source: string
   origin_key: string
   origin_label: string
+  quality_bucket: ContactQualityBucket | null
+  quality_score: number | null
   li_verified: boolean
   li_current_title: string | null
   li_current_company: string | null
@@ -314,6 +358,15 @@ export interface LeadListParams {
   min_score?: number
   score_min?: number
   score_max?: number
+  email_quality?: ContactQualityBucket
+  has_verified_email?: boolean
+  has_mobile?: boolean
+  linkedin_mismatch?: boolean
+}
+
+export interface EnrichLeadOptions {
+  include_mobile?: boolean
+  force_refresh?: boolean
 }
 
 export interface PaginatedLeads {
@@ -348,6 +401,16 @@ export function useLeads(
       const minScore = params.min_score ?? params.score_min
       if (minScore != null) searchParams.set("min_score", String(minScore))
       if (params.score_max != null) searchParams.set("score_max", String(params.score_max))
+      if (params.email_quality) searchParams.set("email_quality", params.email_quality)
+      if (params.has_verified_email != null) {
+        searchParams.set("has_verified_email", String(params.has_verified_email))
+      }
+      if (params.has_mobile != null) {
+        searchParams.set("has_mobile", String(params.has_mobile))
+      }
+      if (params.linkedin_mismatch != null) {
+        searchParams.set("linkedin_mismatch", String(params.linkedin_mismatch))
+      }
 
       const url = `/leads?${searchParams.toString()}` as never
       const { data, error } = await client.GET(url)
@@ -637,13 +700,28 @@ export function useEnrichLead() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (leadId: string): Promise<{ status: string; lead_id: string }> => {
+    mutationFn: async (
+      input: string | ({ leadId: string } & EnrichLeadOptions),
+    ): Promise<{ status: string; lead_id: string }> => {
+      const leadId = typeof input === "string" ? input : input.leadId
+      const options: EnrichLeadOptions = typeof input === "string" ? {} : input
       const client = createBrowserClient(session?.accessToken)
-      const { data, error } = await client.POST(`/leads/${leadId}/enrich` as never)
+      const searchParams = new URLSearchParams()
+      if (options.include_mobile != null) {
+        searchParams.set("include_mobile", String(options.include_mobile))
+      }
+      if (options.force_refresh != null) {
+        searchParams.set("force_refresh", String(options.force_refresh))
+      }
+      const query = searchParams.toString()
+      const { data, error } = await client.POST(
+        `/leads/${leadId}/enrich${query ? `?${query}` : ""}` as never,
+      )
       if (error) throw new Error("Falha ao iniciar enriquecimento")
       return data as { status: string; lead_id: string }
     },
-    onSuccess: (_data, leadId) => {
+    onSuccess: (_data, input) => {
+      const leadId = typeof input === "string" ? input : input.leadId
       void queryClient.invalidateQueries({ queryKey: ["leads", leadId] })
       void queryClient.invalidateQueries({ queryKey: ["leads"] })
     },

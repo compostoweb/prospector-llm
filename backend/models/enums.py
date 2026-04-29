@@ -74,6 +74,35 @@ class EmailType(str, Enum):
     UNKNOWN = "unknown"
 
 
+class ContactQualityBucket(str, Enum):
+    """Bucket visual de qualidade do contato."""
+
+    RED = "red"
+    ORANGE = "orange"
+    GREEN = "green"
+
+
+class ContactPointKind(str, Enum):
+    """Tipo canônico de ponto de contato do lead."""
+
+    EMAIL = "email"
+    PHONE = "phone"
+
+
+class EmailVerificationStatus(str, Enum):
+    """Status normalizado de verificação de e-mail entre provedores."""
+
+    VALID = "valid"
+    ACCEPT_ALL = "accept_all"
+    UNKNOWN = "unknown"
+    INVALID = "invalid"
+    DISPOSABLE = "disposable"
+    ABUSE = "abuse"
+    DO_NOT_MAIL = "do_not_mail"
+    SPAMTRAP = "spamtrap"
+    WEBMAIL = "webmail"
+
+
 class InteractionDirection(str, Enum):
     """Direção da mensagem na interação."""
 

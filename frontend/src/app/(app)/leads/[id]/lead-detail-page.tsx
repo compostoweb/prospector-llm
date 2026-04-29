@@ -29,7 +29,9 @@ import {
   useEnrollLead,
   useEnrichLead,
 } from "@/lib/api/hooks/use-leads"
+import type { LeadContactPoint, LeadEmail } from "@/lib/api/hooks/use-leads"
 import { useCadences } from "@/lib/api/hooks/use-cadences"
+import { ContactQualityBadge } from "@/components/leads/contact-quality-badge"
 import { LeadDeleteDialog } from "@/components/leads/lead-delete-dialog"
 import { LeadEditDialog } from "@/components/leads/lead-edit-dialog"
 import { LeadReplyAudit } from "@/components/leads/lead-reply-audit"
@@ -37,6 +39,7 @@ import { LeadTimeline } from "@/components/leads/lead-timeline"
 import { LeadScore } from "@/components/leads/lead-score"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 
 const statusLabel: Record<string, string> = {
   raw: "Novo",
@@ -67,6 +70,8 @@ export default function LeadDetailPage() {
   const { mutate: enrollLead, isPending: enrolling } = useEnrollLead()
   const { mutate: enrichLead, isPending: enriching } = useEnrichLead()
   const [showEnroll, setShowEnroll] = useState(false)
+  const [includeMobileOnEnrich, setIncludeMobileOnEnrich] = useState(true)
+  const [forceRefreshOnEnrich, setForceRefreshOnEnrich] = useState(false)
 
   if (isLoading) {
     return (
@@ -96,6 +101,11 @@ export default function LeadDetailPage() {
   }
 
   const activeCadences = cadences?.filter((c) => c.is_active) ?? []
+  const sortedEmails = [...lead.emails].sort(
+    (left, right) => Number(right.is_primary) - Number(left.is_primary),
+  )
+  const emailContactPoints = lead.contact_points.filter((point) => point.kind === "email")
+  const phoneContactPoints = lead.contact_points.filter((point) => point.kind === "phone")
 
   function handleArchive() {
     archiveLead(leadId, {
@@ -108,14 +118,21 @@ export default function LeadDetailPage() {
   }
 
   function handleEnrich() {
-    enrichLead(leadId, {
-      onSuccess: () => {
-        toast.success("Enriquecimento iniciado")
+    enrichLead(
+      {
+        leadId,
+        include_mobile: includeMobileOnEnrich,
+        force_refresh: forceRefreshOnEnrich,
       },
-      onError: (error) => {
-        toast.error(error instanceof Error ? error.message : "Falha ao iniciar enriquecimento")
+      {
+        onSuccess: () => {
+          toast.success("Enriquecimento iniciado")
+        },
+        onError: (error) => {
+          toast.error(error instanceof Error ? error.message : "Falha ao iniciar enriquecimento")
+        },
       },
-    })
+    )
   }
 
   return (
@@ -164,6 +181,26 @@ export default function LeadDetailPage() {
         </div>
       </div>
 
+      {lead.status !== "archived" && (
+        <div className="flex flex-wrap items-center gap-4 rounded-lg border border-(--border-default) bg-(--bg-surface) px-4 py-3 text-xs text-(--text-secondary)">
+          <span className="font-medium text-(--text-primary)">Configuração do enriquecimento</span>
+          <label className="inline-flex items-center gap-2">
+            <Checkbox
+              checked={includeMobileOnEnrich}
+              onCheckedChange={(checked) => setIncludeMobileOnEnrich(checked === true)}
+            />
+            Buscar mobile
+          </label>
+          <label className="inline-flex items-center gap-2">
+            <Checkbox
+              checked={forceRefreshOnEnrich}
+              onCheckedChange={(checked) => setForceRefreshOnEnrich(checked === true)}
+            />
+            Forçar refresh
+          </label>
+        </div>
+      )}
+
       {/* Enroll dropdown */}
       {showEnroll && (
         <Card>
@@ -205,6 +242,13 @@ export default function LeadDetailPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               {lead.company && <InfoRow icon={Building2} label="Empresa" value={lead.company} />}
+              {lead.linkedin_current_company && (
+                <InfoRow
+                  icon={Linkedin}
+                  label="Empresa atual no LinkedIn"
+                  value={lead.linkedin_current_company}
+                />
+              )}
               {lead.industry && <InfoRow icon={Tag} label="Setor" value={lead.industry} />}
               {lead.company_size && (
                 <InfoRow icon={Briefcase} label="Tamanho" value={lead.company_size} />
@@ -233,28 +277,29 @@ export default function LeadDetailPage() {
               <CardTitle className="text-sm">Contato</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {lead.email_corporate && (
-                <InfoRow icon={Mail} label="Email corporativo" value={lead.email_corporate} />
+              {emailContactPoints.length > 0 ? (
+                emailContactPoints.map((point) => (
+                  <LeadContactPointRow key={point.id} point={point} label="Email" />
+                ))
+              ) : sortedEmails.length > 0 ? (
+                sortedEmails.map((email) => <LeadEmailRow key={email.id} email={email} />)
+              ) : (
+                <p className="text-xs text-(--text-tertiary)">Nenhum email registrado.</p>
               )}
-              {lead.email_personal && (
-                <InfoRow icon={Mail} label="Email pessoal" value={lead.email_personal} />
-              )}
-              {lead.emails
-                .filter(
-                  (email) =>
-                    email.email !== lead.email_corporate && email.email !== lead.email_personal,
-                )
-                .map((email) => (
-                  <InfoRow
-                    key={email.id}
-                    icon={Mail}
-                    label={labelForLeadEmail(email.email_type, email.is_primary)}
-                    value={email.email}
-                  />
-                ))}
-              {lead.phone && <InfoRow icon={Phone} label="Telefone" value={lead.phone} />}
+              {phoneContactPoints.length > 0 ? (
+                phoneContactPoints.map((point) => (
+                  <LeadContactPointRow key={point.id} point={point} label="Telefone" />
+                ))
+              ) : lead.phone ? (
+                <InfoRow icon={Phone} label="Telefone" value={lead.phone} />
+              ) : null}
               {lead.linkedin_url && (
                 <InfoRow icon={Linkedin} label="LinkedIn" value={lead.linkedin_url} link />
+              )}
+              {lead.linkedin_mismatch && lead.linkedin_current_company && (
+                <div className="rounded-(--radius) border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  O LinkedIn aponta empresa atual diferente da empresa salva neste lead.
+                </div>
               )}
             </CardContent>
           </Card>
@@ -351,6 +396,64 @@ function labelForLeadEmail(type: "corporate" | "personal" | "unknown", isPrimary
   if (type === "corporate") return isPrimary ? "Email corporativo" : "Email corporativo extra"
   if (type === "personal") return isPrimary ? "Email pessoal" : "Email pessoal extra"
   return isPrimary ? "Email principal" : "Email adicional"
+}
+
+function LeadEmailRow({ email }: { email: LeadEmail }) {
+  return (
+    <div className="flex items-start gap-2.5">
+      <Mail size={14} className="mt-0.5 shrink-0 text-(--text-tertiary)" aria-hidden="true" />
+      <div className="min-w-0 overflow-hidden space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-[11px] font-medium uppercase tracking-wider text-(--text-tertiary)">
+            {labelForLeadEmail(email.email_type, email.is_primary)}
+          </p>
+          <ContactQualityBadge
+            qualityBucket={email.quality_bucket}
+            qualityScore={email.quality_score}
+            verificationStatus={email.verification_status}
+            source={email.source}
+          />
+        </div>
+        <p className="text-xs text-(--text-secondary)">{email.email}</p>
+        {email.source ? (
+          <p className="text-[11px] text-(--text-tertiary)">Fonte: {email.source}</p>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function LeadContactPointRow({ point, label }: { point: LeadContactPoint; label: string }) {
+  const Icon = point.kind === "phone" ? Phone : Mail
+
+  return (
+    <div className="flex items-start gap-2.5">
+      <Icon size={14} className="mt-0.5 shrink-0 text-(--text-tertiary)" aria-hidden="true" />
+      <div className="min-w-0 overflow-hidden space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-[11px] font-medium uppercase tracking-wider text-(--text-tertiary)">
+            {point.is_primary ? `${label} principal` : `${label} adicional`}
+          </p>
+          <ContactQualityBadge
+            qualityBucket={point.quality_bucket}
+            qualityScore={point.quality_score}
+            verificationStatus={null}
+            source={point.source}
+          />
+        </div>
+        <p className="text-xs text-(--text-secondary)">{point.value}</p>
+        {point.source ? (
+          <p className="text-[11px] text-(--text-tertiary)">Fonte: {point.source}</p>
+        ) : null}
+        {typeof point.evidence_json?.linkedin_company_match === "boolean" ? (
+          <p className="text-[11px] text-(--text-tertiary)">
+            Cruzamento LinkedIn:{" "}
+            {point.evidence_json.linkedin_company_match ? "compatível" : "divergente"}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  )
 }
 
 // ── Componente auxiliar ───────────────────────────────────────────────

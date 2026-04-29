@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -14,9 +14,18 @@ from models.cadence import Cadence
 from models.cadence_step import CadenceStep
 from models.content_calculator_result import ContentCalculatorResult
 from models.content_lm_lead import ContentLMLead
-from models.enums import EmailType, LeadSource, LeadStatus, StepStatus
+from models.enums import (
+    ContactPointKind,
+    ContactQualityBucket,
+    EmailType,
+    EmailVerificationStatus,
+    LeadSource,
+    LeadStatus,
+    StepStatus,
+)
 from models.interaction import Interaction
 from models.lead import Lead
+from models.lead_contact_point import LeadContactPoint
 from models.lead_email import LeadEmail
 from models.lead_list import LeadList, lead_list_members
 from models.lead_tag import LeadTag
@@ -24,6 +33,7 @@ from models.manual_task import ManualTask
 from models.sandbox import SandboxStep
 from schemas.lead import (
     LeadActiveCadenceSummary,
+    LeadContactPointResponse,
     LeadEmailInput,
     LeadEmailResponse,
     LeadGeneratedPreviewItem,
@@ -57,6 +67,23 @@ class LeadEmailSpec(TypedDict):
     email_type: EmailType
     source: str | None
     verified: bool
+    verification_status: NotRequired[EmailVerificationStatus | None]
+    quality_score: NotRequired[float | None]
+    quality_bucket: NotRequired[ContactQualityBucket | None]
+    is_primary: bool
+
+
+class LeadContactPointSpec(TypedDict):
+    kind: ContactPointKind
+    value: str
+    normalized_value: str
+    source: str | None
+    verified: bool
+    verification_status: NotRequired[str | None]
+    quality_score: NotRequired[float | None]
+    quality_bucket: NotRequired[ContactQualityBucket | None]
+    evidence_json: NotRequired[dict[str, object] | None]
+    metadata_json: NotRequired[dict[str, object] | None]
     is_primary: bool
 
 
@@ -66,6 +93,7 @@ def infer_lead_origin(lead: Lead) -> tuple[str, str, str | None]:
         lead.email_corporate_source,
         lead.email_personal_source,
         *(email.source for email in lead.emails or []),
+        *(point.source for point in lead.contact_points or []),
     }
 
     if "lead_magnet" in sources or _note_mentions(lead.notes, "Origem inbound:"):
@@ -102,9 +130,16 @@ def serialize_lead(
         lead.emails or [],
         key=lambda item: (not item.is_primary, item.email_type.value, item.email),
     )
+    lead_contact_points = sorted(
+        lead.contact_points or [],
+        key=lambda item: (not item.is_primary, item.kind.value, item.value.casefold()),
+    )
     active_cadences = (active_cadences_by_lead or {}).get(lead.id, [])
     base["lead_lists"] = [LeadListSummary(id=ll.id, name=ll.name) for ll in lead_lists]
     base["emails"] = [LeadEmailResponse.model_validate(email) for email in lead_emails]
+    base["contact_points"] = [
+        LeadContactPointResponse.model_validate(point) for point in lead_contact_points
+    ]
     base["origin_key"] = origin_key
     base["origin_label"] = origin_label
     base["origin_detail"] = origin_detail
@@ -155,7 +190,11 @@ async def get_lead_with_lists(
         select(Lead)
         .where(Lead.id == lead_id, Lead.tenant_id == tenant_id)
         .execution_options(populate_existing=True)
-        .options(selectinload(Lead.lists), selectinload(Lead.emails))  # type: ignore[arg-type]
+        .options(
+            selectinload(Lead.lists),
+            selectinload(Lead.emails),
+            selectinload(Lead.contact_points),
+        )  # type: ignore[arg-type]
     )
     return result.scalar_one_or_none()
 
@@ -187,7 +226,11 @@ async def find_existing_lead(
             select(Lead)
             .where(getattr(Lead, field_name) == value, Lead.tenant_id == tenant_id)
             .execution_options(populate_existing=True)
-            .options(selectinload(Lead.lists), selectinload(Lead.emails))  # type: ignore[arg-type]
+            .options(
+                selectinload(Lead.lists),
+                selectinload(Lead.emails),
+                selectinload(Lead.contact_points),
+            )  # type: ignore[arg-type]
             .limit(1)
         )
         lead = result.scalar_one_or_none()
@@ -204,7 +247,11 @@ async def find_existing_lead(
                 LeadEmail.email == email,
             )
             .execution_options(populate_existing=True)
-            .options(selectinload(Lead.lists), selectinload(Lead.emails))  # type: ignore[arg-type]
+            .options(
+                selectinload(Lead.lists),
+                selectinload(Lead.emails),
+                selectinload(Lead.contact_points),
+            )  # type: ignore[arg-type]
             .limit(1)
         )
         lead = result.scalar_one_or_none()
@@ -221,6 +268,9 @@ def lead_email_specs_from_lead(lead: Lead) -> list[LeadEmailSpec]:
                 "email_type": email.email_type,
                 "source": email.source,
                 "verified": email.verified,
+                "verification_status": email.verification_status,
+                "quality_score": email.quality_score,
+                "quality_bucket": email.quality_bucket,
                 "is_primary": email.is_primary,
             }
             for email in lead.emails
@@ -239,13 +289,82 @@ def additional_lead_email_specs(lead: Lead) -> list[LeadEmailSpec]:
     return [spec for spec in lead_email_specs_from_lead(lead) if not spec["is_primary"]]
 
 
+def build_lead_contact_point_specs(
+    *,
+    email_specs: Iterable[LeadEmailSpec] | None = None,
+    email_evidence_by_value: dict[str, dict[str, object] | None] | None = None,
+    phone: str | None = None,
+    phone_source: str | None = None,
+    phone_verified: bool = False,
+    phone_verification_status: str | None = None,
+    phone_quality_score: float | None = None,
+    phone_quality_bucket: ContactQualityBucket | None = None,
+    phone_evidence_json: dict[str, object] | None = None,
+    phone_metadata_json: dict[str, object] | None = None,
+) -> list[LeadContactPointSpec]:
+    specs: list[LeadContactPointSpec] = []
+    evidence_lookup = {
+        _normalize_email(key): value
+        for key, value in (email_evidence_by_value or {}).items()
+        if key
+    }
+
+    for email_spec in email_specs or []:
+        normalized_email = _normalize_email(email_spec.get("email"))
+        if not normalized_email:
+            continue
+        specs.append(
+            {
+                "kind": ContactPointKind.EMAIL,
+                "value": normalized_email,
+                "normalized_value": normalized_email,
+                "source": email_spec.get("source"),
+                "verified": bool(email_spec.get("verified", False)),
+                "verification_status": _string_or_none(email_spec.get("verification_status")),
+                "quality_score": email_spec.get("quality_score"),
+                "quality_bucket": email_spec.get("quality_bucket"),
+                "evidence_json": evidence_lookup.get(normalized_email),
+                "metadata_json": {
+                    "email_type": _email_type_attr(email_spec).value,
+                },
+                "is_primary": bool(email_spec.get("is_primary", False)),
+            }
+        )
+
+    normalized_phone = _normalize_phone(phone)
+    if normalized_phone and phone:
+        specs.append(
+            {
+                "kind": ContactPointKind.PHONE,
+                "value": phone.strip(),
+                "normalized_value": normalized_phone,
+                "source": phone_source,
+                "verified": phone_verified,
+                "verification_status": phone_verification_status,
+                "quality_score": phone_quality_score,
+                "quality_bucket": phone_quality_bucket,
+                "evidence_json": phone_evidence_json,
+                "metadata_json": phone_metadata_json,
+                "is_primary": True,
+            }
+        )
+
+    return _dedupe_contact_point_specs(specs)
+
+
 def build_lead_email_specs(
     *,
     email_corporate: str | None = None,
     email_corporate_source: str | None = None,
     email_corporate_verified: bool = False,
+    email_corporate_verification_status: EmailVerificationStatus | None = None,
+    email_corporate_quality_score: float | None = None,
+    email_corporate_quality_bucket: ContactQualityBucket | None = None,
     email_personal: str | None = None,
     email_personal_source: str | None = None,
+    email_personal_verification_status: EmailVerificationStatus | None = None,
+    email_personal_quality_score: float | None = None,
+    email_personal_quality_bucket: ContactQualityBucket | None = None,
     extra_emails: Iterable[LeadEmailInput | LeadEmailSpec | LeadEmail] | None = None,
 ) -> list[LeadEmailSpec]:
     specs: list[LeadEmailSpec] = []
@@ -258,6 +377,9 @@ def build_lead_email_specs(
                 "email_type": EmailType.CORPORATE,
                 "source": email_corporate_source,
                 "verified": email_corporate_verified,
+                "verification_status": email_corporate_verification_status,
+                "quality_score": email_corporate_quality_score,
+                "quality_bucket": email_corporate_quality_bucket,
                 "is_primary": True,
             }
         )
@@ -270,6 +392,9 @@ def build_lead_email_specs(
                 "email_type": EmailType.PERSONAL,
                 "source": email_personal_source,
                 "verified": False,
+                "verification_status": email_personal_verification_status,
+                "quality_score": email_personal_quality_score,
+                "quality_bucket": email_personal_quality_bucket,
                 "is_primary": True,
             }
         )
@@ -284,6 +409,9 @@ def build_lead_email_specs(
                 "email_type": _email_type_attr(item),
                 "source": _email_attr(item, "source"),
                 "verified": bool(_email_attr(item, "verified", False)),
+                "verification_status": _email_verification_status_attr(item),
+                "quality_score": _quality_score_attr(item),
+                "quality_bucket": _quality_bucket_attr(item),
                 "is_primary": bool(_email_attr(item, "is_primary", False)),
             }
         )
@@ -320,6 +448,9 @@ async def replace_lead_email_records(
                     email_type=spec["email_type"],
                     source=spec["source"],
                     verified=spec["verified"],
+                    verification_status=spec.get("verification_status"),
+                    quality_score=spec.get("quality_score"),
+                    quality_bucket=spec.get("quality_bucket"),
                     is_primary=spec["is_primary"],
                 )
             )
@@ -330,10 +461,119 @@ async def replace_lead_email_records(
         record.email_type = spec["email_type"]
         record.source = spec["source"]
         record.verified = spec["verified"]
+        record.verification_status = spec.get("verification_status")
+        record.quality_score = spec.get("quality_score")
+        record.quality_bucket = spec.get("quality_bucket")
         record.is_primary = spec["is_primary"]
 
     for stale_record in existing_by_email.values():
         await db.delete(stale_record)
+
+
+async def replace_lead_contact_points(
+    db: AsyncSession,
+    *,
+    lead: Lead,
+    specs: Iterable[LeadContactPointSpec],
+) -> None:
+    normalized_specs = _dedupe_contact_point_specs(list(specs))
+
+    existing_result = await db.execute(
+        select(LeadContactPoint)
+        .where(LeadContactPoint.lead_id == lead.id)
+        .execution_options(populate_existing=True)
+    )
+    existing_records = existing_result.scalars().all()
+    existing_by_key = {
+        (record.kind.value, record.normalized_value.casefold()): record
+        for record in existing_records
+    }
+
+    for spec in normalized_specs:
+        point_key = (spec["kind"].value, spec["normalized_value"].casefold())
+        record = existing_by_key.pop(point_key, None)
+        if record is None:
+            db.add(
+                LeadContactPoint(
+                    tenant_id=lead.tenant_id,
+                    lead_id=lead.id,
+                    kind=spec["kind"],
+                    value=spec["value"],
+                    normalized_value=spec["normalized_value"],
+                    source=spec["source"],
+                    verified=spec["verified"],
+                    verification_status=spec.get("verification_status"),
+                    quality_score=spec.get("quality_score"),
+                    quality_bucket=spec.get("quality_bucket"),
+                    evidence_json=spec.get("evidence_json"),
+                    metadata_json=spec.get("metadata_json"),
+                    is_primary=spec["is_primary"],
+                )
+            )
+            continue
+
+        record.tenant_id = lead.tenant_id
+        record.lead_id = lead.id
+        record.kind = spec["kind"]
+        record.value = spec["value"]
+        record.normalized_value = spec["normalized_value"]
+        record.source = spec["source"]
+        record.verified = spec["verified"]
+        record.verification_status = spec.get("verification_status")
+        record.quality_score = spec.get("quality_score")
+        record.quality_bucket = spec.get("quality_bucket")
+        record.evidence_json = spec.get("evidence_json")
+        record.metadata_json = spec.get("metadata_json")
+        record.is_primary = spec["is_primary"]
+
+    for stale_record in existing_by_key.values():
+        await db.delete(stale_record)
+
+
+async def sync_lead_contact_points_from_state(
+    db: AsyncSession,
+    *,
+    lead: Lead,
+) -> None:
+    await db.flush()
+    existing_emails_result = await db.execute(
+        select(LeadEmail)
+        .where(LeadEmail.lead_id == lead.id)
+        .execution_options(populate_existing=True)
+    )
+    email_records = existing_emails_result.scalars().all()
+    email_specs = (
+        [
+            {
+                "email": email.email,
+                "email_type": email.email_type,
+                "source": email.source,
+                "verified": email.verified,
+                "verification_status": email.verification_status,
+                "quality_score": email.quality_score,
+                "quality_bucket": email.quality_bucket,
+                "is_primary": email.is_primary,
+            }
+            for email in email_records
+        ]
+        if email_records
+        else build_lead_email_specs(
+            email_corporate=lead.email_corporate,
+            email_corporate_source=lead.email_corporate_source,
+            email_corporate_verified=lead.email_corporate_verified,
+            email_personal=lead.email_personal,
+            email_personal_source=lead.email_personal_source,
+        )
+    )
+
+    await replace_lead_contact_points(
+        db,
+        lead=lead,
+        specs=build_lead_contact_point_specs(
+            email_specs=email_specs,
+            phone=lead.phone,
+        ),
+    )
 
 
 def preferred_lead_email(lead: Lead | None) -> str | None:
@@ -406,7 +646,11 @@ async def merge_leads(
     result = await db.execute(
         select(Lead)
         .where(Lead.tenant_id == tenant_id, Lead.id.in_(target_ids))
-        .options(selectinload(Lead.lists), selectinload(Lead.emails))  # type: ignore[arg-type]
+        .options(
+            selectinload(Lead.lists),
+            selectinload(Lead.emails),
+            selectinload(Lead.contact_points),
+        )  # type: ignore[arg-type]
     )
     leads = result.scalars().all()
     lead_map = {lead.id: lead for lead in leads}
@@ -417,6 +661,7 @@ async def merge_leads(
         _merge_lead_fields(primary, secondary)
 
     _merge_lead_email_records(primary, secondary_leads)
+    await sync_lead_contact_points_from_state(db, lead=primary)
 
     await _merge_memberships(db, primary.id, secondary_leads)
     await _merge_tags(db, tenant_id, primary.id, secondary_ids)
@@ -754,6 +999,51 @@ def _email_type_attr(item: LeadEmailInput | LeadEmailSpec | LeadEmail) -> EmailT
         return EmailType.UNKNOWN
 
 
+def _email_verification_status_attr(
+    item: LeadEmailInput | LeadEmailSpec | LeadEmail,
+) -> EmailVerificationStatus | None:
+    raw = _email_attr(item, "verification_status")
+    if raw is None:
+        return None
+    if isinstance(raw, EmailVerificationStatus):
+        return raw
+    try:
+        return EmailVerificationStatus(str(raw))
+    except ValueError:
+        return None
+
+
+def _quality_bucket_attr(
+    item: LeadEmailInput | LeadEmailSpec | LeadEmail,
+) -> ContactQualityBucket | None:
+    raw = _email_attr(item, "quality_bucket")
+    if raw is None:
+        return None
+    if isinstance(raw, ContactQualityBucket):
+        return raw
+    try:
+        return ContactQualityBucket(str(raw))
+    except ValueError:
+        return None
+
+
+def _quality_score_attr(item: LeadEmailInput | LeadEmailSpec | LeadEmail) -> float | None:
+    raw = _email_attr(item, "quality_score")
+    if raw is None:
+        return None
+    try:
+        return max(0.0, min(1.0, float(raw)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _string_or_none(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _dedupe_email_specs(specs: list[LeadEmailSpec]) -> list[LeadEmailSpec]:
     merged: dict[str, LeadEmailSpec] = {}
 
@@ -766,6 +1056,9 @@ def _dedupe_email_specs(specs: list[LeadEmailSpec]) -> list[LeadEmailSpec]:
             "email_type": spec.get("email_type", EmailType.UNKNOWN),
             "source": spec.get("source"),
             "verified": bool(spec.get("verified", False)),
+            "verification_status": spec.get("verification_status"),
+            "quality_score": spec.get("quality_score"),
+            "quality_bucket": spec.get("quality_bucket"),
             "is_primary": bool(spec.get("is_primary", False)),
         }
 
@@ -778,6 +1071,17 @@ def _dedupe_email_specs(specs: list[LeadEmailSpec]) -> list[LeadEmailSpec]:
         current["is_primary"] = current["is_primary"] or normalized_spec["is_primary"]
         if current["source"] in (None, "") and normalized_spec["source"]:
             current["source"] = normalized_spec["source"]
+        if _verification_status_rank(
+            normalized_spec.get("verification_status")
+        ) > _verification_status_rank(current.get("verification_status")):
+            current["verification_status"] = normalized_spec.get("verification_status")
+        current_score = current.get("quality_score")
+        normalized_score = normalized_spec.get("quality_score")
+        if normalized_score is not None and (
+            current_score is None or normalized_score >= current_score
+        ):
+            current["quality_score"] = normalized_score
+            current["quality_bucket"] = normalized_spec.get("quality_bucket")
         if (
             current["email_type"] == EmailType.UNKNOWN
             and normalized_spec["email_type"] != EmailType.UNKNOWN
@@ -805,6 +1109,88 @@ def _dedupe_email_specs(specs: list[LeadEmailSpec]) -> list[LeadEmailSpec]:
     )
 
 
+def _dedupe_contact_point_specs(specs: list[LeadContactPointSpec]) -> list[LeadContactPointSpec]:
+    merged: dict[tuple[str, str], LeadContactPointSpec] = {}
+
+    for spec in specs:
+        normalized_value = _normalize_contact_point_value(spec["kind"], spec.get("value"))
+        if not normalized_value:
+            continue
+        normalized_spec: LeadContactPointSpec = {
+            "kind": spec["kind"],
+            "value": str(spec["value"]).strip(),
+            "normalized_value": normalized_value,
+            "source": spec.get("source"),
+            "verified": bool(spec.get("verified", False)),
+            "verification_status": _string_or_none(spec.get("verification_status")),
+            "quality_score": spec.get("quality_score"),
+            "quality_bucket": spec.get("quality_bucket"),
+            "evidence_json": spec.get("evidence_json"),
+            "metadata_json": spec.get("metadata_json"),
+            "is_primary": bool(spec.get("is_primary", False)),
+        }
+        key = (normalized_spec["kind"].value, normalized_value.casefold())
+        current = merged.get(key)
+        if current is None:
+            merged[key] = normalized_spec
+            continue
+
+        current["verified"] = current["verified"] or normalized_spec["verified"]
+        current["is_primary"] = current["is_primary"] or normalized_spec["is_primary"]
+        if current.get("source") in (None, "") and normalized_spec.get("source"):
+            current["source"] = normalized_spec.get("source")
+        current_score = current.get("quality_score")
+        normalized_score = normalized_spec.get("quality_score")
+        if normalized_score is not None and (
+            current_score is None or normalized_score >= current_score
+        ):
+            current["quality_score"] = normalized_score
+            current["quality_bucket"] = normalized_spec.get("quality_bucket")
+        if current.get("verification_status") in (None, "") and normalized_spec.get(
+            "verification_status"
+        ):
+            current["verification_status"] = normalized_spec.get("verification_status")
+        if (
+            current.get("evidence_json") is None
+            and normalized_spec.get("evidence_json") is not None
+        ):
+            current["evidence_json"] = normalized_spec.get("evidence_json")
+        if (
+            current.get("metadata_json") is None
+            and normalized_spec.get("metadata_json") is not None
+        ):
+            current["metadata_json"] = normalized_spec.get("metadata_json")
+
+    deduped = list(merged.values())
+    for kind in ContactPointKind:
+        typed_specs = [spec for spec in deduped if spec["kind"] == kind]
+        primary_seen = False
+        for spec in typed_specs:
+            if spec["is_primary"] and not primary_seen:
+                primary_seen = True
+                continue
+            if spec["is_primary"] and primary_seen:
+                spec["is_primary"] = False
+        if not primary_seen and typed_specs:
+            typed_specs[0]["is_primary"] = True
+
+    return sorted(
+        deduped,
+        key=lambda spec: (spec["kind"].value, not spec["is_primary"], spec["normalized_value"]),
+    )
+
+
+def _normalize_contact_point_value(kind: ContactPointKind, value: object) -> str | None:
+    if kind == ContactPointKind.EMAIL:
+        return _normalize_email(_string_or_none(value))
+    return _normalize_phone(_string_or_none(value))
+
+
+def _normalize_phone(value: str | None) -> str | None:
+    digits = "".join(ch for ch in (value or "") if ch.isdigit())
+    return digits or None
+
+
 def _sync_primary_email_fields(lead: Lead, specs: list[LeadEmailSpec]) -> None:
     corporate_primary = next(
         (
@@ -824,3 +1210,15 @@ def _sync_primary_email_fields(lead: Lead, specs: list[LeadEmailSpec]) -> None:
     lead.email_corporate_verified = corporate_primary["verified"] if corporate_primary else False
     lead.email_personal = personal_primary["email"] if personal_primary else None
     lead.email_personal_source = personal_primary["source"] if personal_primary else None
+
+
+def _verification_status_rank(status: EmailVerificationStatus | None) -> int:
+    if status == EmailVerificationStatus.VALID:
+        return 4
+    if status == EmailVerificationStatus.ACCEPT_ALL:
+        return 3
+    if status == EmailVerificationStatus.UNKNOWN:
+        return 2
+    if status is None:
+        return 1
+    return 0

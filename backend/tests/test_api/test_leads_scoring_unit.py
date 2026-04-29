@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import inspect
 import uuid
-from typing import Any, get_args, get_type_hints
+from typing import Any, cast, get_args, get_type_hints
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.routes import leads as leads_route
 from models.enums import LeadSource, LeadStatus
@@ -24,6 +25,9 @@ class _FakeResult:
     def __init__(self, items: list[Any]) -> None:
         self._items = items
 
+    def all(self) -> list[Any]:
+        return list(self._items)
+
     def scalar_one_or_none(self) -> Any | None:
         if not self._items:
             return None
@@ -42,6 +46,11 @@ class FakeAsyncSession:
 
     def add(self, obj: Any) -> None:
         self.items.append(obj)
+
+    async def flush(self) -> None:
+        for item in self.items:
+            if isinstance(item, Lead) and item.id is None:
+                item.id = uuid.uuid4()
 
     async def commit(self) -> None:
         pass
@@ -76,10 +85,16 @@ async def test_create_lead_sets_initial_score(monkeypatch: pytest.MonkeyPatch) -
     ) -> Lead | None:
         assert tenant_id_arg == tenant_id
         assert session is db
-        return next((item for item in db.items if isinstance(item, Lead) and item.id == lead_id), None)
+        return next(
+            (item for item in db.items if isinstance(item, Lead) and item.id == lead_id), None
+        )
+
+    async def _fake_reload_lead_for_output(_db: FakeAsyncSession, *, lead: Lead) -> Lead:
+        return lead
 
     monkeypatch.setattr(leads_route, "get_lead_with_lists", _fake_get_lead_with_lists)
-    monkeypatch.setattr(leads_route, "serialize_lead", lambda lead: lead)
+    monkeypatch.setattr(leads_route, "reload_lead_for_output", _fake_reload_lead_for_output)
+    monkeypatch.setattr(leads_route, "serialize_lead", lambda lead, **_: lead)
 
     result = await leads_route.create_lead(
         body=LeadCreateRequest(
@@ -91,11 +106,11 @@ async def test_create_lead_sets_initial_score(monkeypatch: pytest.MonkeyPatch) -
         ),
         enrich=False,
         tenant_id=tenant_id,
-        db=db,
+        db=cast(AsyncSession, db),
     )
 
     assert isinstance(result, Lead)
-    assert result.score == 40.0
+    assert result.score == 35.0
 
 
 @pytest.mark.asyncio
@@ -121,8 +136,12 @@ async def test_update_lead_recalculates_score_for_score_fields(
         assert session is db
         return lead
 
+    async def _fake_reload_lead_for_output(_db: FakeAsyncSession, *, lead: Lead) -> Lead:
+        return lead
+
     monkeypatch.setattr(leads_route, "_get_lead_or_404", _fake_get_lead_or_404)
-    monkeypatch.setattr(leads_route, "serialize_lead", lambda current: current)
+    monkeypatch.setattr(leads_route, "reload_lead_for_output", _fake_reload_lead_for_output)
+    monkeypatch.setattr(leads_route, "serialize_lead", lambda current, **_: current)
 
     result = await leads_route.update_lead(
         lead_id=lead.id,
@@ -133,11 +152,11 @@ async def test_update_lead_recalculates_score_for_score_fields(
             segment="SaaS",
         ),
         tenant_id=tenant_id,
-        db=db,
+        db=cast(AsyncSession, db),
     )
 
     assert isinstance(result, Lead)
-    assert result.score == 80.0
+    assert result.score == 68.0
 
 
 def test_list_leads_accepts_min_score_up_to_100() -> None:

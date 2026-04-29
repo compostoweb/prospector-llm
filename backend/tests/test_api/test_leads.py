@@ -85,6 +85,34 @@ async def test_create_lead_with_multiple_emails(client: AsyncClient):
     }
 
 
+async def test_create_lead_exposes_contact_points(client: AsyncClient):
+    resp = await client.post(
+        "/leads",
+        json=_lead_payload(
+            linkedin_url="https://linkedin.com/in/contact-points-create",
+            phone="+55 11 99999-1111",
+            emails=[
+                {
+                    "email": "founder@acme.com",
+                    "email_type": "corporate",
+                    "verified": True,
+                    "quality_bucket": "green",
+                    "quality_score": 0.94,
+                    "is_primary": True,
+                }
+            ],
+        ),
+    )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert {item["kind"] for item in data["contact_points"]} == {"email", "phone"}
+    email_point = next(item for item in data["contact_points"] if item["kind"] == "email")
+    assert email_point["value"] == "founder@acme.com"
+    assert email_point["quality_bucket"] == "green"
+    assert email_point["verified"] is True
+
+
 async def test_create_lead_duplicate_linkedin(client: AsyncClient, db: AsyncSession):
     """Segundo cadastro com mesmo linkedin_url deve retornar 409."""
     payload = _lead_payload(linkedin_url="https://linkedin.com/in/duplicate-test")
@@ -124,6 +152,86 @@ async def test_list_leads_pagination(client: AsyncClient):
     resp = await client.get("/leads", params={"page": 1, "page_size": 2})
     assert resp.status_code == 200
     assert len(resp.json()["items"]) <= 2
+
+
+async def test_list_leads_filters_by_email_quality(client: AsyncClient):
+    await client.post(
+        "/leads",
+        json=_lead_payload(
+            linkedin_url="https://linkedin.com/in/filter-email-quality-green",
+            emails=[
+                {
+                    "email": "green@acme.com",
+                    "email_type": "corporate",
+                    "verified": True,
+                    "quality_bucket": "green",
+                    "quality_score": 0.95,
+                    "is_primary": True,
+                }
+            ],
+        ),
+    )
+    await client.post(
+        "/leads",
+        json=_lead_payload(
+            linkedin_url="https://linkedin.com/in/filter-email-quality-red",
+            emails=[
+                {
+                    "email": "red@gmail.com",
+                    "email_type": "personal",
+                    "quality_bucket": "red",
+                    "quality_score": 0.18,
+                    "is_primary": True,
+                }
+            ],
+        ),
+    )
+
+    resp = await client.get("/leads", params={"email_quality": "green"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["items"]) == 1
+    assert data["items"][0]["linkedin_url"] == "https://linkedin.com/in/filter-email-quality-green"
+
+
+async def test_list_leads_filters_by_mobile_presence(client: AsyncClient):
+    await client.post(
+        "/leads",
+        json=_lead_payload(
+            linkedin_url="https://linkedin.com/in/filter-mobile-yes",
+            phone="+55 11 98888-7777",
+        ),
+    )
+    await client.post(
+        "/leads",
+        json=_lead_payload(linkedin_url="https://linkedin.com/in/filter-mobile-no"),
+    )
+
+    resp = await client.get("/leads", params={"has_mobile": "true"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["items"]) == 1
+    assert data["items"][0]["linkedin_url"] == "https://linkedin.com/in/filter-mobile-yes"
+
+
+async def test_list_leads_filters_by_linkedin_mismatch(client: AsyncClient, db: AsyncSession):
+    created = (
+        await client.post(
+            "/leads", json=_lead_payload(linkedin_url="https://linkedin.com/in/filter-mismatch")
+        )
+    ).json()
+
+    lead = await db.get(Lead, uuid.UUID(created["id"]))
+    assert lead is not None
+    lead.linkedin_current_company = "Outra Empresa"
+    lead.linkedin_mismatch = True
+    await db.commit()
+
+    resp = await client.get("/leads", params={"linkedin_mismatch": "true"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["items"]) == 1
+    assert data["items"][0]["id"] == created["id"]
 
 
 # ── GET /leads/{id} ───────────────────────────────────────────────────
@@ -865,8 +973,7 @@ async def test_list_lead_steps_includes_reply_metadata_for_manual_task(
     manual_task_item = next(
         item
         for item in items
-        if item["item_kind"] == "manual_task"
-        and item["manual_task_id"] == str(manual_task.id)
+        if item["item_kind"] == "manual_task" and item["manual_task_id"] == str(manual_task.id)
     )
 
     assert manual_task_item["reply_content"] == "Pode mandar mais detalhes."
@@ -1061,6 +1168,12 @@ async def test_generate_import_merge_duplicates_updates_existing_lead_and_preser
     refreshed_emails = _email_by_address(refreshed)
     assert set(refreshed_emails) == {"contato@acme.com", "joao@gmail.com"}
     assert refreshed_emails["contato@acme.com"]["id"] == initial_emails["contato@acme.com"]["id"]
+    assert {item["kind"] for item in refreshed["contact_points"]} == {"email"}
+    assert {item["value"] for item in refreshed["contact_points"]} == {
+        "contato@acme.com",
+        "joao@gmail.com",
+    }
+    assert refreshed["score"] is not None
 
 
 async def test_add_members_to_linked_list_enrolls_lead_even_when_cadence_is_paused(

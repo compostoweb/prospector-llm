@@ -19,25 +19,43 @@ Retorna EmailFindResult ou None se todos os finders falharem.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import structlog
 
 from integrations.email_finders.apollo import ApolloClient
 from integrations.email_finders.hunter import HunterClient
-from integrations.email_finders.prospeo import ProspeoClient
+from integrations.email_finders.prospeo import ProspeoClient, ProspeoPersonEnrichment
 from integrations.zerobounce import ZeroBounceClient
-from models.enums import EmailType
+from models.enums import ContactQualityBucket, EmailType, EmailVerificationStatus
+from services.contact_quality import contact_quality_classifier
 
 logger = structlog.get_logger()
 
 # Domínios de e-mail pessoal mais comuns no Brasil e no mundo
-_PERSONAL_DOMAINS = frozenset({
-    "gmail.com", "yahoo.com", "yahoo.com.br", "hotmail.com", "outlook.com",
-    "live.com", "msn.com", "bol.com.br", "uol.com.br", "terra.com.br",
-    "ig.com.br", "r7.com", "protonmail.com", "icloud.com", "me.com",
-    "mac.com", "aol.com", "gmx.com", "yandex.com",
-})
+_PERSONAL_DOMAINS = frozenset(
+    {
+        "gmail.com",
+        "yahoo.com",
+        "yahoo.com.br",
+        "hotmail.com",
+        "outlook.com",
+        "live.com",
+        "msn.com",
+        "bol.com.br",
+        "uol.com.br",
+        "terra.com.br",
+        "ig.com.br",
+        "r7.com",
+        "protonmail.com",
+        "icloud.com",
+        "me.com",
+        "mac.com",
+        "aol.com",
+        "gmx.com",
+        "yandex.com",
+    }
+)
 
 _NAME_RE = re.compile(r"[^\w\s'-]")
 
@@ -45,10 +63,13 @@ _NAME_RE = re.compile(r"[^\w\s'-]")
 @dataclass
 class EmailFindResult:
     email: str
-    source: str          # "prospeo" | "hunter" | "apollo"
+    source: str  # "prospeo" | "hunter" | "apollo"
     email_type: EmailType
-    confidence: float    # 0.0 – 1.0
-    verified: bool       # resultado do ZeroBounce
+    confidence: float  # 0.0 – 1.0
+    verified: bool  # resultado do ZeroBounce
+    verification_status: EmailVerificationStatus
+    quality_score: float
+    quality_bucket: ContactQualityBucket
 
 
 class EmailFinderService:
@@ -69,6 +90,7 @@ class EmailFinderService:
         domain: str | None,
         linkedin_url: str | None = None,
         existing_email: str | None = None,
+        prospeo_enrichment: ProspeoPersonEnrichment | None = None,
     ) -> EmailFindResult | None:
         """
         Cascata de busca de e-mail.
@@ -81,14 +103,22 @@ class EmailFinderService:
         """
         # ── 1. Já temos um e-mail? Apenas valida e classifica ──────────
         if existing_email:
-            verified = await self._zerobounce.validate(existing_email)
             email_type = _classify_email(existing_email)
+            validation_result = await self._zerobounce.validate_with_details(existing_email)
+            quality = contact_quality_classifier.assess_email(
+                finder_confidence=1.0,
+                verification_status=validation_result.status,
+                email_type=email_type,
+            )
             return EmailFindResult(
                 email=existing_email,
                 source="existing",
                 email_type=email_type,
                 confidence=1.0,
-                verified=verified,
+                verified=quality.verified,
+                verification_status=quality.verification_status,
+                quality_score=quality.score,
+                quality_bucket=quality.bucket,
             )
 
         first = _clean_name(first_name)
@@ -96,6 +126,10 @@ class EmailFinderService:
 
         # ── 2. Prospeo (precisa de domínio) ───────────────────────────
         if domain:
+            if prospeo_enrichment and prospeo_enrichment.email:
+                email = prospeo_enrichment.email
+                confidence = prospeo_enrichment.email_confidence
+                return await self._finalize(email, "prospeo", confidence)
             result = await self._prospeo.find_email(first, last, domain)
             if result:
                 email, confidence = result
@@ -132,14 +166,21 @@ class EmailFinderService:
         source: str,
         confidence: float,
     ) -> EmailFindResult:
-        verified = await self._zerobounce.validate(email)
         email_type = _classify_email(email)
+        validation_result = await self._zerobounce.validate_with_details(email)
+        quality = contact_quality_classifier.assess_email(
+            finder_confidence=confidence,
+            verification_status=validation_result.status,
+            email_type=email_type,
+        )
         logger.info(
             "email_finder.found",
             email=email,
             source=source,
             email_type=email_type.value,
-            verified=verified,
+            verified=quality.verified,
+            verification_status=quality.verification_status.value,
+            quality_bucket=quality.bucket.value,
             confidence=confidence,
         )
         return EmailFindResult(
@@ -147,7 +188,49 @@ class EmailFinderService:
             source=source,
             email_type=email_type,
             confidence=confidence,
-            verified=verified,
+            verified=quality.verified,
+            verification_status=quality.verification_status,
+            quality_score=quality.score,
+            quality_bucket=quality.bucket,
+        )
+
+    def apply_linkedin_company_signal(
+        self,
+        result: EmailFindResult,
+        *,
+        company_match: bool | None,
+    ) -> EmailFindResult:
+        adjusted_quality = contact_quality_classifier.apply_linkedin_signal(
+            contact_quality_classifier.assess_email(
+                finder_confidence=result.quality_score,
+                verification_status=result.verification_status,
+                email_type=result.email_type,
+            ),
+            company_match=company_match,
+        )
+        return replace(
+            result,
+            quality_score=adjusted_quality.score,
+            quality_bucket=adjusted_quality.bucket,
+        )
+
+    async def enrich_person(
+        self,
+        first_name: str,
+        last_name: str,
+        domain: str | None,
+        *,
+        include_mobile: bool = False,
+    ) -> ProspeoPersonEnrichment | None:
+        if not domain:
+            return None
+        first = _clean_name(first_name)
+        last = _clean_name(last_name)
+        return await self._prospeo.enrich_person(
+            first,
+            last,
+            domain,
+            include_mobile=include_mobile,
         )
 
     async def aclose(self) -> None:
@@ -158,6 +241,7 @@ class EmailFinderService:
 
 
 # ── Utilitários ───────────────────────────────────────────────────────
+
 
 def _classify_email(email: str) -> EmailType:
     """Classifica o e-mail como corporativo ou pessoal pelo domínio."""
