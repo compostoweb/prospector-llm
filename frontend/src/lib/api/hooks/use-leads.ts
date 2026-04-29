@@ -326,7 +326,10 @@ export interface PaginatedLeads {
 
 // ── Hooks de query ────────────────────────────────────────────────────
 
-export function useLeads(params: LeadListParams = {}) {
+export function useLeads(
+  params: LeadListParams = {},
+  options?: { refetchInterval?: number | false },
+) {
   const { data: session } = useSession()
 
   return useQuery({
@@ -352,6 +355,7 @@ export function useLeads(params: LeadListParams = {}) {
       return data as PaginatedLeads
     },
     staleTime: 30 * 1000,
+    refetchInterval: options?.refetchInterval ?? false,
     enabled: !!session?.accessToken,
   })
 }

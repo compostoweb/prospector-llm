@@ -83,161 +83,163 @@ export function LeadCreateDialog() {
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Criar lead</DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Nome (obrigatório) */}
-          <div className="space-y-1.5">
-            <Label htmlFor="lead-name">Nome *</Label>
-            <Input
-              id="lead-name"
-              value={form.name}
-              onChange={(e) => set("name", e.target.value)}
-              placeholder="João da Silva"
-              required
-            />
-          </div>
-
-          {/* LinkedIn */}
-          <div className="space-y-1.5">
-            <Label htmlFor="lead-linkedin">LinkedIn URL</Label>
-            <Input
-              id="lead-linkedin"
-              value={form.linkedin_url ?? ""}
-              onChange={(e) => set("linkedin_url", e.target.value)}
-              placeholder="https://linkedin.com/in/joao"
-            />
-          </div>
-
-          {/* Grid 2 colunas */}
-          <div className="grid grid-cols-2 gap-3">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-0 overflow-y-auto">
+          <div className="space-y-4 overflow-y-auto px-1 py-2">
+            {/* Nome (obrigatório) */}
             <div className="space-y-1.5">
-              <Label htmlFor="lead-company">Empresa</Label>
+              <Label htmlFor="lead-name">Nome *</Label>
               <Input
-                id="lead-company"
-                value={form.company ?? ""}
-                onChange={(e) => set("company", e.target.value)}
+                id="lead-name"
+                value={form.name}
+                onChange={(e) => set("name", e.target.value)}
+                placeholder="João da Silva"
+                required
               />
             </div>
+
+            {/* LinkedIn */}
             <div className="space-y-1.5">
-              <Label htmlFor="lead-website">Website</Label>
+              <Label htmlFor="lead-linkedin">LinkedIn URL</Label>
               <Input
-                id="lead-website"
-                value={form.website ?? ""}
-                onChange={(e) => set("website", e.target.value)}
+                id="lead-linkedin"
+                value={form.linkedin_url ?? ""}
+                onChange={(e) => set("linkedin_url", e.target.value)}
+                placeholder="https://linkedin.com/in/joao"
               />
             </div>
+
+            {/* Grid 2 colunas */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="lead-company">Empresa</Label>
+                <Input
+                  id="lead-company"
+                  value={form.company ?? ""}
+                  onChange={(e) => set("company", e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="lead-website">Website</Label>
+                <Input
+                  id="lead-website"
+                  value={form.website ?? ""}
+                  onChange={(e) => set("website", e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="lead-email">Email corporativo</Label>
+                <Input
+                  id="lead-email"
+                  type="email"
+                  value={form.email_corporate ?? ""}
+                  onChange={(e) => set("email_corporate", e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="lead-email-personal">Email pessoal</Label>
+                <Input
+                  id="lead-email-personal"
+                  type="email"
+                  value={form.email_personal ?? ""}
+                  onChange={(e) => set("email_personal", e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="lead-phone">Telefone</Label>
+                <Input
+                  id="lead-phone"
+                  value={form.phone ?? ""}
+                  onChange={(e) => set("phone", e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="lead-segment">Segmento</Label>
+                <Input
+                  id="lead-segment"
+                  value={form.segment ?? ""}
+                  onChange={(e) => set("segment", e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="lead-city">Cidade</Label>
+                <Input
+                  id="lead-city"
+                  value={form.city ?? ""}
+                  onChange={(e) => set("city", e.target.value)}
+                />
+              </div>
+            </div>
+
             <div className="space-y-1.5">
-              <Label htmlFor="lead-email">Email corporativo</Label>
-              <Input
-                id="lead-email"
-                type="email"
-                value={form.email_corporate ?? ""}
-                onChange={(e) => set("email_corporate", e.target.value)}
+              <Label htmlFor="lead-additional-emails">Emails adicionais</Label>
+              <textarea
+                id="lead-additional-emails"
+                className="flex w-full rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-sm text-(--text-primary) shadow-sm transition-colors placeholder:text-(--text-tertiary) focus:border-(--accent) focus:outline-none focus:ring-2 focus:ring-(--accent) focus:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50"
+                rows={3}
+                value={additionalEmails}
+                onChange={(e) => setAdditionalEmails(e.target.value)}
+                placeholder="Um email por linha"
               />
             </div>
+
             <div className="space-y-1.5">
-              <Label htmlFor="lead-email-personal">Email pessoal</Label>
+              <Label htmlFor="lead-job">Cargo</Label>
               <Input
-                id="lead-email-personal"
-                type="email"
-                value={form.email_personal ?? ""}
-                onChange={(e) => set("email_personal", e.target.value)}
+                id="lead-job"
+                value={form.job_title ?? ""}
+                onChange={(e) => set("job_title", e.target.value)}
               />
             </div>
+
             <div className="space-y-1.5">
-              <Label htmlFor="lead-phone">Telefone</Label>
-              <Input
-                id="lead-phone"
-                value={form.phone ?? ""}
-                onChange={(e) => set("phone", e.target.value)}
+              <Label htmlFor="lead-notes">Notas</Label>
+              <textarea
+                id="lead-notes"
+                className="flex w-full rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-2 text-sm text-(--text-primary) shadow-sm transition-colors placeholder:text-(--text-tertiary) focus:border-(--accent) focus:outline-none focus:ring-2 focus:ring-(--accent) focus:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50"
+                rows={2}
+                value={form.notes ?? ""}
+                onChange={(e) => set("notes", e.target.value)}
+                placeholder="Observações sobre o lead..."
               />
             </div>
+
+            {/* Lista (opcional) */}
             <div className="space-y-1.5">
-              <Label htmlFor="lead-segment">Segmento</Label>
-              <Input
-                id="lead-segment"
-                value={form.segment ?? ""}
-                onChange={(e) => set("segment", e.target.value)}
-              />
+              <Label htmlFor="lead-list">Adicionar à lista</Label>
+              <select
+                id="lead-list"
+                value={selectedListId}
+                onChange={(e) => setSelectedListId(e.target.value)}
+                aria-label="Selecionar lista"
+                className="flex h-9 w-full rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-1 text-sm text-(--text-primary) shadow-sm transition-colors focus:border-(--accent) focus:outline-none focus:ring-2 focus:ring-(--accent) focus:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="">Nenhuma lista</option>
+                {lists?.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="lead-city">Cidade</Label>
-              <Input
-                id="lead-city"
-                value={form.city ?? ""}
-                onChange={(e) => set("city", e.target.value)}
+
+            {/* Enriquecer checkbox */}
+            <label className="flex items-center gap-2 text-sm text-(--text-secondary)">
+              <input
+                type="checkbox"
+                checked={enrich}
+                onChange={(e) => setEnrich(e.target.checked)}
+                className="rounded border-(--border)"
               />
-            </div>
+              Enriquecer após criar
+            </label>
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="lead-additional-emails">Emails adicionais</Label>
-            <textarea
-              id="lead-additional-emails"
-              className="flex w-full rounded-md border border-(--border) bg-transparent px-3 py-2 text-sm placeholder:text-(--text-tertiary) focus:outline-none focus:ring-1 focus:ring-(--ring)"
-              rows={3}
-              value={additionalEmails}
-              onChange={(e) => setAdditionalEmails(e.target.value)}
-              placeholder="Um email por linha"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="lead-job">Cargo</Label>
-            <Input
-              id="lead-job"
-              value={form.job_title ?? ""}
-              onChange={(e) => set("job_title", e.target.value)}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="lead-notes">Notas</Label>
-            <textarea
-              id="lead-notes"
-              className="flex w-full rounded-md border border-(--border) bg-transparent px-3 py-2 text-sm placeholder:text-(--text-tertiary) focus:outline-none focus:ring-1 focus:ring-(--ring)"
-              rows={2}
-              value={form.notes ?? ""}
-              onChange={(e) => set("notes", e.target.value)}
-              placeholder="Observações sobre o lead..."
-            />
-          </div>
-
-          {/* Lista (opcional) */}
-          <div className="space-y-1.5">
-            <Label htmlFor="lead-list">Adicionar à lista</Label>
-            <select
-              id="lead-list"
-              value={selectedListId}
-              onChange={(e) => setSelectedListId(e.target.value)}
-              aria-label="Selecionar lista"
-              className="flex h-9 w-full rounded-md border border-(--border) bg-transparent px-3 py-1 text-sm text-(--text-primary) focus:outline-none focus:ring-1 focus:ring-(--ring)"
-            >
-              <option value="">Nenhuma lista</option>
-              {lists?.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Enriquecer checkbox */}
-          <label className="flex items-center gap-2 text-sm text-(--text-secondary)">
-            <input
-              type="checkbox"
-              checked={enrich}
-              onChange={(e) => setEnrich(e.target.checked)}
-              className="rounded border-(--border)"
-            />
-            Enriquecer após criar
-          </label>
-
-          <DialogFooter>
+          <DialogFooter className="border-t border-(--border-default) px-1 pt-4">
             <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
               Cancelar
             </Button>

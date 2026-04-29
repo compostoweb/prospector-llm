@@ -1,17 +1,43 @@
 ﻿"use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
-import { useLeads } from "@/lib/api/hooks/use-leads"
+import {
+  useLeads,
+  useEnrichLead,
+  useArchiveLead,
+  usePermanentDeleteLead,
+} from "@/lib/api/hooks/use-leads"
 import { useLeadLists } from "@/lib/api/hooks/use-lead-lists"
 import { useUIStore } from "@/store/ui-store"
 import { LeadTable } from "@/components/leads/lead-table"
 import { LeadCreateDialog } from "@/components/leads/lead-create-dialog"
 import { LeadImportDialog } from "@/components/leads/lead-import-dialog"
 import { LeadMergeDialog } from "@/components/leads/lead-merge-dialog"
-import { Search, X, Linkedin, GitMerge, AlertTriangle } from "lucide-react"
+import {
+  Search,
+  X,
+  Linkedin,
+  GitMerge,
+  AlertTriangle,
+  Sparkles,
+  Archive,
+  Trash2,
+  Loader2,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { toast } from "sonner"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 const STATUS_OPTIONS = [
   { value: "", label: "Todos" },
@@ -39,18 +65,28 @@ export default function LeadsPage() {
   const [page, setPage] = useState(1)
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([])
   const [showMergeDialog, setShowMergeDialog] = useState(false)
+  const [enrichingIds, setEnrichingIds] = useState<Set<string>>(new Set())
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [bulkPending, setBulkPending] = useState(false)
+  const prevStatusRef = useRef<Map<string, string>>(new Map())
+  const enrichLead = useEnrichLead()
+  const archiveLead = useArchiveLead()
+  const permanentDelete = usePermanentDeleteLead()
 
-  const { data, isLoading } = useLeads({
-    page,
-    page_size: 20,
-    ...(activeFilters.status?.[0] ? { status: activeFilters.status[0] } : {}),
-    ...(activeFilters.source ? { source: activeFilters.source } : {}),
-    ...(activeFilters.list_id ? { list_id: activeFilters.list_id } : {}),
-    ...(activeFilters.segment ? { segment: activeFilters.segment } : {}),
-    ...(activeFilters.score_min != null ? { score_min: activeFilters.score_min } : {}),
-    ...(activeFilters.score_max != null ? { score_max: activeFilters.score_max } : {}),
-    ...(search ? { search } : {}),
-  })
+  const { data, isLoading } = useLeads(
+    {
+      page,
+      page_size: 20,
+      ...(activeFilters.status?.[0] ? { status: activeFilters.status[0] } : {}),
+      ...(activeFilters.source ? { source: activeFilters.source } : {}),
+      ...(activeFilters.list_id ? { list_id: activeFilters.list_id } : {}),
+      ...(activeFilters.segment ? { segment: activeFilters.segment } : {}),
+      ...(activeFilters.score_min != null ? { score_min: activeFilters.score_min } : {}),
+      ...(activeFilters.score_max != null ? { score_max: activeFilters.score_max } : {}),
+      ...(search ? { search } : {}),
+    },
+    { refetchInterval: enrichingIds.size > 0 ? 5000 : false },
+  )
 
   const hasFilters =
     !!activeFilters.status?.[0] ||
@@ -64,6 +100,23 @@ export default function LeadsPage() {
   const overlappingCadenceLeads = (data?.items ?? []).filter(
     (lead) => lead.has_multiple_active_cadences,
   )
+
+  useEffect(() => {
+    if (!data || enrichingIds.size === 0) return
+    const prevStatuses = prevStatusRef.current
+    data.items.forEach((lead) => {
+      const prevStatus = prevStatuses.get(lead.id)
+      if (prevStatus !== undefined && prevStatus !== lead.status && enrichingIds.has(lead.id)) {
+        toast.success(`${lead.name} foi enriquecido`)
+        setEnrichingIds((curr) => {
+          const next = new Set(curr)
+          next.delete(lead.id)
+          return next
+        })
+      }
+      prevStatuses.set(lead.id, lead.status)
+    })
+  }, [data, enrichingIds])
 
   function handleSearch(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -82,6 +135,47 @@ export default function LeadsPage() {
     setSelectedLeadIds(checked ? data.items.map((lead) => lead.id) : [])
   }
 
+  function handleEnrichStart(leadId: string) {
+    setEnrichingIds((curr) => new Set([...curr, leadId]))
+  }
+
+  async function handleBulkEnrich() {
+    const ids = [...selectedLeadIds]
+    setBulkPending(true)
+    toast.loading(`Iniciando enriquecimento…`, { id: "bulk-enrich" })
+    setEnrichingIds((curr) => new Set([...curr, ...ids]))
+    const results = await Promise.allSettled(ids.map((id) => enrichLead.mutateAsync(id)))
+    const succeeded = results.filter((r) => r.status === "fulfilled").length
+    toast.success(`${succeeded} de ${ids.length} leads enviados para enriquecimento`, {
+      id: "bulk-enrich",
+    })
+    setSelectedLeadIds([])
+    setBulkPending(false)
+  }
+
+  async function handleBulkArchive() {
+    const ids = [...selectedLeadIds]
+    setBulkPending(true)
+    toast.loading(`Arquivando ${ids.length} leads…`, { id: "bulk-archive" })
+    const results = await Promise.allSettled(ids.map((id) => archiveLead.mutateAsync(id)))
+    const succeeded = results.filter((r) => r.status === "fulfilled").length
+    toast.success(`${succeeded} de ${ids.length} leads arquivados`, { id: "bulk-archive" })
+    setSelectedLeadIds([])
+    setBulkPending(false)
+  }
+
+  async function handleBulkDelete() {
+    const ids = [...selectedLeadIds]
+    setBulkPending(true)
+    toast.loading(`Excluindo ${ids.length} leads…`, { id: "bulk-delete" })
+    const results = await Promise.allSettled(ids.map((id) => permanentDelete.mutateAsync(id)))
+    const succeeded = results.filter((r) => r.status === "fulfilled").length
+    toast.success(`${succeeded} de ${ids.length} leads excuídos`, { id: "bulk-delete" })
+    setSelectedLeadIds([])
+    setBulkDeleteOpen(false)
+    setBulkPending(false)
+  }
+
   return (
     <div className="space-y-5">
       {/* Cabeçalho */}
@@ -92,19 +186,13 @@ export default function LeadsPage() {
             {data ? `${data.total} lead${data.total !== 1 ? "s" : ""}` : "Carregando…"}
           </p>
         </div>
-        <div className="flex gap-2">
-          {selectedLeadIds.length >= 2 && (
-            <Button variant="outline" onClick={() => setShowMergeDialog(true)}>
-              <GitMerge size={14} aria-hidden="true" />
-              Mesclar {selectedLeadIds.length}
-            </Button>
-          )}
+        <div className="flex items-center gap-2">
           <LeadImportDialog />
           <Link
             href="/leads/busca-linkedin"
-            className="inline-flex items-center gap-1.5 rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-1.5 text-sm font-medium text-(--text-secondary) transition-colors hover:bg-(--bg-overlay) hover:text-(--text-primary)"
+            className="inline-flex h-7 items-center gap-1.5 rounded-sm bg-[#0A66C2] px-3 text-xs font-medium text-white transition-opacity hover:opacity-90"
           >
-            <Linkedin size={14} />
+            <Linkedin size={13} />
             Busca LinkedIn
           </Link>
           <LeadCreateDialog />
@@ -233,6 +321,74 @@ export default function LeadsPage() {
         </div>
       </div>
 
+      {/* Ações em massa */}
+      {selectedLeadIds.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-(--accent) bg-(--accent) px-4 py-2.5 shadow-(--shadow-sm)">
+          <span className="text-sm font-semibold text-white">
+            {selectedLeadIds.length} lead{selectedLeadIds.length !== 1 ? "s" : ""} selecionado
+            {selectedLeadIds.length !== 1 ? "s" : ""}
+          </span>
+          <div className="h-4 w-px bg-white/30" />
+          <div className="flex flex-wrap items-center gap-1.5">
+            {selectedLeadIds.length >= 2 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 border-white/40 bg-white/10 text-white hover:bg-white/20 hover:text-white"
+                onClick={() => setShowMergeDialog(true)}
+                disabled={bulkPending}
+              >
+                <GitMerge size={12} aria-hidden="true" />
+                Mesclar
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 border-white/40 bg-white/10 text-white hover:bg-white/20 hover:text-white"
+              onClick={handleBulkEnrich}
+              disabled={bulkPending}
+            >
+              {bulkPending ? (
+                <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+              ) : (
+                <Sparkles size={12} aria-hidden="true" />
+              )}
+              Enriquecer
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 border-white/40 bg-white/10 text-white hover:bg-white/20 hover:text-white"
+              onClick={handleBulkArchive}
+              disabled={bulkPending}
+            >
+              <Archive size={12} aria-hidden="true" />
+              Arquivar
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 border-red-300/60 bg-red-500/30 text-white hover:bg-red-500/50 hover:text-white"
+              onClick={() => setBulkDeleteOpen(true)}
+              disabled={bulkPending}
+            >
+              <Trash2 size={12} aria-hidden="true" />
+              Excluir
+            </Button>
+          </div>
+          <div className="flex-1" />
+          <button
+            type="button"
+            onClick={() => setSelectedLeadIds([])}
+            className="rounded-md p-1 text-white/70 transition-colors hover:bg-white/20 hover:text-white"
+            aria-label="Desmarcar todos"
+          >
+            <X size={14} aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
       {/* Tabela */}
       {overlappingCadenceLeads.length > 0 && (
         <div className="flex items-start gap-3 rounded-lg border border-(--warning) bg-(--warning-subtle) px-4 py-3 text-sm text-(--warning-subtle-fg)">
@@ -254,6 +410,8 @@ export default function LeadsPage() {
         onToggleLead={toggleLead}
         onToggleAll={toggleAll}
         onLeadDeleted={() => setSelectedLeadIds([])}
+        enrichingLeadIds={enrichingIds}
+        onEnrich={handleEnrichStart}
       />
 
       <LeadMergeDialog
@@ -263,28 +421,64 @@ export default function LeadsPage() {
         onMerged={() => setSelectedLeadIds([])}
       />
 
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Excluir {selectedLeadIds.length} lead{selectedLeadIds.length !== 1 ? "s" : ""}{" "}
+              definitivamente?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação não pode ser desfeita. Os leads serão permanentemente removidos do sistema,
+              incluindo histórico de interações e etapas de cadência.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-(--danger) text-white hover:opacity-90"
+              disabled={bulkPending}
+              onClick={handleBulkDelete}
+            >
+              {bulkPending && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
+              Excluir definitivamente
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Paginação */}
       {data && data.pages > 1 && (
-        <div className="flex items-center justify-between text-sm">
-          <p className="text-(--text-secondary)">
-            Página {data.page} de {data.pages}
+        <div className="flex items-center justify-between rounded-lg border border-(--border-default) bg-(--bg-surface) px-4 py-3">
+          <p className="text-sm text-(--text-secondary)">
+            Página <span className="font-semibold text-(--text-primary)">{data.page}</span> de{" "}
+            <span className="font-semibold text-(--text-primary)">{data.pages}</span>
+            <span className="mx-2 text-(--text-tertiary)">·</span>
+            <span className="text-xs text-(--text-tertiary)">
+              Exibindo{" "}
+              <span className="font-medium text-(--text-secondary)">
+                {(data.page - 1) * data.page_size + 1}–
+                {Math.min(data.page * data.page_size, data.total)}
+              </span>{" "}
+              de <span className="font-medium text-(--text-secondary)">{data.total}</span> leads
+            </span>
           </p>
           <div className="flex gap-2">
             <button
               type="button"
               disabled={data.page <= 1}
               onClick={() => setPage((p) => p - 1)}
-              className="rounded-md border border-(--border-default) px-3 py-1.5 text-xs text-(--text-secondary) transition-colors hover:bg-(--bg-overlay) disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 rounded-md border border-(--border-default) bg-(--bg-surface) px-3 py-1.5 text-sm font-medium text-(--text-secondary) transition-colors hover:border-(--accent) hover:bg-(--accent-subtle) hover:text-(--accent) disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Anterior
+              ← Anterior
             </button>
             <button
               type="button"
               disabled={data.page >= data.pages}
               onClick={() => setPage((p) => p + 1)}
-              className="rounded-md border border-(--border-default) px-3 py-1.5 text-xs text-(--text-secondary) transition-colors hover:bg-(--bg-overlay) disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 rounded-md border border-(--accent) bg-(--accent) px-3 py-1.5 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Próxima
+              Próxima →
             </button>
           </div>
         </div>

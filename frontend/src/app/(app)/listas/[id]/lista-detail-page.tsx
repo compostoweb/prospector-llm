@@ -6,12 +6,14 @@ import {
   useLeadList,
   useRemoveLeadListMembers,
   useAddLeadListMembers,
+  useUpdateLeadList,
 } from "@/lib/api/hooks/use-lead-lists"
 import { useLeads, type Lead } from "@/lib/api/hooks/use-leads"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
   DialogContent,
@@ -29,6 +31,8 @@ import {
   AlertTriangle,
   ListFilter,
   Mail,
+  Pencil,
+  Linkedin,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -56,12 +60,16 @@ export default function ListaDetailPage() {
   const { data: list, isLoading, isError } = useLeadList(listId)
   const { mutate: removeMembers, isPending: removing } = useRemoveLeadListMembers()
   const { mutate: addMembers, isPending: adding } = useAddLeadListMembers()
+  const { mutate: updateList, isPending: updatingList } = useUpdateLeadList()
 
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [addOpen, setAddOpen] = useState(false)
   const [addSearch, setAddSearch] = useState("")
   const [memberSearch, setMemberSearch] = useState("")
   const [addSelected, setAddSelected] = useState<Set<string>>(new Set())
+  const [editOpen, setEditOpen] = useState(false)
+  const [editName, setEditName] = useState("")
+  const [editDescription, setEditDescription] = useState("")
 
   // Buscar leads disponíveis para adicionar
   const leadsParams: import("@/lib/api/hooks/use-leads").LeadListParams = { page_size: 100 }
@@ -141,6 +149,25 @@ export default function ListaDetailPage() {
     )
   }
 
+  function openEdit() {
+    setEditName(list?.name ?? "")
+    setEditDescription(list?.description ?? "")
+    setEditOpen(true)
+  }
+
+  function handleEditSave() {
+    updateList(
+      {
+        id: listId,
+        body: {
+          name: editName.trim() || undefined,
+          description: editDescription.trim() || undefined,
+        },
+      },
+      { onSuccess: () => setEditOpen(false) },
+    )
+  }
+
   // ── Loading / Error ──
 
   if (isLoading) {
@@ -182,6 +209,9 @@ export default function ListaDetailPage() {
           <Users size={14} />
           {list.lead_count} lead{list.lead_count !== 1 ? "s" : ""}
         </span>
+        <Button variant="ghost" size="sm" onClick={openEdit} title="Editar lista">
+          <Pencil size={14} />
+        </Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -361,11 +391,38 @@ export default function ListaDetailPage() {
                       </td>
                       <td className="px-4 py-3 text-(--text-secondary)">{lead.company ?? "—"}</td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2 text-(--text-secondary)">
-                          <Mail size={13} aria-hidden="true" className="text-(--text-tertiary)" />
-                          <span className="text-xs">
-                            {lead.email_corporate ?? "Sem email corporativo"}
-                          </span>
+                        <div className="space-y-1.5 text-(--text-secondary)">
+                          <div className="flex items-center gap-2">
+                            <Mail
+                              size={13}
+                              aria-hidden="true"
+                              className="shrink-0 text-(--text-tertiary)"
+                            />
+                            <span className="text-xs">
+                              {lead.email_corporate ?? "Sem email corporativo"}
+                            </span>
+                          </div>
+                          {lead.linkedin_url && (
+                            <div className="flex items-center gap-2">
+                              <Linkedin
+                                size={13}
+                                aria-hidden="true"
+                                className="shrink-0 text-(--text-tertiary)"
+                              />
+                              <a
+                                href={lead.linkedin_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="max-w-48 truncate text-xs text-(--accent) hover:underline"
+                                title={lead.linkedin_url}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {lead.linkedin_url
+                                  .replace(/^https?:\/\/(www\.)?linkedin\.com\/in\//, "")
+                                  .replace(/\/$/, "") || "Ver perfil"}
+                              </a>
+                            </div>
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-3">
@@ -471,6 +528,44 @@ export default function ListaDetailPage() {
               {adding && <Loader2 size={14} className="animate-spin" />}
               Adicionar {addSelected.size > 0 ? addSelected.size : ""} lead
               {addSelected.size !== 1 ? "s" : ""}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Editar lista */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Editar lista</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-(--text-secondary)">Nome</label>
+              <Input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="Nome da lista"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-(--text-secondary)">Descrição</label>
+              <Textarea
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                placeholder="Descrição opcional"
+                rows={3}
+                className="resize-none"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setEditOpen(false)}>
+              Cancelar
+            </Button>
+            <Button size="sm" disabled={!editName.trim() || updatingList} onClick={handleEditSave}>
+              {updatingList && <Loader2 size={14} className="animate-spin" />}
+              Salvar
             </Button>
           </DialogFooter>
         </DialogContent>

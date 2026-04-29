@@ -363,10 +363,13 @@ interface InfoRowProps {
 }
 
 function InfoRow({ icon: Icon, label, value, link }: InfoRowProps) {
+  // For link display, strip query params and show only the clean path
+  const displayValue = link ? value.split("?")[0] : value
+
   return (
     <div className="flex items-start gap-2.5">
       <Icon size={14} className="mt-0.5 shrink-0 text-(--text-tertiary)" aria-hidden="true" />
-      <div className="min-w-0">
+      <div className="min-w-0 overflow-hidden">
         <p className="text-[11px] font-medium uppercase tracking-wider text-(--text-tertiary)">
           {label}
         </p>
@@ -375,9 +378,10 @@ function InfoRow({ icon: Icon, label, value, link }: InfoRowProps) {
             href={value.startsWith("http") ? value : `https://${value}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="truncate text-xs text-(--accent) hover:underline"
+            className="block truncate text-xs text-(--accent) hover:underline"
+            title={displayValue}
           >
-            {value}
+            {displayValue}
           </a>
         ) : (
           <p className="text-xs text-(--text-secondary)">{value}</p>

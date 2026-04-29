@@ -1542,13 +1542,13 @@ class UnipileClient:
                     "industry": p.get("industry") or None,
                     "location": p.get("location") or None,
                     "profile_url": (
-                        p.get("public_profile_url")
-                        or p.get("profile_url")
-                        or (
+                        (
                             f"https://www.linkedin.com/in/{public_identifier}"
                             if public_identifier
                             else None
                         )
+                        or p.get("public_profile_url")
+                        or p.get("profile_url")
                     ),
                     "profile_picture_url": p.get("profile_picture_url") or None,
                     "network_distance": nd,

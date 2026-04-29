@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { ArrowDown, ArrowUp, ArrowUpDown, Eye, Trash2, Users } from "lucide-react"
+import { ArrowDown, ArrowUp, ArrowUpDown, Eye, Pencil, Trash2, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -29,6 +29,7 @@ interface LeadListsTableProps {
   isDeleting?: boolean
   onDelete: (id: string) => void
   onOpen: (id: string) => void
+  onEdit: (list: LeadList) => void
 }
 
 export function LeadListsTable({
@@ -36,6 +37,7 @@ export function LeadListsTable({
   isDeleting = false,
   onDelete,
   onOpen,
+  onEdit,
 }: LeadListsTableProps) {
   const gridCols = "grid-cols-[minmax(260px,1.7fr)_110px_130px_130px_150px] min-w-[860px]"
 
@@ -164,6 +166,16 @@ export function LeadListsTable({
               >
                 <Eye size={13} aria-hidden="true" />
                 Abrir
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-(--text-tertiary) hover:text-(--text-primary)"
+                onClick={() => onEdit(list)}
+                aria-label="Editar lista"
+              >
+                <Pencil size={14} aria-hidden="true" />
               </Button>
               <Button
                 type="button"

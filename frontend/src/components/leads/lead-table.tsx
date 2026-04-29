@@ -1,7 +1,7 @@
 ﻿"use client"
 
 import Link from "next/link"
-import { AlertTriangle, Archive, Mail, Phone, Sparkles, Users } from "lucide-react"
+import { AlertTriangle, Archive, Loader2, Mail, Phone, Sparkles, Users } from "lucide-react"
 import { toast } from "sonner"
 import { useArchiveLead, useEnrichLead, type Lead } from "@/lib/api/hooks/use-leads"
 import { Button } from "@/components/ui/button"
@@ -35,6 +35,8 @@ interface LeadTableProps {
   onToggleLead?: (leadId: string, checked: boolean) => void
   onToggleAll?: (checked: boolean) => void
   onLeadDeleted?: () => void
+  enrichingLeadIds?: Set<string>
+  onEnrich?: (leadId: string) => void
 }
 
 export function LeadTable({
@@ -44,16 +46,16 @@ export function LeadTable({
   onToggleLead,
   onToggleAll,
   onLeadDeleted,
+  enrichingLeadIds,
+  onEnrich,
 }: LeadTableProps) {
   const archiveLead = useArchiveLead()
   const enrichLead = useEnrichLead()
   const allSelected = leads.length > 0 && selectedLeadIds.length === leads.length
 
   function handleEnrich(leadId: string) {
+    onEnrich?.(leadId)
     enrichLead.mutate(leadId, {
-      onSuccess: () => {
-        toast.success("Enriquecimento iniciado")
-      },
       onError: (error) => {
         toast.error(error instanceof Error ? error.message : "Falha ao iniciar enriquecimento")
       },
@@ -89,7 +91,7 @@ export function LeadTable({
               <Checkbox
                 checked={allSelected}
                 onCheckedChange={(checked) => onToggleAll?.(checked === true)}
-                className="border-white/70 hover:border-amber-300"
+                className="border-white bg-white/20 data-[state=checked]:bg-white data-[state=checked]:text-(--accent) hover:border-amber-300"
               />
             </th>
             <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-invert)">
@@ -136,6 +138,12 @@ export function LeadTable({
                   <p className="font-medium text-(--text-primary)">{lead.name}</p>
                   {lead.job_title && (
                     <p className="text-xs text-(--text-tertiary)">{truncate(lead.job_title, 40)}</p>
+                  )}
+                  {enrichingLeadIds?.has(lead.id) && (
+                    <div className="mt-1 inline-flex items-center gap-1 text-[11px] text-(--info-subtle-fg)">
+                      <Loader2 size={10} className="animate-spin" aria-hidden="true" />
+                      <span>Enriquecendo…</span>
+                    </div>
                   )}
                   {lead.has_multiple_active_cadences && (
                     <div
@@ -232,12 +240,21 @@ export function LeadTable({
                       size="sm"
                       className="h-8 gap-1.5 text-(--text-secondary) hover:text-(--accent)"
                       onClick={() => handleEnrich(lead.id)}
-                      disabled={enrichLead.isPending}
+                      disabled={enrichingLeadIds?.has(lead.id) ?? enrichLead.isPending}
                       aria-label="Enriquecer lead"
                       title="Enriquecer lead"
                     >
-                      <Sparkles size={14} aria-hidden="true" />
-                      <span>Enriquecer</span>
+                      {enrichingLeadIds?.has(lead.id) ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                          <span>Enriquecendo…</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles size={14} aria-hidden="true" />
+                          <span>Enriquecer</span>
+                        </>
+                      )}
                     </Button>
                   )}
                   {lead.status !== "archived" && (

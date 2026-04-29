@@ -99,13 +99,20 @@ async def import_linkedin_profiles(
             skipped += 1
             continue
 
-        profile_url = cast(str | None, profile.get("profile_url"))
+        raw_url = cast(str | None, profile.get("profile_url"))
+        # Strip query params (e.g. ?miniProfileUrn=…) to keep a clean URL
+        if raw_url and "?" in raw_url:
+            raw_url = raw_url.split("?")[0]
+        profile_url = raw_url
+
+        headline = cast(str | None, profile.get("headline"))
+        job_title = headline[:200] if headline else None
 
         lead = Lead(
             id=uuid.uuid4(),
             tenant_id=tenant_id,
             name=cast(str, profile.get("name") or provider_id),
-            job_title=cast(str | None, profile.get("headline")),
+            job_title=job_title,
             company=cast(str | None, profile.get("company")),
             location=cast(str | None, profile.get("location")),
             linkedin_url=profile_url,

@@ -2,7 +2,13 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { useLeadLists, useCreateLeadList, useDeleteLeadList } from "@/lib/api/hooks/use-lead-lists"
+import {
+  useLeadLists,
+  useCreateLeadList,
+  useDeleteLeadList,
+  useUpdateLeadList,
+} from "@/lib/api/hooks/use-lead-lists"
+import type { LeadList } from "@/lib/api/hooks/use-lead-lists"
 import { LeadListsTable } from "@/components/listas/lead-lists-table"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -16,7 +22,18 @@ import {
   DialogFooter,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Loader2, Plus, Trash2, List, Users, AlertTriangle, LayoutGrid, Table2 } from "lucide-react"
+import {
+  Loader2,
+  Plus,
+  Trash2,
+  List,
+  Users,
+  AlertTriangle,
+  LayoutGrid,
+  Table2,
+  Pencil,
+} from "lucide-react"
+import { Textarea } from "@/components/ui/textarea"
 import { formatRelativeTime } from "@/lib/utils"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
@@ -25,12 +42,39 @@ export default function LeadListsPage() {
   const { data: lists, isLoading, isError } = useLeadLists()
   const { mutate: createList, isPending: creating } = useCreateLeadList()
   const deleteListMutation = useDeleteLeadList()
+  const { mutate: updateList, isPending: updating } = useUpdateLeadList()
   const router = useRouter()
 
   const [open, setOpen] = useState(false)
   const [view, setView] = useState<"table" | "grid">("table")
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
+
+  const [editOpen, setEditOpen] = useState(false)
+  const [editingList, setEditingList] = useState<LeadList | null>(null)
+  const [editName, setEditName] = useState("")
+  const [editDescription, setEditDescription] = useState("")
+
+  function openEdit(list: LeadList) {
+    setEditingList(list)
+    setEditName(list.name)
+    setEditDescription(list.description ?? "")
+    setEditOpen(true)
+  }
+
+  function handleEditSave() {
+    if (!editingList) return
+    updateList(
+      {
+        id: editingList.id,
+        body: {
+          name: editName.trim() || undefined,
+          description: editDescription.trim() || undefined,
+        },
+      },
+      { onSuccess: () => setEditOpen(false) },
+    )
+  }
 
   function handleCreate(e: React.FormEvent) {
     e.preventDefault()
@@ -133,7 +177,6 @@ export default function LeadListsPage() {
           </Dialog>
         </div>
       </div>
-
       {/* Loading */}
       {isLoading && (
         <div className="flex h-40 items-center justify-center">
@@ -144,7 +187,6 @@ export default function LeadListsPage() {
           />
         </div>
       )}
-
       {/* Error */}
       {isError && !isLoading && (
         <div className="flex flex-col items-center gap-3 py-12 text-center">
@@ -155,7 +197,6 @@ export default function LeadListsPage() {
           </p>
         </div>
       )}
-
       {/* Empty */}
       {!isLoading && lists?.length === 0 && (
         <div className="flex flex-col items-center gap-2 py-12 text-center">
@@ -166,15 +207,16 @@ export default function LeadListsPage() {
           </p>
         </div>
       )}
-
       {/* Conteúdo */}
-      {lists && lists.length > 0 && (
-        view === "table" ? (
+      {lists &&
+        lists.length > 0 &&
+        (view === "table" ? (
           <LeadListsTable
             lists={lists}
             isDeleting={deleteListMutation.isPending}
             onDelete={(id) => deleteListMutation.mutate(id)}
             onOpen={(id) => router.push(`/listas/${id}`)}
+            onEdit={openEdit}
           />
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -187,6 +229,14 @@ export default function LeadListsPage() {
                       Atualizada {formatRelativeTime(list.updated_at)}
                     </p>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => openEdit(list)}
+                    className="shrink-0 rounded-md p-1 text-(--text-tertiary) transition-colors hover:bg-(--bg-overlay) hover:text-(--text-primary)"
+                    aria-label="Editar lista"
+                  >
+                    <Pencil size={13} aria-hidden="true" />
+                  </button>
                   <button
                     type="button"
                     onClick={() => deleteListMutation.mutate(list.id)}
@@ -216,8 +266,46 @@ export default function LeadListsPage() {
               </Card>
             ))}
           </div>
-        )
-      )}
+        ))}
+      {/* Dialog: Editar lista */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Editar lista</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-name">Nome *</Label>
+              <Input
+                id="edit-name"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="Nome da lista"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-desc">Descrição</Label>
+              <Textarea
+                id="edit-desc"
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                placeholder="Descrição opcional"
+                rows={3}
+                className="resize-none"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setEditOpen(false)}>
+              Cancelar
+            </Button>
+            <Button size="sm" disabled={!editName.trim() || updating} onClick={handleEditSave}>
+              {updating && <Loader2 size={14} className="animate-spin" />}
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>{" "}
     </div>
   )
 }

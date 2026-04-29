@@ -247,7 +247,11 @@ export function LeadImportDialog() {
   return (
     <Dialog open={open} onOpenChange={(v) => (v ? setOpen(true) : handleClose())}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
+        <Button
+          variant="outline"
+          size="sm"
+          className="border-emerald-600 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-700 dark:hover:bg-emerald-950/70"
+        >
           <Upload size={14} aria-hidden="true" />
           Importar CSV
         </Button>
