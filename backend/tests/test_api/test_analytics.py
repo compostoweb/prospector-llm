@@ -9,7 +9,7 @@ sem depender do ambiente asyncpg atual, que segue instável para esse tipo de se
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, Protocol, cast
 
@@ -22,7 +22,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.routes import analytics as analytics_routes
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
-from models.enums import Channel, InteractionDirection, LeadSource, LeadStatus, ManualTaskStatus, StepStatus
+from models.enums import (
+    Channel,
+    InteractionDirection,
+    LeadSource,
+    LeadStatus,
+    ManualTaskStatus,
+    StepStatus,
+)
 from models.interaction import Interaction
 from models.lead import Lead
 from models.manual_task import ManualTask
@@ -182,6 +189,7 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
         FakeResult(scalar_value=5),
         FakeResult(scalar_value=4),
         FakeResult(one_value=SimpleNamespace(sent=3, pending=1, skipped=0, failed=1)),
+        FakeResult(one_value=SimpleNamespace(sent=0, pending=0, skipped=0)),
         FakeResult(one_value=SimpleNamespace(replied=1)),
         FakeResult(
             all_values=[
@@ -208,6 +216,7 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
                 ),
             ]
         ),
+        FakeResult(all_values=[]),
         FakeResult(
             all_values=[
                 SimpleNamespace(channel=Channel.LINKEDIN_DM, replied=1),
@@ -267,6 +276,7 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
                 ),
             ]
         ),
+        FakeResult(all_values=[]),
         FakeResult(
             all_values=[
                 SimpleNamespace(step_number=2, channel=Channel.LINKEDIN_DM, replied=1),
@@ -326,11 +336,11 @@ async def test_get_cadence_analytics_maps_counts_and_uses_days_filter(
     assert step_map[(5, "linkedin_connect")].accepted == 1
     assert step_map[(5, "linkedin_connect")].acceptance_rate == 100.0
 
-    for index in range(3, 14):
+    for index in range(3, 17):
         assert _statement_contains_param(session.statements[index], marker_since)
-    assert _statement_contains_param(session.statements[4], "fallback_single_cadence")
-    assert _statement_contains_param(session.statements[6], "fallback_single_cadence")
-    assert _statement_contains_param(session.statements[10], "fallback_single_cadence")
+    assert _statement_contains_param(session.statements[5], "fallback_single_cadence")
+    assert _statement_contains_param(session.statements[8], "fallback_single_cadence")
+    assert _statement_contains_param(session.statements[13], "fallback_single_cadence")
 
 
 async def test_get_cadence_analytics_accepts_explicit_date_range() -> None:
@@ -345,7 +355,16 @@ async def test_get_cadence_analytics_accepts_explicit_date_range() -> None:
         FakeResult(scalar_value=5),
         FakeResult(scalar_value=4),
         FakeResult(one_value=SimpleNamespace(sent=3, pending=1, skipped=0, failed=1)),
+        FakeResult(one_value=SimpleNamespace(sent=0, pending=0, skipped=0)),
         FakeResult(one_value=SimpleNamespace(replied=1)),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
         FakeResult(all_values=[]),
         FakeResult(all_values=[]),
         FakeResult(all_values=[]),
@@ -374,9 +393,9 @@ async def test_get_cadence_analytics_accepts_explicit_date_range() -> None:
     assert result.cadence_id == str(cadence.id)
     assert _statement_contains_param(session.statements[3], datetime(2026, 3, 28, tzinfo=UTC))
     assert _statement_contains_param(session.statements[3], period_until)
-    assert _statement_contains_param(session.statements[4], period_until)
-    assert _statement_contains_param(session.statements[6], period_until)
-    assert _statement_contains_param(session.statements[7], period_until)
+    assert _statement_contains_param(session.statements[5], period_until)
+    assert _statement_contains_param(session.statements[8], period_until)
+    assert _statement_contains_param(session.statements[9], period_until)
 
 
 async def test_get_cadence_analytics_raises_404_when_missing() -> None:
@@ -412,7 +431,16 @@ async def test_get_cadence_analytics_syncs_legacy_list_members_before_counting(
         FakeResult(scalar_value=1),
         FakeResult(scalar_value=1),
         FakeResult(one_value=SimpleNamespace(sent=0, pending=1, skipped=0, failed=0)),
+        FakeResult(one_value=SimpleNamespace(sent=0, pending=0, skipped=0)),
         FakeResult(one_value=SimpleNamespace(replied=0)),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
+        FakeResult(all_values=[]),
         FakeResult(all_values=[]),
         FakeResult(all_values=[]),
         FakeResult(all_values=[]),
@@ -434,6 +462,100 @@ async def test_get_cadence_analytics_syncs_legacy_list_members_before_counting(
     assert synced == [cadence.id]
     assert result.total_leads == 1
     assert result.leads_active == 1
+
+
+async def test_cadence_analytics_excludes_ambiguous_hold_skips(
+    client: AsyncClient,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+) -> None:
+    lead = Lead(
+        tenant_id=tenant_id,
+        name="Lead Hold Analytics",
+        company="Acme",
+        linkedin_url=f"https://linkedin.com/in/hold-analytics-{uuid.uuid4()}",
+        email_corporate="hold.analytics@acme.test",
+        source=LeadSource.MANUAL,
+        status=LeadStatus.IN_CADENCE,
+    )
+    cadence = Cadence(
+        tenant_id=tenant_id,
+        name="Cadência Hold Analytics",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    db.add_all([lead, cadence])
+    await db.flush()
+
+    interaction = Interaction(
+        tenant_id=tenant_id,
+        lead_id=lead.id,
+        channel=Channel.EMAIL,
+        direction=InteractionDirection.INBOUND,
+        content_text="Resposta sem cadência clara.",
+        reply_match_status="ambiguous",
+        reply_match_source="ambiguous_reply_hold",
+    )
+    db.add(interaction)
+    await db.flush()
+
+    now = datetime.now(tz=UTC)
+    db.add_all(
+        [
+            CadenceStep(
+                tenant_id=tenant_id,
+                cadence_id=cadence.id,
+                lead_id=lead.id,
+                channel=Channel.EMAIL,
+                step_number=1,
+                day_offset=0,
+                use_voice=False,
+                status=StepStatus.SKIPPED,
+                scheduled_at=now - timedelta(hours=1),
+                reply_hold_interaction_id=interaction.id,
+                reply_hold_reason="ambiguous_reply",
+                reply_hold_previous_status="pending",
+                reply_hold_created_at=now,
+            ),
+            CadenceStep(
+                tenant_id=tenant_id,
+                cadence_id=cadence.id,
+                lead_id=lead.id,
+                channel=Channel.EMAIL,
+                step_number=2,
+                day_offset=1,
+                use_voice=False,
+                status=StepStatus.SKIPPED,
+                scheduled_at=now,
+            ),
+        ]
+    )
+    await db.commit()
+
+    resp = await client.get(f"/analytics/cadences/{cadence.id}")
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["skipped_steps"] == 1
+    assert data["channel_breakdown"] == [
+        {
+            "channel": "email",
+            "sent": 0,
+            "replied": 0,
+            "opened": 0,
+            "accepted": 0,
+            "pending": 0,
+            "skipped": 1,
+            "failed": 0,
+            "open_rate": 0.0,
+            "acceptance_rate": 0.0,
+            "reply_rate": 0.0,
+        }
+    ]
+    assert len(data["step_breakdown"]) == 1
+    assert data["step_breakdown"][0]["step_number"] == 2
+    assert data["step_breakdown"][0]["skipped"] == 1
 
 
 async def _fake_sync_cadence_list_members(cadence: Cadence, db: AsyncSession) -> int:
@@ -986,6 +1108,7 @@ async def test_dashboard_channel_recent_and_intent_queries_ignore_low_confidence
         FakeResult(one_value=SimpleNamespace(total=10, in_cadence=4, converted=1, archived=0)),
         FakeResult(one_value=SimpleNamespace(current=3, previous=2)),
         FakeResult(one_value=SimpleNamespace(today=2, week=5, period=9, prev_period=7)),
+        FakeResult(one_value=SimpleNamespace(today=0, week=0, period=0, prev_period=0)),
         FakeResult(one_value=SimpleNamespace(today=1, week=2, period=3, prev_period=1)),
         FakeResult(one_value=SimpleNamespace(current=2, previous=1)),
     )
@@ -995,7 +1118,7 @@ async def test_dashboard_channel_recent_and_intent_queries_ignore_low_confidence
         tenant_id=tenant_id,
     )
     assert dashboard.replies_period == 3
-    assert _statement_contains_param(dashboard_session.statements[3], "fallback_single_cadence")
+    assert _statement_contains_param(dashboard_session.statements[4], "fallback_single_cadence")
 
     channel_session = FakeAsyncSession(
         FakeResult(all_values=[SimpleNamespace(channel=Channel.EMAIL, sent=5)]),
@@ -1058,6 +1181,7 @@ async def test_dashboard_breakdowns_accept_explicit_date_range() -> None:
         FakeResult(one_value=SimpleNamespace(total=10, in_cadence=4, converted=1, archived=0)),
         FakeResult(one_value=SimpleNamespace(current=3, previous=2)),
         FakeResult(one_value=SimpleNamespace(today=2, week=5, period=9, prev_period=7)),
+        FakeResult(one_value=SimpleNamespace(today=0, week=0, period=0, prev_period=0)),
         FakeResult(one_value=SimpleNamespace(today=1, week=2, period=3, prev_period=1)),
         FakeResult(one_value=SimpleNamespace(current=2, previous=1)),
     )
@@ -1103,6 +1227,7 @@ async def test_dashboard_breakdowns_accept_explicit_date_range() -> None:
 
     performance_session = FakeAsyncSession(
         FakeResult(all_values=[SimpleNamespace(cadence_id=cadence_id, sent=5)]),
+        FakeResult(all_values=[]),
         FakeResult(all_values=[SimpleNamespace(id=cadence_id, name="Cadência A")]),
         FakeResult(all_values=[SimpleNamespace(cadence_id=cadence_id, replied=2)]),
         FakeResult(all_values=[SimpleNamespace(cadence_id=cadence_id, total_leads=4)]),
@@ -1118,7 +1243,7 @@ async def test_dashboard_breakdowns_accept_explicit_date_range() -> None:
     assert performance[0].steps_sent == 5
     assert performance[0].total_leads == 4
     assert _statement_contains_param(performance_session.statements[0], period_end)
-    assert _statement_contains_param(performance_session.statements[2], period_end)
+    assert _statement_contains_param(performance_session.statements[3], period_end)
 
 
 async def test_get_email_ab_results_joins_outbound_opened_by_cadence_step_id(

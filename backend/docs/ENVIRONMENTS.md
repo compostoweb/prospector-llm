@@ -101,8 +101,9 @@ docker compose -f docker-compose.dev.yml up -d
 # Ver logs da API em tempo real
 docker compose -f docker-compose.dev.yml logs -f api
 
-# Ver logs de um worker específico
-docker compose -f docker-compose.dev.yml logs -f worker-dispatch
+# Ver logs dos workers
+docker compose -f docker-compose.dev.yml logs -f worker-general
+docker compose -f docker-compose.dev.yml logs -f worker-content
 
 # Parar tudo
 docker compose -f docker-compose.dev.yml down

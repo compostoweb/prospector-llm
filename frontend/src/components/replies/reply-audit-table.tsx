@@ -242,6 +242,7 @@ export function ReplyAuditTable({
     [candidateSteps, selectedStepId],
   )
   const isMutating = isReviewPending || isLinkPending
+  const selectedIsAmbiguousHold = selectedItem ? isAmbiguousHold(selectedItem) : false
   const selectedSourceMeta = selectedItem
     ? getReplyMatchSourceMeta(selectedItem.replyMatchSource)
     : null
@@ -557,8 +558,7 @@ export function ReplyAuditTable({
                   </span>
                 </DialogTitle>
                 <DialogDescription>
-                  Revise o contexto completo e marque como revisado quando este inbound já estiver
-                  tratado.
+                  Revise o contexto completo antes de liberar a fila operacional deste lead.
                 </DialogDescription>
               </DialogHeader>
 
@@ -638,8 +638,9 @@ export function ReplyAuditTable({
                         Tratamento
                       </p>
                       <p className="mt-2 text-sm text-(--text-secondary)">
-                        Marcar como revisado apenas remove o item da fila de auditoria. Vincular
-                        como resposta transforma este inbound em reply confiável do step escolhido.
+                        {selectedIsAmbiguousHold
+                          ? "Marcar como revisado libera os steps em hold sem vincular o reply. Vincular como resposta pausa a cadência escolhida e retoma as outras cadências candidatas."
+                          : "Marcar como revisado remove o item da fila de auditoria. Vincular como resposta transforma este inbound em reply confiável do step escolhido."}
                       </p>
                     </div>
                     <span className="inline-flex items-center gap-1 rounded-(--radius-full) border border-(--accent-border) bg-(--accent-subtle) px-2 py-1 text-xs font-medium text-(--accent-subtle-fg)">
@@ -675,6 +676,13 @@ export function ReplyAuditTable({
                         </SelectContent>
                       </Select>
                     </div>
+
+                    {selectedIsAmbiguousHold ? (
+                      <div className="rounded-lg border border-(--warning) bg-(--warning-subtle) px-3 py-2 text-xs leading-relaxed text-(--warning-subtle-fg)">
+                        Este reply colocou próximos steps em hold para evitar envio duplicado até a
+                        revisão. Escolha um step se a resposta pertence a uma cadência específica.
+                      </div>
+                    ) : null}
 
                     {stepsQuery.isLoading ? (
                       <p className="text-xs text-(--text-tertiary)">

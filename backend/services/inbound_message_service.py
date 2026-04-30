@@ -30,7 +30,11 @@ from models.manual_task import ManualTask
 from models.tenant import Tenant, TenantIntegration
 from services.llm_config import resolve_tenant_llm_config
 from services.message_quality import normalize_email_subject
-from services.reply_matching import AMBIGUOUS_REPLY_HOLD_SOURCE, reply_candidate_step_channels
+from services.reply_matching import (
+    AMBIGUOUS_REPLY_HOLD_REASON,
+    AMBIGUOUS_REPLY_HOLD_SOURCE,
+    reply_candidate_step_channels,
+)
 from services.reply_parser import ReplyParser
 
 logger = structlog.get_logger()
@@ -326,7 +330,19 @@ async def process_inbound_reply(
 
         enqueue_pipedrive_sync_for_reply(interaction_id=interaction.id, tenant_id=tenant_id)
 
-    if intent in (Intent.INTEREST, Intent.OBJECTION):
+    if reply_resolution.ambiguous:
+        from services.notification import send_ambiguous_reply_notification
+
+        await send_ambiguous_reply_notification(
+            lead=lead,
+            intent=intent.value,
+            reply_text=reply_text,
+            tenant_id=tenant_id,
+            db=db,
+            sent_cadence_count=reply_resolution.sent_cadence_count,
+            held_steps=paused_steps,
+        )
+    elif intent in (Intent.INTEREST, Intent.OBJECTION):
         from services.notification import send_reply_notification
 
         await send_reply_notification(
@@ -739,7 +755,7 @@ async def hold_cadence_steps_for_ambiguous_reply(
     held_at = datetime.now(UTC)
     for step in held_steps:
         step.reply_hold_interaction_id = interaction_id
-        step.reply_hold_reason = "ambiguous_reply"
+        step.reply_hold_reason = AMBIGUOUS_REPLY_HOLD_REASON
         step.reply_hold_previous_status = step.status.value
         step.reply_hold_created_at = held_at
         step.status = StepStatus.SKIPPED

@@ -8,6 +8,7 @@ from models.interaction import Interaction
 LOW_CONFIDENCE_EMAIL_REPLY_SOURCE = "fallback_single_cadence"
 MANUAL_REVIEW_REPLY_SOURCE = "manual_review"
 AMBIGUOUS_REPLY_HOLD_SOURCE = "ambiguous_reply_hold"
+AMBIGUOUS_REPLY_HOLD_REASON = "ambiguous_reply"
 
 
 def reply_candidate_step_channels(channel: Channel) -> tuple[Channel, ...]:

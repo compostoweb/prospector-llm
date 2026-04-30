@@ -195,13 +195,14 @@ docker compose -f docker-compose.prod.yml exec api alembic upgrade head
 ```bash
 # Logs
 docker compose -f docker-compose.dev.yml logs -f api
-docker compose -f docker-compose.dev.yml logs -f worker-dispatch
-docker compose -f docker-compose.dev.yml logs -f worker-content-engagement
+docker compose -f docker-compose.dev.yml logs -f worker-general
+docker compose -f docker-compose.dev.yml logs -f worker-content
 
 # Dev local no Windows
 npm run backend
 npm run frontend
-npm run worker:engagement
+npm run worker:general
+npm run worker:content
 npm run extension
 npm run extension:build
 

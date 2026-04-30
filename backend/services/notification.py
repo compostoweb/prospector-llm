@@ -871,9 +871,9 @@ async def send_reply_notification(
     html_body = f"""
     <div style="font-family: sans-serif; max-width: 600px;">
       <h2 style="color: #1a1a2e;">{intent_label}</h2>
-      <p><strong>Lead:</strong> {html.escape(lead.name or '')}</p>
-      <p><strong>Empresa:</strong> {html.escape(lead.company or '—')}</p>
-      <p><strong>Cargo:</strong> {html.escape(lead.job_title or '—')}</p>
+      <p><strong>Lead:</strong> {html.escape(lead.name or "")}</p>
+      <p><strong>Empresa:</strong> {html.escape(lead.company or "—")}</p>
+      <p><strong>Cargo:</strong> {html.escape(lead.job_title or "—")}</p>
       <hr style="border: none; border-top: 1px solid #eee;" />
       <p style="white-space: pre-wrap; color: #333;">{html.escape(reply_text)}</p>
       <hr style="border: none; border-top: 1px solid #eee;" />
@@ -904,6 +904,75 @@ async def send_reply_notification(
         return False
 
 
+async def send_ambiguous_reply_notification(
+    lead: Lead,
+    intent: str,
+    reply_text: str,
+    tenant_id: uuid.UUID,
+    db: AsyncSession,
+    *,
+    sent_cadence_count: int,
+    held_steps: int,
+) -> bool:
+    """Envia alerta quando um inbound exige auditoria antes de vincular cadência."""
+    resend = _get_resend()
+    if not resend:
+        return False
+
+    config = await _get_notify_config(tenant_id, db)
+    if not config:
+        return False
+
+    notify_email = config["email"]
+    intent_label = {
+        "interest": "Interesse",
+        "objection": "Objeção",
+        "not_interested": "Não interessado",
+        "neutral": "Neutro",
+        "out_of_office": "Ausente",
+    }.get(intent, intent)
+
+    subject = f"[Composto Web] Reply ambíguo em auditoria — {html.escape(lead.name or '')}"
+    html_body = f"""
+    <div style="font-family: sans-serif; max-width: 600px;">
+      <h2 style="color: #7c2d12;">Reply ambíguo em auditoria</h2>
+      <p><strong>Lead:</strong> {html.escape(lead.name or "")}</p>
+      <p><strong>Empresa:</strong> {html.escape(lead.company or "—")}</p>
+      <p><strong>Cargo:</strong> {html.escape(lead.job_title or "—")}</p>
+      <p><strong>Intent detectado:</strong> {html.escape(intent_label)}</p>
+      <p><strong>Cadências candidatas:</strong> {sent_cadence_count}</p>
+      <p><strong>Steps colocados em hold:</strong> {held_steps}</p>
+      <hr style="border: none; border-top: 1px solid #eee;" />
+      <p style="white-space: pre-wrap; color: #333;">{html.escape(reply_text)}</p>
+      <hr style="border: none; border-top: 1px solid #eee;" />
+      <p style="font-size: 12px; color: #888;">
+        Revise o item na fila de auditoria antes de retomar ou vincular a cadência correta.
+      </p>
+    </div>
+    """
+
+    try:
+        resend.Emails.send(
+            {
+                "from": settings.RESEND_FROM_EMAIL,
+                "to": [notify_email],
+                "subject": subject,
+                "html": html_body,
+            }
+        )
+        logger.info(
+            "notification.ambiguous_reply_sent",
+            lead_id=str(lead.id),
+            intent=intent,
+            to=notify_email,
+            held_steps=held_steps,
+        )
+        return True
+    except Exception as exc:
+        logger.error("notification.ambiguous_reply_failed", error=str(exc))
+        return False
+
+
 async def send_manual_task_notification(
     lead: Lead,
     cadence_name: str,
@@ -931,8 +1000,8 @@ async def send_manual_task_notification(
     html_body = f"""
     <div style="font-family: sans-serif; max-width: 600px;">
       <h2 style="color: #1a1a2e">📋 Tarefa Manual</h2>
-      <p><strong>Lead:</strong> {html.escape(lead.name or '')}</p>
-      <p><strong>Empresa:</strong> {html.escape(lead.company or '—')}</p>
+      <p><strong>Lead:</strong> {html.escape(lead.name or "")}</p>
+      <p><strong>Empresa:</strong> {html.escape(lead.company or "—")}</p>
       <p><strong>Cadência:</strong> {html.escape(cadence_name)} — Step {step_number}</p>
       <hr style="border: none; border-top: 1px solid #eee;" />
       <p><strong>Instrução:</strong></p>

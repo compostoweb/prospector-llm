@@ -23,6 +23,7 @@ from models.enums import Channel, LeadStatus, ManualTaskStatus, StepStatus
 from models.interaction import Interaction
 from models.lead import Lead
 from models.manual_task import ManualTask
+from models.tenant import TenantIntegration
 
 
 @pytest.mark.asyncio
@@ -410,7 +411,9 @@ async def test_unipile_webhook_email_reply_matches_manual_task_end_to_end(
         with (
             patch(
                 "services.inbound_message_service.resolve_tenant_llm_config",
-                new=AsyncMock(return_value=SimpleNamespace(provider="openai", model="gpt-5.4-mini")),
+                new=AsyncMock(
+                    return_value=SimpleNamespace(provider="openai", model="gpt-5.4-mini")
+                ),
             ),
             patch("services.inbound_message_service.ReplyParser", return_value=parser_instance),
             patch("api.routes.ws.broadcast_event", new=AsyncMock()),
@@ -450,6 +453,151 @@ async def test_unipile_webhook_email_reply_matches_manual_task_end_to_end(
     assert inbound_interaction.reply_match_status == "matched"
     assert inbound_interaction.reply_match_source == "email_message_id"
     assert future_step.status == StepStatus.SKIPPED
+
+
+@pytest.mark.asyncio
+async def test_unipile_webhook_ambiguous_email_reply_holds_candidate_cadences(
+    client: AsyncClient,
+    db: AsyncSession,
+    tenant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    integration_result = await db.execute(
+        select(TenantIntegration).where(TenantIntegration.tenant_id == tenant.id)
+    )
+    integration = integration_result.scalar_one()
+    integration.unipile_gmail_account_id = "acc_mail_ambiguous"
+
+    lead = Lead(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Lead Email Ambíguo",
+        email_corporate="lead.ambiguous@empresa.com",
+        status=LeadStatus.IN_CADENCE,
+        source="manual",
+    )
+    cadence_a = Cadence(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Cadência Ambígua A",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    cadence_b = Cadence(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Cadência Ambígua B",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+    )
+    now = datetime.now(tz=UTC)
+    sent_a = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence_a.id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        use_voice=False,
+        status=StepStatus.SENT,
+        scheduled_at=now - timedelta(days=3),
+        sent_at=now - timedelta(days=3),
+    )
+    sent_b = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence_b.id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        use_voice=False,
+        status=StepStatus.SENT,
+        scheduled_at=now - timedelta(days=2),
+        sent_at=now - timedelta(days=2),
+    )
+    future_a = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence_a.id,
+        channel=Channel.EMAIL,
+        step_number=2,
+        day_offset=2,
+        use_voice=False,
+        status=StepStatus.PENDING,
+        scheduled_at=now + timedelta(days=1),
+    )
+    future_b = CadenceStep(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        cadence_id=cadence_b.id,
+        channel=Channel.EMAIL,
+        step_number=2,
+        day_offset=2,
+        use_voice=False,
+        status=StepStatus.DISPATCHING,
+        scheduled_at=now + timedelta(days=1),
+    )
+    db.add_all([lead, cadence_a, cadence_b, sent_a, sent_b, future_a, future_b])
+    await db.commit()
+
+    parser_instance = MagicMock()
+    parser_instance.classify = AsyncMock(
+        return_value={"intent": "NEUTRAL", "confidence": 0.82, "summary": "Pediu contexto"}
+    )
+
+    monkeypatch.setattr(unipile_webhook.settings, "UNIPILE_WEBHOOK_SECRET", "secret-123")
+    monkeypatch.setattr(unipile_webhook.settings, "ENV", "prod")
+
+    with (
+        patch(
+            "services.inbound_message_service.resolve_tenant_llm_config",
+            new=AsyncMock(return_value=SimpleNamespace(provider="openai", model="gpt-5.4-mini")),
+        ),
+        patch("services.inbound_message_service.ReplyParser", return_value=parser_instance),
+        patch("api.routes.ws.broadcast_event", new=AsyncMock()),
+        patch("services.notification.send_ambiguous_reply_notification", new=AsyncMock()),
+    ):
+        resp = await client.post(
+            "/webhooks/unipile",
+            content=json.dumps(
+                {
+                    "event": "mail_received",
+                    "account_id": "acc_mail_ambiguous",
+                    "sender": {"attendee_provider_id": "lead.ambiguous@empresa.com"},
+                    "message": {
+                        "id": "mail_reply_ambiguous_1",
+                        "account_id": "acc_mail_ambiguous",
+                        "account_type": "GMAIL",
+                        "subject": "Re: proposta",
+                        "body": "Pode me explicar melhor?",
+                    },
+                }
+            ),
+            headers={"Unipile-Auth": "secret-123"},
+        )
+
+    assert resp.status_code == 200, resp.text
+
+    interaction_result = await db.execute(
+        select(Interaction).where(Interaction.unipile_message_id == "mail_reply_ambiguous_1")
+    )
+    inbound_interaction = interaction_result.scalar_one()
+    await db.refresh(future_a)
+    await db.refresh(future_b)
+
+    assert inbound_interaction.reply_match_status == "ambiguous"
+    assert inbound_interaction.reply_match_source == "ambiguous_reply_hold"
+    assert inbound_interaction.reply_match_sent_cadence_count == 2
+    assert future_a.status == StepStatus.SKIPPED
+    assert future_b.status == StepStatus.SKIPPED
+    assert future_a.reply_hold_interaction_id == inbound_interaction.id
+    assert future_b.reply_hold_previous_status == "dispatching"
 
 
 @pytest.mark.asyncio
@@ -552,7 +700,9 @@ async def test_unipile_webhook_linkedin_reply_matches_manual_task_end_to_end(
         with (
             patch(
                 "services.inbound_message_service.resolve_tenant_llm_config",
-                new=AsyncMock(return_value=SimpleNamespace(provider="openai", model="gpt-5.4-mini")),
+                new=AsyncMock(
+                    return_value=SimpleNamespace(provider="openai", model="gpt-5.4-mini")
+                ),
             ),
             patch("services.inbound_message_service.ReplyParser", return_value=parser_instance),
             patch("api.routes.ws.broadcast_event", new=AsyncMock()),

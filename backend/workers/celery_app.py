@@ -4,9 +4,12 @@ workers/celery_app.py
 Instância e configuração central do Celery.
 
 Responsabilidades:
-  - Criar o app Celery com broker e backend de settings
+    - Criar o app Celery com broker e backend de settings
     - Declarar as filas de processamento: capture, enrich, cadence, dispatch,
         content e content-engagement
+    - Operar com dois serviços de worker:
+        worker-general  — capture, enrich, cadence, dispatch
+        worker-content  — content, content-engagement
   - Configurar serialização JSON e fuso UTC
   - Carregar o Beat schedule de scheduler/beats.py
 
@@ -19,7 +22,8 @@ Filas:
     content-engagement — scanner de engajamento do Content Hub
 
 Uso:
-    celery -A workers.celery_app worker -Q dispatch -c 2
+        celery -A workers.celery_app worker -Q capture,enrich,cadence,dispatch -c 4
+        celery -A workers.celery_app worker -Q content,content-engagement -c 2
     celery -A workers.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule
 """
 
@@ -60,6 +64,9 @@ celery_app = Celery(
 # ── Filas e exchanges ─────────────────────────────────────────────────
 
 default_exchange = Exchange("prospector", type="direct")
+GENERAL_WORKER_QUEUES = ("capture", "enrich", "cadence", "dispatch")
+CONTENT_WORKER_QUEUES = ("content", "content-engagement")
+ALL_WORKER_QUEUES = GENERAL_WORKER_QUEUES + CONTENT_WORKER_QUEUES
 
 task_queues = (
     Queue("capture", default_exchange, routing_key="capture"),

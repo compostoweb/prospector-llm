@@ -115,7 +115,7 @@ CELERY_RESULT_BACKEND=redis://redis:6379/2
 
 ## 4. Workers Celery
 
-Cada worker é um app separado no EasyPanel usando o mesmo build do backend.
+Hoje a operação usa dois apps de worker no EasyPanel usando o mesmo build do backend.
 
 Configuração base para todos:
 
@@ -128,53 +128,25 @@ Configuração base para todos:
 
 Use exatamente as mesmas environment variables da API.
 
-### worker-capture
+### worker-general
 
 Start command:
 
 ```bash
-celery -A workers.celery_app worker -Q capture -c 2 --loglevel=warning
+celery -A workers.celery_app worker -Q capture,enrich,cadence,dispatch -c 4 --loglevel=warning
 ```
 
-### worker-dispatch
-
-Start command:
-
-```bash
-celery -A workers.celery_app worker -Q dispatch -c 4 --loglevel=warning
-```
-
-### worker-cadence
-
-Start command:
-
-```bash
-celery -A workers.celery_app worker -Q cadence -c 1 --loglevel=warning
-```
-
-### worker-enrich
-
-Start command:
-
-```bash
-celery -A workers.celery_app worker -Q enrich -c 2 --loglevel=warning
-```
+Processa captura, enriquecimento, cadências, inbox polling, dispatch e sync Pipedrive.
 
 ### worker-content
 
 Start command:
 
 ```bash
-celery -A workers.celery_app worker -Q content -c 2 --loglevel=warning
+celery -A workers.celery_app worker -Q content,content-engagement -c 2 --loglevel=warning
 ```
 
-### worker-content-engagement
-
-Start command:
-
-```bash
-celery -A workers.celery_app worker -Q content-engagement -c 2 --loglevel=warning
-```
+Processa publicações, sincronizações do Content Hub, lead magnets e scanner de engajamento.
 
 ## 5. Serviço Beat
 

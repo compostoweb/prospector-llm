@@ -747,6 +747,7 @@ async def test_process_inbound_reply_broadcasts_alert_when_reply_is_ambiguous(
         return_value={"intent": "NEUTRAL", "confidence": 0.71, "summary": "Resposta curta"}
     )
     broadcast_event = AsyncMock()
+    ambiguous_notification = AsyncMock()
 
     with (
         patch(
@@ -755,6 +756,10 @@ async def test_process_inbound_reply_broadcasts_alert_when_reply_is_ambiguous(
         ),
         patch("services.inbound_message_service.ReplyParser", return_value=parser_instance),
         patch("api.routes.ws.broadcast_event", new=broadcast_event),
+        patch(
+            "services.notification.send_ambiguous_reply_notification",
+            new=ambiguous_notification,
+        ),
     ):
         await process_inbound_reply(
             db=db,
@@ -780,6 +785,10 @@ async def test_process_inbound_reply_broadcasts_alert_when_reply_is_ambiguous(
     assert ambiguous_calls[0].args[0] == str(tenant.id)
     assert ambiguous_calls[0].args[1]["lead_id"] == str(lead.id)
     assert ambiguous_calls[0].args[1]["sent_cadence_count"] == 2
+    ambiguous_notification.assert_awaited_once()
+    notification_call = ambiguous_notification.await_args
+    assert notification_call is not None
+    assert notification_call.kwargs["sent_cadence_count"] == 2
     assert interaction.reply_match_status == "ambiguous"
     assert interaction.reply_match_sent_cadence_count == 2
     assert lead.status == LeadStatus.IN_CADENCE

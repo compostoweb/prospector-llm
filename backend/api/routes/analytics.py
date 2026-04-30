@@ -32,6 +32,7 @@ from models.lead_email import LeadEmail
 from models.manual_task import ManualTask
 from services.cadence_manager import CadenceManager
 from services.reply_matching import (
+    AMBIGUOUS_REPLY_HOLD_REASON,
     reliable_reply_interaction_condition,
 )
 
@@ -211,6 +212,14 @@ def _safe_rate(numerator: int, denominator: int) -> float:
     if denominator <= 0:
         return 0.0
     return round((numerator / denominator) * 100, 1)
+
+
+def _countable_skipped_cadence_step_condition():
+    return and_(
+        CadenceStep.status == StepStatus.SKIPPED,
+        CadenceStep.reply_hold_interaction_id.is_(None),
+        CadenceStep.reply_hold_reason.is_distinct_from(AMBIGUOUS_REPLY_HOLD_REASON),
+    )
 
 
 def _cadence_step_period_expr():
@@ -1237,7 +1246,7 @@ async def get_cadence_analytics(
             .label("pending"),
             func.count(CadenceStep.id)
             .filter(
-                CadenceStep.status == StepStatus.SKIPPED,
+                _countable_skipped_cadence_step_condition(),
                 period_expr >= since,
                 period_expr < until,
             )
@@ -1342,7 +1351,7 @@ async def get_cadence_analytics(
             .label("pending"),
             func.count(CadenceStep.id)
             .filter(
-                CadenceStep.status == StepStatus.SKIPPED,
+                _countable_skipped_cadence_step_condition(),
                 period_expr >= since,
                 period_expr < until,
             )
@@ -1447,6 +1456,8 @@ async def get_cadence_analytics(
         pending = channel_stats["pending"] if channel_stats is not None else 0
         skipped = channel_stats["skipped"] if channel_stats is not None else 0
         failed = channel_stats["failed"] if channel_stats is not None else 0
+        if not any((sent, replied, opened, accepted, pending, skipped, failed)):
+            continue
         channel_breakdown.append(
             CadenceAnalyticsChannelItem(
                 channel=channel.value if hasattr(channel, "value") else str(channel),
@@ -1479,7 +1490,7 @@ async def get_cadence_analytics(
             .label("pending"),
             func.count(CadenceStep.id)
             .filter(
-                CadenceStep.status == StepStatus.SKIPPED,
+                _countable_skipped_cadence_step_condition(),
                 period_expr >= since,
                 period_expr < until,
             )
@@ -1599,6 +1610,8 @@ async def get_cadence_analytics(
         skipped = step_row["skipped"] if step_row is not None else 0
         failed = step_row["failed"] if step_row is not None else 0
         lead_count = (sent or 0) + (pending or 0) + (skipped or 0) + (failed or 0)
+        if not any((lead_count, replied, opened, bounced, accepted)):
+            continue
         step_breakdown.append(
             CadenceAnalyticsStepItem(
                 step_number=step_number,
