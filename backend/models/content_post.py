@@ -16,14 +16,15 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Integer, Numeric, String, Text
+from sqlalchemy import DateTime, Integer, Numeric, String, Text, and_
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, foreign, mapped_column, relationship
 
 from models.base import Base, TenantMixin, TimestampMixin
+from models.content_gallery_image import ContentGalleryImage
 
 if TYPE_CHECKING:
-    from models.content_gallery_image import ContentGalleryImage
+    pass
 
 
 class ContentPost(Base, TenantMixin, TimestampMixin):
@@ -225,10 +226,10 @@ class ContentPost(Base, TenantMixin, TimestampMixin):
     # ── Carrossel (multi-imagem) ──────────────────────────────────────
     carousel_images: Mapped[list[ContentGalleryImage]] = relationship(
         "ContentGalleryImage",
-        primaryjoin=(
-            "and_(ContentPost.id==ContentGalleryImage.linked_post_id, "
-            "ContentGalleryImage.position.isnot(None))"
+        primaryjoin=lambda: and_(
+            ContentPost.id == foreign(ContentGalleryImage.linked_post_id),
+            ContentGalleryImage.position.is_not(None),
         ),
-        order_by="ContentGalleryImage.position",
+        order_by=lambda: ContentGalleryImage.position,
         viewonly=True,
     )
