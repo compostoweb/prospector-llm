@@ -69,7 +69,7 @@ export function LLMConfigForm({ value, onChange, variant = "default" }: LLMConfi
         isDialog ? "space-y-4 p-4 sm:p-5" : "space-y-5 p-5",
       )}
     >
-      <p className="text-xs font-semibold uppercase tracking-wider text-(--text-tertiary)">
+      <p className="text-xs font-semibold uppercase tracking-wider text-(--accent)">
         Configuração LLM
       </p>
 
@@ -77,12 +77,14 @@ export function LLMConfigForm({ value, onChange, variant = "default" }: LLMConfi
       <div
         className={cn(
           "grid gap-4",
-          isDialog ? "lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,1fr)]" : "xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,1fr)]",
+          isDialog
+            ? "lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,1fr)]"
+            : "xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,1fr)]",
         )}
       >
         {/* Provider */}
-        <div className="space-y-2">
-          <label className="block text-xs font-medium text-(--text-secondary)">Provider</label>
+        <div className="min-w-0 space-y-2">
+          <label className="block text-sm font-medium text-(--accent)">Provider</label>
           <div
             className={cn(
               "grid gap-2",
@@ -112,8 +114,8 @@ export function LLMConfigForm({ value, onChange, variant = "default" }: LLMConfi
         </div>
 
         {/* Modelo — Combobox com busca */}
-        <div className="space-y-2">
-          <Label className="block text-xs">Modelo</Label>
+        <div className="min-w-0 space-y-2">
+          <Label className="block text-sm font-medium">Modelo</Label>
           <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
               <button
@@ -136,8 +138,15 @@ export function LLMConfigForm({ value, onChange, variant = "default" }: LLMConfi
                 <ChevronsUpDown size={12} className="ml-1 shrink-0 text-(--text-disabled)" />
               </button>
             </PopoverTrigger>
-            <PopoverContent className={cn("p-0", isDialog ? "w-[min(36rem,calc(100vw-4rem))]" : "w-72")}>
-              <Command>
+            <PopoverContent
+              align="start"
+              style={{
+                width: "var(--radix-popover-trigger-width)",
+                maxWidth: isDialog ? "min(36rem, calc(100vw - 4rem))" : "calc(100vw - 2rem)",
+              }}
+              className={cn("min-w-0 p-0")}
+            >
+              <Command className="w-full">
                 <CommandInput placeholder="Buscar modelo…" />
                 <CommandList>
                   <CommandEmpty>Nenhum modelo encontrado.</CommandEmpty>
@@ -171,8 +180,8 @@ export function LLMConfigForm({ value, onChange, variant = "default" }: LLMConfi
       {/* Temperature */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <Label className="text-xs">Temperature</Label>
-          <span className="text-xs tabular-nums text-(--text-tertiary)">
+          <Label className="text-sm">Temperature</Label>
+          <span className="text-sm font-medium tabular-nums text-(--accent)">
             {value.llm_temperature.toFixed(1)}
           </span>
         </div>
@@ -186,7 +195,7 @@ export function LLMConfigForm({ value, onChange, variant = "default" }: LLMConfi
           onChange={(e) => update("llm_temperature", Number(e.target.value))}
           className="w-full accent-(--accent)"
         />
-        <div className="flex justify-between text-[10px] text-(--text-disabled)">
+        <div className="flex justify-between font-medium text-[14px] text-(--accent)">
           <span>Preciso</span>
           <span>Criativo</span>
         </div>
@@ -204,13 +213,13 @@ export function LLMConfigForm({ value, onChange, variant = "default" }: LLMConfi
           onChange={(e) => update("llm_max_tokens", Number(e.target.value))}
           className={cn("h-10 text-sm", isDialog && "text-base")}
         />
-        <p className="text-[10px] leading-snug text-(--text-disabled)">
+        <p className="text-[14px] leading-snug text-(--accent)">
           ≈{" "}
-          <span className="font-medium text-(--text-tertiary)">
+          <span className="font-medium text-(--accent)">
             {Math.round(value.llm_max_tokens * 0.75).toLocaleString("pt-BR")}
           </span>{" "}
           palavras &nbsp;·&nbsp;
-          <span className="font-medium text-(--text-tertiary)">
+          <span className="font-medium text-(--accent)">
             {Math.round(value.llm_max_tokens * 4).toLocaleString("pt-BR")}
           </span>{" "}
           caracteres por resposta

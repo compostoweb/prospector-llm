@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   Sparkles,
   Check,
@@ -14,6 +14,7 @@ import {
   Upload,
   Maximize2,
   X,
+  Layers,
 } from "lucide-react"
 import { getDayOfMonthFromLocalDateTime, isFutureLocalDateTime, localDateToUTC } from "@/lib/date"
 import {
@@ -32,7 +33,9 @@ import {
   useUploadPostImage,
   useUploadPostVideo,
   useDeletePostVideo,
+  useContentPosts,
   type ContentPost,
+  type CarouselImageItem,
   type HookType,
   type PostPillar,
   type ImageStyle,
@@ -75,6 +78,7 @@ import {
 } from "@/lib/content/post-media"
 import { downloadMediaFile, getDownloadBaseName } from "@/lib/content/media-download"
 import { buildGeneratedTitle, extractGeneratedPostParts } from "@/lib/content/generated-post"
+import { CarouselEditor, CAROUSEL_MIN_IMAGES } from "@/components/content/carousel-editor"
 
 const DAY_NAMES: Record<number, string> = {
   0: "Domingo",
@@ -169,6 +173,9 @@ export function CreatePostDialog({
   const [videoLightboxOpen, setVideoLightboxOpen] = useState(false)
   const [localVideoDeleted, setLocalVideoDeleted] = useState(false)
 
+  const [carouselOpen, setCarouselOpen] = useState(false)
+  const [isCreatingDraftForCarousel, setIsCreatingDraftForCarousel] = useState(false)
+
   const createPost = useCreateContentPost()
   const updatePost = useUpdatePost()
   const deletePostMut = useDeletePost()
@@ -184,6 +191,14 @@ export function CreatePostDialog({
   const uploadVideo = useUploadPostVideo()
   const deleteVideo = useDeletePostVideo()
   const { data: availableThemes } = useContentThemes({ used: false })
+
+  // Lê dados frescos do post-rascunho via cache da listagem (atualiza após mutações de carrossel).
+  const { data: allPostsForDraft } = useContentPosts()
+  const liveDraftPost = useMemo(() => {
+    if (!draftPost) return null
+    return allPostsForDraft?.find((p) => p.id === draftPost.id) ?? draftPost
+  }, [allPostsForDraft, draftPost])
+  const carouselImages = (liveDraftPost?.carousel_images ?? []) as CarouselImageItem[]
 
   useEffect(() => {
     if (open) return
@@ -299,6 +314,9 @@ export function CreatePostDialog({
     setLocalVideoSizeMB(null)
     setVideoLightboxOpen(false)
     setLocalVideoDeleted(false)
+
+    setCarouselOpen(false)
+    setIsCreatingDraftForCarousel(false)
   }
 
   function handleClose(keepDraft: boolean) {
@@ -1488,6 +1506,77 @@ export function CreatePostDialog({
                           )}
                         </Button>
                       </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* ── Seção de carrossel ── */}
+            <div className="rounded-md border border-(--border-subtle)">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium"
+                onClick={() => setCarouselOpen((v) => !v)}
+              >
+                <span className="flex items-center gap-2">
+                  <Layers className="h-4 w-4 text-(--text-secondary)" />
+                  Carrossel
+                  {carouselImages.length > 0 && (
+                    <span className="rounded-full bg-(--accent)/15 px-1.5 py-0.5 text-xs text-(--accent)">
+                      {carouselImages.length} imagens
+                    </span>
+                  )}
+                  {liveDraftPost?.media_kind === "carousel" &&
+                    carouselImages.length < CAROUSEL_MIN_IMAGES && (
+                      <span className="rounded-full bg-red-500/15 px-1.5 py-0.5 text-xs text-red-600">
+                        Mínimo {CAROUSEL_MIN_IMAGES}
+                      </span>
+                    )}
+                </span>
+                {carouselOpen ? (
+                  <ChevronUp className="h-4 w-4 text-(--text-tertiary)" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 text-(--text-tertiary)" />
+                )}
+              </button>
+
+              {carouselOpen && (
+                <div className="border-t border-(--border-subtle) p-3">
+                  <p className="mb-3 text-xs text-(--text-tertiary)">
+                    Carrossel multi-imagem (até 9). Mutualmente exclusivo com imagem única ou vídeo.
+                    Ao adicionar a primeira imagem, o tipo do post muda automaticamente para
+                    &quot;carrossel&quot;.
+                  </p>
+                  {liveDraftPost ? (
+                    <CarouselEditor postId={liveDraftPost.id} images={carouselImages} />
+                  ) : (
+                    <div className="flex flex-col items-start gap-2 rounded-md bg-(--bg-subtle) p-3 text-xs text-(--text-secondary)">
+                      <p>
+                        Para anexar imagens ao carrossel, primeiro salvamos um rascunho do post com
+                        título e texto.
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={isCreatingDraftForCarousel || !title.trim() || !body.trim()}
+                        onClick={async () => {
+                          setIsCreatingDraftForCarousel(true)
+                          try {
+                            await ensureDraftPost()
+                          } finally {
+                            setIsCreatingDraftForCarousel(false)
+                          }
+                        }}
+                      >
+                        {isCreatingDraftForCarousel ? "Criando rascunho…" : "Iniciar carrossel"}
+                      </Button>
+                      {(!title.trim() || !body.trim()) && (
+                        <p className="text-(--text-tertiary)">
+                          Preencha o título interno e o texto do post primeiro.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>

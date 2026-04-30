@@ -51,14 +51,14 @@ function SectionCard({ number, icon, title, subtitle, children, className }: Sec
         className,
       )}
     >
-      <div className="flex items-center gap-3 border-b border-(--border-subtle) bg-(--bg-overlay) px-5 py-3.5">
-        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-(--accent-subtle) text-xs font-bold text-(--accent)">
+      <div className="flex items-center gap-3 border-b border-(--accent-border) bg-(--accent) px-5 py-3.5 transition-all duration-200 hover:brightness-95">
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-(--bg-surface) text-xs font-bold text-(--accent)">
           {number}
         </span>
-        <span className="text-(--text-tertiary)">{icon}</span>
+        <span className="text-white">{icon}</span>
         <div>
-          <p className="text-sm font-semibold text-(--text-primary)">{title}</p>
-          {subtitle && <p className="text-xs text-(--text-tertiary)">{subtitle}</p>}
+          <p className="text-sm font-semibold text-white">{title}</p>
+          {subtitle && <p className="text-xs text-white">{subtitle}</p>}
         </div>
       </div>
       <div className="space-y-4 p-5">{children}</div>
@@ -415,7 +415,9 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
                     </option>
                   ))}
               </StyledSelect>
-              {hasLinkedInInmailSteps && selectedLinkedInAccount && !selectedLinkedInAccount.supports_inmail ? (
+              {hasLinkedInInmailSteps &&
+              selectedLinkedInAccount &&
+              !selectedLinkedInAccount.supports_inmail ? (
                 <p className="text-xs text-(--warning)">
                   A conta selecionada não está marcada com suporte a InMail. Steps desse tipo serão
                   pulados antes de consumir budget.
@@ -452,19 +454,17 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
           <button
             type="button"
             onClick={() => setContextOpen((v) => !v)}
-            className="flex w-full items-center gap-3 border-b border-(--border-subtle) bg-(--bg-overlay) px-5 py-3.5 transition-colors hover:bg-(--bg-sunken)"
+            className="flex w-full items-center gap-3 border-b border-(--accent-border) bg-(--accent) px-5 py-3.5 transition-all duration-200 hover:brightness-95"
           >
-            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-(--accent-subtle) text-xs font-bold text-(--accent)">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-(--bg-surface) text-xs font-bold text-(--accent)">
               04
             </span>
-            <span className="text-(--text-tertiary)">
+            <span className="text-white">
               <BrainCircuit size={14} />
             </span>
             <div className="flex-1 text-left">
-              <p className="text-sm font-semibold text-(--text-primary)">Contexto para IA</p>
-              <p className="text-xs text-(--text-tertiary)">
-                Alimenta o modelo com informações do seu negócio
-              </p>
+              <p className="text-sm font-semibold text-white">Contexto para IA</p>
+              <p className="text-xs text-white">Alimenta o modelo com informações do seu negócio</p>
             </div>
             <div className="flex items-center gap-2">
               {hasContextFilled && (
@@ -473,9 +473,9 @@ export function CadenceForm({ cadence }: CadenceFormProps) {
                 </span>
               )}
               {contextOpen ? (
-                <ChevronUp size={14} className="text-(--text-tertiary)" />
+                <ChevronUp size={14} className="text-(--accent-subtle-fg)" />
               ) : (
-                <ChevronDown size={14} className="text-(--text-tertiary)" />
+                <ChevronDown size={14} className="text-(--accent-subtle-fg)" />
               )}
             </div>
           </button>

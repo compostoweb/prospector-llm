@@ -13,6 +13,7 @@ import {
   useContentSettings,
   type PostStatus,
   type PostPillar,
+  type MediaKind,
 } from "@/lib/api/hooks/use-content"
 import { PostCard } from "@/components/content/post-card"
 import { PostListView, type SortKey } from "@/components/content/post-list-view"
@@ -43,9 +44,18 @@ const PILLAR_OPTIONS: { value: PostPillar | "all"; label: string }[] = [
   { value: "vision", label: "Visão" },
 ]
 
+const MEDIA_KIND_OPTIONS: { value: MediaKind | "all"; label: string }[] = [
+  { value: "all", label: "Todos os tipos" },
+  { value: "none", label: "Texto puro" },
+  { value: "image", label: "Com imagem" },
+  { value: "carousel", label: "Carrossel" },
+  { value: "video", label: "Com vídeo" },
+]
+
 export default function ContentPostsPage() {
   const [statusFilter, setStatusFilter] = useState<PostStatus | "all">("all")
   const [pillarFilter, setPillarFilter] = useState<PostPillar | "all">("all")
+  const [mediaKindFilter, setMediaKindFilter] = useState<MediaKind | "all">("all")
   const [monthFilter, setMonthFilter] = useState<string>("") // "2026-04" format
   const [createOpen, setCreateOpen] = useState(false)
   const [notionOpen, setNotionOpen] = useState(false)
@@ -62,19 +72,30 @@ export default function ContentPostsPage() {
     contentSettings?.notion_api_key_set && contentSettings?.notion_database_id
   )
 
-  // Filtro de mês client-side — mesma prioridade de data que o PostListView usa para exibir
+  // Filtros client-side: mês + tipo de mídia
   const posts = useMemo(() => {
-    if (!allPosts || !monthFilter) return allPosts
-    return allPosts.filter((post) => {
-      const dateStr = post.published_at ?? post.publish_date ?? post.created_at
-      if (!dateStr) return false
-      try {
-        return isSameMonth(parseISO(dateStr), parseISO(monthFilter + "-01"))
-      } catch {
-        return false
-      }
-    })
-  }, [allPosts, monthFilter])
+    if (!allPosts) return allPosts
+    let result = allPosts
+    if (mediaKindFilter !== "all") {
+      result = result.filter((post) => {
+        const kind: MediaKind =
+          post.media_kind ?? (post.video_url ? "video" : post.image_url ? "image" : "none")
+        return kind === mediaKindFilter
+      })
+    }
+    if (monthFilter) {
+      result = result.filter((post) => {
+        const dateStr = post.published_at ?? post.publish_date ?? post.created_at
+        if (!dateStr) return false
+        try {
+          return isSameMonth(parseISO(dateStr), parseISO(monthFilter + "-01"))
+        } catch {
+          return false
+        }
+      })
+    }
+    return result
+  }, [allPosts, monthFilter, mediaKindFilter])
 
   // Últimos 12 meses como opções de Select
   const monthOptions = useMemo(() => {
@@ -91,59 +112,95 @@ export default function ContentPostsPage() {
   return (
     <div className="flex flex-col gap-5">
       {/* Toolbar */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <Filter className="h-4 w-4 text-(--text-tertiary)" />
-          <Select
-            value={statusFilter}
-            onValueChange={(v) => setStatusFilter(v as PostStatus | "all")}
-          >
-            <SelectTrigger className="h-8 w-44 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {STATUS_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value} className="text-xs">
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      <div className="flex items-end justify-between gap-3 flex-wrap">
+        <div className="flex items-end gap-2">
+          <Filter className="h-4 w-4 text-(--text-tertiary) mb-2" />
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-semibold uppercase tracking-wide text-(--text-secondary) pl-2">
+              Status
+            </label>
+            <Select
+              value={statusFilter}
+              onValueChange={(v) => setStatusFilter(v as PostStatus | "all")}
+            >
+              <SelectTrigger className="h-8 w-44 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {STATUS_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value} className="text-xs">
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-          <Select
-            value={pillarFilter}
-            onValueChange={(v) => setPillarFilter(v as PostPillar | "all")}
-          >
-            <SelectTrigger className="h-8 w-44 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PILLAR_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value} className="text-xs">
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-semibold uppercase tracking-wide text-(--text-secondary) pl-2 ">
+              Pilar
+            </label>
+            <Select
+              value={pillarFilter}
+              onValueChange={(v) => setPillarFilter(v as PostPillar | "all")}
+            >
+              <SelectTrigger className="h-8 w-44 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PILLAR_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value} className="text-xs">
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-          <Select
-            value={monthFilter || "all"}
-            onValueChange={(v) => setMonthFilter(v === "all" ? "" : v)}
-          >
-            <SelectTrigger className="h-8 w-36 text-xs">
-              <SelectValue placeholder="Todos os meses" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all" className="text-xs">
-                Todos os meses
-              </SelectItem>
-              {monthOptions.map((o) => (
-                <SelectItem key={o.value} value={o.value} className="text-xs">
-                  {o.label}
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-semibold uppercase tracking-wide text-(--text-secondary) pl-2">
+              Tipo de mídia
+            </label>
+            <Select
+              value={mediaKindFilter}
+              onValueChange={(v) => setMediaKindFilter(v as MediaKind | "all")}
+            >
+              <SelectTrigger className="h-8 w-40 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MEDIA_KIND_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value} className="text-xs">
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-semibold uppercase tracking-wide text-(--text-secondary) pl-2">
+              Mês
+            </label>
+            <Select
+              value={monthFilter || "all"}
+              onValueChange={(v) => setMonthFilter(v === "all" ? "" : v)}
+            >
+              <SelectTrigger className="h-8 w-36 text-xs">
+                <SelectValue placeholder="Todos os meses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" className="text-xs">
+                  Todos os meses
                 </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+                {monthOptions.map((o) => (
+                  <SelectItem key={o.value} value={o.value} className="text-xs">
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">

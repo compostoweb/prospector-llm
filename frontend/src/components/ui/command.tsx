@@ -11,7 +11,10 @@ const Command = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <CommandPrimitive
     ref={ref}
-    className={cn("flex flex-col overflow-hidden rounded-md bg-(--bg-surface) text-(--text-primary)", className)}
+    className={cn(
+      "flex flex-col overflow-hidden rounded-md bg-(--bg-surface) text-(--text-primary)",
+      className,
+    )}
     {...props}
   />
 ))
@@ -21,12 +24,20 @@ const CommandInput = React.forwardRef<
   React.ComponentRef<typeof CommandPrimitive.Input>,
   React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input>
 >(({ className, ...props }, ref) => (
-  <div className="flex items-center gap-2 border-b border-(--border-default) px-3" cmdk-input-wrapper="">
-    <Search size={13} className="shrink-0 text-(--text-disabled)" />
+  <div
+    className="flex items-center gap-2 border-b border-(--border-default) px-3 focus-within:outline-none focus-within:ring-0 focus-within:shadow-none"
+    cmdk-input-wrapper=""
+  >
+    <Search size={13} className="shrink-0 text-(--text-secondary)" />
     <CommandPrimitive.Input
       ref={ref}
+      style={{
+        border: "none",
+        outline: "none",
+        boxShadow: "none",
+      }}
       className={cn(
-        "flex h-9 w-full bg-transparent py-2 text-xs outline-none placeholder:text-(--text-disabled) disabled:cursor-not-allowed disabled:opacity-50",
+        "flex h-9 w-full appearance-none border-0 border-l-0 border-r-0 bg-transparent py-2 text-xs outline-none ring-0 shadow-none placeholder:text-(--text-secondary) placeholder:opacity-100 disabled:cursor-not-allowed disabled:opacity-50 focus:border-0 focus:border-l-0 focus:border-r-0 focus:outline-none focus:ring-0 focus:shadow-none focus-visible:border-0 focus-visible:border-l-0 focus-visible:border-r-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none",
         className,
       )}
       {...props}
@@ -51,7 +62,11 @@ const CommandEmpty = React.forwardRef<
   React.ComponentRef<typeof CommandPrimitive.Empty>,
   React.ComponentPropsWithoutRef<typeof CommandPrimitive.Empty>
 >((props, ref) => (
-  <CommandPrimitive.Empty ref={ref} className="py-4 text-center text-xs text-(--text-secondary)" {...props} />
+  <CommandPrimitive.Empty
+    ref={ref}
+    className="py-4 text-center text-xs text-(--text-secondary)"
+    {...props}
+  />
 ))
 CommandEmpty.displayName = CommandPrimitive.Empty.displayName
 
