@@ -409,3 +409,195 @@ async def _purge_old_deleted_posts_async() -> dict:
 
     logger.info("content.purge_deleted.done", purged=deleted_count, cutoff=str(cutoff))
     return {"purged": deleted_count}
+
+
+# ── Articles (link share Posts API) ──────────────────────────────────
+
+
+@celery_app.task(
+    bind=True,
+    name="workers.content.publish_article_to_linkedin",
+    max_retries=3,
+    default_retry_delay=60,
+    queue="content",
+)
+def publish_article_to_linkedin(self, article_id: str, tenant_id: str) -> dict:
+    """Publica um Article (link share) no LinkedIn. Idempotente."""
+    return asyncio.run(_publish_article_async(article_id, tenant_id, self))
+
+
+async def _publish_article_async(article_id: str, tenant_id: str, task) -> dict:  # type: ignore[type-arg]
+    from sqlalchemy import select
+
+    from core.database import get_worker_session
+    from models.content_article import ContentArticle
+    from services.content.article_service import publish_article_now
+    from services.content.linkedin_client import LinkedInClientError
+
+    tid = uuid.UUID(tenant_id)
+    aid = uuid.UUID(article_id)
+
+    async for db in get_worker_session(tid):
+        result = await db.execute(
+            select(ContentArticle).where(
+                ContentArticle.id == aid,
+                ContentArticle.tenant_id == tid,
+            )
+        )
+        article = result.scalar_one_or_none()
+        if article is None:
+            return {"status": "skipped", "reason": "not_found"}
+        if article.status == "published":
+            return {"status": "skipped", "reason": "already_published"}
+        if article.status not in ("approved", "scheduled"):
+            return {"status": "skipped", "reason": f"invalid_status:{article.status}"}
+
+        try:
+            updated = await publish_article_now(db, article_id=aid, tenant_id=tid)
+            updated.processing_at = None
+            updated.processing_lock_id = None
+            await db.commit()
+            return {
+                "status": "published",
+                "article_id": article_id,
+                "linkedin_post_urn": updated.linkedin_post_urn,
+            }
+        except LinkedInClientError as exc:
+            article.processing_at = None
+            article.processing_lock_id = None
+            await db.commit()
+            logger.error(
+                "content.article_publish_task.linkedin_error",
+                article_id=article_id,
+                error=exc.detail,
+            )
+            raise task.retry(exc=exc)
+        except ValueError as exc:
+            article.processing_at = None
+            article.processing_lock_id = None
+            await db.commit()
+            return {"status": "failed", "reason": str(exc)}
+
+    return {"status": "skipped", "reason": "no_session"}
+
+
+@celery_app.task(
+    name="workers.content.check_scheduled_articles",
+    queue="content",
+)
+def check_scheduled_articles() -> dict:
+    """Beat: enfileira publish_article_to_linkedin para articles vencidos."""
+    return asyncio.run(_check_scheduled_articles_async())
+
+
+async def _check_scheduled_articles_async() -> dict:
+    from datetime import timedelta
+
+    from sqlalchemy import update
+
+    from core.database import WorkerSessionLocal
+    from models.content_article import ContentArticle
+
+    now = datetime.now(UTC)
+    stale_threshold = now - timedelta(minutes=10)
+
+    async with WorkerSessionLocal() as db:
+        await db.execute(
+            update(ContentArticle)
+            .where(
+                ContentArticle.status == "scheduled",
+                ContentArticle.processing_at.isnot(None),
+                ContentArticle.processing_at < stale_threshold,
+            )
+            .values(processing_at=None, processing_lock_id=None)
+        )
+        lock_id = uuid.uuid4()
+        claim_result = await db.execute(
+            update(ContentArticle)
+            .where(
+                ContentArticle.status == "scheduled",
+                ContentArticle.scheduled_for <= now,
+                ContentArticle.processing_at.is_(None),
+                ContentArticle.deleted_at.is_(None),
+            )
+            .values(processing_at=now, processing_lock_id=lock_id)
+            .returning(ContentArticle.id, ContentArticle.tenant_id)
+        )
+        rows = claim_result.all()
+        await db.commit()
+
+        dispatched = 0
+        for art_id, tid in rows:
+            publish_article_to_linkedin.apply_async(
+                args=[str(art_id), str(tid)],
+                queue="content",
+            )
+            dispatched += 1
+
+    logger.info("content.check_scheduled_articles.done", dispatched=dispatched)
+    return {"dispatched": dispatched}
+
+
+# ── Newsletter reminders ──────────────────────────────────────────────
+
+
+@celery_app.task(
+    name="workers.content.send_newsletter_reminders",
+    queue="content",
+)
+def send_newsletter_reminders() -> dict:
+    """
+    Beat diario (09h America/Sao_Paulo): notifica autor sobre newsletters
+    com scheduled_for nas proximas 72h e que nao receberam lembrete ainda.
+    """
+    return asyncio.run(_send_newsletter_reminders_async())
+
+
+async def _send_newsletter_reminders_async() -> dict:
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from core.database import WorkerSessionLocal
+    from models.content_newsletter import ContentNewsletter
+
+    now = datetime.now(UTC)
+    horizon = now + timedelta(days=3)
+    today_start = datetime(now.year, now.month, now.day, tzinfo=UTC)
+
+    sent = 0
+    async with WorkerSessionLocal() as db:
+        result = await db.execute(
+            select(ContentNewsletter).where(
+                ContentNewsletter.status == "scheduled",
+                ContentNewsletter.deleted_at.is_(None),
+                ContentNewsletter.scheduled_for.isnot(None),
+                ContentNewsletter.scheduled_for >= today_start,
+                ContentNewsletter.scheduled_for <= horizon,
+            )
+        )
+        newsletters = list(result.scalars().all())
+
+        for nl in newsletters:
+            # Idempotencia diaria: nao re-enviar se ja avisou hoje
+            if nl.last_reminder_sent_at and nl.last_reminder_sent_at >= today_start:
+                continue
+
+            # Aqui plugaria envio de email/notificacao in-app.
+            # Por ora apenas registra log estruturado para o autor monitorar.
+            logger.info(
+                "content.newsletter_reminder",
+                newsletter_id=str(nl.id),
+                edition=nl.edition_number,
+                title=nl.title,
+                scheduled_for=nl.scheduled_for.isoformat() if nl.scheduled_for else "",
+                tenant_id=str(nl.tenant_id),
+            )
+            nl.last_reminder_sent_at = now
+            sent += 1
+
+        if sent:
+            await db.commit()
+
+    logger.info("content.newsletter_reminders.done", sent=sent, total=len(newsletters))
+    return {"sent": sent}

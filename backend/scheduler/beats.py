@@ -57,6 +57,18 @@ CELERY_BEAT_SCHEDULE: dict = {
         "task": "workers.content.check_scheduled_posts",
         "schedule": crontab(minute="*"),
     },
+    # Content Hub — verifica articles agendados — a cada minuto
+    "content-check-scheduled-articles": {
+        "task": "workers.content.check_scheduled_articles",
+        "schedule": crontab(minute="*"),
+        "options": {"queue": "content"},
+    },
+    # Content Hub — lembretes de newsletter — diariamente 12h UTC (~09h BR)
+    "content-newsletter-reminders": {
+        "task": "workers.content.send_newsletter_reminders",
+        "schedule": crontab(hour="12", minute="0"),
+        "options": {"queue": "content"},
+    },
     # Polling de batches Anthropic em andamento — a cada 5 minutos
     "poll-anthropic-batches": {
         "task": "workers.anthropic_batch.poll_anthropic_batches",

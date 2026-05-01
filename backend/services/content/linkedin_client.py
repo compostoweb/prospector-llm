@@ -123,6 +123,70 @@ class LinkedInClient:
         )
         return response.json()
 
+    # ── Article (link share) via Posts API ───────────────────────────
+
+    async def create_article_post(
+        self,
+        commentary: str,
+        source_url: str,
+        title: str | None = None,
+        description: str | None = None,
+        thumbnail_urn: str | None = None,
+    ) -> dict:
+        """
+        Publica um post tipo "article" (link share) usando a Posts API REST.
+
+        Diferente de /ugcPosts, esse endpoint renderiza um cartão rico para
+        a URL externa.
+
+        Returns: dict com pelo menos chave 'id' = urn:li:share:XXX (header X-RestLi-Id).
+        """
+        payload: dict = {
+            "author": self._person_urn,
+            "commentary": commentary or "",
+            "visibility": "PUBLIC",
+            "distribution": {
+                "feedDistribution": "MAIN_FEED",
+                "targetEntities": [],
+                "thirdPartyDistributionChannels": [],
+            },
+            "content": {
+                "article": {
+                    "source": source_url,
+                }
+            },
+            "lifecycleState": "PUBLISHED",
+            "isReshareDisabledByAuthor": False,
+        }
+        article = payload["content"]["article"]
+        if title:
+            article["title"] = title
+        if description:
+            article["description"] = description
+        if thumbnail_urn:
+            article["thumbnail"] = thumbnail_urn
+
+        async with httpx.AsyncClient(
+            base_url=_LINKEDIN_REST_BASE,
+            headers={
+                "Authorization": self._client.headers["Authorization"],
+                "Linkedin-Version": _LINKEDIN_VERSION,
+                "X-Restli-Protocol-Version": "2.0.0",
+                "Content-Type": "application/json",
+            },
+            timeout=30.0,
+        ) as rest_client:
+            response = await rest_client.post("/posts", json=payload)
+            self._raise_for_status(response)
+            post_urn = response.headers.get("x-restli-id") or response.headers.get("X-RestLi-Id")
+            logger.info(
+                "linkedin.article_published",
+                person_urn=self._person_urn,
+                post_urn=post_urn,
+                source_url=source_url,
+            )
+            return {"id": post_urn, "status_code": response.status_code}
+
     # ── Upload de mídia ───────────────────────────────────────────────
 
     async def upload_image(self, image_bytes: bytes) -> str:

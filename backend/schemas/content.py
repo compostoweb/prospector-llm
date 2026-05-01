@@ -32,7 +32,20 @@ def _normalize_content_publish_date(value: datetime | None) -> datetime | None:
 
 PostPillar = Literal["authority", "case", "vision"]
 PostStatus = Literal["draft", "approved", "scheduled", "published", "failed"]
-HookType = Literal["loop_open", "contrarian", "identification", "shortcut", "benefit", "data"]
+HookType = Literal[
+    "loop_open",
+    "contrarian",
+    "identification",
+    "contrast_direct",
+    "data_isolated",
+    "short_reflection",
+    "personal_story",
+    "shortcut",
+    "dm_offer",
+    # Aliases legados (mantidos para retrocompat com posts antigos)
+    "benefit",
+    "data",
+]
 MediaKind = Literal["none", "image", "video", "carousel"]
 PublishAction = Literal["schedule", "publish", "cancel", "fail"]
 ContentGoal = Literal["editorial", "lead_magnet_launch"]

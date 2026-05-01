@@ -8,6 +8,7 @@ from models.cadence import Cadence  # noqa: F401
 from models.cadence_step import CadenceStep  # noqa: F401
 from models.capture_execution_log import CaptureExecutionLog  # noqa: F401
 from models.capture_schedule import CaptureScheduleConfig  # noqa: F401
+from models.content_article import ContentArticle  # noqa: F401
 from models.content_calculator_result import ContentCalculatorResult  # noqa: F401
 from models.content_engagement_comment import ContentEngagementComment  # noqa: F401
 from models.content_engagement_discovery_query import ContentEngagementDiscoveryQuery  # noqa: F401
@@ -22,6 +23,7 @@ from models.content_linkedin_account import ContentLinkedInAccount  # noqa: F401
 from models.content_lm_email_event import ContentLMEmailEvent  # noqa: F401
 from models.content_lm_lead import ContentLMLead  # noqa: F401
 from models.content_lm_post import ContentLMPost  # noqa: F401
+from models.content_newsletter import ContentNewsletter  # noqa: F401
 
 # Content Hub
 from models.content_post import ContentPost  # noqa: F401

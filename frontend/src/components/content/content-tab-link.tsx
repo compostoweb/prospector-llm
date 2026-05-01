@@ -13,6 +13,8 @@ import {
   Inbox,
   MessageSquare,
   ImageIcon,
+  Mail,
+  Newspaper,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Route } from "next"
@@ -20,6 +22,8 @@ import type { Route } from "next"
 const TABS = [
   { href: "/content", label: "Dashboard", Icon: LayoutDashboard },
   { href: "/content/posts", label: "Posts", Icon: LayoutList },
+  { href: "/content/newsletters", label: "Newsletters", Icon: Mail },
+  { href: "/content/articles", label: "Artigos", Icon: Newspaper },
   { href: "/content/calendario", label: "Calendário", Icon: FileText },
   { href: "/content/inbound", label: "Inbound", Icon: Inbox },
   { href: "/content/engajamento", label: "Engajamento", Icon: MessageSquare },

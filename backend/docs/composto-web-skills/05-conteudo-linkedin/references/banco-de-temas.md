@@ -22,10 +22,10 @@
 13. O fechamento mensal que caiu de 5 dias para 6 horas
 14. Por que o primeiro projeto de automação da empresa quase foi um desastre
 15. O que encontrei quando fui diagnosticar uma operação "que já tinha tudo automatizado"
-16. Como um escritório jurídico parou de usar ChatGPT e melhorou os resultados com IA privada
+16. Como um escritório jurídico parou de usar ChatGPT e melhorou com IA privada
 17. Bastidor: como mapeamos um processo de 40 etapas e encontramos o gargalo na etapa 7
 18. O cliente que queria chatbot e precisava de integração de ERP
-19. Por que entregamos o código e a documentação: o dia que um cliente nos agradeceu por isso
+19. Por que entregamos o código e a documentação: o dia que um cliente nos agradeceu
 20. O que acontece quando um projeto de TI vai pra produção sem teste de carga
 
 ## VISÃO E PROVOCAÇÃO (10 temas)
@@ -43,22 +43,7 @@
 
 ## TEMAS JÁ PUBLICADOS (não repetir)
 
-Semana 1:
-- O problema raramente está onde você acha (Visão)
-- Automatizar processo ruim é piorar mais rápido (Autoridade)
-- A clínica que queria chatbot (Case)
-
-Semana 2:
-- Empresas não têm problema de IA. Têm problema de dado. (Visão)
-- Projeto que começa pelo código já começa errado (Autoridade)
-- O que aprendi diagnosticando operações (Case)
-
-Semana 3:
-- Você está decidindo com dado de ontem (Visão)
-- Antes de colocar seus contratos no ChatGPT (Autoridade)
-- O cliente queria trocar o ERP (Case)
-
-Semana 4:
-- O dado em tempo real vai separar quem cresce de quem trava (Visão)
-- Você é dono do seu software? (Autoridade)
-- Toda solução começa com uma pergunta (Case)
+Semana 1: O problema raramente está onde você acha (Visão), Automatizar processo ruim é piorar mais rápido (Autoridade), A clínica que queria chatbot (Case)
+Semana 2: Empresas não têm problema de IA. Têm problema de dado. (Visão), Projeto que começa pelo código já começa errado (Autoridade), O que aprendi diagnosticando operações (Case)
+Semana 3: Você está decidindo com dado de ontem (Visão), Antes de colocar seus contratos no ChatGPT (Autoridade), O cliente queria trocar o ERP (Case)
+Semana 4: O dado em tempo real vai separar quem cresce de quem trava (Visão), Você é dono do seu software? (Autoridade), Toda solução começa com uma pergunta (Case)

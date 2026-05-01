@@ -70,9 +70,12 @@ const HOOK_OPTIONS: { value: HookType; label: string }[] = [
   { value: "loop_open", label: "Loop aberto" },
   { value: "contrarian", label: "Contrário" },
   { value: "identification", label: "Identificação" },
+  { value: "contrast_direct", label: "Contraste direto" },
+  { value: "data_isolated", label: "Dado isolado" },
+  { value: "short_reflection", label: "Reflexão curta" },
+  { value: "personal_story", label: "História pessoal" },
   { value: "shortcut", label: "Atalho" },
-  { value: "benefit", label: "Benefício" },
-  { value: "data", label: "Dado" },
+  { value: "dm_offer", label: "Oferta DM" },
 ]
 
 const STEP_LABELS = ["Planejar", "Temas", "Configurar", "Gerar", "Revisar", "Agendar"]

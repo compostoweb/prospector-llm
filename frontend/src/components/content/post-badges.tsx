@@ -79,7 +79,13 @@ const HOOK_STYLES: Record<HookType, string> = {
   loop_open: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300",
   contrarian: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
   identification: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300",
+  contrast_direct: "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/40 dark:text-fuchsia-300",
+  data_isolated: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+  short_reflection: "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300",
+  personal_story: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
   shortcut: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+  dm_offer: "bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300",
+  // Aliases legados
   benefit: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
   data: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
 }
@@ -88,7 +94,13 @@ const HOOK_LABELS: Record<HookType, string> = {
   loop_open: "Loop aberto",
   contrarian: "Contrário",
   identification: "Identificação",
+  contrast_direct: "Contraste direto",
+  data_isolated: "Dado isolado",
+  short_reflection: "Reflexão curta",
+  personal_story: "História pessoal",
   shortcut: "Atalho",
+  dm_offer: "Oferta DM",
+  // Aliases legados
   benefit: "Benefício",
   data: "Dado",
 }

@@ -10,6 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from api.routes.content import (
+    articles,
     browser_extension,
     calculator,
     carousel,
@@ -19,6 +20,7 @@ from api.routes.content import (
     landing_pages,
     lead_magnets,
     linkedin_auth,
+    newsletters,
     notion_import,
     posts,
     references,
@@ -44,3 +46,5 @@ router.include_router(notion_import.router)
 router.include_router(engagement.router)
 router.include_router(images.router)
 router.include_router(sendpulse_test.router)
+router.include_router(newsletters.router)
+router.include_router(articles.router)

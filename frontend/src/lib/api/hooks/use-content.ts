@@ -15,7 +15,13 @@ export type HookType =
   | "loop_open"
   | "contrarian"
   | "identification"
+  | "contrast_direct"
+  | "data_isolated"
+  | "short_reflection"
+  | "personal_story"
   | "shortcut"
+  | "dm_offer"
+  // Aliases legados (mantidos para retrocompat com posts antigos)
   | "benefit"
   | "data"
 

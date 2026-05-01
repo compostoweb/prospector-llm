@@ -70,12 +70,67 @@ PILLAR_CONTEXT: dict[str, str] = {
 }
 
 HOOK_CONTEXT: dict[str, str] = {
-    "loop_open": "Abre enigma ou promessa que só se resolve lendo o post inteiro.",
-    "contrarian": "Desafia o senso comum — começa afirmando o contrário do óbvio.",
-    "identification": "Descreve a dor exata do leitor para ele pensar 'é isso!'",
-    "shortcut": "Promete uma rota mais curta para um resultado desejado.",
+    # Ganchos canônicos da skill 05-conteudo-linkedin (atualizada).
+    "loop_open": (
+        "Abre enigma ou promessa que só se resolve lendo o post inteiro. "
+        "Use para casos com payoff em mid/late."
+    ),
+    "contrarian": (
+        "Desafia o senso comum — começa afirmando o contrário do óbvio. "
+        "Pede argumentação consistente para sustentar a posição."
+    ),
+    "identification": (
+        "Descreve a dor exata do leitor para ele pensar 'é isso!' "
+        "Linguagem específica do dia-a-dia do tomador de decisão."
+    ),
+    "contrast_direct": (
+        "Estrutura A vs B em 2-4 linhas paralelas e curtas. "
+        "Mediana de ER mais alta de todos os formatos. Texto enxuto, alto contraste."
+    ),
+    "data_isolated": (
+        "Ancora o post em um dado concreto que surpreende, isolado na 1ª linha "
+        "(ex.: '83% dos projetos de IA falham.'). Resto desenvolve por que."
+    ),
+    "short_reflection": (
+        "Reflexão curta e direta (150-400 chars). Uma observação afiada, "
+        "sem desenvolvimento longo. Mediana ER ~14%."
+    ),
+    "personal_story": (
+        "Narrativa em 1ª pessoa contando experiência real. "
+        "Picos de ER mais altos. Começo, meio, fim — e aprendizado."
+    ),
+    "shortcut": (
+        "Promete uma rota mais curta para um resultado desejado. "
+        "Use somente quando há método/passos concretos no corpo."
+    ),
+    "dm_offer": (
+        "Oferta de material/diagnóstico via DM ou comentário, no máximo 1x/mês. "
+        "Lead qualificado — exige post anterior de autoridade no mesmo tema."
+    ),
+    # Hooks legados — alias para retrocompat (não citar nos prompts)
     "benefit": "Entrega o principal benefício ou aprendizado já na primeira linha.",
     "data": "Ancora o post em dado concreto que surpreende.",
+}
+
+# Mapa hook → pilar default (skill 05). Usado quando hook_type ausente.
+# A primeira opção da lista é a sugestão default para o pilar.
+HOOK_DEFAULT_BY_PILLAR: dict[str, list[str]] = {
+    "vision": ["contrarian", "contrast_direct", "short_reflection"],
+    "authority": ["loop_open", "data_isolated", "shortcut"],
+    "case": ["personal_story", "loop_open", "contrast_direct"],
+}
+
+# Range textual por gancho (espelha rules.IDEAL_RANGES_BY_HOOK; usado no prompt).
+HOOK_LENGTH_HINTS: dict[str, str] = {
+    "short_reflection": "150-400 chars (curto e afiado)",
+    "contrast_direct": "300-600 chars (paralelos enxutos)",
+    "contrarian": "600-900 chars (argumentação curta)",
+    "identification": "600-900 chars (dor específica)",
+    "loop_open": "900-1500 chars (autoridade/case)",
+    "data_isolated": "900-1500 chars (autoridade/case)",
+    "shortcut": "900-1500 chars (método em passos)",
+    "personal_story": "800-1500 chars (narrativa)",
+    "dm_offer": "400-900 chars (oferta direta)",
 }
 
 # ── Templates de prompt ───────────────────────────────────────────────
@@ -93,22 +148,33 @@ REGRAS INVIOLÁVEIS DE FORMATO:
 - Parágrafos curtos: máx 3 linhas
 - Linha em branco entre cada bloco de texto
 - 1 post = 1 ideia. Nunca duas ideias no mesmo post.
-- Comprimento ideal: {ideal_min} a {ideal_max} caracteres (máx LinkedIn: {max_chars})
+- Comprimento ajustado ao gancho (ver tabela abaixo). Máx LinkedIn: {max_chars}
 - Hashtags: 3 a 5 no final, nunca no meio do texto
 
-PALAVRAS PROIBIDAS (nunca usar):
-inovação, otimização, gestão inteligente, reduza custos, faz sentido?,
-transformação digital, solução robusta, de forma eficiente, travessão
+PALAVRAS PROIBIDAS (nunca usar — incluindo variações):
+inovação, inovador, inovar, otimização, gestão inteligente, reduza custos,
+aumente eficiência, impacto nos seus lucros, faz sentido?, transformação digital,
+solução robusta, de forma eficiente, travessão.
 
-CTA: pergunta leve ou reflexão. Nunca pedido de reunião direto.
+CTAs PROIBIDOS (nunca usar):
+"Entre em contato", "Agende uma reunião", "Tem 15 minutos?", "Clique no link".
+CTA permitido: pergunta leve, reflexão ou convite à conversa nos comentários.
 
-TIPOS DE GANCHO (hook):
-- loop_open: abre enigma que só fecha no post
-- contrarian: desafia o senso comum
-- identification: descreve a dor com precisão para o leitor pensar "é isso!"
-- shortcut: promessa de rota mais curta
-- benefit: entrega o valor logo de cara
-- data: ancora o post em dado concreto
+TIPOS DE GANCHO (hook) — 9 formatos canônicos:
+- loop_open: abre enigma que só fecha no post (autoridade/case, 900-1500)
+- contrarian: desafia o senso comum (vision, 600-900)
+- identification: descreve a dor com precisão (600-900)
+- contrast_direct: estrutura A vs B em paralelos curtos (vision, 300-600) — maior ER mediano
+- data_isolated: dado isolado na 1ª linha que surpreende (authority, 900-1500)
+- short_reflection: reflexão afiada (vision, 150-400)
+- personal_story: narrativa em 1ª pessoa (case, 800-1500) — picos de ER
+- shortcut: rota mais curta com método em passos (authority, 900-1500)
+- dm_offer: oferta de DM/comentário (uso máx 1x/mês, exige autoridade prévia, 400-900)
+
+QUAL GANCHO POR PILAR (default quando não especificado):
+- vision   → contrarian | contrast_direct | short_reflection
+- authority → loop_open | data_isolated | shortcut
+- case     → personal_story | loop_open | contrast_direct
 
 ESTRUTURA ESPERADA:
 [Linha 1: GANCHO — curta, direta, para o scroll]
@@ -119,11 +185,18 @@ ESTRUTURA ESPERADA:
 
 [FECHAMENTO — 1-2 linhas com conclusão ou aprendizado]
 
-[CTA — pergunta leve]
+[CTA — pergunta leve sobre a operação/empresa do leitor]
 
 
 
 #hashtag1 #hashtag2 #hashtag3
+
+O QUE NÃO REPLICAR (estilos fora da voz do autor):
+- Nada de tom religioso, espiritual ou motivacional vazio.
+- Nada de "saí do CLT", jornada de empreendedor solo ou storytelling de coach.
+- Nada de listas genéricas de ferramentas sem contexto de uso real.
+- Nada de promessas exageradas ("3x mais resultado", "dobre seu faturamento").
+- Nada de tom guru, "verdade que ninguém te conta", clickbait.
 {few_shot_block}
 Retorne APENAS o texto do post. Sem explicações, sem prefácio, sem aspas.\
 """
@@ -178,8 +251,12 @@ REGRAS INVIOLÁVEIS:
 - Mantenha a voz e o estilo do autor
 - Parágrafos curtos (máx 3 linhas) com linha em branco entre blocos
 - Comprimento ideal: {ideal_min} a {ideal_max} caracteres (máx: {max_chars})
-- Palavras proibidas: inovação, otimização, gestão inteligente, reduza custos,
-  faz sentido?, transformação digital, solução robusta, de forma eficiente, travessão
+- Palavras proibidas: inovação, inovador, inovar, otimização, gestão inteligente,
+  reduza custos, aumente eficiência, impacto nos seus lucros, faz sentido?,
+  transformação digital, solução robusta, de forma eficiente, travessão.
+- CTAs proibidos: "Entre em contato", "Agende uma reunião", "Tem 15 minutos?",
+  "Clique no link". Use pergunta leve ou convite à conversa.
+- Não use tom religioso, motivacional vazio, "saí do CLT" ou listas genéricas.
 
 Retorne APENAS o texto do post reescrito. Sem explicações, sem prefácio, sem aspas.\
 """
@@ -256,8 +333,6 @@ def _render_system_prompt(
     return _SYSTEM_PROMPT_TEMPLATE.format(
         author_name=author_name,
         author_voice=author_voice,
-        ideal_min=IDEAL_MIN_CHARS,
-        ideal_max=IDEAL_MAX_CHARS,
         max_chars=LINKEDIN_MAX_CHARS,
         few_shot_block=few_shot_block,
     )
@@ -337,18 +412,22 @@ async def generate_post(
       - hook_type_used: str
       - violations: list[str]
     """
-    resolved_hook = hook_type or "benefit"
+    resolved_hook = hook_type or HOOK_DEFAULT_BY_PILLAR.get(pillar, ["loop_open"])[0]
     system_prompt = _render_system_prompt(author_name, author_voice, references)
     content_goal_label, goal_block = _build_goal_block(
         content_goal=content_goal,
         lead_magnet_context=lead_magnet_context,
     )
+    hook_description = HOOK_CONTEXT.get(resolved_hook, resolved_hook)
+    length_hint = HOOK_LENGTH_HINTS.get(resolved_hook)
+    if length_hint:
+        hook_description = f"{hook_description} | Comprimento esperado: {length_hint}."
     user_prompt = _USER_PROMPT_TEMPLATE.format(
         theme=theme,
         pillar_label=pillar,
         pillar_description=PILLAR_CONTEXT.get(pillar, pillar),
         hook_label=resolved_hook,
-        hook_description=HOOK_CONTEXT.get(resolved_hook, resolved_hook),
+        hook_description=hook_description,
         content_goal_label=content_goal_label,
         goal_block=goal_block,
     )
@@ -389,7 +468,7 @@ async def generate_post(
                         "text": text,
                         "character_count": count_characters(text),
                         "hook_type_used": resolved_hook,
-                        "violations": validate_post(text),
+                        "violations": validate_post(text, hook_type=resolved_hook),
                     }
                 )
             return results
@@ -414,7 +493,7 @@ async def generate_post(
                 "text": text,
                 "character_count": count_characters(text),
                 "hook_type_used": resolved_hook,
-                "violations": validate_post(text),
+                "violations": validate_post(text, hook_type=resolved_hook),
             }
         )
 
