@@ -155,6 +155,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/account-audit-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Account Audit Logs */
+        get: operations["list_account_audit_logs_account_audit_logs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/analytics/dashboard": {
         parameters: {
             query?: never;
@@ -167,6 +184,26 @@ export interface paths {
          * @description Retorna estatísticas gerais do dashboard com trends.
          */
         get: operations["get_dashboard_stats_analytics_dashboard_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analytics/team/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Team User Analytics
+         * @description Retorna métricas de atividade por usuário do tenant.
+         */
+        get: operations["get_team_user_analytics_analytics_team_users_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2628,6 +2665,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/linkedin-accounts/unipile/hosted-auth": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Unipile Hosted Auth Link
+         * @description Gera um link Hosted Auth da Unipile limitado ao provider LinkedIn.
+         */
+        post: operations["create_unipile_hosted_auth_link_linkedin_accounts_unipile_hosted_auth_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/linkedin-accounts/{account_id}/unipile/reconnect-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Unipile Reconnect Link
+         * @description Gera um link Hosted Auth da Unipile para reconectar uma conta LinkedIn.
+         */
+        post: operations["create_unipile_reconnect_link_linkedin_accounts__account_id__unipile_reconnect_link_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/linkedin-accounts/unipile": {
         parameters: {
             query?: never;
@@ -4499,6 +4576,374 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/content/newsletters/banks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Banks
+         * @description Bancos de referencia para popular dropdowns no frontend.
+         */
+        get: operations["get_banks_api_content_newsletters_banks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/newsletters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Newsletters */
+        get: operations["list_newsletters_api_content_newsletters_get"];
+        put?: never;
+        /** Create Newsletter */
+        post: operations["create_newsletter_api_content_newsletters_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/newsletters/{nid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Newsletter */
+        get: operations["get_newsletter_api_content_newsletters__nid__get"];
+        /** Update Newsletter */
+        put: operations["update_newsletter_api_content_newsletters__nid__put"];
+        post?: never;
+        /** Delete Newsletter */
+        delete: operations["delete_newsletter_api_content_newsletters__nid__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/newsletters/{nid}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Newsletter */
+        post: operations["restore_newsletter_api_content_newsletters__nid__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/newsletters/{nid}/generate-draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate Draft */
+        post: operations["generate_draft_api_content_newsletters__nid__generate_draft_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/newsletters/{nid}/improve-section": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Improve Section */
+        post: operations["improve_section_api_content_newsletters__nid__improve_section_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/newsletters/{nid}/upload-cover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload Cover */
+        post: operations["upload_cover_api_content_newsletters__nid__upload_cover_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/newsletters/{nid}/cover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Cover */
+        delete: operations["delete_cover_api_content_newsletters__nid__cover_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/newsletters/{nid}/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Schedule Newsletter */
+        post: operations["schedule_newsletter_api_content_newsletters__nid__schedule_post"];
+        /** Cancel Schedule */
+        delete: operations["cancel_schedule_api_content_newsletters__nid__schedule_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/newsletters/{nid}/mark-published": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark Published */
+        post: operations["mark_published_api_content_newsletters__nid__mark_published_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/newsletters/{nid}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export Newsletter */
+        get: operations["export_newsletter_api_content_newsletters__nid__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/articles/scrape-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Scrape */
+        post: operations["scrape_api_content_articles_scrape_url_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/articles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Articles */
+        get: operations["list_articles_api_content_articles_get"];
+        put?: never;
+        /** Create Article */
+        post: operations["create_article_api_content_articles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/articles/{aid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Article */
+        get: operations["get_article_api_content_articles__aid__get"];
+        /** Update Article */
+        put: operations["update_article_api_content_articles__aid__put"];
+        post?: never;
+        /** Delete Article */
+        delete: operations["delete_article_api_content_articles__aid__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/articles/{aid}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Article */
+        post: operations["restore_article_api_content_articles__aid__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/articles/{aid}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Approve Article */
+        patch: operations["approve_article_api_content_articles__aid__approve_patch"];
+        trace?: never;
+    };
+    "/api/content/articles/{aid}/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Schedule Article */
+        post: operations["schedule_article_api_content_articles__aid__schedule_post"];
+        /** Cancel Article Schedule */
+        delete: operations["cancel_article_schedule_api_content_articles__aid__schedule_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/articles/{aid}/publish-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish Article */
+        post: operations["publish_article_api_content_articles__aid__publish_now_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/articles/{aid}/upload-thumbnail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload Thumbnail */
+        post: operations["upload_thumbnail_api_content_articles__aid__upload_thumbnail_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/articles/{aid}/thumbnail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Thumbnail */
+        delete: operations["delete_thumbnail_api_content_articles__aid__thumbnail_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/articles/{aid}/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Update Metrics */
+        post: operations["update_metrics_api_content_articles__aid__metrics_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/webhooks/unipile": {
         parameters: {
             query?: never;
@@ -4514,6 +4959,26 @@ export interface paths {
          *     Sempre retorna 200 para evitar reenvio agressivo da Unipile.
          */
         post: operations["unipile_webhook_webhooks_unipile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/unipile/hosted-auth": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unipile Hosted Auth Webhook
+         * @description Recebe callback do Hosted Auth Wizard e registra contas LinkedIn Unipile.
+         */
+        post: operations["unipile_hosted_auth_webhook_webhooks_unipile_hosted_auth_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4562,6 +5027,54 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AccountAuditLogListResponse */
+        AccountAuditLogListResponse: {
+            /** Items */
+            items?: components["schemas"]["AccountAuditLogResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /** AccountAuditLogResponse */
+        AccountAuditLogResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Account Type */
+            account_type: string;
+            /** Account Id */
+            account_id?: string | null;
+            /** External Account Id */
+            external_account_id?: string | null;
+            /** Provider Type */
+            provider_type?: string | null;
+            /** Event Type */
+            event_type: string;
+            /** Actor User Id */
+            actor_user_id?: string | null;
+            /** Provider Status */
+            provider_status?: string | null;
+            /** Message */
+            message?: string | null;
+            /** Event Metadata */
+            event_metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** AddManualPostRequest */
         AddManualPostRequest: {
             /**
@@ -4674,6 +5187,182 @@ export interface components {
             engagement_score?: number | null;
             /** Notes */
             notes?: string | null;
+        };
+        /** ArticleCreate */
+        ArticleCreate: {
+            /** Source Url */
+            source_url: string;
+            /** Title */
+            title?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Thumbnail Url */
+            thumbnail_url?: string | null;
+            /** Thumbnail S3 Key */
+            thumbnail_s3_key?: string | null;
+            /** Commentary */
+            commentary?: string | null;
+            /** Scheduled For */
+            scheduled_for?: string | null;
+            /** Source Newsletter Id */
+            source_newsletter_id?: string | null;
+            /**
+             * Auto Scraped
+             * @default false
+             */
+            auto_scraped: boolean;
+            /** First Comment Text */
+            first_comment_text?: string | null;
+        };
+        /** ArticleMetricsUpdate */
+        ArticleMetricsUpdate: {
+            /**
+             * Impressions
+             * @default 0
+             */
+            impressions: number;
+            /**
+             * Likes
+             * @default 0
+             */
+            likes: number;
+            /**
+             * Comments
+             * @default 0
+             */
+            comments: number;
+            /**
+             * Shares
+             * @default 0
+             */
+            shares: number;
+        };
+        /** ArticleResponse */
+        ArticleResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Source Url */
+            source_url: string;
+            /** Title */
+            title: string | null;
+            /** Description */
+            description: string | null;
+            /** Thumbnail Url */
+            thumbnail_url: string | null;
+            /** Thumbnail S3 Key */
+            thumbnail_s3_key: string | null;
+            /** Linkedin Image Urn */
+            linkedin_image_urn: string | null;
+            /** Commentary */
+            commentary: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "approved" | "scheduled" | "published" | "failed" | "deleted";
+            /** Scheduled For */
+            scheduled_for: string | null;
+            /** Published At */
+            published_at: string | null;
+            /** Linkedin Post Urn */
+            linkedin_post_urn: string | null;
+            /** Error Message */
+            error_message: string | null;
+            /** First Comment Text */
+            first_comment_text: string | null;
+            /** First Comment Status */
+            first_comment_status: ("pending" | "posted" | "failed") | null;
+            /** First Comment Pin Status */
+            first_comment_pin_status: ("unpinned" | "pinned" | "failed") | null;
+            /** First Comment Urn */
+            first_comment_urn: string | null;
+            /** First Comment Posted At */
+            first_comment_posted_at: string | null;
+            /** First Comment Error */
+            first_comment_error: string | null;
+            /** Impressions */
+            impressions: number;
+            /** Likes */
+            likes: number;
+            /** Comments */
+            comments: number;
+            /** Shares */
+            shares: number;
+            /** Engagement Rate */
+            engagement_rate: number | null;
+            /** Metrics Updated At */
+            metrics_updated_at: string | null;
+            /** Source Newsletter Id */
+            source_newsletter_id: string | null;
+            /** Auto Scraped */
+            auto_scraped: boolean;
+            /** Scraped At */
+            scraped_at: string | null;
+            /** Deleted At */
+            deleted_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** ArticleScheduleRequest */
+        ArticleScheduleRequest: {
+            /**
+             * Scheduled For
+             * Format: date-time
+             */
+            scheduled_for: string;
+        };
+        /** ArticleScrapeRequest */
+        ArticleScrapeRequest: {
+            /** Source Url */
+            source_url: string;
+        };
+        /** ArticleScrapeResponse */
+        ArticleScrapeResponse: {
+            /** Title */
+            title: string | null;
+            /** Description */
+            description: string | null;
+            /** Thumbnail Url */
+            thumbnail_url: string | null;
+            /** Cached */
+            cached: boolean;
+        };
+        /** ArticleUpdate */
+        ArticleUpdate: {
+            /** Source Url */
+            source_url?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Thumbnail Url */
+            thumbnail_url?: string | null;
+            /** Thumbnail S3 Key */
+            thumbnail_s3_key?: string | null;
+            /** Commentary */
+            commentary?: string | null;
+            /** Status */
+            status?: ("draft" | "approved" | "scheduled" | "published" | "failed" | "deleted") | null;
+            /** Scheduled For */
+            scheduled_for?: string | null;
+            /** First Comment Text */
+            first_comment_text?: string | null;
         };
         /**
          * AudioFileListResponse
@@ -4837,6 +5526,14 @@ export interface components {
              */
             language: string;
         };
+        /** Body_upload_cover_api_content_newsletters__nid__upload_cover_post */
+        Body_upload_cover_api_content_newsletters__nid__upload_cover_post: {
+            /**
+             * File
+             * Format: binary
+             */
+            file: string;
+        };
         /** Body_upload_lead_magnet_pdf_api_content_lead_magnets__lead_magnet_id__upload_pdf_post */
         Body_upload_lead_magnet_pdf_api_content_lead_magnets__lead_magnet_id__upload_pdf_post: {
             /**
@@ -4871,6 +5568,14 @@ export interface components {
         };
         /** Body_upload_standalone_image_api_content_images_upload_post */
         Body_upload_standalone_image_api_content_images_upload_post: {
+            /**
+             * File
+             * Format: binary
+             */
+            file: string;
+        };
+        /** Body_upload_thumbnail_api_content_articles__aid__upload_thumbnail_post */
+        Body_upload_thumbnail_api_content_articles__aid__upload_thumbnail_post: {
             /**
              * File
              * Format: binary
@@ -6675,7 +7380,7 @@ export interface components {
              */
             pillar: "authority" | "case" | "vision";
             /** Hook Type */
-            hook_type?: ("loop_open" | "contrarian" | "identification" | "shortcut" | "benefit" | "data") | null;
+            hook_type?: ("loop_open" | "contrarian" | "identification" | "contrast_direct" | "data_isolated" | "short_reflection" | "personal_story" | "shortcut" | "dm_offer" | "benefit" | "data") | null;
             /** Hashtags */
             hashtags?: string | null;
             /** Character Count */
@@ -6887,7 +7592,7 @@ export interface components {
             /** Pillar */
             pillar?: ("authority" | "case" | "vision") | null;
             /** Hook Type */
-            hook_type?: ("loop_open" | "contrarian" | "identification" | "shortcut" | "benefit" | "data") | null;
+            hook_type?: ("loop_open" | "contrarian" | "identification" | "contrast_direct" | "data_isolated" | "short_reflection" | "personal_story" | "shortcut" | "dm_offer" | "benefit" | "data") | null;
             /** Hashtags */
             hashtags?: string | null;
             /** Character Count */
@@ -6914,7 +7619,7 @@ export interface components {
             /** Author Company */
             author_company?: string | null;
             /** Hook Type */
-            hook_type?: ("loop_open" | "contrarian" | "identification" | "shortcut" | "benefit" | "data") | null;
+            hook_type?: ("loop_open" | "contrarian" | "identification" | "contrast_direct" | "data_isolated" | "short_reflection" | "personal_story" | "shortcut" | "dm_offer" | "benefit" | "data") | null;
             /** Pillar */
             pillar?: ("authority" | "case" | "vision") | null;
             /** Engagement Score */
@@ -7338,6 +8043,14 @@ export interface components {
             display_name: string;
             /** Email Address */
             email_address: string;
+            /** Owner User Id */
+            owner_user_id?: string | null;
+            /** Owner Email */
+            owner_email?: string | null;
+            /** Owner Name */
+            owner_name?: string | null;
+            /** Created By User Id */
+            created_by_user_id?: string | null;
             /** From Name */
             from_name: string | null;
             /** Provider Type */
@@ -7369,6 +8082,20 @@ export interface components {
             daily_send_limit: number;
             /** Is Active */
             is_active: boolean;
+            /** Provider Status */
+            provider_status?: string | null;
+            /** Last Status At */
+            last_status_at?: string | null;
+            /** Last Health Check At */
+            last_health_check_at?: string | null;
+            /** Health Error */
+            health_error?: string | null;
+            /** Connected At */
+            connected_at?: string | null;
+            /** Disconnected At */
+            disconnected_at?: string | null;
+            /** Reconnect Required At */
+            reconnect_required_at?: string | null;
             /** Is Warmup Enabled */
             is_warmup_enabled: boolean;
             /** Email Signature */
@@ -8161,7 +8888,7 @@ export interface components {
             /** Lead Magnet Id */
             lead_magnet_id?: string | null;
             /** Hook Type */
-            hook_type?: ("loop_open" | "contrarian" | "identification" | "shortcut" | "benefit" | "data") | null;
+            hook_type?: ("loop_open" | "contrarian" | "identification" | "contrast_direct" | "data_isolated" | "short_reflection" | "personal_story" | "shortcut" | "dm_offer" | "benefit" | "data") | null;
             /** Launch Distribution Type */
             launch_distribution_type?: ("comment" | "dm" | "link_bio") | null;
             /** Launch Trigger Word */
@@ -9573,6 +10300,27 @@ export interface components {
             notes?: string | null;
             status?: components["schemas"]["LeadStatus"] | null;
         };
+        /**
+         * LinkedInAccountHostedAuthRequest
+         * @description Gerar link Hosted Auth da Unipile para conectar LinkedIn.
+         */
+        LinkedInAccountHostedAuthRequest: {
+            /** Display Name */
+            display_name: string;
+            /** Linkedin Username */
+            linkedin_username?: string | null;
+            /**
+             * Supports Inmail
+             * @description Marque true quando esta conta emissora puder enviar InMail.
+             * @default false
+             */
+            supports_inmail: boolean;
+        };
+        /** LinkedInAccountHostedAuthResponse */
+        LinkedInAccountHostedAuthResponse: {
+            /** Auth Url */
+            auth_url: string;
+        };
         /** LinkedInAccountListResponse */
         LinkedInAccountListResponse: {
             /** Accounts */
@@ -9620,6 +10368,14 @@ export interface components {
             display_name: string;
             /** Linkedin Username */
             linkedin_username: string | null;
+            /** Owner User Id */
+            owner_user_id?: string | null;
+            /** Owner Email */
+            owner_email?: string | null;
+            /** Owner Name */
+            owner_name?: string | null;
+            /** Created By User Id */
+            created_by_user_id?: string | null;
             /** Provider Type */
             provider_type: string;
             /** Unipile Account Id */
@@ -9628,6 +10384,20 @@ export interface components {
             is_active: boolean;
             /** Supports Inmail */
             supports_inmail: boolean;
+            /** Provider Status */
+            provider_status?: string | null;
+            /** Last Status At */
+            last_status_at?: string | null;
+            /** Last Health Check At */
+            last_health_check_at?: string | null;
+            /** Health Error */
+            health_error?: string | null;
+            /** Connected At */
+            connected_at?: string | null;
+            /** Disconnected At */
+            disconnected_at?: string | null;
+            /** Reconnect Required At */
+            reconnect_required_at?: string | null;
             /** Last Polled At */
             last_polled_at: string | null;
             /**
@@ -9921,6 +10691,209 @@ export interface components {
             output_cost_per_mtok: number;
             /** Pricing Tag */
             pricing_tag: string;
+        };
+        /** NewsletterCreate */
+        NewsletterCreate: {
+            /** Title */
+            title?: string | null;
+            /** Subtitle */
+            subtitle?: string | null;
+            /** Body Markdown */
+            body_markdown?: string | null;
+            /** Body Html */
+            body_html?: string | null;
+            /** Sections Payload */
+            sections_payload?: {
+                [key: string]: unknown;
+            } | null;
+            /** Cover Image Url */
+            cover_image_url?: string | null;
+            /** Cover Image S3 Key */
+            cover_image_s3_key?: string | null;
+            /** Scheduled For */
+            scheduled_for?: string | null;
+            /** Notion Page Id */
+            notion_page_id?: string | null;
+        };
+        /** NewsletterExportFormat */
+        NewsletterExportFormat: {
+            /**
+             * Format
+             * @default markdown
+             * @enum {string}
+             */
+            format: "markdown" | "html";
+            /** Content */
+            content: string;
+        };
+        /** NewsletterGenerateDraftRequest */
+        NewsletterGenerateDraftRequest: {
+            /** Theme Central */
+            theme_central: string;
+            /** Vision Topic */
+            vision_topic: string;
+            /** Tutorial Topic */
+            tutorial_topic: string;
+            /** Radar Tool */
+            radar_tool: {
+                [key: string]: string;
+            } | string;
+            /** Radar Data */
+            radar_data: {
+                [key: string]: string;
+            };
+            /**
+             * Provider
+             * @default gemini
+             */
+            provider: string;
+            /**
+             * Model
+             * @default gemini-2.5-pro
+             */
+            model: string;
+            /**
+             * Temperature
+             * @default 0.6
+             */
+            temperature: number;
+            /**
+             * Max Tokens
+             * @default 4096
+             */
+            max_tokens: number;
+        };
+        /** NewsletterImproveSectionRequest */
+        NewsletterImproveSectionRequest: {
+            /**
+             * Section Id
+             * @enum {string}
+             */
+            section_id: "tema_quinzena" | "visao_opiniao" | "mini_tutorial" | "radar" | "pergunta";
+            /** Instruction */
+            instruction: string;
+            /**
+             * Provider
+             * @default gemini
+             */
+            provider: string;
+            /**
+             * Model
+             * @default gemini-2.5-pro
+             */
+            model: string;
+            /**
+             * Temperature
+             * @default 0.5
+             */
+            temperature: number;
+        };
+        /** NewsletterMarkPublishedRequest */
+        NewsletterMarkPublishedRequest: {
+            /** Linkedin Pulse Url */
+            linkedin_pulse_url: string;
+            /**
+             * Create Derived Article
+             * @default true
+             */
+            create_derived_article: boolean;
+        };
+        /** NewsletterResponse */
+        NewsletterResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Edition Number */
+            edition_number: number;
+            /** Title */
+            title: string;
+            /** Subtitle */
+            subtitle: string | null;
+            /** Body Markdown */
+            body_markdown: string | null;
+            /** Body Html */
+            body_html: string | null;
+            /** Sections Payload */
+            sections_payload: {
+                [key: string]: unknown;
+            } | null;
+            /** Cover Image Url */
+            cover_image_url: string | null;
+            /** Cover Image S3 Key */
+            cover_image_s3_key: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "approved" | "scheduled" | "published" | "deleted";
+            /** Scheduled For */
+            scheduled_for: string | null;
+            /** Published At */
+            published_at: string | null;
+            /** Linkedin Pulse Url */
+            linkedin_pulse_url: string | null;
+            /** Derived Article Id */
+            derived_article_id: string | null;
+            /** Last Reminder Sent At */
+            last_reminder_sent_at: string | null;
+            /** Created By */
+            created_by: string | null;
+            /** Notion Page Id */
+            notion_page_id: string | null;
+            /** Deleted At */
+            deleted_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** NewsletterScheduleRequest */
+        NewsletterScheduleRequest: {
+            /**
+             * Scheduled For
+             * Format: date-time
+             */
+            scheduled_for: string;
+        };
+        /** NewsletterUpdate */
+        NewsletterUpdate: {
+            /** Title */
+            title?: string | null;
+            /** Subtitle */
+            subtitle?: string | null;
+            /** Body Markdown */
+            body_markdown?: string | null;
+            /** Body Html */
+            body_html?: string | null;
+            /** Sections Payload */
+            sections_payload?: {
+                [key: string]: unknown;
+            } | null;
+            /** Cover Image Url */
+            cover_image_url?: string | null;
+            /** Cover Image S3 Key */
+            cover_image_s3_key?: string | null;
+            /** Status */
+            status?: ("draft" | "approved" | "scheduled" | "published" | "deleted") | null;
+            /** Scheduled For */
+            scheduled_for?: string | null;
+            /** Linkedin Pulse Url */
+            linkedin_pulse_url?: string | null;
+            /** Notion Page Id */
+            notion_page_id?: string | null;
         };
         /**
          * NotionColumnMappings
@@ -10784,6 +11757,101 @@ export interface components {
             suggested_text: string;
             /** Tone */
             tone: string;
+        };
+        /** TeamAnalyticsResponse */
+        TeamAnalyticsResponse: {
+            /** Users */
+            users: components["schemas"]["TeamUserAnalyticsItem"][];
+            /**
+             * Total Users
+             * @default 0
+             */
+            total_users: number;
+            /**
+             * Active Users
+             * @default 0
+             */
+            active_users: number;
+            /**
+             * Steps Sent
+             * @default 0
+             */
+            steps_sent: number;
+            /**
+             * Replies
+             * @default 0
+             */
+            replies: number;
+            /**
+             * Reply Rate
+             * @default 0
+             */
+            reply_rate: number;
+        };
+        /** TeamUserAnalyticsItem */
+        TeamUserAnalyticsItem: {
+            /** User Id */
+            user_id: string;
+            /** Email */
+            email: string;
+            /** Name */
+            name?: string | null;
+            /** Role */
+            role: string;
+            /** Is Active */
+            is_active: boolean;
+            /**
+             * Email Accounts
+             * @default 0
+             */
+            email_accounts: number;
+            /**
+             * Linkedin Accounts
+             * @default 0
+             */
+            linkedin_accounts: number;
+            /**
+             * Reconnect Required Accounts
+             * @default 0
+             */
+            reconnect_required_accounts: number;
+            /**
+             * Steps Sent
+             * @default 0
+             */
+            steps_sent: number;
+            /**
+             * Email Sent
+             * @default 0
+             */
+            email_sent: number;
+            /**
+             * Linkedin Sent
+             * @default 0
+             */
+            linkedin_sent: number;
+            /**
+             * Manual Tasks Sent
+             * @default 0
+             */
+            manual_tasks_sent: number;
+            /**
+             * Replies
+             * @default 0
+             */
+            replies: number;
+            /**
+             * Interested Replies
+             * @default 0
+             */
+            interested_replies: number;
+            /**
+             * Reply Rate
+             * @default 0
+             */
+            reply_rate: number;
+            /** Last Activity At */
+            last_activity_at?: string | null;
         };
         /** TemplateVariableResponse */
         TemplateVariableResponse: {
@@ -11907,6 +12975,41 @@ export interface operations {
             };
         };
     };
+    list_account_audit_logs_account_audit_logs_get: {
+        parameters: {
+            query?: {
+                account_type?: string | null;
+                account_id?: string | null;
+                event_type?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountAuditLogListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_dashboard_stats_analytics_dashboard_get: {
         parameters: {
             query?: {
@@ -11927,6 +13030,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DashboardStatsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_team_user_analytics_analytics_team_users_get: {
+        parameters: {
+            query?: {
+                days?: number;
+                start_date?: string | null;
+                end_date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamAnalyticsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -16977,6 +18113,70 @@ export interface operations {
             };
         };
     };
+    create_unipile_hosted_auth_link_linkedin_accounts_unipile_hosted_auth_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkedInAccountHostedAuthRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkedInAccountHostedAuthResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_unipile_reconnect_link_linkedin_accounts__account_id__unipile_reconnect_link_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkedInAccountHostedAuthResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_unipile_account_linkedin_accounts_unipile_post: {
         parameters: {
             query?: never;
@@ -20615,7 +21815,961 @@ export interface operations {
             };
         };
     };
+    get_banks_api_content_newsletters_banks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    list_newsletters_api_content_newsletters_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                include_deleted?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsletterResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_newsletter_api_content_newsletters_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewsletterCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsletterResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_newsletter_api_content_newsletters__nid__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsletterResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_newsletter_api_content_newsletters__nid__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewsletterUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsletterResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_newsletter_api_content_newsletters__nid__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_newsletter_api_content_newsletters__nid__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsletterResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_draft_api_content_newsletters__nid__generate_draft_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewsletterGenerateDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsletterResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    improve_section_api_content_newsletters__nid__improve_section_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewsletterImproveSectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsletterResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_cover_api_content_newsletters__nid__upload_cover_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_cover_api_content_newsletters__nid__upload_cover_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsletterResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_cover_api_content_newsletters__nid__cover_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    schedule_newsletter_api_content_newsletters__nid__schedule_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewsletterScheduleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsletterResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_schedule_api_content_newsletters__nid__schedule_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsletterResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_published_api_content_newsletters__nid__mark_published_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewsletterMarkPublishedRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsletterResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_newsletter_api_content_newsletters__nid__export_get: {
+        parameters: {
+            query?: {
+                format?: string;
+            };
+            header?: never;
+            path: {
+                nid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsletterExportFormat"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    scrape_api_content_articles_scrape_url_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArticleScrapeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArticleScrapeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_articles_api_content_articles_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                include_deleted?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArticleResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_article_api_content_articles_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArticleCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArticleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_article_api_content_articles__aid__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                aid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArticleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_article_api_content_articles__aid__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                aid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArticleUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArticleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_article_api_content_articles__aid__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                aid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_article_api_content_articles__aid__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                aid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArticleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_article_api_content_articles__aid__approve_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                aid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArticleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    schedule_article_api_content_articles__aid__schedule_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                aid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArticleScheduleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArticleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_article_schedule_api_content_articles__aid__schedule_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                aid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArticleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_article_api_content_articles__aid__publish_now_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                aid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArticleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_thumbnail_api_content_articles__aid__upload_thumbnail_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                aid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_thumbnail_api_content_articles__aid__upload_thumbnail_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArticleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_thumbnail_api_content_articles__aid__thumbnail_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                aid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_metrics_api_content_articles__aid__metrics_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                aid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArticleMetricsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArticleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     unipile_webhook_webhooks_unipile_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    unipile_hosted_auth_webhook_webhooks_unipile_hosted_auth_post: {
         parameters: {
             query?: never;
             header?: never;

@@ -11,10 +11,21 @@ export interface LinkedInAccount {
   tenant_id: string
   display_name: string
   linkedin_username: string | null
+  owner_user_id: string | null
+  owner_email: string | null
+  owner_name: string | null
+  created_by_user_id: string | null
   provider_type: "unipile" | "native"
   unipile_account_id: string | null
   is_active: boolean
   supports_inmail: boolean
+  provider_status: string | null
+  last_status_at: string | null
+  last_health_check_at: string | null
+  health_error: string | null
+  connected_at: string | null
+  disconnected_at: string | null
+  reconnect_required_at: string | null
   last_polled_at: string | null
   created_at: string
   updated_at: string
@@ -25,6 +36,12 @@ export interface CreateUnipileLinkedInAccountBody {
   linkedin_username?: string | null
   supports_inmail?: boolean
   unipile_account_id: string
+}
+
+export interface CreateUnipileHostedAuthBody {
+  display_name: string
+  linkedin_username?: string | null
+  supports_inmail?: boolean
 }
 
 export interface CreateNativeLinkedInAccountBody {
@@ -102,6 +119,42 @@ export function useCreateUnipileLinkedInAccount() {
       return data as LinkedInAccount
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["linkedin-accounts"] }),
+  })
+}
+
+export function useCreateUnipileHostedAuthLink() {
+  const { data: session } = useSession()
+
+  return useMutation({
+    mutationFn: async (body: CreateUnipileHostedAuthBody): Promise<{ auth_url: string }> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.POST("/linkedin-accounts/unipile/hosted-auth" as never, {
+        body: body as never,
+      })
+      if (error) {
+        const errMsg = (error as { detail?: string }).detail ?? "Falha ao iniciar conexão Unipile"
+        throw new Error(errMsg)
+      }
+      return data as { auth_url: string }
+    },
+  })
+}
+
+export function useCreateUnipileReconnectLink() {
+  const { data: session } = useSession()
+
+  return useMutation({
+    mutationFn: async (accountId: string): Promise<{ auth_url: string }> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.POST(
+        `/linkedin-accounts/${accountId}/unipile/reconnect-link` as never,
+      )
+      if (error) {
+        const errMsg = (error as { detail?: string }).detail ?? "Falha ao iniciar reconexão Unipile"
+        throw new Error(errMsg)
+      }
+      return data as { auth_url: string }
+    },
   })
 }
 

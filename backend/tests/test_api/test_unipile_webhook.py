@@ -16,12 +16,14 @@ from api.dependencies import get_llm_registry, get_session_no_auth
 from api.main import app
 from api.webhooks import unipile as unipile_webhook
 from integrations.llm import LLMRegistry
+from models.account_audit_log import AccountAuditLog
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
 from models.email_account import EmailAccount
 from models.enums import Channel, LeadStatus, ManualTaskStatus, StepStatus
 from models.interaction import Interaction
 from models.lead import Lead
+from models.linkedin_account import LinkedInAccount
 from models.manual_task import ManualTask
 from models.tenant import TenantIntegration
 
@@ -107,6 +109,16 @@ def test_extract_event_type_supports_account_status_payload() -> None:
         )
         == "sync_success"
     )
+    assert (
+        unipile_webhook._extract_event_type(
+            {
+                "event": "account_status",
+                "account_id": "acc_123",
+                "status": "CREDENTIALS",
+            }
+        )
+        == "credentials"
+    )
 
 
 def test_is_outbound_message_event_detects_own_sender() -> None:
@@ -117,6 +129,87 @@ def test_is_outbound_message_event_detects_own_sender() -> None:
             "sender": {"attendee_provider_id": "me-123"},
         }
     )
+
+
+@pytest.mark.asyncio
+async def test_unipile_webhook_account_status_updates_linkedin_health(
+    client: AsyncClient,
+    db: AsyncSession,
+    tenant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(unipile_webhook.settings, "UNIPILE_WEBHOOK_SECRET", "secret-123")
+    monkeypatch.setattr(unipile_webhook.settings, "ENV", "prod")
+    account = LinkedInAccount(
+        tenant_id=tenant.id,
+        display_name="LinkedIn Status",
+        provider_type="unipile",
+        unipile_account_id="li-status-1",
+        is_active=True,
+        provider_status="ok",
+    )
+    db.add(account)
+    await db.commit()
+
+    credentials_response = await client.post(
+        "/webhooks/unipile",
+        headers={"Unipile-Auth": "secret-123"},
+        json={
+            "AccountStatus": {
+                "account_id": "li-status-1",
+                "account_type": "LINKEDIN",
+                "message": "CREDENTIALS",
+                "error": "Credenciais expiradas",
+            }
+        },
+    )
+
+    assert credentials_response.status_code == 200, credentials_response.text
+    await db.refresh(account)
+    assert account.provider_status == "credentials"
+    assert account.health_error == "Credenciais expiradas"
+    assert account.reconnect_required_at is not None
+    assert account.disconnected_at is not None
+    assert account.last_status_at is not None
+
+    audit_result = await db.execute(
+        select(AccountAuditLog).where(
+            AccountAuditLog.account_id == account.id,
+            AccountAuditLog.event_type == "status_credentials",
+        )
+    )
+    audit_log = audit_result.scalar_one()
+    assert audit_log.account_type == "linkedin"
+    assert audit_log.provider_status == "credentials"
+    assert audit_log.message == "Credenciais expiradas"
+
+    success_response = await client.post(
+        "/webhooks/unipile",
+        headers={"Unipile-Auth": "secret-123"},
+        json={
+            "AccountStatus": {
+                "account_id": "li-status-1",
+                "account_type": "LINKEDIN",
+                "message": "SYNC_SUCCESS",
+            }
+        },
+    )
+
+    assert success_response.status_code == 200, success_response.text
+    await db.refresh(account)
+    assert account.provider_status == "ok"
+    assert account.health_error is None
+    assert account.reconnect_required_at is None
+    assert account.disconnected_at is None
+
+    success_audit_result = await db.execute(
+        select(AccountAuditLog).where(
+            AccountAuditLog.account_id == account.id,
+            AccountAuditLog.event_type == "status_sync_success",
+        )
+    )
+    success_audit_log = success_audit_result.scalar_one()
+    assert success_audit_log.provider_status == "ok"
 
 
 @pytest.mark.asyncio
@@ -131,6 +224,26 @@ async def test_verify_signature_accepts_custom_auth_header(
         signature_header="",
         custom_auth_header="secret-123",
     )
+
+
+@pytest.mark.asyncio
+async def test_hosted_auth_webhook_rejects_missing_signature(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(unipile_webhook.settings, "UNIPILE_WEBHOOK_SECRET", "secret-123")
+    monkeypatch.setattr(unipile_webhook.settings, "ENV", "prod")
+
+    response = await client.post(
+        "/webhooks/unipile/hosted-auth",
+        json={
+            "status": "CREATION_SUCCESS",
+            "account_id": "li-hosted-callback",
+            "name": "signed-state",
+        },
+    )
+
+    assert response.status_code == 401
 
 
 def test_verify_signature_rejects_when_secret_is_missing(

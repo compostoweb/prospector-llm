@@ -152,6 +152,13 @@ class ChatDetail:
     account_id: str = ""
 
 
+@dataclass
+class HostedAuthLink:
+    """Link hospedado da Unipile para conectar ou reconectar uma conta."""
+
+    url: str
+
+
 class UnipileClient:
     """
     Wrapper sobre a Unipile REST API.
@@ -170,6 +177,56 @@ class UnipileClient:
                 timeout=_TIMEOUT,
             )
         )
+
+    # ── Accounts / Hosted Auth ───────────────────────────────────────
+
+    async def create_hosted_auth_link(
+        self,
+        *,
+        auth_type: str,
+        providers: list[str],
+        expires_on: str,
+        success_redirect_url: str,
+        failure_redirect_url: str,
+        notify_url: str,
+        name: str,
+        reconnect_account: str | None = None,
+    ) -> HostedAuthLink:
+        """Gera um link Hosted Auth Wizard para conectar/reconectar contas."""
+        api_url = _BASE_URL.rstrip("/").removesuffix("/api/v1")
+        payload: dict[str, Any] = {
+            "type": auth_type,
+            "providers": providers,
+            "api_url": api_url,
+            "expiresOn": expires_on,
+            "success_redirect_url": success_redirect_url,
+            "failure_redirect_url": failure_redirect_url,
+            "notify_url": notify_url,
+            "name": name,
+        }
+        if reconnect_account:
+            payload["reconnect_account"] = reconnect_account
+
+        response = await self._client.post("/hosted/accounts/link", json=payload)
+
+        if 400 <= response.status_code < 500:
+            body_text = response.text[:500]
+            logger.error(
+                "unipile.hosted_auth.client_error",
+                status=response.status_code,
+                response_body=body_text,
+            )
+            raise UnipileNonRetryableError(f"Unipile {response.status_code}: {body_text}")
+
+        response.raise_for_status()
+        data = response.json()
+        url = str(data.get("url") or "")
+        if not url:
+            logger.error("unipile.hosted_auth.empty_url", payload_keys=list(data.keys()))
+            raise UnipileNonRetryableError("Unipile Hosted Auth não retornou URL.")
+
+        logger.info("unipile.hosted_auth.link_created", providers=providers, auth_type=auth_type)
+        return HostedAuthLink(url=url)
 
     # ── LinkedIn ──────────────────────────────────────────────────────
 

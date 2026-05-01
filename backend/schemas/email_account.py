@@ -98,6 +98,10 @@ class EmailAccountResponse(BaseModel):
     tenant_id: uuid.UUID
     display_name: str
     email_address: str
+    owner_user_id: uuid.UUID | None = None
+    owner_email: str | None = None
+    owner_name: str | None = None
+    created_by_user_id: uuid.UUID | None = None
     from_name: str | None
     provider_type: str
     effective_provider_type: str
@@ -112,6 +116,13 @@ class EmailAccountResponse(BaseModel):
     imap_use_ssl: bool
     daily_send_limit: int
     is_active: bool
+    provider_status: str | None = None
+    last_status_at: datetime | None = None
+    last_health_check_at: datetime | None = None
+    health_error: str | None = None
+    connected_at: datetime | None = None
+    disconnected_at: datetime | None = None
+    reconnect_required_at: datetime | None = None
     is_warmup_enabled: bool
     email_signature: str | None
     created_at: datetime

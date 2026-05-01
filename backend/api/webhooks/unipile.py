@@ -53,6 +53,8 @@ from models.email_account import EmailAccount
 from models.enums import Intent
 from models.interaction import Interaction
 from models.lead import Lead
+from models.linkedin_account import LinkedInAccount
+from services.account_audit_log_service import record_account_audit_log
 from services.email_event_service import classify_inbound_email_event, record_email_bounce
 from services.inbound_message_service import (
     find_lead_by_sender as _svc_find_lead_by_sender,
@@ -61,6 +63,7 @@ from services.inbound_message_service import (
     process_inbound_reply,
     resolve_unipile_account_context,
 )
+from services.linkedin_account_service import parse_hosted_linkedin_auth_state
 
 logger = structlog.get_logger()
 
@@ -121,14 +124,7 @@ async def unipile_webhook(
     elif event_type in {"new_relation", "relation_created"}:
         await _handle_relation_created(payload, db)
     elif event_type in _ACCOUNT_STATUS_EVENTS:
-        account_status = (
-            payload.get("AccountStatus") if isinstance(payload.get("AccountStatus"), dict) else {}
-        )
-        logger.info(
-            "webhook.unipile.account_status",
-            account_id=account_status.get("account_id") or payload.get("account_id"),
-            status=event_type,
-        )
+        await _handle_account_status(payload, event_type, db)
     elif event_type in {"message_read", "chat_read", "message_seen", "read_receipt"}:
         await _handle_chat_read(payload)
     else:
@@ -142,7 +138,299 @@ async def unipile_webhook(
     return {"status": "ok"}
 
 
+@router.post("/unipile/hosted-auth", status_code=status.HTTP_200_OK)
+async def unipile_hosted_auth_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_session_no_auth),
+) -> dict:
+    """Recebe callback do Hosted Auth Wizard e registra contas LinkedIn Unipile."""
+    body = await request.body()
+
+    signature_header = request.headers.get("X-Unipile-Signature", "")
+    custom_auth_header = request.headers.get("Unipile-Auth", "")
+    if not _verify_signature(body, signature_header, custom_auth_header):
+        logger.warning("webhook.unipile.hosted_auth.invalid_signature")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Assinatura inválida",
+        )
+
+    try:
+        payload = json.loads(body)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payload inválido",
+        ) from exc
+
+    account_id = str(payload.get("account_id") or "").strip()
+    state = str(payload.get("name") or "").strip()
+    hosted_status = str(payload.get("status") or "").lower()
+    if not account_id or not state:
+        logger.warning("webhook.unipile.hosted_auth.missing_fields")
+        return {"status": "ignored"}
+    if hosted_status not in {"creation_success", "reconnected"}:
+        logger.info(
+            "webhook.unipile.hosted_auth.non_success",
+            hosted_status=hosted_status or None,
+            account_id=account_id,
+        )
+        return {"status": "ignored"}
+
+    try:
+        auth_state = parse_hosted_linkedin_auth_state(state)
+    except ValueError as exc:
+        logger.warning("webhook.unipile.hosted_auth.invalid_state", error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Estado Hosted Auth inválido",
+        ) from exc
+
+    now = datetime.now(UTC)
+    result = await db.execute(
+        select(LinkedInAccount).where(
+            LinkedInAccount.tenant_id == auth_state.tenant_id,
+            LinkedInAccount.unipile_account_id == account_id,
+        )
+    )
+    account = result.scalar_one_or_none()
+    if account is None:
+        account = LinkedInAccount(
+            tenant_id=auth_state.tenant_id,
+            display_name=auth_state.display_name,
+            linkedin_username=auth_state.linkedin_username,
+            owner_user_id=auth_state.user_id,
+            created_by_user_id=auth_state.user_id,
+            provider_type="unipile",
+            unipile_account_id=account_id,
+            supports_inmail=auth_state.supports_inmail,
+            provider_status="connected",
+            connected_at=now,
+            last_status_at=now,
+        )
+        db.add(account)
+    else:
+        account.display_name = auth_state.display_name
+        account.linkedin_username = auth_state.linkedin_username
+        account.owner_user_id = auth_state.user_id
+        account.supports_inmail = auth_state.supports_inmail
+        account.is_active = True
+        account.provider_status = "connected"
+        account.health_error = None
+        account.connected_at = account.connected_at or now
+        account.disconnected_at = None
+        account.reconnect_required_at = None
+        account.last_status_at = now
+
+    await db.flush()
+    await record_account_audit_log(
+        db,
+        tenant_id=auth_state.tenant_id,
+        account_type="linkedin",
+        account_id=account.id,
+        external_account_id=account.unipile_account_id,
+        provider_type=account.provider_type,
+        event_type="reconnected" if hosted_status == "reconnected" else "connected",
+        actor_user_id=auth_state.user_id,
+        provider_status=account.provider_status,
+        message="Callback Hosted Auth da Unipile processado.",
+        event_metadata={"hosted_status": hosted_status},
+    )
+    await db.commit()
+    logger.info(
+        "webhook.unipile.hosted_auth.account_connected",
+        tenant_id=str(auth_state.tenant_id),
+        account_id=account_id,
+        owner_user_id=str(auth_state.user_id) if auth_state.user_id else None,
+    )
+    return {"status": "ok"}
+
+
 # ── Handlers ──────────────────────────────────────────────────────────
+
+
+async def _handle_account_status(
+    payload: dict,
+    event_type: str,
+    db: AsyncSession,
+) -> None:
+    account_status = _extract_account_status_payload(payload)
+    account_id = _extract_account_status_account_id(payload, account_status)
+    account_type = _normalize_account_status_type(
+        _extract_account_status_account_type(payload, account_status)
+    )
+    normalized_status = (event_type or "").strip().lower()
+
+    if not account_id:
+        logger.warning("webhook.unipile.account_status.no_account_id", status=normalized_status)
+        return
+
+    updated_count = 0
+    if account_type in {None, _LINKEDIN_ACCOUNT_TYPE}:
+        linkedin_result = await db.execute(
+            select(LinkedInAccount).where(
+                LinkedInAccount.unipile_account_id == account_id,
+                LinkedInAccount.provider_type == "unipile",
+            )
+        )
+        for linkedin_account in linkedin_result.scalars().all():
+            previous_status = linkedin_account.provider_status
+            previous_error = linkedin_account.health_error
+            _apply_unipile_account_status(
+                linkedin_account,
+                normalized_status,
+                account_status,
+                payload,
+            )
+            await record_account_audit_log(
+                db,
+                tenant_id=linkedin_account.tenant_id,
+                account_type="linkedin",
+                account_id=linkedin_account.id,
+                external_account_id=linkedin_account.unipile_account_id,
+                provider_type=linkedin_account.provider_type,
+                event_type=f"status_{normalized_status or 'unknown'}",
+                actor_user_id=linkedin_account.owner_user_id,
+                provider_status=linkedin_account.provider_status,
+                message=linkedin_account.health_error,
+                event_metadata={
+                    "previous_status": previous_status,
+                    "previous_error": previous_error,
+                    "account_type": account_type,
+                },
+            )
+            updated_count += 1
+
+    if account_type in {None, _EMAIL_ACCOUNT_TYPE}:
+        email_result = await db.execute(
+            select(EmailAccount).where(
+                EmailAccount.unipile_account_id == account_id,
+                EmailAccount.provider_type == "unipile_gmail",
+            )
+        )
+        for email_account in email_result.scalars().all():
+            previous_status = email_account.provider_status
+            previous_error = email_account.health_error
+            _apply_unipile_account_status(email_account, normalized_status, account_status, payload)
+            await record_account_audit_log(
+                db,
+                tenant_id=email_account.tenant_id,
+                account_type="email",
+                account_id=email_account.id,
+                external_account_id=email_account.unipile_account_id,
+                provider_type=email_account.provider_type,
+                event_type=f"status_{normalized_status or 'unknown'}",
+                actor_user_id=email_account.owner_user_id,
+                provider_status=email_account.provider_status,
+                message=email_account.health_error,
+                event_metadata={
+                    "previous_status": previous_status,
+                    "previous_error": previous_error,
+                    "account_type": account_type,
+                },
+            )
+            updated_count += 1
+
+    if updated_count == 0:
+        logger.info(
+            "webhook.unipile.account_status.account_not_found",
+            account_id=account_id,
+            account_type=account_type,
+            status=normalized_status,
+        )
+        return
+
+    await db.commit()
+    logger.info(
+        "webhook.unipile.account_status.updated",
+        account_id=account_id,
+        account_type=account_type,
+        status=normalized_status,
+        updated_count=updated_count,
+    )
+
+
+def _apply_unipile_account_status(
+    account: LinkedInAccount | EmailAccount,
+    normalized_status: str,
+    account_status: dict,
+    payload: dict,
+) -> None:
+    now = datetime.now(UTC)
+    account.last_status_at = now
+
+    if normalized_status in {"ok", "reconnected", "sync_success", "creation_success"}:
+        account.provider_status = "connected" if normalized_status == "creation_success" else "ok"
+        account.is_active = True
+        account.health_error = None
+        account.connected_at = account.connected_at or now
+        account.disconnected_at = None
+        account.reconnect_required_at = None
+        return
+
+    if normalized_status == "connecting":
+        account.provider_status = "connecting"
+        account.is_active = True
+        account.health_error = None
+        return
+
+    account.provider_status = normalized_status or "error"
+    account.is_active = True
+    account.health_error = _extract_account_status_error(account_status, payload, normalized_status)
+    account.disconnected_at = account.disconnected_at or now
+    account.reconnect_required_at = account.reconnect_required_at or now
+
+
+def _extract_account_status_payload(payload: dict) -> dict:
+    account_status = payload.get("AccountStatus")
+    if isinstance(account_status, dict):
+        return cast(dict[str, Any], account_status)
+    return {}
+
+
+def _extract_account_status_account_id(payload: dict, account_status: dict) -> str:
+    account = account_status.get("account") or payload.get("account")
+    account_id = ""
+    if isinstance(account, dict):
+        account_id = str(account.get("id") or account.get("account_id") or "").strip()
+    return str(
+        account_status.get("account_id") or payload.get("account_id") or account_id or ""
+    ).strip()
+
+
+def _extract_account_status_account_type(payload: dict, account_status: dict) -> str | None:
+    account = account_status.get("account") or payload.get("account")
+    if isinstance(account, dict):
+        account_type = account.get("type") or account.get("account_type") or account.get("provider")
+        if account_type:
+            return str(account_type)
+    for source in (account_status, payload):
+        account_type = source.get("account_type") or source.get("type") or source.get("provider")
+        if account_type:
+            return str(account_type)
+    return None
+
+
+def _normalize_account_status_type(account_type: str | None) -> str | None:
+    normalized = (account_type or "").strip().upper()
+    if normalized in {"LINKEDIN", "LINKEDIN_RECRUITER", "LINKEDIN_SALES_NAVIGATOR"}:
+        return _LINKEDIN_ACCOUNT_TYPE
+    if normalized in {"GMAIL", "GOOGLE", "EMAIL", "MAIL"}:
+        return _EMAIL_ACCOUNT_TYPE
+    return normalized or None
+
+
+def _extract_account_status_error(
+    account_status: dict,
+    payload: dict,
+    normalized_status: str,
+) -> str:
+    for source in (account_status, payload):
+        for key in ("error", "error_message", "reason", "details", "description"):
+            value = source.get(key)
+            if value:
+                return str(value)[:1000]
+    return f"Status Unipile: {normalized_status or 'error'}"
 
 
 async def _handle_relation_created(
@@ -527,14 +815,36 @@ def _extract_subject(message: dict, payload: dict) -> str:
 def _extract_event_type(payload: dict) -> str:
     event = payload.get("event")
     if isinstance(event, str) and event.strip():
-        return event.strip().lower()
+        normalized_event = event.strip().lower()
+        if normalized_event in {
+            "account_status",
+            "account_status_changed",
+            "account_status_updated",
+        }:
+            status_value = _extract_account_status_value(payload)
+            if status_value:
+                return status_value
+        return normalized_event
 
     account_status = payload.get("AccountStatus")
     if isinstance(account_status, dict):
-        message = account_status.get("message")
-        if isinstance(message, str) and message.strip():
-            return message.strip().lower()
+        status_value = _extract_account_status_value(payload)
+        if status_value:
+            return status_value
 
+    return ""
+
+
+def _extract_account_status_value(payload: dict) -> str:
+    account_status = payload.get("AccountStatus")
+    status_sources = [account_status, payload] if isinstance(account_status, dict) else [payload]
+    for source in status_sources:
+        if not isinstance(source, dict):
+            continue
+        for key in ("message", "status", "account_status"):
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip().lower()
     return ""
 
 

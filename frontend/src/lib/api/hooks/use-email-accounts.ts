@@ -17,9 +17,7 @@ function mergeEmailAccountIntoCache(
 
   return {
     ...current,
-    accounts: current.accounts.map((account) =>
-      account.id === updated.id ? updated : account,
-    ),
+    accounts: current.accounts.map((account) => (account.id === updated.id ? updated : account)),
   }
 }
 
@@ -30,6 +28,10 @@ export interface EmailAccount {
   tenant_id: string
   display_name: string
   email_address: string
+  owner_user_id: string | null
+  owner_email: string | null
+  owner_name: string | null
+  created_by_user_id: string | null
   from_name: string | null
   provider_type: "unipile_gmail" | "google_oauth" | "smtp"
   effective_provider_type: "unipile_gmail" | "google_oauth" | "smtp"
@@ -44,6 +46,13 @@ export interface EmailAccount {
   imap_use_ssl: boolean
   daily_send_limit: number
   is_active: boolean
+  provider_status: string | null
+  last_status_at: string | null
+  last_health_check_at: string | null
+  health_error: string | null
+  connected_at: string | null
+  disconnected_at: string | null
+  reconnect_required_at: string | null
   is_warmup_enabled: boolean
   email_signature: string | null
   created_at: string

@@ -85,6 +85,34 @@ export interface LinkedInStats {
   dm_reply_rate: number
 }
 
+export interface TeamUserAnalytics {
+  user_id: string
+  email: string
+  name: string | null
+  role: string
+  is_active: boolean
+  email_accounts: number
+  linkedin_accounts: number
+  reconnect_required_accounts: number
+  steps_sent: number
+  email_sent: number
+  linkedin_sent: number
+  manual_tasks_sent: number
+  replies: number
+  interested_replies: number
+  reply_rate: number
+  last_activity_at: string | null
+}
+
+export interface TeamAnalytics {
+  users: TeamUserAnalytics[]
+  total_users: number
+  active_users: number
+  steps_sent: number
+  replies: number
+  reply_rate: number
+}
+
 // ── Hooks ─────────────────────────────────────────────────────────────
 
 export function useDashboardStats(range: AnalyticsRangeQuery = { days: 30 }) {
@@ -259,6 +287,30 @@ export function useLinkedInStats(range: AnalyticsRangeQuery = { days: 30 }) {
       return data as LinkedInStats
     },
     staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    enabled: !!session?.accessToken,
+  })
+}
+
+export function useTeamAnalytics(range: AnalyticsRangeQuery = { days: 30 }) {
+  const { data: session } = useSession()
+  const query = buildAnalyticsQueryString(range)
+
+  return useQuery({
+    queryKey: [
+      "analytics",
+      "team",
+      range.days ?? null,
+      range.startDate ?? null,
+      range.endDate ?? null,
+    ],
+    queryFn: async (): Promise<TeamAnalytics> => {
+      const client = createBrowserClient(session?.accessToken)
+      const { data, error } = await client.GET(`/analytics/team/users${query}` as never)
+      if (error) throw new Error("Falha ao carregar métricas da equipe")
+      return data as TeamAnalytics
+    },
+    staleTime: 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
     enabled: !!session?.accessToken,
   })

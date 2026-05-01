@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 # Importa todos os models para garantir que estão no Base.metadata
+import models.account_audit_log  # noqa: F401  # pyright: ignore[reportUnusedImport]
 import models.cadence  # noqa: F401  # pyright: ignore[reportUnusedImport]
 import models.cadence_step  # noqa: F401  # pyright: ignore[reportUnusedImport]
 import models.content_gallery_image  # noqa: F401  # pyright: ignore[reportUnusedImport]

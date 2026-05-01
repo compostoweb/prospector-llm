@@ -44,6 +44,7 @@ import {
 
 const navItems: Array<{ href: Route; label: string; icon: LucideIcon }> = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/equipe" as Route, label: "Equipe", icon: Users },
   { href: "/leads/busca-linkedin", label: "Busca LinkedIn", icon: Search },
   { href: "/gerar-leads", label: "Gerar Leads", icon: Sparkles },
   { href: "/listas", label: "Listas", icon: List },

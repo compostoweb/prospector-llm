@@ -1,6 +1,7 @@
 # Models exportados para uso pelo Alembic (env.py) e pelo sistema.
 # Todos os models devem ser importados aqui para que o Alembic os detecte.
 
+from models.account_audit_log import AccountAuditLog  # noqa: F401
 from models.anthropic_batch_job import AnthropicBatchJob  # noqa: F401
 from models.audio_file import AudioFile  # noqa: F401
 from models.base import Base  # noqa: F401

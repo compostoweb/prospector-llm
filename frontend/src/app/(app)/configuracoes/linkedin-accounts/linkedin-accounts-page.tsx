@@ -1,15 +1,31 @@
 "use client"
 
-import { useState } from "react"
-import { Linkedin, Plus, Trash2, CheckCircle2, XCircle, Loader2, Zap, KeyRound, AlertTriangle } from "lucide-react"
+import type { Route } from "next"
+import { useRouter, useSearchParams } from "next/navigation"
+import { useEffect, useRef, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
+import {
+  Linkedin,
+  Plus,
+  Trash2,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  RefreshCw,
+  Zap,
+  KeyRound,
+  AlertTriangle,
+} from "lucide-react"
 import {
   useLinkedInAccounts,
-  useCreateUnipileLinkedInAccount,
+  useCreateUnipileHostedAuthLink,
+  useCreateUnipileReconnectLink,
   useCreateNativeLinkedInAccount,
   useUpdateLinkedInAccount,
   useDeleteLinkedInAccount,
   type LinkedInAccount,
-  type CreateUnipileLinkedInAccountBody,
+  type CreateUnipileHostedAuthBody,
   type CreateNativeLinkedInAccountBody,
 } from "@/lib/api/hooks/use-linkedin-accounts"
 import { Button } from "@/components/ui/button"
@@ -25,6 +41,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { SettingsPageShell, SettingsPanel } from "@/components/settings/settings-shell"
 import { SettingsCallout } from "@/components/settings/settings-shell"
+import { Badge } from "@/components/ui/badge"
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -38,19 +55,55 @@ const PROVIDER_ICONS: Record<string, React.ReactNode> = {
   native: <KeyRound size={14} />,
 }
 
+function ownerLabel(account: LinkedInAccount) {
+  return account.owner_name || account.owner_email || "Sem dono"
+}
+
+function statusBadge(account: LinkedInAccount): {
+  label: string
+  variant: "outline" | "success" | "warning" | "danger"
+} {
+  if (!account.is_active) return { label: "Inativa", variant: "outline" }
+  if (account.reconnect_required_at) return { label: "Reconectar", variant: "warning" }
+  if (account.provider_status === "error") return { label: "Erro", variant: "danger" }
+  if (account.provider_status === "ok" || account.provider_status === "connected") {
+    return { label: "Conectada", variant: "success" }
+  }
+  return { label: "Status pendente", variant: "outline" }
+}
+
+function shouldOfferReconnect(account: LinkedInAccount) {
+  return (
+    account.provider_type === "unipile" &&
+    Boolean(
+      account.reconnect_required_at ||
+      account.provider_status === "error" ||
+      account.provider_status === "credentials" ||
+      account.provider_status === "stopped",
+    )
+  )
+}
+
 // ── Account Card ──────────────────────────────────────────────────────
 
 function AccountCard({
   account,
   onDelete,
+  onReconnect,
   onToggleActive,
   onToggleInmail,
+  isReconnecting,
 }: {
   account: LinkedInAccount
   onDelete: (id: string) => void
+  onReconnect: (id: string) => void
   onToggleActive: (id: string, active: boolean) => void
   onToggleInmail: (id: string, enabled: boolean) => void
+  isReconnecting: boolean
 }) {
+  const status = statusBadge(account)
+  const canReconnect = shouldOfferReconnect(account)
+
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-(--border-default) bg-(--bg-surface) px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
       <div className="flex min-w-0 items-center gap-3">
@@ -72,18 +125,19 @@ function AccountCard({
               linkedin.com/in/{account.linkedin_username}
             </p>
           )}
-          <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-(--bg-overlay) px-2 py-0.5 text-[11px] text-(--text-tertiary)">
-            {PROVIDER_LABELS[account.provider_type] ?? account.provider_type}
-          </span>
-          <span
-            className={`mt-1 ml-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ${
-              account.supports_inmail
-                ? "bg-(--success-subtle) text-(--success-subtle-fg)"
-                : "bg-(--bg-overlay) text-(--text-tertiary)"
-            }`}
-          >
-            {account.supports_inmail ? "InMail habilitado" : "Sem InMail"}
-          </span>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            <Badge variant="outline">
+              {PROVIDER_LABELS[account.provider_type] ?? account.provider_type}
+            </Badge>
+            <Badge variant={status.variant}>{status.label}</Badge>
+            <Badge variant="neutral">Dono: {ownerLabel(account)}</Badge>
+            <Badge variant={account.supports_inmail ? "success" : "outline"}>
+              {account.supports_inmail ? "InMail habilitado" : "Sem InMail"}
+            </Badge>
+          </div>
+          {account.health_error ? (
+            <p className="mt-1 truncate text-xs text-(--danger)">{account.health_error}</p>
+          ) : null}
         </div>
       </div>
       <div className="flex flex-col gap-2 lg:flex-row lg:items-stretch lg:justify-end">
@@ -130,6 +184,23 @@ function AccountCard({
           </div>
         </div>
 
+        {canReconnect ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-2 self-end lg:self-center"
+            disabled={isReconnecting}
+            onClick={() => onReconnect(account.id)}
+          >
+            {isReconnecting ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <RefreshCw size={14} />
+            )}
+            Reconectar
+          </Button>
+        ) : null}
+
         <Button
           variant="ghost"
           size="icon"
@@ -147,26 +218,19 @@ function AccountCard({
 // ── Modal Unipile ─────────────────────────────────────────────────────
 
 function UnipileModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [form, setForm] = useState<CreateUnipileLinkedInAccountBody>({
+  const [form, setForm] = useState<CreateUnipileHostedAuthBody>({
     display_name: "",
     linkedin_username: "",
     supports_inmail: false,
-    unipile_account_id: "",
   })
   const [error, setError] = useState<string | null>(null)
-  const create = useCreateUnipileLinkedInAccount()
+  const createHostedAuth = useCreateUnipileHostedAuthLink()
 
   async function handleSubmit() {
     setError(null)
     try {
-      await create.mutateAsync(form)
-      onClose()
-      setForm({
-        display_name: "",
-        linkedin_username: "",
-        supports_inmail: false,
-        unipile_account_id: "",
-      })
+      const result = await createHostedAuth.mutateAsync(form)
+      window.location.assign(result.auth_url)
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro desconhecido")
     }
@@ -176,10 +240,14 @@ function UnipileModal({ open, onClose }: { open: boolean; onClose: () => void })
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Conectar via Unipile</DialogTitle>
+          <DialogTitle>Conectar LinkedIn via Unipile</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
+          <div className="rounded-lg border border-(--border-subtle) bg-(--bg-overlay) px-3 py-3 text-xs leading-5 text-(--text-secondary)">
+            O Prospector vai abrir o Hosted Auth da Unipile em uma nova etapa segura. Depois da
+            confirmação, a conta volta associada ao usuário atual e aparece nesta tela.
+          </div>
           <div>
             <Label htmlFor="ul-display_name">Nome de exibição</Label>
             <Input
@@ -198,15 +266,6 @@ function UnipileModal({ open, onClose }: { open: boolean; onClose: () => void })
                 setForm((f) => ({ ...f, linkedin_username: e.target.value || null }))
               }
               placeholder="joao-silva-123"
-            />
-          </div>
-          <div>
-            <Label htmlFor="ul-account_id">Account ID (Unipile)</Label>
-            <Input
-              id="ul-account_id"
-              value={form.unipile_account_id}
-              onChange={(e) => setForm((f) => ({ ...f, unipile_account_id: e.target.value }))}
-              placeholder="ID da conta no painel Unipile"
             />
           </div>
           <div className="rounded-lg border border-(--border-subtle) bg-(--bg-overlay) px-3 py-3">
@@ -240,12 +299,10 @@ function UnipileModal({ open, onClose }: { open: boolean; onClose: () => void })
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={
-              create.isPending || !form.display_name.trim() || !form.unipile_account_id.trim()
-            }
+            disabled={createHostedAuth.isPending || !form.display_name.trim()}
           >
-            {create.isPending && <Loader2 size={14} className="mr-2 animate-spin" />}
-            Salvar
+            {createHostedAuth.isPending && <Loader2 size={14} className="mr-2 animate-spin" />}
+            Abrir Unipile
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -375,14 +432,41 @@ function NativeModal({ open, onClose }: { open: boolean; onClose: () => void }) 
 // ── Página principal ──────────────────────────────────────────────────
 
 export default function LinkedInAccountsPage() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const queryClient = useQueryClient()
+  const handledUnipileStatusRef = useRef<string | null>(null)
   const [showUnipileModal, setShowUnipileModal] = useState(false)
   const [showNativeModal, setShowNativeModal] = useState(false)
 
   const { data, isLoading, isError, error } = useLinkedInAccounts()
   const updateAccount = useUpdateLinkedInAccount()
   const deleteAccount = useDeleteLinkedInAccount()
+  const reconnectAccount = useCreateUnipileReconnectLink()
 
   const accounts = data?.accounts ?? []
+
+  useEffect(() => {
+    const unipileStatus = searchParams.get("unipile")
+    if (!unipileStatus || handledUnipileStatusRef.current === unipileStatus) return
+
+    handledUnipileStatusRef.current = unipileStatus
+    if (unipileStatus === "success") {
+      toast.success("Conta LinkedIn conectada com sucesso")
+      queryClient.invalidateQueries({ queryKey: ["linkedin-accounts"] })
+    } else if (unipileStatus === "reconnected") {
+      toast.success("Conta LinkedIn reconectada com sucesso")
+      queryClient.invalidateQueries({ queryKey: ["linkedin-accounts"] })
+    } else if (unipileStatus === "error") {
+      toast.error("Não foi possível concluir a conexão LinkedIn")
+    }
+
+    const nextParams = new URLSearchParams(searchParams.toString())
+    nextParams.delete("unipile")
+    const nextQuery = nextParams.toString()
+    const nextUrl = `/configuracoes/linkedin-accounts${nextQuery ? `?${nextQuery}` : ""}`
+    router.replace(nextUrl as Route, { scroll: false })
+  }, [queryClient, router, searchParams])
 
   async function handleDelete(id: string) {
     if (
@@ -400,6 +484,11 @@ export default function LinkedInAccountsPage() {
 
   async function handleToggleInmail(id: string, enabled: boolean) {
     await updateAccount.mutateAsync({ id, body: { supports_inmail: enabled } })
+  }
+
+  async function handleReconnect(id: string) {
+    const result = await reconnectAccount.mutateAsync(id)
+    window.location.assign(result.auth_url)
   }
 
   return (
@@ -432,7 +521,10 @@ export default function LinkedInAccountsPage() {
           className="border-(--warning-subtle) bg-(--warning-subtle) text-(--warning-subtle-fg)"
         >
           <p>{error instanceof Error ? error.message : "Erro ao buscar contas LinkedIn."}</p>
-          <p>Se a API estiver fora do ar, a lista de contas e os modais não vão refletir o estado real.</p>
+          <p>
+            Se a API estiver fora do ar, a lista de contas e os modais não vão refletir o estado
+            real.
+          </p>
         </SettingsCallout>
       ) : null}
 
@@ -458,7 +550,9 @@ export default function LinkedInAccountsPage() {
           ) : isError ? (
             <div className="flex flex-col items-center gap-2 py-10 text-center">
               <AlertTriangle size={28} className="text-(--warning)" />
-              <p className="text-sm text-(--text-secondary)">Não foi possível consultar as contas.</p>
+              <p className="text-sm text-(--text-secondary)">
+                Não foi possível consultar as contas.
+              </p>
             </div>
           ) : accounts.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-10 text-center">
@@ -475,8 +569,10 @@ export default function LinkedInAccountsPage() {
                   key={account.id}
                   account={account}
                   onDelete={handleDelete}
+                  onReconnect={handleReconnect}
                   onToggleActive={handleToggleActive}
                   onToggleInmail={handleToggleInmail}
+                  isReconnecting={reconnectAccount.isPending}
                 />
               ))}
             </div>
@@ -493,7 +589,8 @@ export default function LinkedInAccountsPage() {
                 <Zap size={15} className="mt-0.5 shrink-0 text-(--brand)" />
                 <p>
                   <strong className="text-(--text-primary)">Via Unipile:</strong> configuração mais
-                  simples quando você já opera LinkedIn e inbox pela Unipile.
+                  simples para abrir o Hosted Auth da Unipile e conectar LinkedIn sem copiar IDs
+                  manualmente.
                 </p>
               </div>
               <div className="flex gap-2.5">

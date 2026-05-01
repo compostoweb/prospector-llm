@@ -16,7 +16,6 @@ import {
 } from "lucide-react"
 import {
   useEmailAccounts,
-  useCreateUnipileAccount,
   useCreateSMTPAccount,
   useTestSMTP,
   useUpdateEmailAccount,
@@ -24,7 +23,6 @@ import {
   useGoogleOAuthUrl,
   useFetchGmailSignature,
   type EmailAccount,
-  type CreateUnipileAccountBody,
   type CreateSMTPAccountBody,
 } from "@/lib/api/hooks/use-email-accounts"
 import { Button } from "@/components/ui/button"
@@ -40,6 +38,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
+import { Badge } from "@/components/ui/badge"
 import {
   SettingsCallout,
   SettingsPageShell,
@@ -49,7 +48,7 @@ import {
 // ── Helpers ───────────────────────────────────────────────────────────
 
 const PROVIDER_LABELS: Record<string, string> = {
-  unipile_gmail: "Unipile Gmail",
+  unipile_gmail: "Unipile Gmail legado",
   google_oauth: "Gmail OAuth",
   smtp: "SMTP",
 }
@@ -58,6 +57,23 @@ const PROVIDER_ICONS: Record<string, React.ReactNode> = {
   unipile_gmail: <Zap size={14} />,
   google_oauth: <Mail size={14} />,
   smtp: <Server size={14} />,
+}
+
+function ownerLabel(account: EmailAccount) {
+  return account.owner_name || account.owner_email || "Sem dono"
+}
+
+function statusBadge(account: EmailAccount): {
+  label: string
+  variant: "outline" | "success" | "warning" | "danger"
+} {
+  if (!account.is_active) return { label: "Inativa", variant: "outline" }
+  if (account.reconnect_required_at) return { label: "Reconectar", variant: "warning" }
+  if (account.provider_status === "error") return { label: "Erro", variant: "danger" }
+  if (account.provider_status === "ok" || account.provider_status === "connected") {
+    return { label: "Conectada", variant: "success" }
+  }
+  return { label: "Status pendente", variant: "outline" }
 }
 
 function AccountCard({
@@ -71,6 +87,8 @@ function AccountCard({
   onToggleActive: (id: string, active: boolean) => void
   onEdit: (account: EmailAccount) => void
 }) {
+  const status = statusBadge(account)
+
   return (
     <div className="flex items-center justify-between rounded-xl border border-(--border-default) bg-(--bg-surface) px-3.5 py-3.5">
       <div className="flex min-w-0 items-center gap-3">
@@ -89,15 +107,18 @@ function AccountCard({
           </p>
           <p className="truncate text-xs text-(--text-secondary)">{account.email_address}</p>
           <div className="mt-1 flex flex-wrap gap-1.5">
-            <span className="inline-flex items-center gap-1 rounded-full bg-(--bg-overlay) px-2 py-0.5 text-[11px] text-(--text-tertiary)">
-              {PROVIDER_LABELS[account.provider_type]}
-            </span>
+            <Badge variant="outline">{PROVIDER_LABELS[account.provider_type]}</Badge>
+            <Badge variant={status.variant}>{status.label}</Badge>
+            <Badge variant="neutral">Dono: {ownerLabel(account)}</Badge>
             {account.outbound_uses_fallback ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-(--info-subtle) px-2 py-0.5 text-[11px] text-(--info-subtle-fg)">
+              <Badge variant="info">
                 envia via {PROVIDER_LABELS[account.effective_provider_type]}
-              </span>
+              </Badge>
             ) : null}
           </div>
+          {account.health_error ? (
+            <p className="mt-1 truncate text-xs text-(--danger)">{account.health_error}</p>
+          ) : null}
         </div>
       </div>
       <div className="ml-4 flex shrink-0 items-center gap-2.5">
@@ -535,84 +556,6 @@ function SMTPModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   )
 }
 
-// ── Modal Unipile ─────────────────────────────────────────────────────
-
-function UnipileModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [form, setForm] = useState<CreateUnipileAccountBody>({
-    display_name: "",
-    email_address: "",
-    unipile_account_id: "",
-    daily_send_limit: 100,
-  })
-  const [error, setError] = useState<string | null>(null)
-  const { mutate: create, isPending } = useCreateUnipileAccount()
-
-  function handleCreate() {
-    setError(null)
-    create(form, {
-      onSuccess: () => {
-        onClose()
-        setForm({
-          display_name: "",
-          email_address: "",
-          unipile_account_id: "",
-          daily_send_limit: 100,
-        })
-      },
-      onError: (e) => setError(e.message),
-    })
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Conectar via Unipile</DialogTitle>
-        </DialogHeader>
-        <div className="grid gap-3 py-2">
-          <div className="space-y-1">
-            <Label>Nome da conta</Label>
-            <Input
-              placeholder="Gmail via Unipile"
-              value={form.display_name}
-              onChange={(e) => setForm((p) => ({ ...p, display_name: e.target.value }))}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label>E-mail do remetente</Label>
-            <Input
-              type="email"
-              placeholder="voce@empresa.com"
-              value={form.email_address}
-              onChange={(e) => setForm((p) => ({ ...p, email_address: e.target.value }))}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label>Unipile Account ID</Label>
-            <Input
-              placeholder="acc_..."
-              value={form.unipile_account_id}
-              onChange={(e) => setForm((p) => ({ ...p, unipile_account_id: e.target.value }))}
-            />
-            <p className="text-xs text-(--text-tertiary)">
-              O account_id da conta Gmail conectada no Unipile.
-            </p>
-          </div>
-          {error && <p className="text-sm text-(--danger)">{error}</p>}
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button onClick={handleCreate} disabled={isPending}>
-            {isPending ? <Loader2 size={14} className="animate-spin" /> : "Conectar"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 // ── Página principal ──────────────────────────────────────────────────
 
 export default function EmailAccountsPage() {
@@ -622,7 +565,6 @@ export default function EmailAccountsPage() {
   const { mutate: updateAccount } = useUpdateEmailAccount()
 
   const [smtpOpen, setSmtpOpen] = useState(false)
-  const [unipileOpen, setUnipileOpen] = useState(false)
   const [editingAccount, setEditingAccount] = useState<EmailAccount | null>(null)
 
   const accounts = data?.accounts ?? []
@@ -643,10 +585,6 @@ export default function EmailAccountsPage() {
       width="wide"
       actions={
         <>
-          <Button variant="outline" size="sm" onClick={() => setUnipileOpen(true)}>
-            <Zap size={13} className="mr-1" />
-            Unipile
-          </Button>
           <Button variant="outline" size="sm" onClick={() => setSmtpOpen(true)}>
             <Server size={13} className="mr-1" />
             SMTP
@@ -716,7 +654,7 @@ export default function EmailAccountsPage() {
               <Mail size={28} />
               <p className="text-sm">Nenhuma conta conectada ainda.</p>
               <p className="text-xs">
-                Use os botões do topo para conectar via SMTP, Gmail OAuth ou Unipile.
+                Use os botões do topo para conectar via SMTP ou Gmail OAuth.
               </p>
             </div>
           ) : (
@@ -743,9 +681,9 @@ export default function EmailAccountsPage() {
               <div className="flex gap-2.5">
                 <Zap size={15} className="mt-0.5 shrink-0 text-(--brand)" />
                 <p>
-                  <strong className="text-(--text-primary)">Unipile:</strong> melhor opção se você
-                  já usa Unipile para LinkedIn e quer reaproveitar a conta Gmail sem configuração
-                  extra.
+                  <strong className="text-(--text-primary)">Unipile Gmail legado:</strong> contas
+                  antigas continuam visíveis, mas novas conexões de e-mail devem usar OAuth direto
+                  ou SMTP.
                 </p>
               </div>
               <div className="flex gap-2.5">
@@ -775,15 +713,14 @@ export default function EmailAccountsPage() {
               diário.
             </p>
             <p className="mt-3 text-sm leading-6 text-(--text-secondary)">
-              Quando uma conta Unipile tiver uma conta Gmail OAuth ativa com o mesmo endereço, o
-              sistema envia pelo OAuth para preservar nome do remetente e assinatura.
+              Cada conta conectada fica associada ao usuário que fez a conexão quando o acesso vem
+              de uma sessão humana. Isso alimenta as métricas por usuário e facilita reconexões.
             </p>
           </SettingsPanel>
         </div>
       </div>
 
       <SMTPModal open={smtpOpen} onClose={() => setSmtpOpen(false)} />
-      <UnipileModal open={unipileOpen} onClose={() => setUnipileOpen(false)} />
       <AccountSettingsModal account={editingAccount} onClose={() => setEditingAccount(null)} />
     </SettingsPageShell>
   )

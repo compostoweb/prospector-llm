@@ -13,7 +13,9 @@ Responsabilidades:
 from __future__ import annotations
 
 import asyncio
+import sys
 from logging.config import fileConfig
+from pathlib import Path
 
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
@@ -21,8 +23,13 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
 # ── Importar settings ────────────────────────────────────────────────
 from core.config import settings
+from models.account_audit_log import AccountAuditLog  # noqa: F401
 from models.audio_file import AudioFile  # noqa: F401
 
 # ── Importar TODOS os models para o autogenerate funcionar ──────────

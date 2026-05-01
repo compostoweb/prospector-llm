@@ -1074,7 +1074,6 @@ function CarouselFolderCard({ group }: { group: CarouselGroup }) {
   return (
     <div className="group relative aspect-4/5 overflow-hidden rounded-lg border border-(--border-subtle) bg-(--bg-secondary)">
       {cover ? (
-        // eslint-disable-next-line @next/next/no-img-element
         <img
           src={cover}
           alt={group.post_title ?? "Carrossel"}

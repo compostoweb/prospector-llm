@@ -22,8 +22,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.routes import analytics as analytics_routes
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
+from models.email_account import EmailAccount
 from models.enums import (
     Channel,
+    EmailProviderType,
+    Intent,
     InteractionDirection,
     LeadSource,
     LeadStatus,
@@ -32,7 +35,10 @@ from models.enums import (
 )
 from models.interaction import Interaction
 from models.lead import Lead
+from models.linkedin_account import LinkedInAccount
 from models.manual_task import ManualTask
+from models.tenant_user import TenantUser
+from models.user import User
 
 pytestmark = pytest.mark.asyncio
 
@@ -804,6 +810,124 @@ async def test_dashboard_includes_manual_tasks_in_steps_sent_metrics(
     assert data["steps_sent_today"] == 1
     assert data["steps_sent_week"] == 1
     assert data["steps_sent_period"] == 1
+
+
+async def test_team_user_analytics_attributes_activity_to_account_owner(
+    client: AsyncClient,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    tenant_admin_user: User,
+    tenant_admin_membership: TenantUser,
+) -> None:
+    now = datetime.now(tz=UTC)
+    email_account = EmailAccount(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        display_name="Gmail Owner",
+        email_address="owner@acme.test",
+        owner_user_id=tenant_admin_user.id,
+        created_by_user_id=tenant_admin_user.id,
+        provider_type=EmailProviderType.GOOGLE_OAUTH,
+        is_active=True,
+    )
+    linkedin_account = LinkedInAccount(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        display_name="LinkedIn Owner",
+        linkedin_username="owner-linkedin",
+        owner_user_id=tenant_admin_user.id,
+        created_by_user_id=tenant_admin_user.id,
+        provider_type="unipile",
+        unipile_account_id="li-owner-analytics",
+        is_active=True,
+    )
+    lead = Lead(
+        tenant_id=tenant_id,
+        name="Lead Team Analytics",
+        company="Acme",
+        linkedin_url=f"https://linkedin.com/in/team-analytics-{uuid.uuid4()}",
+        email_corporate="team.analytics@acme.test",
+        source=LeadSource.MANUAL,
+        status=LeadStatus.IN_CADENCE,
+    )
+    db.add_all([email_account, linkedin_account, lead])
+    await db.flush()
+
+    cadence = Cadence(
+        tenant_id=tenant_id,
+        name="Cadência Team Analytics",
+        is_active=True,
+        llm_provider="openai",
+        llm_model="gpt-5.4-mini",
+        email_account_id=email_account.id,
+        linkedin_account_id=linkedin_account.id,
+    )
+    db.add(cadence)
+    await db.flush()
+
+    email_step = CadenceStep(
+        tenant_id=tenant_id,
+        cadence_id=cadence.id,
+        lead_id=lead.id,
+        channel=Channel.EMAIL,
+        step_number=1,
+        day_offset=0,
+        use_voice=False,
+        status=StepStatus.SENT,
+        scheduled_at=now - timedelta(hours=2),
+        sent_at=now - timedelta(hours=1),
+    )
+    manual_task = ManualTask(
+        tenant_id=tenant_id,
+        cadence_id=cadence.id,
+        lead_id=lead.id,
+        channel=Channel.LINKEDIN_DM,
+        step_number=2,
+        status=ManualTaskStatus.SENT,
+        sent_at=now,
+        edited_text="Mensagem manual enviada.",
+    )
+    db.add_all([email_step, manual_task])
+    await db.flush()
+
+    db.add(
+        Interaction(
+            tenant_id=tenant_id,
+            lead_id=lead.id,
+            cadence_step_id=email_step.id,
+            channel=Channel.EMAIL,
+            direction=InteractionDirection.INBOUND,
+            intent=Intent.INTEREST,
+            content_text="Tenho interesse.",
+            created_at=now,
+        )
+    )
+    await db.commit()
+
+    response = await client.get("/analytics/team/users?days=1")
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["total_users"] == 1
+    assert data["active_users"] == 1
+    assert data["steps_sent"] == 2
+    assert data["replies"] == 1
+    assert data["reply_rate"] == 50.0
+
+    user_item = data["users"][0]
+    assert user_item["user_id"] == str(tenant_admin_user.id)
+    assert user_item["email"] == tenant_admin_user.email
+    assert user_item["role"] == tenant_admin_membership.role.value
+    assert user_item["email_accounts"] == 1
+    assert user_item["linkedin_accounts"] == 1
+    assert user_item["steps_sent"] == 2
+    assert user_item["email_sent"] == 1
+    assert user_item["linkedin_sent"] == 1
+    assert user_item["manual_tasks_sent"] == 1
+    assert user_item["replies"] == 1
+    assert user_item["interested_replies"] == 1
+    assert user_item["reply_rate"] == 50.0
+    assert user_item["last_activity_at"] is not None
 
 
 async def test_cadence_performance_includes_manual_tasks_in_steps_sent_ranking(

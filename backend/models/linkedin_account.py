@@ -13,8 +13,9 @@ Use linkedin_account_service.encrypt_credential / decrypt_credential.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,6 +32,15 @@ class LinkedInAccount(Base, TenantMixin, TimestampMixin):
     """
 
     __tablename__ = "linkedin_accounts"
+    __table_args__ = (
+        Index("ix_linkedin_accounts_tenant_owner", "tenant_id", "owner_user_id"),
+        Index(
+            "ix_linkedin_accounts_tenant_unipile_account",
+            "tenant_id",
+            "unipile_account_id",
+            postgresql_where=text("unipile_account_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -48,6 +58,20 @@ class LinkedInAccount(Base, TenantMixin, TimestampMixin):
         String(200),
         nullable=True,
         comment="Username do LinkedIn (parte final da URL do perfil)",
+    )
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Usuário do tenant dono operacional desta conta.",
+    )
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Usuário que conectou/criou esta conta no sistema.",
     )
 
     # ── Tipo de provider ───────────────────────────────────────────────
@@ -85,9 +109,44 @@ class LinkedInAccount(Base, TenantMixin, TimestampMixin):
         server_default="false",
         comment="True quando a conta emissora tem capability operacional para InMail",
     )
+    provider_status: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Status operacional reportado pelo provider, ex: OK, CREDENTIALS, ERROR.",
+    )
+    last_status_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Última atualização de status recebida do provider.",
+    )
+    last_health_check_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Última verificação ativa de saúde da conta.",
+    )
+    health_error: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Último erro de health check ou reconexão, sem credenciais sensíveis.",
+    )
+    connected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Momento em que a conta foi conectada com sucesso.",
+    )
+    disconnected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Momento em que a conta foi marcada como desconectada.",
+    )
+    reconnect_required_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Momento em que o sistema detectou necessidade de reconexão.",
+    )
 
     # ── Polling state (provider nativo) ───────────────────────────────
-    last_polled_at: Mapped[str | None] = mapped_column(
+    last_polled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         comment="Última vez que o poller verificou novas mensagens",

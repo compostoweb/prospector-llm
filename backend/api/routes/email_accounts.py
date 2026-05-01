@@ -21,6 +21,7 @@ Autenticação: user token ou tenant token (get_session_flexible).
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -29,6 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible, get_session_no_auth
+from core.security import UserPayload, get_current_user_payload, get_optional_user_payload
 from models.email_account import EmailAccount
 from models.enums import EmailProviderType
 from schemas.email_account import (
@@ -43,6 +45,7 @@ from schemas.email_account import (
     SMTPTestRequest,
     SMTPTestResponse,
 )
+from services.account_audit_log_service import record_account_audit_log
 from services.email_account_service import (
     build_email_account_response,
     build_google_auth_url,
@@ -50,6 +53,7 @@ from services.email_account_service import (
     exchange_google_code,
     fetch_gmail_signature_details,
     get_tenant_id_from_oauth_state,
+    get_user_id_from_oauth_state,
     test_smtp_connection,
 )
 
@@ -90,6 +94,7 @@ async def list_email_accounts(
 async def create_unipile_account(
     body: EmailAccountUnipileCreateRequest,
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    user: UserPayload | None = Depends(get_optional_user_payload),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> EmailAccountResponse:
     """Conecta uma conta Gmail via Unipile (account_id já existe no Unipile)."""
@@ -97,14 +102,30 @@ async def create_unipile_account(
         tenant_id=tenant_id,
         display_name=body.display_name,
         email_address=str(body.email_address),
+        owner_user_id=user.user_id if user else None,
+        created_by_user_id=user.user_id if user else None,
         from_name=body.from_name,
         provider_type=EmailProviderType.UNIPILE_GMAIL,
         unipile_account_id=body.unipile_account_id,
         daily_send_limit=body.daily_send_limit,
+        provider_status="connected",
+        connected_at=datetime.now(UTC),
     )
     db.add(account)
     await db.flush()
     await db.refresh(account)
+    await record_account_audit_log(
+        db,
+        tenant_id=tenant_id,
+        account_type="email",
+        account_id=account.id,
+        external_account_id=account.unipile_account_id,
+        provider_type=account.provider_type,
+        event_type="connected",
+        actor_user_id=user.user_id if user else None,
+        provider_status=account.provider_status,
+        message="Conta Gmail legado via Unipile conectada.",
+    )
     logger.info(
         "email_account.created",
         provider="unipile_gmail",
@@ -144,6 +165,7 @@ async def test_smtp(
 async def create_smtp_account(
     body: EmailAccountSMTPCreateRequest,
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    user: UserPayload | None = Depends(get_optional_user_payload),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> EmailAccountResponse:
     """Conecta uma conta SMTP. Testa a conexão antes de salvar."""
@@ -169,6 +191,8 @@ async def create_smtp_account(
         tenant_id=tenant_id,
         display_name=body.display_name,
         email_address=str(body.email_address),
+        owner_user_id=user.user_id if user else None,
+        created_by_user_id=user.user_id if user else None,
         from_name=body.from_name,
         provider_type=EmailProviderType.SMTP,
         smtp_host=body.smtp_host,
@@ -181,10 +205,23 @@ async def create_smtp_account(
         imap_port=body.imap_port,
         imap_use_ssl=body.imap_use_ssl,
         imap_password=encrypted_imap_password,
+        provider_status="connected",
+        connected_at=datetime.now(UTC),
     )
     db.add(account)
     await db.flush()
     await db.refresh(account)
+    await record_account_audit_log(
+        db,
+        tenant_id=tenant_id,
+        account_type="email",
+        account_id=account.id,
+        provider_type=account.provider_type,
+        event_type="connected",
+        actor_user_id=user.user_id if user else None,
+        provider_status=account.provider_status,
+        message="Conta SMTP conectada.",
+    )
     logger.info(
         "email_account.created",
         provider="smtp",
@@ -200,13 +237,14 @@ async def create_smtp_account(
 @router.get("/google/authorize", response_model=GoogleOAuthUrlResponse)
 async def google_authorize(
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    user: UserPayload = Depends(get_current_user_payload),
 ) -> GoogleOAuthUrlResponse:
     """
     Retorna a URL de autorização OAuth do Google.
     O frontend deve redirecionar o usuário para essa URL.
     """
     try:
-        auth_url = build_google_auth_url(tenant_id)
+        auth_url = build_google_auth_url(tenant_id, user_id=user.user_id)
     except RuntimeError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -236,6 +274,7 @@ async def google_callback(
     # Extrai tenant_id do state HMAC antes de qualquer operação
     try:
         tenant_id = get_tenant_id_from_oauth_state(state)
+        user_id = get_user_id_from_oauth_state(state)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -262,14 +301,29 @@ async def google_callback(
         tenant_id=tenant_id,
         display_name=display_name,
         email_address=email_address,
+        owner_user_id=user_id,
+        created_by_user_id=user_id,
         from_name=from_name,
         provider_type=EmailProviderType.GOOGLE_OAUTH,
         google_refresh_token=encrypted_token,
         daily_send_limit=daily_send_limit,
+        provider_status="connected",
+        connected_at=datetime.now(UTC),
     )
     db.add(account)
     await db.flush()
     await db.refresh(account)
+    await record_account_audit_log(
+        db,
+        tenant_id=tenant_id,
+        account_type="email",
+        account_id=account.id,
+        provider_type=account.provider_type,
+        event_type="connected",
+        actor_user_id=user_id,
+        provider_status=account.provider_status,
+        message="Conta Gmail OAuth conectada.",
+    )
 
     logger.info(
         "email_account.created",
@@ -331,9 +385,22 @@ async def update_email_account(
 async def delete_email_account(
     account_id: uuid.UUID,
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    user: UserPayload | None = Depends(get_optional_user_payload),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> None:
     account = await _get_or_404(account_id, tenant_id, db)
+    await record_account_audit_log(
+        db,
+        tenant_id=tenant_id,
+        account_type="email",
+        account_id=account.id,
+        external_account_id=account.unipile_account_id,
+        provider_type=account.provider_type,
+        event_type="deleted",
+        actor_user_id=user.user_id if user else None,
+        provider_status=account.provider_status,
+        message="Conta de e-mail removida.",
+    )
     await db.delete(account)
     logger.info(
         "email_account.deleted",
@@ -349,6 +416,7 @@ async def delete_email_account(
 async def get_account_status(
     account_id: uuid.UUID,
     tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    user: UserPayload | None = Depends(get_optional_user_payload),
     db: AsyncSession = Depends(get_session_flexible),
 ) -> EmailAccountStatusResponse:
     """Faz um ping no provider para verificar se a conta está funcionando."""
@@ -364,6 +432,22 @@ async def get_account_status(
     except Exception as exc:
         is_reachable = False
         error = str(exc)
+
+    account.last_health_check_at = datetime.now(UTC)
+    account.health_error = error
+    account.provider_status = "ok" if is_reachable else "error"
+    await record_account_audit_log(
+        db,
+        tenant_id=tenant_id,
+        account_type="email",
+        account_id=account.id,
+        external_account_id=account.unipile_account_id,
+        provider_type=account.provider_type,
+        event_type="health_check_ok" if is_reachable else "health_check_failed",
+        actor_user_id=user.user_id if user else None,
+        provider_status=account.provider_status,
+        message=error,
+    )
 
     return EmailAccountStatusResponse(
         account_id=account.id,

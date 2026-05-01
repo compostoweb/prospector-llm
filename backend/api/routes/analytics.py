@@ -12,6 +12,7 @@ Endpoints:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated, cast
 from uuid import UUID
@@ -25,11 +26,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.dependencies import get_effective_tenant_id, get_session_flexible
 from models.cadence import Cadence
 from models.cadence_step import CadenceStep
-from models.enums import Channel, InteractionDirection, LeadStatus, ManualTaskStatus, StepStatus
+from models.email_account import EmailAccount
+from models.enums import (
+    Channel,
+    Intent,
+    InteractionDirection,
+    LeadStatus,
+    ManualTaskStatus,
+    StepStatus,
+)
 from models.interaction import Interaction
 from models.lead import Lead
 from models.lead_email import LeadEmail
+from models.linkedin_account import LinkedInAccount
 from models.manual_task import ManualTask
+from models.tenant_user import TenantUser
+from models.user import User
 from services.cadence_manager import CadenceManager
 from services.reply_matching import (
     AMBIGUOUS_REPLY_HOLD_REASON,
@@ -165,6 +177,48 @@ class CadenceAnalyticsResponse(BaseModel):
     step_breakdown: list[CadenceAnalyticsStepItem] = []
 
 
+class TeamUserAnalyticsItem(BaseModel):
+    user_id: str
+    email: str
+    name: str | None = None
+    role: str
+    is_active: bool
+    email_accounts: int = 0
+    linkedin_accounts: int = 0
+    reconnect_required_accounts: int = 0
+    steps_sent: int = 0
+    email_sent: int = 0
+    linkedin_sent: int = 0
+    manual_tasks_sent: int = 0
+    replies: int = 0
+    interested_replies: int = 0
+    reply_rate: float = 0.0
+    last_activity_at: str | None = None
+
+
+class TeamAnalyticsResponse(BaseModel):
+    users: list[TeamUserAnalyticsItem]
+    total_users: int = 0
+    active_users: int = 0
+    steps_sent: int = 0
+    replies: int = 0
+    reply_rate: float = 0.0
+
+
+@dataclass
+class _TeamUserMetrics:
+    email_accounts: int = 0
+    linkedin_accounts: int = 0
+    reconnect_required_accounts: int = 0
+    steps_sent: int = 0
+    email_sent: int = 0
+    linkedin_sent: int = 0
+    manual_tasks_sent: int = 0
+    replies: int = 0
+    interested_replies: int = 0
+    last_activity_at: datetime | None = None
+
+
 # ── Helpers ───────────────────────────────────────────────────────────
 
 
@@ -212,6 +266,26 @@ def _safe_rate(numerator: int, denominator: int) -> float:
     if denominator <= 0:
         return 0.0
     return round((numerator / denominator) * 100, 1)
+
+
+def _is_linkedin_channel(channel_column):
+    return channel_column.in_(
+        [
+            Channel.LINKEDIN_CONNECT,
+            Channel.LINKEDIN_DM,
+            Channel.LINKEDIN_POST_REACTION,
+            Channel.LINKEDIN_POST_COMMENT,
+            Channel.LINKEDIN_INMAIL,
+        ]
+    )
+
+
+def _account_owner_expr(channel_column):
+    return case(
+        (channel_column == Channel.EMAIL, EmailAccount.owner_user_id),
+        (_is_linkedin_channel(channel_column), LinkedInAccount.owner_user_id),
+        else_=None,
+    )
 
 
 def _countable_skipped_cadence_step_condition():
@@ -721,6 +795,273 @@ async def get_dashboard_stats(
         leads_converted_trend=0.0,
         steps_sent_trend=_trend(steps_sent_period, steps_prev_period),
         replies_trend=_trend(replies_period, replies_prev_period),
+    )
+
+
+@router.get("/team/users", response_model=TeamAnalyticsResponse)
+async def get_team_user_analytics(
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
+    start_date: Annotated[date | None, Query()] = None,
+    end_date: Annotated[date | None, Query()] = None,
+    db: AsyncSession = Depends(get_session_flexible),
+    tenant_id: UUID = Depends(get_effective_tenant_id),
+) -> TeamAnalyticsResponse:
+    """Retorna métricas de atividade por usuário do tenant."""
+    since, until = _resolve_period_bounds(days=days, start_date=start_date, end_date=end_date)
+
+    members_q = await db.execute(
+        select(
+            User.id.label("user_id"),
+            User.email,
+            User.name,
+            TenantUser.role,
+            TenantUser.is_active.label("membership_active"),
+            User.is_active.label("user_active"),
+        )
+        .join(TenantUser, TenantUser.user_id == User.id)
+        .where(TenantUser.tenant_id == tenant_id)
+        .order_by(TenantUser.is_active.desc(), User.name.asc().nulls_last(), User.email.asc())
+    )
+    members = members_q.all()
+
+    metrics: dict[UUID, _TeamUserMetrics] = {
+        member_row.user_id: _TeamUserMetrics() for member_row in members
+    }
+
+    def _ensure_user(user_id: UUID | None) -> _TeamUserMetrics | None:
+        if user_id is None:
+            return None
+        return metrics.setdefault(user_id, _TeamUserMetrics())
+
+    def _add_metric(user_id: UUID | None, field: str, value: int | None) -> None:
+        user_metrics = _ensure_user(user_id)
+        if user_metrics is None:
+            return
+        current = getattr(user_metrics, field)
+        setattr(user_metrics, field, int(current or 0) + int(value or 0))
+
+    def _touch_last_activity(user_id: UUID | None, activity_at: datetime | None) -> None:
+        user_metrics = _ensure_user(user_id)
+        if user_metrics is None or activity_at is None:
+            return
+        current = user_metrics.last_activity_at
+        if current is None or activity_at > current:
+            user_metrics.last_activity_at = activity_at
+
+    email_accounts_q = await db.execute(
+        select(
+            EmailAccount.owner_user_id,
+            func.count(EmailAccount.id).label("account_count"),
+            func.count(EmailAccount.id)
+            .filter(EmailAccount.reconnect_required_at.is_not(None))
+            .label("reconnect_count"),
+        )
+        .where(
+            EmailAccount.tenant_id == tenant_id,
+            EmailAccount.owner_user_id.is_not(None),
+            EmailAccount.is_active.is_(True),
+        )
+        .group_by(EmailAccount.owner_user_id)
+    )
+    for account_row in email_accounts_q.all():
+        _add_metric(account_row.owner_user_id, "email_accounts", account_row.account_count)
+        _add_metric(
+            account_row.owner_user_id,
+            "reconnect_required_accounts",
+            account_row.reconnect_count,
+        )
+
+    linkedin_accounts_q = await db.execute(
+        select(
+            LinkedInAccount.owner_user_id,
+            func.count(LinkedInAccount.id).label("account_count"),
+            func.count(LinkedInAccount.id)
+            .filter(LinkedInAccount.reconnect_required_at.is_not(None))
+            .label("reconnect_count"),
+        )
+        .where(
+            LinkedInAccount.tenant_id == tenant_id,
+            LinkedInAccount.owner_user_id.is_not(None),
+            LinkedInAccount.is_active.is_(True),
+        )
+        .group_by(LinkedInAccount.owner_user_id)
+    )
+    for account_row in linkedin_accounts_q.all():
+        _add_metric(account_row.owner_user_id, "linkedin_accounts", account_row.account_count)
+        _add_metric(
+            account_row.owner_user_id,
+            "reconnect_required_accounts",
+            account_row.reconnect_count,
+        )
+
+    step_owner = _account_owner_expr(CadenceStep.channel)
+    sent_steps_q = await db.execute(
+        select(
+            step_owner.label("owner_user_id"),
+            func.count(CadenceStep.id).label("sent_count"),
+            func.count(CadenceStep.id)
+            .filter(CadenceStep.channel == Channel.EMAIL)
+            .label("email_sent"),
+            func.count(CadenceStep.id)
+            .filter(_is_linkedin_channel(CadenceStep.channel))
+            .label("linkedin_sent"),
+            func.max(CadenceStep.sent_at).label("last_activity_at"),
+        )
+        .select_from(CadenceStep)
+        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
+        .outerjoin(EmailAccount, EmailAccount.id == Cadence.email_account_id)
+        .outerjoin(LinkedInAccount, LinkedInAccount.id == Cadence.linkedin_account_id)
+        .where(
+            CadenceStep.tenant_id == tenant_id,
+            Cadence.tenant_id == tenant_id,
+            CadenceStep.status.in_([StepStatus.SENT, StepStatus.REPLIED]),
+            CadenceStep.sent_at >= since,
+            CadenceStep.sent_at < until,
+        )
+        .group_by(step_owner)
+    )
+    for step_row in sent_steps_q.all():
+        _add_metric(step_row.owner_user_id, "steps_sent", step_row.sent_count)
+        _add_metric(step_row.owner_user_id, "email_sent", step_row.email_sent)
+        _add_metric(step_row.owner_user_id, "linkedin_sent", step_row.linkedin_sent)
+        _touch_last_activity(step_row.owner_user_id, step_row.last_activity_at)
+
+    manual_owner = _account_owner_expr(ManualTask.channel)
+    manual_steps_q = await db.execute(
+        select(
+            manual_owner.label("owner_user_id"),
+            func.count(ManualTask.id).label("sent_count"),
+            func.count(ManualTask.id)
+            .filter(ManualTask.channel == Channel.EMAIL)
+            .label("email_sent"),
+            func.count(ManualTask.id)
+            .filter(_is_linkedin_channel(ManualTask.channel))
+            .label("linkedin_sent"),
+            func.max(ManualTask.sent_at).label("last_activity_at"),
+        )
+        .select_from(ManualTask)
+        .join(Cadence, Cadence.id == ManualTask.cadence_id)
+        .outerjoin(EmailAccount, EmailAccount.id == Cadence.email_account_id)
+        .outerjoin(LinkedInAccount, LinkedInAccount.id == Cadence.linkedin_account_id)
+        .where(
+            ManualTask.tenant_id == tenant_id,
+            Cadence.tenant_id == tenant_id,
+            ManualTask.status.in_(_MANUAL_TASK_SENT_STATUSES),
+            ManualTask.sent_at.is_not(None),
+            ManualTask.sent_at >= since,
+            ManualTask.sent_at < until,
+        )
+        .group_by(manual_owner)
+    )
+    for step_row in manual_steps_q.all():
+        _add_metric(step_row.owner_user_id, "steps_sent", step_row.sent_count)
+        _add_metric(step_row.owner_user_id, "email_sent", step_row.email_sent)
+        _add_metric(step_row.owner_user_id, "linkedin_sent", step_row.linkedin_sent)
+        _add_metric(step_row.owner_user_id, "manual_tasks_sent", step_row.sent_count)
+        _touch_last_activity(step_row.owner_user_id, step_row.last_activity_at)
+
+    reply_owner = _account_owner_expr(CadenceStep.channel)
+    replies_q = await db.execute(
+        select(
+            reply_owner.label("owner_user_id"),
+            func.count(Interaction.id).label("reply_count"),
+            func.count(Interaction.id)
+            .filter(Interaction.intent == Intent.INTEREST)
+            .label("interested_count"),
+            func.max(Interaction.created_at).label("last_activity_at"),
+        )
+        .select_from(Interaction)
+        .join(CadenceStep, CadenceStep.id == Interaction.cadence_step_id)
+        .join(Cadence, Cadence.id == CadenceStep.cadence_id)
+        .outerjoin(EmailAccount, EmailAccount.id == Cadence.email_account_id)
+        .outerjoin(LinkedInAccount, LinkedInAccount.id == Cadence.linkedin_account_id)
+        .where(
+            Interaction.tenant_id == tenant_id,
+            CadenceStep.tenant_id == tenant_id,
+            Cadence.tenant_id == tenant_id,
+            _reliable_reply_interaction_condition(),
+            Interaction.created_at >= since,
+            Interaction.created_at < until,
+        )
+        .group_by(reply_owner)
+    )
+    for reply_row in replies_q.all():
+        _add_metric(reply_row.owner_user_id, "replies", reply_row.reply_count)
+        _add_metric(reply_row.owner_user_id, "interested_replies", reply_row.interested_count)
+        _touch_last_activity(reply_row.owner_user_id, reply_row.last_activity_at)
+
+    manual_reply_owner = _account_owner_expr(ManualTask.channel)
+    manual_replies_q = await db.execute(
+        select(
+            manual_reply_owner.label("owner_user_id"),
+            func.count(Interaction.id).label("reply_count"),
+            func.count(Interaction.id)
+            .filter(Interaction.intent == Intent.INTEREST)
+            .label("interested_count"),
+            func.max(Interaction.created_at).label("last_activity_at"),
+        )
+        .select_from(Interaction)
+        .join(ManualTask, ManualTask.id == Interaction.manual_task_id)
+        .join(Cadence, Cadence.id == ManualTask.cadence_id)
+        .outerjoin(EmailAccount, EmailAccount.id == Cadence.email_account_id)
+        .outerjoin(LinkedInAccount, LinkedInAccount.id == Cadence.linkedin_account_id)
+        .where(
+            Interaction.tenant_id == tenant_id,
+            ManualTask.tenant_id == tenant_id,
+            Cadence.tenant_id == tenant_id,
+            _reliable_manual_task_reply_condition(),
+            Interaction.created_at >= since,
+            Interaction.created_at < until,
+        )
+        .group_by(manual_reply_owner)
+    )
+    for reply_row in manual_replies_q.all():
+        _add_metric(reply_row.owner_user_id, "replies", reply_row.reply_count)
+        _add_metric(reply_row.owner_user_id, "interested_replies", reply_row.interested_count)
+        _touch_last_activity(reply_row.owner_user_id, reply_row.last_activity_at)
+
+    users: list[TeamUserAnalyticsItem] = []
+    for member_row in members:
+        user_metrics = metrics[member_row.user_id]
+        steps_sent = user_metrics.steps_sent
+        replies = user_metrics.replies
+        last_activity_at = user_metrics.last_activity_at
+        users.append(
+            TeamUserAnalyticsItem(
+                user_id=str(member_row.user_id),
+                email=member_row.email,
+                name=member_row.name,
+                role=member_row.role.value
+                if hasattr(member_row.role, "value")
+                else str(member_row.role),
+                is_active=bool(member_row.membership_active and member_row.user_active),
+                email_accounts=user_metrics.email_accounts,
+                linkedin_accounts=user_metrics.linkedin_accounts,
+                reconnect_required_accounts=user_metrics.reconnect_required_accounts,
+                steps_sent=steps_sent,
+                email_sent=user_metrics.email_sent,
+                linkedin_sent=user_metrics.linkedin_sent,
+                manual_tasks_sent=user_metrics.manual_tasks_sent,
+                replies=replies,
+                interested_replies=user_metrics.interested_replies,
+                reply_rate=_safe_rate(replies, steps_sent),
+                last_activity_at=(
+                    last_activity_at.isoformat() if isinstance(last_activity_at, datetime) else None
+                ),
+            )
+        )
+
+    total_steps_sent = sum(user.steps_sent for user in users)
+    total_replies = sum(user.replies for user in users)
+
+    logger.debug("analytics.team_users", tenant_id=str(tenant_id), days=days)
+    return TeamAnalyticsResponse(
+        users=users,
+        total_users=len(users),
+        active_users=sum(1 for user in users if user.is_active),
+        steps_sent=total_steps_sent,
+        replies=total_replies,
+        reply_rate=_safe_rate(total_replies, total_steps_sent),
     )
 
 

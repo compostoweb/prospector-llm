@@ -62,6 +62,7 @@ dependencies = [
 
     # Email transacional (notificações)
     "resend>=2.0.0",
+    "aiosmtplib>=3.0.0",
 
     # PDFs de diagnóstico
     "reportlab>=4.2.0",
@@ -83,6 +84,7 @@ dev = [
     "faker>=30.0.0",
     "ruff>=0.7.0",
     "mypy>=1.13.0",
+    "types-python-jose>=3.5.0",
     "pre-commit>=4.0.0",
 ]
 

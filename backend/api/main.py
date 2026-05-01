@@ -25,6 +25,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from api.routes import account_audit_logs as account_audit_logs_router
 from api.routes import admin_users as admin_users_router
 from api.routes import analytics as analytics_router
 from api.routes import audio as audio_router
@@ -272,6 +273,7 @@ async def log_requests(
 # ── Routers ───────────────────────────────────────────────────────────
 
 app.include_router(auth_router.router)
+app.include_router(account_audit_logs_router.router)
 app.include_router(analytics_router.router)
 app.include_router(llm_usage_analytics_router.router)
 app.include_router(audio_router.router)

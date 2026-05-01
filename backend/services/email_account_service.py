@@ -21,6 +21,7 @@ import json
 import re
 import uuid
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlencode
 
 import httpx
 import structlog
@@ -30,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import settings
 from models.email_account import EmailAccount
 from models.enums import EmailProviderType
+from models.user import User
 
 logger = structlog.get_logger()
 
@@ -154,16 +156,18 @@ _GOOGLE_OAUTH_SCOPES = [
 ]
 
 
-def _build_oauth_state(tenant_id: uuid.UUID) -> str:
+def _build_oauth_state(tenant_id: uuid.UUID, user_id: uuid.UUID | None = None) -> str:
     """
     Gera estado OAuth assinado com HMAC-SHA256.
-    Formato JSON: {"tid": "<tenant_id>", "exp": <unix_ts>}
+    Formato JSON: {"tid": "<tenant_id>", "uid": "<user_id>", "exp": <unix_ts>}
     Assinado com SECRET_KEY + prefixo "oauth-email-state:".
     """
     payload = {
         "tid": str(tenant_id),
         "exp": int((datetime.now(UTC) + timedelta(minutes=15)).timestamp()),
     }
+    if user_id is not None:
+        payload["uid"] = str(user_id)
     payload_b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
 
     sig = hmac.new(
@@ -213,12 +217,24 @@ def get_tenant_id_from_oauth_state(state: str) -> uuid.UUID:
     return uuid.UUID(payload["tid"])
 
 
-def build_google_auth_url(tenant_id: uuid.UUID) -> str:
+def get_user_id_from_oauth_state(state: str) -> uuid.UUID | None:
+    """
+    Valida o state OAuth HMAC e extrai o user_id opcional.
+    Lança ValueError se inválido ou expirado.
+    """
+    payload = _verify_oauth_state(state)
+    if payload is None:
+        raise ValueError("Estado OAuth inválido ou expirado")
+    user_id = payload.get("uid")
+    return uuid.UUID(user_id) if user_id else None
+
+
+def build_google_auth_url(tenant_id: uuid.UUID, user_id: uuid.UUID | None = None) -> str:
     """Constrói a URL de autorização OAuth do Google."""
     if not settings.GOOGLE_CLIENT_ID_EMAIL:
         raise RuntimeError("GOOGLE_CLIENT_ID_EMAIL não configurado no .env")
 
-    state = _build_oauth_state(tenant_id)
+    state = _build_oauth_state(tenant_id, user_id=user_id)
     scope = " ".join(_GOOGLE_OAUTH_SCOPES)
 
     params = {
@@ -231,7 +247,7 @@ def build_google_auth_url(tenant_id: uuid.UUID) -> str:
         "state": state,
     }
 
-    query = "&".join(f"{k}={v}" for k, v in params.items())
+    query = urlencode(params)
     return f"https://accounts.google.com/o/oauth2/v2/auth?{query}"
 
 
@@ -399,11 +415,26 @@ async def build_email_account_response(
     from schemas.email_account import EmailAccountResponse  # noqa: PLC0415
 
     effective_account = await resolve_outbound_email_account(db, account)
+    owner_email: str | None = None
+    owner_name: str | None = None
+    if account.owner_user_id:
+        owner_result = await db.execute(
+            select(User.email, User.name).where(User.id == account.owner_user_id)
+        )
+        owner = owner_result.one_or_none()
+        if owner is not None:
+            owner_email = owner.email
+            owner_name = owner.name
+
     return EmailAccountResponse(
         id=account.id,
         tenant_id=account.tenant_id,
         display_name=account.display_name,
         email_address=account.email_address,
+        owner_user_id=account.owner_user_id,
+        owner_email=owner_email,
+        owner_name=owner_name,
+        created_by_user_id=account.created_by_user_id,
         from_name=account.from_name,
         provider_type=account.provider_type,
         effective_provider_type=effective_account.provider_type,
@@ -418,6 +449,13 @@ async def build_email_account_response(
         imap_use_ssl=account.imap_use_ssl,
         daily_send_limit=account.daily_send_limit,
         is_active=account.is_active,
+        provider_status=account.provider_status,
+        last_status_at=account.last_status_at,
+        last_health_check_at=account.last_health_check_at,
+        health_error=account.health_error,
+        connected_at=account.connected_at,
+        disconnected_at=account.disconnected_at,
+        reconnect_required_at=account.reconnect_required_at,
         is_warmup_enabled=account.is_warmup_enabled,
         email_signature=account.email_signature,
         created_at=account.created_at,

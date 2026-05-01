@@ -169,6 +169,35 @@ def get_current_user_payload(
         raise credentials_exception
 
 
+def get_optional_user_payload(
+    token: str = Depends(oauth2_scheme),
+) -> UserPayload | None:
+    """
+    Retorna o payload apenas quando o JWT é de usuário humano.
+    Tokens de tenant continuam válidos para rotas flexíveis, mas sem actor/owner.
+    """
+    try:
+        payload = decode_token(token)
+        if payload.get("type") != "user":
+            return None
+        user_id_str: str | None = payload.get("user_id")
+        email: str | None = payload.get("email")
+        if not user_id_str or not email:
+            return None
+        return UserPayload(
+            user_id=uuid.UUID(user_id_str),
+            email=email,
+            is_superuser=bool(payload.get("is_superuser", False)),
+            name=payload.get("name"),
+            tenant_id=uuid.UUID(payload["tenant_id"]) if payload.get("tenant_id") else None,
+            tenant_role=(
+                TenantRole(payload["tenant_role"]) if payload.get("tenant_role") else None
+            ),
+        )
+    except (JWTError, ValueError):
+        return None
+
+
 async def require_superuser(
     user: UserPayload = Depends(get_current_user_payload),
 ) -> UserPayload:
