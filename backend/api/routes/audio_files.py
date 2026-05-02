@@ -15,6 +15,8 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible
+from core.config import settings
+from core.file_security import detect_audio_content_type
 from integrations.s3_client import s3_client
 from models.audio_file import AudioFile
 from schemas.audio_file import (
@@ -30,6 +32,37 @@ router = APIRouter(prefix="/audio-files", tags=["Audio Files"])
 
 _MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 _ALLOWED_TYPES = {"audio/mpeg", "audio/wav", "audio/mp3", "audio/ogg", "audio/webm", "audio/x-wav", "audio/mp4"}
+
+
+def _build_audio_file_response(audio_file: AudioFile) -> AudioFileResponse:
+    resolved_url = audio_file.url
+    if s3_client is not None and audio_file.s3_key:
+        try:
+            resolved_url = s3_client.generate_presigned_url(
+                audio_file.s3_key,
+                expiry_seconds=settings.S3_PRIVATE_URL_EXPIRY_SECONDS,
+            )
+        except Exception as exc:
+            logger.warning(
+                "audio_file.presigned_url_failed",
+                audio_file_id=str(audio_file.id),
+                s3_key=audio_file.s3_key,
+                error=str(exc),
+            )
+
+    return AudioFileResponse(
+        id=audio_file.id,
+        tenant_id=audio_file.tenant_id,
+        name=audio_file.name,
+        s3_key=audio_file.s3_key,
+        url=resolved_url,
+        content_type=audio_file.content_type,
+        size_bytes=audio_file.size_bytes,
+        duration_seconds=audio_file.duration_seconds,
+        language=audio_file.language,
+        created_at=audio_file.created_at,
+        updated_at=audio_file.updated_at,
+    )
 
 
 @router.post("", response_model=AudioFileUploadResponse, status_code=status.HTTP_201_CREATED)
@@ -70,6 +103,29 @@ async def upload_audio_file(
             detail="Arquivo vazio.",
         )
 
+    detected_content_type = detect_audio_content_type(data)
+    if detected_content_type is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Arquivo de audio invalido ou formato nao reconhecido.",
+        )
+
+    if detected_content_type != content_type:
+        compatible_types = {detected_content_type}
+        if detected_content_type == "audio/mpeg":
+            compatible_types.add("audio/mp3")
+        if detected_content_type == "audio/wav":
+            compatible_types.add("audio/x-wav")
+        if content_type not in compatible_types:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Conteudo do arquivo nao corresponde ao content_type enviado. "
+                    f"Detectado: {detected_content_type}; recebido: {content_type}."
+                ),
+            )
+        content_type = detected_content_type
+
     # Upload para S3
     filename = file.filename or "audio.mp3"
     s3_key, url = s3_client.upload_audio(
@@ -103,7 +159,7 @@ async def upload_audio_file(
     )
 
     return AudioFileUploadResponse(
-        audio_file=AudioFileResponse.model_validate(audio_file),
+        audio_file=_build_audio_file_response(audio_file),
     )
 
 
@@ -126,7 +182,7 @@ async def list_audio_files(
     total = count_result.scalar() or 0
 
     return AudioFileListResponse(
-        items=[AudioFileResponse.model_validate(af) for af in items],
+        items=[_build_audio_file_response(af) for af in items],
         total=total,
     )
 
@@ -147,7 +203,7 @@ async def get_audio_file(
     af = result.scalar_one_or_none()
     if af is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Áudio não encontrado.")
-    return AudioFileResponse.model_validate(af)
+    return _build_audio_file_response(af)
 
 
 @router.patch("/{audio_file_id}", response_model=AudioFileResponse)
@@ -175,7 +231,7 @@ async def update_audio_file(
 
     await db.commit()
     await db.refresh(af)
-    return AudioFileResponse.model_validate(af)
+    return _build_audio_file_response(af)
 
 
 @router.delete("/{audio_file_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)

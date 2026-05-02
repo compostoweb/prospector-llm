@@ -119,6 +119,8 @@ reportUntypedFunctionDecorator = false
 # structlog usa magic methods que não possuem stubs; pacote instalado em runtime
 reportMissingModuleSource = false
 reportMissingImports = false
+# dependências runtime como passlib/boto3 não publicam stubs completos
+reportMissingTypeStubs = false
 # Celery .delay() não está tipado nos stubs do celery
 reportAttributeAccessIssue = false
 # structlog — tipos dinâmicos

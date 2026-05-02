@@ -8,6 +8,25 @@ import {
 } from "./storage";
 import type { ExtensionBootstrap, ExtensionSession } from "../shared/types";
 
+function parseExpectedIdentityRedirectOrigin(): URL {
+  return new URL(chrome.identity.getRedirectURL());
+}
+
+function validateAuthFlowRedirectUrl(redirectUrl: string): URL {
+  const callbackUrl = new URL(redirectUrl);
+  const expectedUrl = parseExpectedIdentityRedirectOrigin();
+
+  if (callbackUrl.origin !== expectedUrl.origin) {
+    throw new Error("Origem de callback OAuth inesperada.");
+  }
+
+  if (!callbackUrl.pathname.startsWith(expectedUrl.pathname)) {
+    throw new Error("Path de callback OAuth inesperado.");
+  }
+
+  return callbackUrl;
+}
+
 function getExtensionVersion(): string {
   return chrome.runtime.getManifest().version;
 }
@@ -28,7 +47,7 @@ export async function loginWithGoogle(): Promise<{
     throw new Error("Fluxo OAuth nao retornou redirect final.");
   }
 
-  const callbackUrl = new URL(redirectUrl);
+  const callbackUrl = validateAuthFlowRedirectUrl(redirectUrl);
   const error = callbackUrl.searchParams.get("error");
   if (error) {
     throw new Error(error);

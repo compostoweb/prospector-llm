@@ -48,6 +48,7 @@ from api.routes import llm_usage_analytics as llm_usage_analytics_router
 from api.routes import manual_tasks as manual_tasks_router
 from api.routes import pipedrive as pipedrive_router
 from api.routes import sandbox as sandbox_router
+from api.routes import security_audit_logs as security_audit_logs_router
 from api.routes import tenants as tenants_router
 from api.routes import tts as tts_router
 from api.routes import warmup as warmup_router
@@ -61,6 +62,17 @@ from core.logging import configure_logging
 from core.redis_client import redis_client
 
 logger = structlog.get_logger()
+
+_ALLOWED_CORS_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+_ALLOWED_CORS_HEADERS = [
+    "Authorization",
+    "Content-Type",
+    "Accept",
+    "Origin",
+    "Cache-Control",
+    "Pragma",
+    "X-Requested-With",
+]
 
 
 def _resolve_allowed_origins(origins: list[str]) -> list[str]:
@@ -243,8 +255,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_resolve_allowed_origins(settings.ALLOWED_ORIGINS),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=_ALLOWED_CORS_METHODS,
+    allow_headers=_ALLOWED_CORS_HEADERS,
 )
 
 
@@ -274,6 +286,7 @@ async def log_requests(
 
 app.include_router(auth_router.router)
 app.include_router(account_audit_logs_router.router)
+app.include_router(security_audit_logs_router.router)
 app.include_router(analytics_router.router)
 app.include_router(llm_usage_analytics_router.router)
 app.include_router(audio_router.router)

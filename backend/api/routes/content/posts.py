@@ -38,6 +38,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible, get_session_no_auth
+from core.file_security import (
+    detect_image_content_type,
+    detect_video_content_type,
+    pick_image_extension,
+    pick_video_extension,
+    sanitize_download_filename,
+)
 from models.content_post import ContentPost
 from schemas.content import (
     ContentPostCreate,
@@ -48,6 +55,7 @@ from schemas.content import (
 )
 from services.content.linkedin_client import LinkedInClientError
 from services.content.publisher import delete_from_linkedin
+from services.security_audit_log_service import record_security_audit_log
 
 logger = structlog.get_logger()
 
@@ -548,6 +556,16 @@ async def delete_post_image(
     post.image_size_bytes = None
     post.linkedin_image_urn = None
 
+    await record_security_audit_log(
+        db,
+        scope_tenant_id=tenant_id,
+        event_type="content.post_image_delete",
+        resource_type="content_post",
+        resource_id=str(post_id),
+        action="delete_image",
+        status="success",
+        message="Imagem do post removida.",
+    )
     await db.commit()
     logger.info("content.post_image_deleted", post_id=str(post_id), tenant_id=str(tenant_id))
 
@@ -556,6 +574,7 @@ async def delete_post_image(
 
 _MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB
 _ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+_ALLOWED_VIDEO_TYPES = {"video/mp4", "video/quicktime"}
 
 
 @router.post(
@@ -591,17 +610,33 @@ async def upload_post_image(
             detail="Imagem excede o limite de 10 MB.",
         )
 
+    detected_content_type = detect_image_content_type(image_bytes)
+    if detected_content_type is None or detected_content_type not in _ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Conteudo do arquivo nao corresponde a uma imagem suportada.",
+        )
+
+    if detected_content_type != file.content_type:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Conteudo do arquivo nao corresponde ao content_type enviado. "
+                f"Detectado: {detected_content_type}; recebido: {file.content_type}."
+            ),
+        )
+
     if post.image_s3_key:
         try:
             S3Client().delete_object(post.image_s3_key)
         except Exception:
             pass
 
-    original_name = file.filename or "image.jpg"
-    ext = original_name.rsplit(".", 1)[-1].lower() if "." in original_name else "jpg"
-    s3_key = f"images/{tenant_id}/{post_id}.{ext}"
+    original_name = sanitize_download_filename(file.filename or "image.jpg", fallback="image.jpg")
+    ext = pick_image_extension(content_type=detected_content_type, original_filename=original_name)
+    s3_key = f"images/{tenant_id}/{post_id}{ext}"
     s3 = S3Client()
-    image_url = s3.upload_bytes(image_bytes, s3_key, file.content_type or "image/jpeg")
+    image_url = s3.upload_bytes(image_bytes, s3_key, detected_content_type)
 
     post.image_url = image_url
     post.image_s3_key = s3_key
@@ -612,8 +647,19 @@ async def upload_post_image(
     post.image_aspect_ratio = None
     post.linkedin_image_urn = None
 
+    await record_security_audit_log(
+        db,
+        scope_tenant_id=tenant_id,
+        event_type="content.post_image_upload",
+        resource_type="content_post",
+        resource_id=str(post_id),
+        action="upload_image",
+        status="success",
+        message="Imagem do post enviada manualmente.",
+        event_metadata={"filename": original_name, "content_type": detected_content_type},
+    )
     await db.commit()
-    await db.refresh(post)
+    post = await _get_post_or_404(post_id, tenant_id, db)
 
     logger.info(
         "content.post_image_uploaded",
@@ -646,7 +692,7 @@ async def upload_post_video(
     """
     from integrations.s3_client import S3Client
 
-    if file.content_type not in ("video/mp4", "video/quicktime"):
+    if file.content_type not in _ALLOWED_VIDEO_TYPES:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Formato inválido. Apenas video/mp4 é aceito.",
@@ -662,6 +708,22 @@ async def upload_post_video(
             detail="Vídeo excede o limite de 150 MB.",
         )
 
+    detected_content_type = detect_video_content_type(video_bytes)
+    if detected_content_type is None or detected_content_type not in _ALLOWED_VIDEO_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Conteudo do arquivo nao corresponde a um video suportado.",
+        )
+
+    if detected_content_type != file.content_type:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Conteudo do arquivo nao corresponde ao content_type enviado. "
+                f"Detectado: {detected_content_type}; recebido: {file.content_type}."
+            ),
+        )
+
     # Remove vídeo anterior do S3
     if post.video_s3_key:
         try:
@@ -669,18 +731,31 @@ async def upload_post_video(
         except Exception:
             pass
 
-    s3_key = f"videos/{tenant_id}/{post_id}.mp4"
+    sanitized_filename = sanitize_download_filename(file.filename or "video.mp4", fallback="video.mp4")
+    ext = pick_video_extension(content_type=detected_content_type, original_filename=sanitized_filename)
+    s3_key = f"videos/{tenant_id}/{post_id}{ext}"
     s3 = S3Client()
-    video_url = s3.upload_bytes(video_bytes, s3_key, "video/mp4")
+    video_url = s3.upload_bytes(video_bytes, s3_key, detected_content_type)
 
     post.video_url = video_url
     post.video_s3_key = s3_key
-    post.video_filename = file.filename or "video.mp4"
+    post.video_filename = sanitized_filename
     post.video_size_bytes = len(video_bytes)
     post.linkedin_video_urn = None  # URN inválido após novo upload
 
+    await record_security_audit_log(
+        db,
+        scope_tenant_id=tenant_id,
+        event_type="content.post_video_upload",
+        resource_type="content_post",
+        resource_id=str(post_id),
+        action="upload_video",
+        status="success",
+        message="Video do post enviado manualmente.",
+        event_metadata={"filename": sanitized_filename, "content_type": detected_content_type},
+    )
     await db.commit()
-    await db.refresh(post)
+    post = await _get_post_or_404(post_id, tenant_id, db)
 
     logger.info(
         "content.post_video_uploaded",
@@ -718,6 +793,16 @@ async def delete_post_video(
     post.video_size_bytes = None
     post.linkedin_video_urn = None
 
+    await record_security_audit_log(
+        db,
+        scope_tenant_id=tenant_id,
+        event_type="content.post_video_delete",
+        resource_type="content_post",
+        resource_id=str(post_id),
+        action="delete_video",
+        status="success",
+        message="Video do post removido.",
+    )
     await db.commit()
     logger.info("content.post_video_deleted", post_id=str(post_id), tenant_id=str(tenant_id))
 

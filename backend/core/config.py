@@ -89,6 +89,54 @@ class Settings(BaseSettings):
     # ── Segurança ─────────────────────────────────────────────────────
     SECRET_KEY: str = Field(..., description="Chave secreta para assinar JWTs")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 dias
+    AUTH_RATE_LIMIT_WINDOW_SECONDS: int = Field(
+        default=300,
+        description="Janela base de rate limit para fluxos de autenticacao, em segundos.",
+    )
+    AUTH_TOKEN_MAX_ATTEMPTS_PER_IP: int = Field(
+        default=20,
+        description="Maximo de tentativas por IP em POST /auth/token dentro da janela.",
+    )
+    AUTH_TOKEN_MAX_ATTEMPTS_PER_SLUG: int = Field(
+        default=10,
+        description="Maximo de tentativas por slug em POST /auth/token dentro da janela.",
+    )
+    GOOGLE_LOGIN_MAX_ATTEMPTS_PER_IP: int = Field(
+        default=20,
+        description="Maximo de inicios de login Google por IP dentro da janela.",
+    )
+    GOOGLE_CALLBACK_MAX_ATTEMPTS_PER_IP: int = Field(
+        default=20,
+        description="Maximo de callbacks Google por IP dentro da janela.",
+    )
+    AUTH_WEB_SESSION_EXCHANGE_MAX_ATTEMPTS_PER_IP: int = Field(
+        default=30,
+        description="Maximo de trocas de grant web por IP dentro da janela.",
+    )
+    EXTENSION_AUTH_START_MAX_ATTEMPTS_PER_IP: int = Field(
+        default=20,
+        description="Maximo de inicios de sessao da extensao por IP dentro da janela.",
+    )
+    EXTENSION_AUTH_START_MAX_ATTEMPTS_PER_EXTENSION: int = Field(
+        default=30,
+        description="Maximo de inicios de sessao por extension_id dentro da janela.",
+    )
+    EXTENSION_AUTH_CALLBACK_MAX_ATTEMPTS_PER_IP: int = Field(
+        default=20,
+        description="Maximo de callbacks OAuth da extensao por IP dentro da janela.",
+    )
+    EXTENSION_AUTH_CALLBACK_MAX_ATTEMPTS_PER_EXTENSION: int = Field(
+        default=30,
+        description="Maximo de callbacks OAuth por extension_id dentro da janela.",
+    )
+    EXTENSION_AUTH_EXCHANGE_MAX_ATTEMPTS_PER_IP: int = Field(
+        default=30,
+        description="Maximo de trocas de grant da extensao por IP dentro da janela.",
+    )
+    EXTENSION_AUTH_EXCHANGE_MAX_ATTEMPTS_PER_EXTENSION: int = Field(
+        default=30,
+        description="Maximo de trocas de grant por extension_id dentro da janela.",
+    )
     EXTENSION_LINKEDIN_CAPTURE_ENABLED: bool = Field(
         default=False,
         description="Kill switch para captura/importacao via extensao do LinkedIn.",
@@ -223,6 +271,10 @@ class Settings(BaseSettings):
     S3_SECRET_KEY: str | None = None
     S3_BUCKET: str = "prospector"
     S3_REGION: str = "us-east-1"
+    S3_PRIVATE_URL_EXPIRY_SECONDS: int = Field(
+        default=3600,
+        description="TTL padrao das URLs pre-assinadas para objetos privados no S3/MinIO.",
+    )
 
     # ── Rate limits por canal (por tenant/dia) ────────────────────────
     LIMIT_LINKEDIN_CONNECT: int = 20

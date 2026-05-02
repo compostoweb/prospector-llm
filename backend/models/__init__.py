@@ -47,6 +47,7 @@ from models.linkedin_search_param import LinkedInSearchParam  # noqa: F401
 from models.llm_usage_event import LLMUsageEvent  # noqa: F401
 from models.llm_usage_hourly import LLMUsageHourlyAggregate  # noqa: F401
 from models.manual_task import ManualTask  # noqa: F401
+from models.security_audit_log import SecurityAuditLog  # noqa: F401
 from models.sandbox import SandboxRun, SandboxStep  # noqa: F401
 from models.tenant import Tenant, TenantIntegration  # noqa: F401
 from models.tenant_user import TenantUser  # noqa: F401

@@ -21,6 +21,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from api.dependencies import get_tts_registry
+from core.file_security import detect_audio_content_type, sanitize_download_filename
 from integrations.tts import TTSRegistry, TTSVoice
 
 logger = structlog.get_logger()
@@ -138,10 +139,22 @@ async def create_voice(
         )
 
     audio_data = await audio.read()
+    if len(audio_data) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Arquivo de referencia vazio.",
+        )
     if len(audio_data) > _MAX_AUDIO_SIZE:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"Arquivo muito grande. Máximo: {_MAX_AUDIO_SIZE // (1024 * 1024)} MB.",
+        )
+
+    detected_content_type = detect_audio_content_type(audio_data)
+    if detected_content_type is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Arquivo de referencia invalido ou formato nao reconhecido.",
         )
 
     voice = await registry.create_voice(
@@ -149,8 +162,8 @@ async def create_voice(
         name=name,
         audio_data=audio_data,
         language=language,
-        filename=audio.filename or "audio",
-        content_type=audio.content_type or "audio/mpeg",
+        filename=sanitize_download_filename(audio.filename or "audio", fallback="audio"),
+        content_type=detected_content_type,
     )
     logger.info("tts.voice.created", provider=provider, voice_id=voice.id, name=name)
     return VoiceResponse.from_tts_voice(voice)
@@ -201,5 +214,9 @@ async def test_tts(
     return Response(
         content=audio_bytes,
         media_type="audio/mpeg",
-        headers={"Content-Disposition": f"inline; filename=tts_test_{uuid.uuid4().hex[:8]}.mp3"},
+        headers={
+            "Content-Disposition": (
+                f"inline; filename={sanitize_download_filename(f'tts_test_{uuid.uuid4().hex[:8]}.mp3', fallback='tts_test.mp3')}"
+            )
+        },
     )

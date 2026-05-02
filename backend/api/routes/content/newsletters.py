@@ -36,6 +36,7 @@ from api.dependencies import (
     get_llm_registry,
     get_session_flexible,
 )
+from core.file_security import detect_image_content_type, pick_image_extension
 from integrations.llm import LLMRegistry
 from models.content_article import ContentArticle
 from models.content_newsletter import ContentNewsletter
@@ -324,9 +325,29 @@ async def upload_cover(
     if len(payload) > _MAX_IMAGE_SIZE:
         raise HTTPException(status_code=413, detail="Imagem maior que 10MB")
 
+    detected_content_type = detect_image_content_type(payload)
+    if detected_content_type is None or detected_content_type not in _ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail="Conteudo do arquivo nao corresponde a uma imagem suportada.",
+        )
+
+    if detected_content_type != file.content_type:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Conteudo do arquivo nao corresponde ao content_type enviado. "
+                f"Detectado: {detected_content_type}; recebido: {file.content_type}."
+            ),
+        )
+
     s3 = S3Client()
-    key = f"newsletters/{tenant_id}/{nid}/cover-{uuid.uuid4().hex}"
-    url = s3.upload_bytes(payload, key, content_type=file.content_type or "image/jpeg")
+    ext = pick_image_extension(
+        content_type=detected_content_type,
+        original_filename=file.filename or "cover.jpg",
+    )
+    key = f"newsletters/{tenant_id}/{nid}/cover-{uuid.uuid4().hex}{ext}"
+    url = s3.upload_bytes(payload, key, content_type=detected_content_type)
 
     if obj.cover_image_s3_key:
         try:

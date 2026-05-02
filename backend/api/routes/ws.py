@@ -3,28 +3,22 @@ api/routes/ws.py
 
 WebSocket endpoint para eventos em tempo real.
 
-Aceita conexão autenticada via token JWT no query param.
-Mantém a conexão aberta com pings periódicos.
-Publica eventos para clientes conectados (inbox, tarefas, conexões).
-
-NOTA DE SEGURANÇA — Token no query param:
-  Browsers não permitem headers customizados (Authorization) em WebSocket.
-  Por isso o JWT é enviado via ?token=. Mitigações adotadas:
-    1. Tokens JWT têm expiração curta (minutos)
-    2. Token é validado ANTES de aceitar a conexão (rejeita 1008)
-    3. Em produção, a conexão é sobre WSS (TLS) — param não vaza em rede
-  Alternativa futura: usar cookie httpOnly ou ticket endpoint de uso único.
+Aceita conexão autenticada preferencialmente via ticket curto single-use no query param.
+Mantém compatibilidade temporária com JWT em `token`, mas o frontend principal deve
+usar `ticket` emitido pelo backend para evitar expor JWT longo em URL.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from typing import Any
 
 import structlog
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 
+from core.redis_client import redis_client
 from core.security import decode_token
 
 logger = structlog.get_logger()
@@ -40,6 +34,7 @@ _EVENT_TYPE_ALIASES = {
 
 # Registry de conexões ativas — {tenant_id: set of websockets}
 _connections: dict[str, set[WebSocket]] = {}
+_WS_TICKET_PREFIX = "ws_auth_ticket:"
 
 
 async def broadcast_event(tenant_id: str, event: dict[str, Any]) -> None:
@@ -89,15 +84,27 @@ def _normalize_event_payload(tenant_id: str, event: dict[str, Any]) -> dict[str,
 @router.websocket("/ws/events")
 async def ws_events(
     websocket: WebSocket,
-    token: str = Query(...),
+    ticket: str | None = Query(default=None),
+    token: str | None = Query(default=None),
 ) -> None:
     """
     WebSocket autenticado para push de eventos em tempo real.
-    O token JWT é validado antes de aceitar a conexão.
+    O ticket curto é validado antes de aceitar a conexão.
     """
-    # Validar token antes de aceitar
     try:
-        payload = decode_token(token)
+        if ticket:
+            raw_ticket = await redis_client.get(f"{_WS_TICKET_PREFIX}{ticket}")
+            if not raw_ticket:
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                return
+            await redis_client.delete(f"{_WS_TICKET_PREFIX}{ticket}")
+            payload = json.loads(raw_ticket)
+        elif token:
+            payload = decode_token(token)
+        else:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+
         if payload.get("type") != "user" and not payload.get("tenant_id"):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return

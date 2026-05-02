@@ -16,16 +16,20 @@ from __future__ import annotations
 
 import io
 import uuid
+from importlib import import_module
+from typing import Any, cast
 
-import boto3
 import structlog
-from boto3.s3.transfer import TransferConfig
-from botocore.config import Config as BotoConfig
-from botocore.exceptions import ClientError
 
 from core.config import settings
+from core.file_security import pick_audio_extension
 
 logger = structlog.get_logger()
+
+boto3 = cast(Any, import_module("boto3"))
+TransferConfig = cast(Any, getattr(import_module("boto3.s3.transfer"), "TransferConfig"))
+BotoConfig = cast(Any, getattr(import_module("botocore.config"), "Config"))
+ClientError = cast(type[Exception], getattr(import_module("botocore.exceptions"), "ClientError"))
 
 
 class S3Client:
@@ -81,8 +85,8 @@ class S3Client:
         Faz upload de arquivo de áudio.
         Retorna (key, url).
         """
-        ext = filename.rsplit(".", 1)[-1] if "." in filename else "mp3"
-        key = f"audio/{tenant_id}/{uuid.uuid4()}.{ext}"
+        ext = pick_audio_extension(content_type=content_type, original_filename=filename)
+        key = f"audio/{tenant_id}/{uuid.uuid4()}{ext}"
         url = self.upload_bytes(data, key, content_type)
         return key, url
 

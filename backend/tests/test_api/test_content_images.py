@@ -185,7 +185,7 @@ async def test_upload_standalone_image_creates_independent_gallery_asset(
         key: str,
         content_type: str,
     ) -> str:
-        assert data == b"fake-upload-bytes"
+        assert data == b"\x89PNG\r\n\x1a\nfake-upload-bytes"
         assert content_type == "image/png"
         return f"https://example.com/{key}"
 
@@ -195,14 +195,14 @@ async def test_upload_standalone_image_creates_independent_gallery_asset(
 
     response = await client.post(
         "/api/content/images/upload",
-        files={"file": ("galeria.png", b"fake-upload-bytes", "image/png")},
+        files={"file": ("galeria.png", b"\x89PNG\r\n\x1a\nfake-upload-bytes", "image/png")},
     )
 
     assert response.status_code == 200
     body = response.json()
     assert body["image_url"].startswith("https://example.com/gallery/uploads/")
     assert body["filename"] == "galeria.png"
-    assert body["size_bytes"] == len(b"fake-upload-bytes")
+    assert body["size_bytes"] == len(b"\x89PNG\r\n\x1a\nfake-upload-bytes")
     assert body["image_id"]
 
     posts_after = await db.scalar(select(func.count()).select_from(ContentPost))
@@ -213,6 +213,18 @@ async def test_upload_standalone_image_creates_independent_gallery_asset(
     assert uploaded_image.linked_post_id is None
     assert uploaded_image.source == "uploaded"
     assert uploaded_image.title == "galeria.png"
+
+
+async def test_upload_standalone_image_rejects_mismatched_magic_bytes(
+    client: AsyncClient,
+) -> None:
+    response = await client.post(
+        "/api/content/images/upload",
+        files={"file": ("galeria.png", b"not-an-image", "image/png")},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Conteudo do arquivo nao corresponde a uma imagem suportada."
 
 
 async def test_delete_gallery_image_removes_standalone_asset(

@@ -117,6 +117,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/session/exchange": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Exchange Web Session */
+        post: operations["exchange_web_session_auth_session_exchange_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/extension/session/exchange": {
         parameters: {
             query?: never;
@@ -155,6 +172,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/ws-ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Issue Ws Ticket */
+        post: operations["issue_ws_ticket_auth_ws_ticket_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/account-audit-logs": {
         parameters: {
             query?: never;
@@ -164,6 +198,23 @@ export interface paths {
         };
         /** List Account Audit Logs */
         get: operations["list_account_audit_logs_account_audit_logs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security-audit-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Security Audit Logs */
+        get: operations["list_security_audit_logs_security_audit_logs_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -11485,6 +11536,53 @@ export interface components {
             /** Body Is Html */
             body_is_html: boolean;
         };
+        /** SecurityAuditLogListResponse */
+        SecurityAuditLogListResponse: {
+            /** Items */
+            items?: components["schemas"]["SecurityAuditLogResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /** SecurityAuditLogResponse */
+        SecurityAuditLogResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Scope Tenant Id */
+            scope_tenant_id?: string | null;
+            /** Actor User Id */
+            actor_user_id?: string | null;
+            /** Event Type */
+            event_type: string;
+            /** Resource Type */
+            resource_type: string;
+            /** Resource Id */
+            resource_id?: string | null;
+            /** Action */
+            action: string;
+            /** Status */
+            status: string;
+            /** Message */
+            message?: string | null;
+            /** Ip Address */
+            ip_address?: string | null;
+            /** User Agent */
+            user_agent?: string | null;
+            /** Event Metadata */
+            event_metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /**
          * SendMessageRequest
          * @description Enviar mensagem texto em conversa existente.
@@ -12496,6 +12594,13 @@ export interface components {
              */
             synced_at: string;
         };
+        /** WSTicketResponse */
+        WSTicketResponse: {
+            /** Ticket */
+            ticket: string;
+            /** Expires In */
+            expires_in: number;
+        };
         /** WarmupCampaignCreateRequest */
         WarmupCampaignCreateRequest: {
             /**
@@ -12591,6 +12696,11 @@ export interface components {
             sent_at: string | null;
             /** Replied At */
             replied_at: string | null;
+        };
+        /** WebSessionExchangeRequest */
+        WebSessionExchangeRequest: {
+            /** Grant Code */
+            grant_code: string;
         };
         /** _ExampleLeadMagnetResponse */
         _ExampleLeadMagnetResponse: {
@@ -12922,6 +13032,39 @@ export interface operations {
             };
         };
     };
+    exchange_web_session_auth_session_exchange_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebSessionExchangeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     exchange_extension_session_auth_extension_session_exchange_post: {
         parameters: {
             query?: never;
@@ -12975,6 +13118,26 @@ export interface operations {
             };
         };
     };
+    issue_ws_ticket_auth_ws_ticket_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WSTicketResponse"];
+                };
+            };
+        };
+    };
     list_account_audit_logs_account_audit_logs_get: {
         parameters: {
             query?: {
@@ -12997,6 +13160,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AccountAuditLogListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_security_audit_logs_security_audit_logs_get: {
+        parameters: {
+            query?: {
+                scope_tenant_id?: string | null;
+                event_type?: string | null;
+                resource_type?: string | null;
+                status?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityAuditLogListResponse"];
                 };
             };
             /** @description Validation Error */

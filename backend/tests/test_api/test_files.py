@@ -49,3 +49,11 @@ def test_extract_storage_key_from_bucket_url() -> None:
     )
 
     assert key == "lm-pdfs/tenant-123/arquivo.pdf"
+
+
+def test_proxy_pdf_sanitizes_content_disposition_filename() -> None:
+    from api.routes.files import _build_pdf_embed_headers
+
+    headers = _build_pdf_embed_headers('..\\evil\r\nname.pdf')
+
+    assert headers["Content-Disposition"] == 'inline; filename="evil__name.pdf"'

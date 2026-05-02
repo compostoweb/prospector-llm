@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible
 from core.config import settings
+from core.file_security import detect_pdf_content_type
 from models.content_landing_page import ContentLandingPage
 from models.content_lead_magnet import ContentLeadMagnet
 from models.content_lm_lead import ContentLMLead
@@ -275,9 +276,17 @@ async def upload_lead_magnet_pdf(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail="Arquivo excede o limite de 50 MB.",
         )
+
+    detected_content_type = detect_pdf_content_type(pdf_bytes)
+    if detected_content_type != "application/pdf":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Conteudo do arquivo nao corresponde a um PDF valido.",
+        )
+
     s3_key = f"lm-pdfs/{tenant_id}/{lead_magnet_id}.pdf"
     s3 = S3Client()
-    s3.upload_bytes(pdf_bytes, s3_key, "application/pdf")
+    s3.upload_bytes(pdf_bytes, s3_key, detected_content_type)
     lead_magnet.file_url = s3.get_masked_url(s3_key)
     await db.commit()
     await db.refresh(lead_magnet)

@@ -15,7 +15,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_effective_tenant_id, get_llm_registry, get_session_flexible, get_session_no_auth
-from integrations.llm import LLMMessage, LLMRegistry
+from core.file_security import detect_image_content_type, pick_image_extension
+from integrations.llm import LLMMessage, LLMRegistry, LLMResponse
 from models.content_landing_page import ContentLandingPage
 from models.content_lead_magnet import ContentLeadMagnet
 from schemas.content_inbound import (
@@ -223,14 +224,32 @@ async def upload_lp_image(
             detail="Imagem muito grande. Máximo 10 MB.",
         )
 
-    ext_map = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
-    ext = ext_map[cast(str, file.content_type)]
+    detected_content_type = detect_image_content_type(image_bytes)
+    if detected_content_type is None or detected_content_type not in allowed_mime:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Conteudo do arquivo nao corresponde a uma imagem suportada.",
+        )
+
+    if detected_content_type != file.content_type:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Conteudo do arquivo nao corresponde ao content_type enviado. "
+                f"Detectado: {detected_content_type}; recebido: {file.content_type}."
+            ),
+        )
+
+    ext = pick_image_extension(
+        content_type=detected_content_type,
+        original_filename=file.filename or f"{image_field}.jpg",
+    ).lstrip(".")
     s3_key = f"lm-images/{tenant_id}/{lead_magnet_id}-{image_field}.{ext}"
 
     from integrations.s3_client import S3Client
 
     s3 = S3Client()
-    s3.upload_bytes(image_bytes, s3_key, cast(str, file.content_type))
+    s3.upload_bytes(image_bytes, s3_key, detected_content_type)
     url = s3.get_masked_url(s3_key)
 
     logger.info(
@@ -336,7 +355,7 @@ async def improve_lp_field(
         prompt += f"\n\nContexto adicional: {body.context}"
 
     messages = [LLMMessage(role="user", content=prompt)]
-    response = await registry.complete(
+    llm_response: LLMResponse = await registry.complete(
         messages=messages,
         provider=llm_config.provider,
         model=llm_config.model,
@@ -344,7 +363,7 @@ async def improve_lp_field(
         max_tokens=512,
     )
 
-    improved = response.content.strip()
+    improved = llm_response.text.strip()
     logger.info(
         "content.landing_page.ai_improved",
         field=body.field,

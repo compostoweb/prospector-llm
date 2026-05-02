@@ -22,7 +22,7 @@ from __future__ import annotations
 import uuid
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +31,7 @@ from core.database import AsyncSessionLocal
 from core.security import UserPayload, require_superuser
 from models.user import User
 from schemas.user import UserCreateRequest, UserResponse
+from services.security_audit_log_service import extract_request_audit_context, record_security_audit_log
 
 logger = structlog.get_logger()
 
@@ -65,6 +66,7 @@ async def list_users(
 
 @router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def create_user(
+    request: Request,
     body: UserCreateRequest,
     admin: UserPayload = Depends(require_superuser),
     db: AsyncSession = Depends(_get_raw_session),
@@ -92,6 +94,22 @@ async def create_user(
         is_active=True,
     )
     db.add(user)
+    await db.flush()
+    ip_address, user_agent = extract_request_audit_context(request)
+    await record_security_audit_log(
+        db,
+        scope_tenant_id=None if admin.is_superuser else admin.tenant_id,
+        actor_user_id=admin.user_id,
+        event_type="admin.user_create",
+        resource_type="user",
+        resource_id=str(user.id),
+        action="create",
+        status="success",
+        message="Usuario adicionado a allowlist administrativa.",
+        ip_address=ip_address,
+        user_agent=user_agent,
+        event_metadata={"email": user.email, "is_superuser": user.is_superuser},
+    )
     await db.commit()
     await db.refresh(user)
 
@@ -108,6 +126,7 @@ async def create_user(
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def deactivate_user(
+    request: Request,
     user_id: uuid.UUID,
     admin: UserPayload = Depends(require_superuser),
     db: AsyncSession = Depends(_get_raw_session),
@@ -136,6 +155,21 @@ async def deactivate_user(
         )
 
     user.is_active = False
+    ip_address, user_agent = extract_request_audit_context(request)
+    await record_security_audit_log(
+        db,
+        scope_tenant_id=None if admin.is_superuser else admin.tenant_id,
+        actor_user_id=admin.user_id,
+        event_type="admin.user_deactivate",
+        resource_type="user",
+        resource_id=str(user.id),
+        action="deactivate",
+        status="success",
+        message="Usuario desativado via painel administrativo.",
+        ip_address=ip_address,
+        user_agent=user_agent,
+        event_metadata={"email": user.email},
+    )
     await db.commit()
 
     logger.info(

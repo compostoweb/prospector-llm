@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible
+from core.file_security import detect_image_content_type, pick_image_extension, sanitize_download_filename
 from integrations.s3_client import S3Client
 from models.content_gallery_image import ContentGalleryImage
 from models.content_post import ContentPost
@@ -164,16 +165,38 @@ async def add_carousel_image(
             detail="Imagem excede o limite de 10 MB.",
         )
 
+    detected_content_type = detect_image_content_type(image_bytes)
+    if detected_content_type is None or detected_content_type not in _ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Conteudo do arquivo nao corresponde a uma imagem suportada.",
+        )
+
+    if detected_content_type != file.content_type:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Conteudo do arquivo nao corresponde ao content_type enviado. "
+                f"Detectado: {detected_content_type}; recebido: {file.content_type}."
+            ),
+        )
+
     position = await _next_position(post_id, db)
     group_id = await _resolve_or_create_group_id(post_id, db)
 
-    original_name = file.filename or f"carousel-{position}.jpg"
-    ext = original_name.rsplit(".", 1)[-1].lower() if "." in original_name else "jpg"
+    original_name = sanitize_download_filename(
+        file.filename or f"carousel-{position}.jpg",
+        fallback=f"carousel-{position}.jpg",
+    )
+    ext = pick_image_extension(
+        content_type=detected_content_type,
+        original_filename=original_name,
+    )
     new_image_id = uuid.uuid4()
-    s3_key = f"images/{tenant_id}/carousel/{post_id}/{new_image_id}.{ext}"
+    s3_key = f"images/{tenant_id}/carousel/{post_id}/{new_image_id}{ext}"
 
     image_url = S3Client().upload_bytes(
-        image_bytes, s3_key, file.content_type or "image/jpeg"
+        image_bytes, s3_key, detected_content_type
     )
 
     item = ContentGalleryImage(

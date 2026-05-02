@@ -8,6 +8,12 @@ import type {
   ImportedPostStatusCandidate,
   ImportedPostStatusResponse,
 } from "../shared/types";
+import {
+  parseCaptureRequestPayload,
+  parseExtensionBootstrap,
+  parseExtensionSession,
+  parseImportedPostStatusCandidates,
+} from "../shared/validation";
 
 function buildHeaders(
   session: ExtensionSession | null,
@@ -84,11 +90,11 @@ export async function exchangeGrant(
     user: ExtensionSession["user"];
   }>(response);
 
-  return {
+  return parseExtensionSession({
     accessToken: payload.access_token,
     expiresAt: payload.expires_at,
     user: payload.user,
-  };
+  });
 }
 
 export async function fetchBootstrap(
@@ -102,7 +108,7 @@ export async function fetchBootstrap(
       headers: buildHeaders(session, extensionVersion),
     },
   );
-  return parseJsonOrThrow<ExtensionBootstrap>(response);
+  return parseExtensionBootstrap(await parseJsonOrThrow<ExtensionBootstrap>(response));
 }
 
 export async function importLinkedInPost(
@@ -111,12 +117,13 @@ export async function importLinkedInPost(
   extensionVersion: string,
   payload: CaptureRequestPayload,
 ): Promise<CaptureResponse> {
+  const validatedPayload = parseCaptureRequestPayload(payload);
   const response = await fetch(
     `${config.apiBaseUrl}/api/content/extension/capture/linkedin-post`,
     {
       method: "POST",
       headers: buildHeaders(session, extensionVersion),
-      body: JSON.stringify(payload),
+      body: JSON.stringify(validatedPayload),
     },
   );
   return parseJsonOrThrow<CaptureResponse>(response);
@@ -143,12 +150,13 @@ export async function resolveImportedPosts(
   extensionVersion: string,
   candidates: ImportedPostStatusCandidate[],
 ): Promise<ImportedPostStatusResponse> {
+  const validatedCandidates = parseImportedPostStatusCandidates(candidates);
   const response = await fetch(
     `${config.apiBaseUrl}/api/content/extension/capture/statuses`,
     {
       method: "POST",
       headers: buildHeaders(session, extensionVersion),
-      body: JSON.stringify({ candidates }),
+      body: JSON.stringify({ candidates: validatedCandidates }),
     },
   );
   return parseJsonOrThrow<ImportedPostStatusResponse>(response);

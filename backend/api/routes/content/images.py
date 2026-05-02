@@ -26,6 +26,7 @@ from api.dependencies import (
     get_session_flexible,
     get_session_no_auth,
 )
+from core.file_security import detect_image_content_type, pick_image_extension, sanitize_download_filename
 from integrations.llm import LLMRegistry
 from integrations.s3_client import S3Client
 from models.content_gallery_image import ContentGalleryImage
@@ -36,6 +37,7 @@ from schemas.content import (
     ImageSubType,
     ImageVisualDirection,
 )
+from services.security_audit_log_service import record_security_audit_log
 
 logger = structlog.get_logger()
 
@@ -488,20 +490,28 @@ async def upload_standalone_image(
             detail=f"Arquivo excede o limite de {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
         )
 
-    filename = file.filename or "upload.png"
+    detected_content_type = detect_image_content_type(image_bytes)
+    if detected_content_type is None or detected_content_type not in ALLOWED_UPLOAD_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Conteudo do arquivo nao corresponde a uma imagem suportada.",
+        )
 
-    ext_map = {
-        "image/jpeg": ".jpg",
-        "image/png": ".png",
-        "image/webp": ".webp",
-        "image/gif": ".gif",
-        "image/svg+xml": ".svg",
-    }
-    ext = ext_map.get(file.content_type or "", ".png")
+    if detected_content_type != file.content_type:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Conteudo do arquivo nao corresponde ao content_type enviado. "
+                f"Detectado: {detected_content_type}; recebido: {file.content_type}."
+            ),
+        )
+
+    filename = sanitize_download_filename(file.filename or "upload.png", fallback="upload.png")
+    ext = pick_image_extension(content_type=detected_content_type, original_filename=filename)
     gallery_image_id = uuid.uuid4()
     s3_key = f"gallery/uploads/{tenant_id}/{gallery_image_id}{ext}"
     s3 = S3Client()
-    image_url = s3.upload_bytes(image_bytes, s3_key, file.content_type or "image/png")
+    image_url = s3.upload_bytes(image_bytes, s3_key, detected_content_type)
 
     gallery_image = ContentGalleryImage(
         id=gallery_image_id,
@@ -515,6 +525,17 @@ async def upload_standalone_image(
     )
     db.add(gallery_image)
 
+    await record_security_audit_log(
+        db,
+        scope_tenant_id=tenant_id,
+        event_type="content.gallery_image_upload",
+        resource_type="content_gallery_image",
+        resource_id=str(gallery_image.id),
+        action="upload_image",
+        status="success",
+        message="Imagem standalone enviada para a galeria.",
+        event_metadata={"filename": filename, "content_type": detected_content_type},
+    )
     await db.commit()
 
     logger.info(
@@ -572,6 +593,16 @@ async def delete_gallery_image(
         post.image_size_bytes = None
         post.linkedin_image_urn = None
 
+        await record_security_audit_log(
+            db,
+            scope_tenant_id=tenant_id,
+            event_type="content.gallery_image_delete",
+            resource_type="content_post",
+            resource_id=str(image_id),
+            action="delete_image",
+            status="success",
+            message="Imagem vinculada a post removida via galeria.",
+        )
         await db.commit()
 
         logger.info(
@@ -603,6 +634,16 @@ async def delete_gallery_image(
             )
 
     await db.delete(gallery_image)
+    await record_security_audit_log(
+        db,
+        scope_tenant_id=tenant_id,
+        event_type="content.gallery_image_delete",
+        resource_type="content_gallery_image",
+        resource_id=str(image_id),
+        action="delete_image",
+        status="success",
+        message="Imagem standalone removida da galeria.",
+    )
     await db.commit()
 
     logger.info(

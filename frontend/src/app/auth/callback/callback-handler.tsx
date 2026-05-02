@@ -11,12 +11,13 @@
 import { useEffect, useRef } from "react"
 import { signIn } from "next-auth/react"
 import { useRouter } from "next/navigation"
+import { env } from "@/env"
 
 interface Props {
-  token?: string | undefined
+  grantCode?: string | undefined
 }
 
-export function CallbackHandler({ token }: Props) {
+export function CallbackHandler({ grantCode }: Props) {
   const router = useRouter()
   const called = useRef(false)
 
@@ -25,15 +26,34 @@ export function CallbackHandler({ token }: Props) {
     if (called.current) return
     called.current = true
 
-    if (!token) {
-      router.replace("/auth/error?error=no_token")
+    if (!grantCode) {
+      router.replace("/auth/error?error=no_grant")
       return
     }
 
-    signIn("backend-google", {
-      access_token: token,
-      redirect: false,
+    fetch(`${env.API_URL}/auth/session/exchange`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ grant_code: grantCode }),
+      cache: "no-store",
     })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("grant_exchange_failed")
+        }
+
+        const payload = (await response.json()) as { access_token?: string }
+        if (!payload.access_token) {
+          throw new Error("missing_access_token")
+        }
+
+        return signIn("backend-google", {
+          access_token: payload.access_token,
+          redirect: false,
+        })
+      })
       .then((result) => {
         if (!result || result.error) {
           router.replace("/auth/error?error=auth_failed")
@@ -45,7 +65,7 @@ export function CallbackHandler({ token }: Props) {
       .catch(() => {
         router.replace("/auth/error?error=auth_failed")
       })
-  }, [token, router])
+  }, [grantCode, router])
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-(--bg-page)">

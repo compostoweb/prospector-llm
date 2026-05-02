@@ -39,6 +39,7 @@ import models.content_gallery_image  # noqa: F401  # pyright: ignore[reportUnuse
 import models.interaction  # noqa: F401  # pyright: ignore[reportUnusedImport]
 import models.lead  # noqa: F401  # pyright: ignore[reportUnusedImport]
 import models.lead_email  # noqa: F401  # pyright: ignore[reportUnusedImport]
+import models.security_audit_log  # noqa: F401  # pyright: ignore[reportUnusedImport]
 import models.tenant_user  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from api.dependencies import (
     get_current_tenant_id,

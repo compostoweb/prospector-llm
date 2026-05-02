@@ -27,14 +27,15 @@ import secrets
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
+from importlib import import_module
+from typing import Any, Protocol, cast
 from urllib.parse import urlencode
 
 import httpx
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
-from passlib.context import CryptContext
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,25 +61,47 @@ from schemas.browser_extension import (
 )
 from schemas.user import UserResponse
 from services.browser_extension import build_extension_callback_url, ensure_extension_id_allowed
+from services.security_audit_log_service import extract_request_audit_context, record_security_audit_log
 from services.tenant_access import resolve_user_login_context
 
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+class _PasswordContext(Protocol):
+    def hash(self, secret: str) -> str: ...
+
+    def verify(self, secret: str, hashed_value: str) -> bool: ...
+
+
+_CryptContext = cast(Any, getattr(import_module("passlib.context"), "CryptContext"))
+_pwd_context: _PasswordContext = _CryptContext(schemes=["bcrypt"], deprecated="auto")
+_DUMMY_API_KEY_HASH = _pwd_context.hash("prospector-invalid-api-key")
 
 # TTL do state CSRF para o fluxo Google OAuth (segundos)
 _OAUTH_STATE_TTL = 300
 _EXTENSION_OAUTH_STATE_PREFIX = "google_oauth_extension_state:"
 _EXTENSION_GRANT_PREFIX = "extension_auth_grant:"
 _EXTENSION_GRANT_TTL = 120
+_WEB_GRANT_PREFIX = "web_auth_grant:"
+_WEB_GRANT_TTL = 120
+_WS_TICKET_PREFIX = "ws_auth_ticket:"
+_WS_TICKET_TTL = 60
 _AUTH_ERROR_CODE_HEADER = "X-Auth-Error-Code"
 
 
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class WebSessionExchangeRequest(BaseModel):
+    grant_code: str
+
+
+class WSTicketResponse(BaseModel):
+    ticket: str
+    expires_in: int
 
 
 def _google_auth_error(*, error_code: str, status_code: int, detail: str) -> HTTPException:
@@ -99,6 +122,109 @@ def _build_frontend_auth_error_url(*, error: str, message: str | None = None) ->
     if message:
         params["message"] = message
     return f"{settings.FRONTEND_URL}/auth/error?{urlencode(params)}"
+
+
+def _rate_limit_error() -> HTTPException:
+    retry_after = str(settings.AUTH_RATE_LIMIT_WINDOW_SECONDS)
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="Muitas tentativas. Aguarde alguns minutos e tente novamente.",
+        headers={"Retry-After": retry_after},
+    )
+
+
+def _normalize_rate_limit_value(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    return normalized or "unknown"
+
+
+def _get_request_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return _normalize_rate_limit_value(forwarded_for.split(",", 1)[0])
+
+    forwarded = request.headers.get("forwarded")
+    if forwarded:
+        for part in forwarded.split(";"):
+            key, _, value = part.partition("=")
+            if key.strip().lower() == "for" and value:
+                return _normalize_rate_limit_value(value.strip().strip('"'))
+
+    if request.client and request.client.host:
+        return _normalize_rate_limit_value(request.client.host)
+
+    return "unknown"
+
+
+def _build_auth_rate_limit_key(scope: str, dimension: str, identifier: str) -> str:
+    return ":".join(
+        [
+            "ratelimit",
+            "auth",
+            _normalize_rate_limit_value(scope),
+            _normalize_rate_limit_value(dimension),
+            _normalize_rate_limit_value(identifier),
+        ]
+    )
+
+
+async def _enforce_auth_rate_limits(
+    *,
+    scope: str,
+    identifiers: list[tuple[str, str, int]],
+) -> None:
+    for dimension, identifier, limit in identifiers:
+        if limit <= 0:
+            continue
+
+        rate_limit_key = _build_auth_rate_limit_key(scope, dimension, identifier)
+        allowed = await redis_client.check_and_increment_key(
+            rate_limit_key,
+            limit=limit,
+            ttl=settings.AUTH_RATE_LIMIT_WINDOW_SECONDS,
+        )
+        if allowed:
+            continue
+
+        logger.warning(
+            "auth.rate_limit_exceeded",
+            scope=scope,
+            dimension=dimension,
+            identifier=identifier,
+            limit=limit,
+        )
+        raise _rate_limit_error()
+
+
+async def _record_auth_audit_event(
+    db: AsyncSession,
+    *,
+    request: Request,
+    event_type: str,
+    resource_type: str,
+    action: str,
+    status_value: str,
+    scope_tenant_id: uuid.UUID | None = None,
+    actor_user_id: uuid.UUID | None = None,
+    resource_id: str | None = None,
+    message: str | None = None,
+    event_metadata: dict[str, object] | None = None,
+) -> None:
+    ip_address, user_agent = extract_request_audit_context(request)
+    await record_security_audit_log(
+        db,
+        scope_tenant_id=scope_tenant_id,
+        actor_user_id=actor_user_id,
+        event_type=event_type,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        action=action,
+        status=status_value,
+        message=message,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        event_metadata=event_metadata,
+    )
 
 
 # ── Sessão sem RLS (usada internamente em auth) ───────────────────────
@@ -262,6 +388,43 @@ def _build_extension_redirect(
     return build_extension_callback_url(extension_id, params)
 
 
+def _build_user_grant_payload(
+    *,
+    user: User,
+    tenant_id: uuid.UUID | None,
+    tenant_role: TenantRole | None,
+) -> dict[str, str | bool | None]:
+    return {
+        "user_id": str(user.id),
+        "email": user.email,
+        "name": user.name,
+        "is_superuser": user.is_superuser,
+        "tenant_id": str(tenant_id) if tenant_id else None,
+        "tenant_role": tenant_role.value if tenant_role else None,
+    }
+
+
+def _issue_user_jwt_from_grant_payload(
+    grant_payload: dict[str, str | bool | None],
+) -> tuple[uuid.UUID, str]:
+    user_id = uuid.UUID(str(grant_payload["user_id"]))
+    jwt_token = create_user_token(
+        user_id=user_id,
+        email=str(grant_payload["email"]),
+        is_superuser=bool(grant_payload.get("is_superuser", False)),
+        name=str(grant_payload["name"]) if grant_payload.get("name") else None,
+        tenant_id=(
+            uuid.UUID(str(grant_payload["tenant_id"])) if grant_payload.get("tenant_id") else None
+        ),
+        tenant_role=(
+            TenantRole(str(grant_payload["tenant_role"]))
+            if grant_payload.get("tenant_role")
+            else None
+        ),
+    )
+    return user_id, jwt_token
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # 1. Fluxo Tenant (API Key)
 # ═══════════════════════════════════════════════════════════════════════
@@ -269,6 +432,7 @@ def _build_extension_redirect(
 
 @router.post("/token", response_model=TokenResponse)
 async def login(
+    request: Request,
     form: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(_get_raw_session),
 ) -> TokenResponse:
@@ -284,19 +448,53 @@ async def login(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
+    client_ip = _get_request_ip(request)
+    await _enforce_auth_rate_limits(
+        scope="auth_token",
+        identifiers=[
+            ("ip", client_ip, settings.AUTH_TOKEN_MAX_ATTEMPTS_PER_IP),
+            ("slug", form.username, settings.AUTH_TOKEN_MAX_ATTEMPTS_PER_SLUG),
+        ],
+    )
+
     result = await db.execute(
         select(Tenant).where(Tenant.slug == form.username, Tenant.is_active.is_(True))
     )
     tenant = result.scalar_one_or_none()
 
     # Verificação em tempo constante para evitar timing attack
-    stored_hash = tenant.api_key_hash if tenant else "$2b$12$invalidhashpadding000000000000000"
+    stored_hash = tenant.api_key_hash if tenant else _DUMMY_API_KEY_HASH
     valid = _pwd_context.verify(form.password, stored_hash)
 
     if not valid or tenant is None:
+        await _record_auth_audit_event(
+            db,
+            request=request,
+            event_type="auth.login",
+            resource_type="tenant_token",
+            action="login",
+            status_value="failure",
+            scope_tenant_id=tenant.id if tenant else None,
+            message="Credenciais invalidas.",
+            event_metadata={"slug": form.username},
+        )
+        await db.commit()
         raise _credentials_error
 
     token = create_access_token({"tenant_id": str(tenant.id)})
+    await _record_auth_audit_event(
+        db,
+        request=request,
+        event_type="auth.login",
+        resource_type="tenant_token",
+        action="login",
+        status_value="success",
+        scope_tenant_id=tenant.id,
+        resource_id=str(tenant.id),
+        message="Token de tenant emitido com sucesso.",
+        event_metadata={"slug": tenant.slug},
+    )
+    await db.commit()
     return TokenResponse(access_token=token)
 
 
@@ -306,7 +504,7 @@ async def login(
 
 
 @router.get("/google/login")
-async def google_login() -> RedirectResponse:
+async def google_login(request: Request) -> RedirectResponse:
     """
     Inicia o fluxo Google OAuth.
 
@@ -318,6 +516,13 @@ async def google_login() -> RedirectResponse:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Google OAuth não configurado neste ambiente.",
         )
+
+    await _enforce_auth_rate_limits(
+        scope="google_login",
+        identifiers=[
+            ("ip", _get_request_ip(request), settings.GOOGLE_LOGIN_MAX_ATTEMPTS_PER_IP),
+        ],
+    )
 
     state = secrets.token_urlsafe(32)
     await redis_client.set(f"google_oauth_state:{state}", "1", ex=_OAUTH_STATE_TTL)
@@ -332,6 +537,7 @@ async def google_login() -> RedirectResponse:
 
 @router.get("/google/callback")
 async def google_callback(
+    request: Request,
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
@@ -354,6 +560,13 @@ async def google_callback(
       - Email deve estar previamente cadastrado na tabela `users`
       - Usuário deve estar ativo (is_active=True)
     """
+    await _enforce_auth_rate_limits(
+        scope="google_callback",
+        identifiers=[
+            ("ip", _get_request_ip(request), settings.GOOGLE_CALLBACK_MAX_ATTEMPTS_PER_IP),
+        ],
+    )
+
     if error:
         logger.warning(
             "auth.google_callback.google_error",
@@ -411,27 +624,51 @@ async def google_callback(
         user = await _resolve_active_user_from_google_profile(db=db, userinfo=userinfo)
         tenant_id, tenant_role = await _build_user_access_context(db=db, user=user)
 
-        jwt_token = create_user_token(
-            user_id=user.id,
-            email=user.email,
-            is_superuser=user.is_superuser,
-            name=user.name,
+        grant_code = secrets.token_urlsafe(32)
+        grant_key = f"{_WEB_GRANT_PREFIX}{grant_code}"
+        grant_payload = _build_user_grant_payload(
+            user=user,
             tenant_id=tenant_id,
             tenant_role=tenant_role,
         )
+        await redis_client.set(grant_key, json.dumps(grant_payload), ex=_WEB_GRANT_TTL)
 
         logger.info(
             "auth.google_callback.success",
             email=user.email,
             is_superuser=user.is_superuser,
         )
+        await _record_auth_audit_event(
+            db,
+            request=request,
+            event_type="auth.google_callback",
+            resource_type="web_session",
+            action="grant_issue",
+            status_value="success",
+            scope_tenant_id=tenant_id,
+            actor_user_id=user.id,
+            resource_id=grant_code,
+            message="Grant web emitido apos autenticacao Google.",
+        )
+        await db.commit()
 
         return RedirectResponse(
-            url=f"{settings.FRONTEND_URL}/auth/callback?token={jwt_token}",
+            url=f"{settings.FRONTEND_URL}/auth/callback?grant_code={grant_code}",
             status_code=status.HTTP_302_FOUND,
         )
     except HTTPException as exc:
         error_code = _resolve_google_auth_error_code(exc)
+        await _record_auth_audit_event(
+            db,
+            request=request,
+            event_type="auth.google_callback",
+            resource_type="web_session",
+            action="grant_issue",
+            status_value="failure",
+            message=str(exc.detail),
+            event_metadata={"error_code": error_code},
+        )
+        await db.commit()
         logger.warning(
             "auth.google_callback.frontend_redirect",
             error_code=error_code,
@@ -442,6 +679,16 @@ async def google_callback(
             status_code=status.HTTP_302_FOUND,
         )
     except Exception as exc:
+        await _record_auth_audit_event(
+            db,
+            request=request,
+            event_type="auth.google_callback",
+            resource_type="web_session",
+            action="grant_issue",
+            status_value="failure",
+            message="Falha inesperada na autenticacao Google.",
+        )
+        await db.commit()
         logger.exception("auth.google_callback.unexpected_error", error=str(exc))
         return RedirectResponse(
             url=_build_frontend_auth_error_url(
@@ -458,7 +705,9 @@ async def google_callback(
     status_code=status.HTTP_201_CREATED,
 )
 async def start_extension_session(
+    request: Request,
     body: BrowserExtensionStartSessionRequest,
+    db: AsyncSession = Depends(_get_raw_session),
 ) -> BrowserExtensionStartSessionResponse:
     if not settings.EXTENSION_LINKEDIN_CAPTURE_ENABLED:
         raise HTTPException(
@@ -473,6 +722,18 @@ async def start_extension_session(
         )
 
     extension_id = ensure_extension_id_allowed(body.extension_id)
+    await _enforce_auth_rate_limits(
+        scope="extension_session_start",
+        identifiers=[
+            ("ip", _get_request_ip(request), settings.EXTENSION_AUTH_START_MAX_ATTEMPTS_PER_IP),
+            (
+                "extension_id",
+                extension_id,
+                settings.EXTENSION_AUTH_START_MAX_ATTEMPTS_PER_EXTENSION,
+            ),
+        ],
+    )
+
     auth_session_id = uuid.uuid4()
     state = secrets.token_urlsafe(32)
     state_key = f"{_EXTENSION_OAUTH_STATE_PREFIX}{state}"
@@ -483,6 +744,18 @@ async def start_extension_session(
         "browser": body.browser,
     }
     await redis_client.set(state_key, json.dumps(payload), ex=_OAUTH_STATE_TTL)
+    await _record_auth_audit_event(
+        db,
+        request=request,
+        event_type="extension.auth.start",
+        resource_type="extension_session",
+        action="start",
+        status_value="success",
+        resource_id=str(auth_session_id),
+        message="Fluxo OAuth da extensao iniciado.",
+        event_metadata={"extension_id": extension_id, "browser": body.browser},
+    )
+    await db.commit()
 
     authorization_url = _build_google_authorization_url(
         redirect_uri=settings.GOOGLE_EXTENSION_REDIRECT_URI,
@@ -504,6 +777,7 @@ async def start_extension_session(
 
 @router.get("/extension/google/callback")
 async def extension_google_callback(
+    request: Request,
     state: str,
     code: str | None = None,
     error: str | None = None,
@@ -521,8 +795,31 @@ async def extension_google_callback(
 
     state_payload = json.loads(raw_state)
     extension_id = ensure_extension_id_allowed(str(state_payload["extension_id"]))
+    await _enforce_auth_rate_limits(
+        scope="extension_callback",
+        identifiers=[
+            ("ip", _get_request_ip(request), settings.EXTENSION_AUTH_CALLBACK_MAX_ATTEMPTS_PER_IP),
+            (
+                "extension_id",
+                extension_id,
+                settings.EXTENSION_AUTH_CALLBACK_MAX_ATTEMPTS_PER_EXTENSION,
+            ),
+        ],
+    )
+    await redis_client.delete(state_key)
 
     if error:
+        await _record_auth_audit_event(
+            db,
+            request=request,
+            event_type="extension.auth.callback",
+            resource_type="extension_session",
+            action="callback",
+            status_value="failure",
+            message=error_description or error,
+            event_metadata={"extension_id": extension_id},
+        )
+        await db.commit()
         logger.warning(
             "extension.auth.google_error",
             extension_id=extension_id,
@@ -538,6 +835,17 @@ async def extension_google_callback(
         )
 
     if not code:
+        await _record_auth_audit_event(
+            db,
+            request=request,
+            event_type="extension.auth.callback",
+            resource_type="extension_session",
+            action="callback",
+            status_value="failure",
+            message="Authorization code ausente.",
+            event_metadata={"extension_id": extension_id},
+        )
+        await db.commit()
         return RedirectResponse(
             url=_build_extension_redirect(
                 extension_id=extension_id,
@@ -555,6 +863,17 @@ async def extension_google_callback(
         user = await _resolve_active_user_from_google_profile(db=db, userinfo=userinfo)
         tenant_id, tenant_role = await _build_user_access_context(db=db, user=user)
     except HTTPException as exc:
+        await _record_auth_audit_event(
+            db,
+            request=request,
+            event_type="extension.auth.callback",
+            resource_type="extension_session",
+            action="callback",
+            status_value="failure",
+            message=str(exc.detail),
+            event_metadata={"extension_id": extension_id},
+        )
+        await db.commit()
         logger.warning(
             "extension.auth.callback_failed",
             extension_id=extension_id,
@@ -580,6 +899,20 @@ async def extension_google_callback(
         "tenant_role": tenant_role.value if tenant_role else None,
     }
     await redis_client.set(grant_key, json.dumps(grant_payload), ex=_EXTENSION_GRANT_TTL)
+    await _record_auth_audit_event(
+        db,
+        request=request,
+        event_type="extension.auth.callback",
+        resource_type="extension_session",
+        action="callback",
+        status_value="success",
+        scope_tenant_id=tenant_id,
+        actor_user_id=user.id,
+        resource_id=str(state_payload["auth_session_id"]),
+        message="Grant da extensao emitido apos autenticacao Google.",
+        event_metadata={"extension_id": extension_id},
+    )
+    await db.commit()
     logger.info(
         "extension.auth.grant_created",
         extension_id=extension_id,
@@ -591,14 +924,94 @@ async def extension_google_callback(
     )
 
 
+@router.post("/session/exchange", response_model=TokenResponse)
+async def exchange_web_session(
+    request: Request,
+    body: WebSessionExchangeRequest,
+    db: AsyncSession = Depends(_get_raw_session),
+) -> TokenResponse:
+    await _enforce_auth_rate_limits(
+        scope="web_session_exchange",
+        identifiers=[
+            (
+                "ip",
+                _get_request_ip(request),
+                settings.AUTH_WEB_SESSION_EXCHANGE_MAX_ATTEMPTS_PER_IP,
+            ),
+        ],
+    )
+
+    grant_key = f"{_WEB_GRANT_PREFIX}{body.grant_code}"
+    raw_grant = await redis_client.get(grant_key)
+    if not raw_grant:
+        await _record_auth_audit_event(
+            db,
+            request=request,
+            event_type="auth.web_session_exchange",
+            resource_type="web_session",
+            action="exchange",
+            status_value="failure",
+            message="Grant web invalido ou expirado.",
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Grant web invalido ou expirado.",
+        )
+
+    await redis_client.delete(grant_key)
+    grant_payload = json.loads(raw_grant)
+    user_id, jwt_token = _issue_user_jwt_from_grant_payload(grant_payload)
+    await _record_auth_audit_event(
+        db,
+        request=request,
+        event_type="auth.web_session_exchange",
+        resource_type="web_session",
+        action="exchange",
+        status_value="success",
+        scope_tenant_id=(
+            uuid.UUID(str(grant_payload["tenant_id"])) if grant_payload.get("tenant_id") else None
+        ),
+        actor_user_id=user_id,
+        message="Grant web trocado por sessao autenticada.",
+    )
+    await db.commit()
+    return TokenResponse(access_token=jwt_token)
+
+
 @router.post("/extension/session/exchange", response_model=BrowserExtensionExchangeResponse)
 async def exchange_extension_session(
+    request: Request,
     body: BrowserExtensionExchangeRequest,
+    db: AsyncSession = Depends(_get_raw_session),
 ) -> BrowserExtensionExchangeResponse:
     extension_id = ensure_extension_id_allowed(body.extension_id)
+    await _enforce_auth_rate_limits(
+        scope="extension_session_exchange",
+        identifiers=[
+            ("ip", _get_request_ip(request), settings.EXTENSION_AUTH_EXCHANGE_MAX_ATTEMPTS_PER_IP),
+            (
+                "extension_id",
+                extension_id,
+                settings.EXTENSION_AUTH_EXCHANGE_MAX_ATTEMPTS_PER_EXTENSION,
+            ),
+        ],
+    )
+
     grant_key = f"{_EXTENSION_GRANT_PREFIX}{body.grant_code}"
     raw_grant = await redis_client.get(grant_key)
     if not raw_grant:
+        await _record_auth_audit_event(
+            db,
+            request=request,
+            event_type="extension.auth.exchange",
+            resource_type="extension_session",
+            action="exchange",
+            status_value="failure",
+            message="Grant da extensao invalido ou expirado.",
+            event_metadata={"extension_id": extension_id},
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Grant da extensao invalido ou expirado.",
@@ -606,27 +1019,39 @@ async def exchange_extension_session(
 
     grant_payload = json.loads(raw_grant)
     if grant_payload.get("extension_id") != extension_id:
+        await _record_auth_audit_event(
+            db,
+            request=request,
+            event_type="extension.auth.exchange",
+            resource_type="extension_session",
+            action="exchange",
+            status_value="failure",
+            message="Grant nao pertence a esta extensao.",
+            event_metadata={"extension_id": extension_id},
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Grant nao pertence a esta extensao.",
         )
 
     await redis_client.delete(grant_key)
-    user_id = uuid.UUID(str(grant_payload["user_id"]))
-    jwt_token = create_user_token(
-        user_id=user_id,
-        email=str(grant_payload["email"]),
-        is_superuser=bool(grant_payload.get("is_superuser", False)),
-        name=str(grant_payload["name"]) if grant_payload.get("name") else None,
-        tenant_id=(
+    user_id, jwt_token = _issue_user_jwt_from_grant_payload(grant_payload)
+    await _record_auth_audit_event(
+        db,
+        request=request,
+        event_type="extension.auth.exchange",
+        resource_type="extension_session",
+        action="exchange",
+        status_value="success",
+        scope_tenant_id=(
             uuid.UUID(str(grant_payload["tenant_id"])) if grant_payload.get("tenant_id") else None
         ),
-        tenant_role=(
-            TenantRole(str(grant_payload["tenant_role"]))
-            if grant_payload.get("tenant_role")
-            else None
-        ),
+        actor_user_id=user_id,
+        message="Grant da extensao trocado por sessao autenticada.",
+        event_metadata={"extension_id": extension_id},
     )
+    await db.commit()
     expires_at = datetime.now(UTC) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     logger.info(
         "extension.auth.exchanged",
@@ -679,6 +1104,46 @@ async def get_me(
         tenant_role=tenant_role,
         created_at=user.created_at,
     )
+
+
+@router.post("/ws-ticket", response_model=WSTicketResponse)
+async def issue_ws_ticket(
+    request: Request,
+    user_payload: UserPayload = Depends(get_current_user_payload),
+    db: AsyncSession = Depends(_get_raw_session),
+) -> WSTicketResponse:
+    if user_payload.tenant_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Usuario sem tenant ativo para emitir ticket de websocket.",
+        )
+
+    ticket = secrets.token_urlsafe(32)
+    ticket_key = f"{_WS_TICKET_PREFIX}{ticket}"
+    ticket_payload = {
+        "type": "user",
+        "user_id": str(user_payload.user_id),
+        "tenant_id": str(user_payload.tenant_id),
+    }
+    await redis_client.set(ticket_key, json.dumps(ticket_payload), ex=_WS_TICKET_TTL)
+    await _record_auth_audit_event(
+        db,
+        request=request,
+        event_type="auth.ws_ticket",
+        resource_type="websocket_session",
+        action="issue_ticket",
+        status_value="success",
+        scope_tenant_id=user_payload.tenant_id,
+        actor_user_id=user_payload.user_id,
+        message="Ticket de websocket emitido.",
+    )
+    await db.commit()
+    logger.info(
+        "auth.ws_ticket.issued",
+        user_id=str(user_payload.user_id),
+        tenant_id=str(user_payload.tenant_id),
+    )
+    return WSTicketResponse(ticket=ticket, expires_in=_WS_TICKET_TTL)
 
 
 # ═══════════════════════════════════════════════════════════════════════

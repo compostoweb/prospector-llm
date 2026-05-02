@@ -15,7 +15,9 @@ Cobre:
 from __future__ import annotations
 
 import uuid
+from typing import AsyncGenerator
 from urllib.parse import parse_qs, urlparse
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -193,6 +195,80 @@ async def test_login_inactive_tenant_returns_401(
     app.dependency_overrides.pop(_get_raw_session, None)
 
     assert resp.status_code == 401
+
+
+async def test_login_rate_limited_returns_429(
+    raw_client: AsyncClient,
+    tenant_with_key: dict[str, str],
+    db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from api.routes import auth as auth_route
+
+    app.dependency_overrides[auth_route._get_raw_session] = _make_db_override(db)
+    monkeypatch.setattr(
+        auth_route.redis_client,
+        "check_and_increment_key",
+        AsyncMock(return_value=False),
+    )
+
+    resp = await raw_client.post(
+        "/auth/token",
+        data={
+            "username": tenant_with_key["slug"],
+            "password": tenant_with_key["api_key"],
+        },
+    )
+    app.dependency_overrides.pop(auth_route._get_raw_session, None)
+
+    assert resp.status_code == 429
+    assert resp.headers["Retry-After"] == str(auth_route.settings.AUTH_RATE_LIMIT_WINDOW_SECONDS)
+
+
+async def test_google_login_rate_limited_returns_429(
+    raw_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from api.routes import auth as auth_route
+
+    monkeypatch.setattr(auth_route.settings, "GOOGLE_CLIENT_ID", "google-client-id")
+    monkeypatch.setattr(
+        auth_route.redis_client,
+        "check_and_increment_key",
+        AsyncMock(return_value=False),
+    )
+
+    resp = await raw_client.get("/auth/google/login")
+
+    assert resp.status_code == 429
+
+
+async def test_extension_session_start_rate_limited_returns_429(
+    raw_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from api.routes import auth as auth_route
+
+    monkeypatch.setattr(auth_route.settings, "EXTENSION_LINKEDIN_CAPTURE_ENABLED", True)
+    monkeypatch.setattr(auth_route.settings, "GOOGLE_CLIENT_ID", "google-client-id")
+    monkeypatch.setattr(auth_route.settings, "GOOGLE_CLIENT_SECRET", "google-client-secret")
+    monkeypatch.setattr(auth_route.settings, "EXTENSION_ALLOWED_IDS", "abcdefghijklmnopqrstuvwxzy123456")
+    monkeypatch.setattr(
+        auth_route.redis_client,
+        "check_and_increment_key",
+        AsyncMock(return_value=False),
+    )
+
+    resp = await raw_client.post(
+        "/auth/extension/session/start",
+        json={
+            "extension_id": "abcdefghijklmnopqrstuvwxzy123456",
+            "extension_version": "1.2.3",
+            "browser": "chrome",
+        },
+    )
+
+    assert resp.status_code == 429
 
 
 async def test_token_authenticates_protected_endpoint(

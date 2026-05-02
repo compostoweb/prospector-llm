@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { useEffect, useRef, useCallback } from "react"
+import { useEffect, useRef, useCallback, type MutableRefObject } from "react"
 import { useSession } from "next-auth/react"
 import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
@@ -75,6 +75,24 @@ const INVALIDATION_MAP: Partial<Record<WSEventType, string[][]>> = {
 
 // ── Hook principal ────────────────────────────────────────────────────
 
+function scheduleReconnectAttempt({
+  retryCountRef,
+  retryTimerRef,
+  unmountedRef,
+  connect,
+}: {
+  retryCountRef: MutableRefObject<number>
+  retryTimerRef: MutableRefObject<ReturnType<typeof setTimeout> | null>
+  unmountedRef: MutableRefObject<boolean>
+  connect: () => void
+}) {
+  if (unmountedRef.current) return
+  const delay =
+    RECONNECT_DELAYS[Math.min(retryCountRef.current, RECONNECT_DELAYS.length - 1)] ?? 30_000
+  retryCountRef.current += 1
+  retryTimerRef.current = setTimeout(connect, delay)
+}
+
 export function useEvents() {
   const { data: session, status } = useSession()
   const queryClient = useQueryClient()
@@ -84,6 +102,35 @@ export function useEvents() {
   const retryCountRef = useRef(0)
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const unmountedRef = useRef(false)
+
+  const issueWsTicket = useCallback(async () => {
+    if (!session?.accessToken) return null
+
+    const response = await fetch(`${env.API_URL}/auth/ws-ticket`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session.accessToken}`,
+      },
+      cache: "no-store",
+    })
+
+    if (!response.ok) {
+      return null
+    }
+
+    const payload = (await response.json()) as { ticket?: string }
+    return payload.ticket ?? null
+  }, [session?.accessToken])
+
+  const disconnect = useCallback(() => {
+    unmountedRef.current = true
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current)
+      retryTimerRef.current = null
+    }
+    wsRef.current?.close()
+    wsRef.current = null
+  }, [])
 
   const handleEvent = useCallback(
     (event: WSEvent) => {
@@ -186,10 +233,23 @@ export function useEvents() {
     [queryClient, push],
   )
 
-  const connect = useCallback(() => {
+  const connect = useCallback(async () => {
     if (!session?.accessToken || unmountedRef.current) return
 
-    const wsUrl = `${env.NEXT_PUBLIC_WS_URL}?token=${session.accessToken}`
+    const ticket = await issueWsTicket()
+    if (!ticket || unmountedRef.current) {
+      scheduleReconnectAttempt({
+        retryCountRef,
+        retryTimerRef,
+        unmountedRef,
+        connect: () => {
+          void connect()
+        },
+      })
+      return
+    }
+
+    const wsUrl = `${env.NEXT_PUBLIC_WS_URL}?ticket=${encodeURIComponent(ticket)}`
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
 
@@ -208,28 +268,27 @@ export function useEvents() {
     }
 
     ws.onclose = () => {
-      if (unmountedRef.current) return
-      const delay =
-        RECONNECT_DELAYS[Math.min(retryCountRef.current, RECONNECT_DELAYS.length - 1)] ?? 30_000
-      retryCountRef.current += 1
-      retryTimerRef.current = setTimeout(connect, delay)
+      scheduleReconnectAttempt({
+        retryCountRef,
+        retryTimerRef,
+        unmountedRef,
+        connect: () => {
+          void connect()
+        },
+      })
     }
 
     ws.onerror = () => {
       ws.close() // dispara onclose → reconnect
     }
-  }, [session?.accessToken, handleEvent])
+  }, [session?.accessToken, handleEvent, issueWsTicket])
 
   useEffect(() => {
     if (status !== "authenticated") return
 
     unmountedRef.current = false
-    connect()
+    void connect()
 
-    return () => {
-      unmountedRef.current = true
-      if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
-      wsRef.current?.close()
-    }
-  }, [status, connect])
+    return disconnect
+  }, [status, connect, disconnect])
 }

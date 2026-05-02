@@ -11,6 +11,7 @@ import {
   GitBranch,
   Settings,
   Building2,
+  ShieldAlert,
   ChevronLeft,
   ChevronRight,
   List,
@@ -61,6 +62,7 @@ const settingsItems: Array<{ href: Route; label: string; icon: LucideIcon }> = [
 ]
 const adminItems: Array<{ href: string; label: string; icon: LucideIcon }> = [
   { href: "/clientes", label: "Tenants", icon: Building2 },
+  { href: "/clientes/auditoria", label: "Auditoria", icon: ShieldAlert },
 ]
 
 interface SidebarProps {

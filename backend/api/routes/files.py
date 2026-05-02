@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import Response
 
 from core.config import settings
+from core.file_security import sanitize_download_filename
 
 logger = structlog.get_logger()
 
@@ -30,9 +31,11 @@ router = APIRouter(prefix="/files", tags=["Files — Proxy público"])
 
 def _build_pdf_embed_headers(filename: str) -> dict[str, str]:
     frontend_origin = urlsplit(settings.FRONTEND_URL).scheme + "://" + urlsplit(settings.FRONTEND_URL).netloc
+    safe_filename = sanitize_download_filename(filename, fallback="document.pdf")
     return {
-        "Content-Disposition": f'inline; filename="{filename}"',
+        "Content-Disposition": f'inline; filename="{safe_filename}"',
         "Content-Security-Policy": f"frame-ancestors 'self' {frontend_origin}",
+        "Cache-Control": "public, max-age=300",
     }
 
 
@@ -76,5 +79,5 @@ async def proxy_lm_image(tenant_id: str, filename: str) -> Response:
     return Response(
         content=data,
         media_type=content_type or "image/jpeg",
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers={"Cache-Control": "public, max-age=86400, immutable"},
     )
