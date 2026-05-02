@@ -106,7 +106,7 @@ export function useEvents() {
   const issueWsTicket = useCallback(async () => {
     if (!session?.accessToken) return null
 
-    const response = await fetch(`${env.API_URL}/auth/ws-ticket`, {
+    const response = await fetch(`${env.NEXT_PUBLIC_API_URL}/auth/ws-ticket`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${session.accessToken}`,

@@ -117,11 +117,11 @@ function SidebarItemInner({
 function SidebarNavItem({ active, collapsed, href, icon, kind, label }: SidebarNavItemProps) {
   const TooltipIcon = icon
   const className = cn(
-    "group/item flex items-center gap-2 rounded-2xl px-2 py-1.5 text-sm transition-all duration-200",
+    "group/item flex items-center gap-2 rounded-2xl px-2 text-sm transition-all duration-200",
     active
       ? "bg-[linear-gradient(135deg,var(--accent-subtle),color-mix(in_srgb,var(--accent-subtle)_74%,transparent))] text-(--accent-subtle-fg) shadow-[0_18px_40px_-28px_var(--accent)]"
       : "text-(--text-secondary) hover:bg-(--bg-overlay) hover:text-(--text-primary)",
-    collapsed ? "justify-center px-1.5" : "pr-3",
+    collapsed ? "justify-center px-1.5 py-1.5" : "pr-3 py-1",
   )
 
   const content =
@@ -201,6 +201,27 @@ export function Sidebar({ initialSidebarCollapsed = false }: SidebarProps) {
     await signOut({ redirectTo: "/login" })
   }
 
+  const userMenuContent = (
+    <>
+      <DropdownMenuLabel className="font-normal">
+        <p className="truncate text-xs font-medium text-(--text-primary)">{user?.name}</p>
+        <p className="truncate text-xs text-(--text-tertiary)">{user?.email}</p>
+      </DropdownMenuLabel>
+      <DropdownMenuSeparator />
+      <div className="px-2 py-2">
+        <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.14em] text-(--text-tertiary)">
+          Tema
+        </p>
+        <ThemeToggle className="w-full justify-center" />
+      </div>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem destructive className="cursor-pointer" onClick={handleSignOut}>
+        <LogOut size={14} aria-hidden="true" />
+        Sair
+      </DropdownMenuItem>
+    </>
+  )
+
   return (
     <TooltipProvider delayDuration={110} skipDelayDuration={0} disableHoverableContent>
       <aside
@@ -213,20 +234,22 @@ export function Sidebar({ initialSidebarCollapsed = false }: SidebarProps) {
         {/* Logo */}
         <div
           className={cn(
-            "flex h-14 items-center border-b border-(--border-default) px-3",
-            collapsed ? "justify-center" : "gap-2",
+            "flex h-14 items-center border-b border-(--border-default)",
+            collapsed ? "justify-center px-1.5" : "px-3",
           )}
         >
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[linear-gradient(135deg,var(--accent),color-mix(in_srgb,var(--accent)_72%,black_28%))] shadow-[0_16px_30px_-20px_var(--accent)]">
-            <span className="text-[10px] font-bold text-white">P</span>
+          <div className={cn("flex items-center", collapsed ? "justify-center" : "gap-2")}>
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[linear-gradient(135deg,var(--accent),color-mix(in_srgb,var(--accent)_72%,black_28%))] shadow-[0_16px_30px_-20px_var(--accent)]">
+              <span className="text-[10px] font-bold text-white">P</span>
+            </div>
+            {!collapsed && (
+              <span className="text-sm font-semibold text-(--text-primary)">Prospector</span>
+            )}
           </div>
-          {!collapsed && (
-            <span className="text-sm font-semibold text-(--text-primary)">Prospector</span>
-          )}
         </div>
 
         {/* Navegação principal */}
-        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
+        <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 py-1.5">
           {(() => {
             const activeHref = [...navItems]
               .sort((a, b) => b.href.length - a.href.length)
@@ -248,10 +271,10 @@ export function Sidebar({ initialSidebarCollapsed = false }: SidebarProps) {
             })
           })()}
 
-          <div className="my-2 border-t border-(--border-subtle)" />
+          <div className="my-1.5 border-t border-(--border-subtle)" />
 
           {!collapsed && (
-            <p className="mb-1 px-2.5 text-[11px] font-medium uppercase tracking-[0.18em] text-(--text-tertiary)">
+            <p className="mb-0.5 px-2.5 text-[10px] font-medium uppercase tracking-[0.18em] text-(--text-tertiary)">
               Configurações
             </p>
           )}
@@ -272,9 +295,9 @@ export function Sidebar({ initialSidebarCollapsed = false }: SidebarProps) {
 
           {user?.is_superuser ? (
             <>
-              <div className="my-2 border-t border-(--border-subtle)" />
+              <div className="my-1.5 border-t border-(--border-subtle)" />
               {!collapsed && (
-                <p className="mb-1 px-2.5 text-[11px] font-medium uppercase tracking-[0.18em] text-(--text-tertiary)">
+                <p className="mb-0.5 px-2.5 text-[10px] font-medium uppercase tracking-[0.18em] text-(--text-tertiary)">
                   Administração
                 </p>
               )}
@@ -297,14 +320,10 @@ export function Sidebar({ initialSidebarCollapsed = false }: SidebarProps) {
         </nav>
 
         {/* Rodapé — controles de usuário */}
-        <div className="flex flex-col gap-0.5 border-t border-(--border-default) p-2">
+        <div className="flex flex-col gap-0.5 border-t border-(--border-default) px-2 py-1.5">
           {collapsed ? (
             /* ── Modo colapsado: ícones centralizados ── */
             <>
-              <div className="flex justify-center">
-                <ThemeToggle collapsed />
-              </div>
-
               {/* Bell */}
               <div className="flex justify-center">
                 <Button
@@ -341,21 +360,7 @@ export function Sidebar({ initialSidebarCollapsed = false }: SidebarProps) {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="right" align="end" className="w-48">
-                    <DropdownMenuLabel className="font-normal">
-                      <p className="truncate text-xs font-medium text-(--text-primary)">
-                        {user?.name}
-                      </p>
-                      <p className="truncate text-xs text-(--text-tertiary)">{user?.email}</p>
-                    </DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      destructive
-                      className="cursor-pointer"
-                      onClick={handleSignOut}
-                    >
-                      <LogOut size={14} aria-hidden="true" />
-                      Sair
-                    </DropdownMenuItem>
+                    {userMenuContent}
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
@@ -363,15 +368,11 @@ export function Sidebar({ initialSidebarCollapsed = false }: SidebarProps) {
           ) : (
             /* ── Modo expandido: controles com labels ── */
             <>
-              <div className="flex justify-center py-0.5">
-                <ThemeToggle />
-              </div>
-
               {/* Bell */}
               <Button
                 variant="ghost"
                 aria-label={`Notificações${unreadCount > 0 ? ` — ${unreadCount} não lidas` : ""}`}
-                className="relative flex h-8 w-full items-center justify-start gap-2.5 rounded-md px-2.5 text-sm text-(--text-secondary) hover:bg-(--bg-overlay) hover:text-(--text-primary)"
+                className="relative flex h-7.5 w-full items-center justify-start gap-2 rounded-md px-2.5 text-sm text-(--text-secondary) hover:bg-(--bg-overlay) hover:text-(--text-primary)"
               >
                 <Bell size={16} aria-hidden="true" className="shrink-0" />
                 <span>Notificações</span>
@@ -387,7 +388,7 @@ export function Sidebar({ initialSidebarCollapsed = false }: SidebarProps) {
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="ghost"
-                    className="flex h-8 w-full items-center justify-start gap-2.5 rounded-md px-2.5 text-sm text-(--text-secondary) hover:bg-(--bg-overlay) hover:text-(--text-primary)"
+                    className="flex h-7.5 w-full items-center justify-start gap-2 rounded-md px-2.5 text-sm text-(--text-secondary) hover:bg-(--bg-overlay) hover:text-(--text-primary)"
                     aria-label="Menu do usuário"
                   >
                     <Avatar className="size-5 shrink-0">
@@ -399,37 +400,33 @@ export function Sidebar({ initialSidebarCollapsed = false }: SidebarProps) {
                     <span className="truncate">{user?.name ?? user?.email}</span>
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent side="right" align="end" className="w-48">
-                  <DropdownMenuLabel className="font-normal">
-                    <p className="truncate text-xs font-medium text-(--text-primary)">
-                      {user?.name}
-                    </p>
-                    <p className="truncate text-xs text-(--text-tertiary)">{user?.email}</p>
-                  </DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem destructive className="cursor-pointer" onClick={handleSignOut}>
-                    <LogOut size={14} aria-hidden="true" />
-                    Sair
-                  </DropdownMenuItem>
+                <DropdownMenuContent side="right" align="end" className="w-56">
+                  {userMenuContent}
                 </DropdownMenuContent>
               </DropdownMenu>
             </>
           )}
-        </div>
 
-        {/* Botão colapsar */}
-        <button
-          type="button"
-          onClick={toggleSidebar}
-          aria-label={collapsed ? "Expandir menu" : "Recolher menu"}
-          className="m-2 flex items-center justify-center rounded-xl border border-(--border-default) py-1.5 text-(--text-tertiary) transition-all duration-200 hover:bg-(--bg-overlay) hover:text-(--text-secondary)"
-        >
-          {collapsed ? (
-            <ChevronRight size={14} aria-hidden="true" />
-          ) : (
-            <ChevronLeft size={14} aria-hidden="true" />
-          )}
-        </button>
+          <div className={cn("pt-1", collapsed ? "flex justify-center" : "") }>
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              aria-label={collapsed ? "Expandir menu" : "Recolher menu"}
+              className={cn(
+                "flex items-center justify-center rounded-xl border border-(--border-default) text-(--text-tertiary) transition-all duration-200 hover:bg-(--bg-overlay) hover:text-(--text-secondary)",
+                collapsed
+                  ? "h-6 w-6 border-(--accent)/20 bg-(--bg-surface) text-(--accent) shadow-[0_10px_24px_-16px_var(--accent)] hover:bg-(--accent)/10 hover:text-(--accent)"
+                  : "h-7 w-full",
+              )}
+            >
+              {collapsed ? (
+                <ChevronRight size={14} aria-hidden="true" />
+              ) : (
+                <ChevronLeft size={14} aria-hidden="true" />
+              )}
+            </button>
+          </div>
+        </div>
       </aside>
     </TooltipProvider>
   )

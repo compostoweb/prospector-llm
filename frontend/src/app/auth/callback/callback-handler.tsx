@@ -31,7 +31,7 @@ export function CallbackHandler({ grantCode }: Props) {
       return
     }
 
-    fetch(`${env.API_URL}/auth/session/exchange`, {
+    fetch(`${env.NEXT_PUBLIC_API_URL}/auth/session/exchange`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
