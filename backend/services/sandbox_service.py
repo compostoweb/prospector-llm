@@ -1088,7 +1088,12 @@ class SandboxService:
             # Lead real — busca via query async (não usar step.lead por lazy loading)
             from sqlalchemy import select as sa_select
 
-            result = await db.execute(sa_select(Lead).where(Lead.id == step.lead_id))
+            result = await db.execute(
+                sa_select(Lead).where(
+                    Lead.id == step.lead_id,
+                    Lead.tenant_id == step.tenant_id,
+                )
+            )
             lead = result.scalar_one_or_none()
             if not lead:
                 raise ValueError(f"Lead {step.lead_id} não encontrado.")

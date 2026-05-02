@@ -58,6 +58,14 @@ Este documento cobre resposta inicial para:
 2. Restaurar ou recriar Redis.
 3. Reiniciar workers.
 4. Validar se nao houve duplicacao critica de dispatch.
+5. Seguir o procedimento completo de `docs/REDIS_DR.md`.
+
+### Perda ou corrupcao de objetos criticos
+
+1. Isolar alteracoes no bucket e suspender automacoes destrutivas.
+2. Restaurar prefixos criticos a partir do mirror/offsite.
+3. Executar `backend/scripts/verify_object_storage_restore.py` contra o banco restaurado.
+4. Registrar missing ou parse_errors e corrigir antes de reabrir o fluxo.
 
 ## Evidencias Minimas a Preservar
 
@@ -72,3 +80,4 @@ Este documento cobre resposta inicial para:
 - Atualizar [docs/BACKUP_SECURITY_PLAN_2026-05-01.md](docs/BACKUP_SECURITY_PLAN_2026-05-01.md) quando o incidente alterar o baseline.
 - Criar tarefa de correcao permanente para a causa raiz.
 - Registrar gaps de monitoramento, documentação e automacao descobertos no incidente.
+- Anexar evidencias geradas por [docs/DR_DRILLS.md](docs/DR_DRILLS.md) quando o incidente virar drill controlado ou pos-mortem técnico.

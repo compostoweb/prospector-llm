@@ -32,6 +32,15 @@ Ultima atualizacao: 2026-05-01
 - Cron:
   - `*/5 * * * * /root/prospector-alerts/check_dr_health.py >> /var/log/prospector-dr-alert.log 2>&1`
 
+## Artefatos Versionados no Repositório
+
+- `backend/scripts/verify_restore_target.py`
+- `backend/scripts/verify_object_storage_restore.py`
+- `docs/REDIS_DR.md`
+- `docs/OBJECT_STORAGE_DR.md`
+- `docs/OPERATIONS_DASHBOARD_V1.md`
+- `docs/DR_DRILLS.md`
+
 ## Runbook de Failover Manual
 
 1. Pausar Celery Beat.
@@ -52,11 +61,26 @@ Ultima atualizacao: 2026-05-01
 
 ## Runbook de Redis
 
+Resumo:
+
 1. Pausar Beat.
-2. Subir Redis restaurado ou limpo.
-3. Reiniciar workers.
-4. Validar retomada de filas, cadencias e pollers.
-5. Reativar Beat.
+2. Parar workers.
+3. Subir Redis restaurado ou limpo com AOF ativo.
+4. Reativar workers e validar auth, rate limits e filas.
+5. Reativar Beat somente apos smoke funcional.
+
+Detalhe completo em `docs/REDIS_DR.md`.
+
+## Runbook de Objetos S3/MinIO
+
+Resumo:
+
+1. Restaurar bucket ou prefixos criticos.
+2. Executar `backend/scripts/verify_object_storage_restore.py`.
+3. Corrigir objetos missing a partir do mirror/offsite.
+4. Repetir ate zerar missing e parse_errors.
+
+Detalhe completo em `docs/OBJECT_STORAGE_DR.md`.
 
 ## Verificacoes Obrigatorias
 
@@ -68,7 +92,6 @@ Ultima atualizacao: 2026-05-01
 
 ## Pendencias Abertas
 
-- Automatizar restore diario em ambiente temporario/staging.
-- Formalizar restore de prefixos criticos de S3/MinIO.
-- Versionar checklist de failover e retorno ao primary apos crise.
-- Definir estrategia offsite real para backups e WAL.
+- Implantar em cron/runner operacional a execucao diaria de `backend/scripts/verify_restore_target.py`.
+- Implantar mirror/offsite real para backups, WAL e prefixos criticos de bucket.
+- Revisar exposicao operacional de borda de Flower, Redis e Postgres.

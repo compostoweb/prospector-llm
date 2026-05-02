@@ -244,7 +244,12 @@ async def process_batch_results(
             continue
 
         lead_id_str = result.custom_id
-        text = result.result.message.content[0].text if result.result.message.content else ""
+        text_parts: list[str] = []
+        for block in result.result.message.content:
+            block_text = getattr(block, "text", None)
+            if isinstance(block_text, str):
+                text_parts.append(block_text)
+        text = "\n".join(text_parts)
 
         try:
             parsed = json.loads(text)
@@ -262,7 +267,12 @@ async def process_batch_results(
             logger.warning("anthropic_batch.invalid_lead_id", custom_id=lead_id_str)
             continue
 
-        result_row = await db.execute(select(Lead).where(Lead.id == lead_uuid))
+        result_row = await db.execute(
+            select(Lead).where(
+                Lead.id == lead_uuid,
+                Lead.tenant_id == job.tenant_id,
+            )
+        )
         lead = result_row.scalar_one_or_none()
         if lead is None:
             logger.warning("anthropic_batch.lead_not_found", lead_id=lead_id_str)

@@ -143,7 +143,10 @@ async def run_daily_warmup(
 
     # Carrega EmailAccount
     acc_result = await db.execute(
-        select(EmailAccount).where(EmailAccount.id == campaign.email_account_id)
+        select(EmailAccount).where(
+            EmailAccount.id == campaign.email_account_id,
+            EmailAccount.tenant_id == campaign.tenant_id,
+        )
     )
     email_account = acc_result.scalar_one_or_none()
     if email_account is None:
@@ -266,7 +269,10 @@ async def get_campaign_stats(
         .where(WarmupLog.campaign_id == campaign_id)
         .group_by(WarmupLog.status)
     )
-    log_counts: dict[str, int] = {row.status: row.count for row in logs_result}
+    log_counts: dict[str, int] = {
+        str(row["status"]): int(row["count"])
+        for row in logs_result.mappings().all()
+    }
 
     daily_volume = calculate_daily_volume(campaign)
     reply_rate = (

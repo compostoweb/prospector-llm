@@ -39,7 +39,10 @@ async def evaluate_step_eligibility(
             return StepEligibilityResult(dispatchable=False, reason="no_email")
         if cadence.email_account_id:
             result = await db.execute(
-                select(EmailAccount).where(EmailAccount.id == cadence.email_account_id)
+                select(EmailAccount).where(
+                    EmailAccount.id == cadence.email_account_id,
+                    EmailAccount.tenant_id == cadence.tenant_id,
+                )
             )
             email_account = result.scalar_one_or_none()
             if email_account is None:
@@ -101,7 +104,10 @@ async def resolve_linkedin_delivery_provider(
     registry = LinkedInRegistry(settings=settings)
     if cadence.linkedin_account_id:
         result = await db.execute(
-            select(LinkedInAccount).where(LinkedInAccount.id == cadence.linkedin_account_id)
+            select(LinkedInAccount).where(
+                LinkedInAccount.id == cadence.linkedin_account_id,
+                LinkedInAccount.tenant_id == cadence.tenant_id,
+            )
         )
         account = result.scalar_one_or_none()
         if account is None or not account.is_active:

@@ -80,8 +80,7 @@ Concluido:
 - monitor operacional para archiving, replicacao e Redis AOF ativo via cron
 
 Pendente:
-- automatizar verificacao diaria de restore em ambiente temporario/staging
-- versionar runbooks operacionais detalhados fora deste consolidado
+- acoplar a execucao diaria dos scripts versionados ao cron/runner operacional do host
 
 ### Phase 3 — Redis, Celery e MinIO/S3
 Status: parcial.
@@ -89,11 +88,13 @@ Status: parcial.
 Concluido:
 - Redis com AOF habilitado em producao
 - uso de presigned URLs para objetos privados relevantes no backend
+- runbook versionado de perda de Redis criado em `docs/REDIS_DR.md`
+- runbook versionado de restore/validacao de S3/MinIO criado em `docs/OBJECT_STORAGE_DR.md`
+- script versionado de verificacao de referencias de bucket criado em `backend/scripts/verify_object_storage_restore.py`
 
 Pendente:
-- runbook versionado de perda de Redis
-- estrategia operacional de mirror/versionamento/backup de MinIO/S3
-- restore validado de prefixos criticos do bucket
+- estrategia operacional de mirror/versionamento/backup de MinIO/S3 em ambiente real
+- restore automatizado recorrente de prefixos criticos do bucket no ambiente operacional
 
 ### Phase 4 — Hardening de Autenticacao e Sessoes
 Status: majoritariamente concluida.
@@ -121,7 +122,7 @@ Concluido:
  - trilha de auditoria leve implementada para eventos sensiveis e administrativos
 
 Pendente:
-- revisar queries criticas restantes para filtro explicito por `tenant_id`
+- revisar periodicamente novas queries criticas para filtro explicito por `tenant_id`
 
 ### Phase 6 — Headers, CORS, Arquivos e Bordas Publicas
 Status: parcial avancado.
@@ -144,8 +145,7 @@ Concluido:
  - auditoria RLS, `pip-audit`, `npm audit` e secret scanning/Gitleaks em workflows dedicados
 
 Pendente:
-- dashboard operacional versionado
-- cadencia operacional formal de drills mensais/trimestrais
+- acoplar o dashboard versionado a uma ferramenta operacional real
 
 ### Observacoes importantes
 - Nao registrar credenciais, tokens ou segredos neste documento.
@@ -253,8 +253,8 @@ Ferramenta principal recomendada: pgBackRest. Alternativa: WAL-G se o ambiente b
 2. Promover standby em drill controlado, trocar aplicacao para o standby e validar retomada em menos de 1h.
 3. Medir replication lag e idade do ultimo WAL arquivado; alertar quando exceder limite compativel com RPO 5-15min.
 4. Rodar restore automatico diario em banco temporario e validar `alembic current`, `/health`, login e consultas multi-tenant.
-5. Simular perda de Redis e validar retomada sem duplicacoes criticas.
-6. Restaurar prefixos MinIO/S3 em bucket temporario e comparar objetos contra referencias do banco.
+5. Simular perda de Redis e validar retomada sem duplicacoes criticas seguindo `docs/REDIS_DR.md`.
+6. Restaurar prefixos MinIO/S3 em bucket temporario e comparar objetos contra referencias do banco com `backend/scripts/verify_object_storage_restore.py`.
 7. Testar rate limit, grants/tickets single-use, expiracao, replay e tenant errado.
 8. Rodar auditoria RLS e testes cross-tenant em CI.
 9. Validar redaction de logs com tokens/secrets/PII sinteticos.
@@ -272,3 +272,10 @@ Ferramenta principal recomendada: pgBackRest. Alternativa: WAL-G se o ambiente b
 1. Copia offsite real: MinIO/S3 no mesmo provedor protege contra erro logico e perda parcial, mas nao contra falha total do provedor. Para DR forte, replicar WAL/backups para outro provedor/regiao.
 2. Failover automatico: nao implementar no primeiro momento sem maturidade operacional; comecar com promocao manual documentada e testada.
 3. Criptografia de backups: se o storage nao criptografar server-side de forma confiavel, ativar criptografia client-side no pgBackRest/WAL-G e guardar keys em cofre.
+
+## Incrementos Versionados em 2026-05-02
+
+- Script de restore verification versionado em `backend/scripts/verify_restore_target.py`.
+- Script de verificacao de object storage versionado em `backend/scripts/verify_object_storage_restore.py`.
+- Dashboard operacional minimo versionado em `docs/OPERATIONS_DASHBOARD_V1.md`.
+- Cadencia formal de drills versionada em `docs/DR_DRILLS.md`.

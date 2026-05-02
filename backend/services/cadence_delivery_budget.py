@@ -88,7 +88,10 @@ async def resolve_account_rate_scope(
     if channel == Channel.EMAIL:
         if cadence.email_account_id:
             email_account_result = await db.execute(
-                select(EmailAccount).where(EmailAccount.id == cadence.email_account_id)
+                select(EmailAccount).where(
+                    EmailAccount.id == cadence.email_account_id,
+                    EmailAccount.tenant_id == cadence.tenant_id,
+                )
             )
             email_account = email_account_result.scalar_one_or_none()
             account_limit = tenant_limit
@@ -120,7 +123,10 @@ async def resolve_account_rate_scope(
     if channel.value.startswith("linkedin"):
         if cadence.linkedin_account_id:
             linkedin_account_result = await db.execute(
-                select(LinkedInAccount).where(LinkedInAccount.id == cadence.linkedin_account_id)
+                select(LinkedInAccount).where(
+                    LinkedInAccount.id == cadence.linkedin_account_id,
+                    LinkedInAccount.tenant_id == cadence.tenant_id,
+                )
             )
             linkedin_account = linkedin_account_result.scalar_one_or_none()
             label = f"Conta LinkedIn {str(cadence.linkedin_account_id)[:8]}"

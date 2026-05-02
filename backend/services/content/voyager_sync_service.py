@@ -679,6 +679,7 @@ async def _consolidate_duplicate_posts(
     for duplicate_post in duplicate_posts:
         await _reassign_post_references(
             db,
+            tenant_id=canonical_post.tenant_id,
             source_post_id=duplicate_post.id,
             target_post_id=canonical_post.id,
         )
@@ -693,29 +694,40 @@ async def _consolidate_duplicate_posts(
 async def _reassign_post_references(
     db: AsyncSession,
     *,
+    tenant_id: Any,
     source_post_id: Any,
     target_post_id: Any,
 ) -> None:
     content_theme_result = await db.execute(
-        select(ContentTheme).where(ContentTheme.used_in_post_id == source_post_id)
+        select(ContentTheme).where(
+            ContentTheme.tenant_id == tenant_id,
+            ContentTheme.used_in_post_id == source_post_id,
+        )
     )
     for theme_row in content_theme_result.scalars():
         theme_row.used_in_post_id = target_post_id  # type: ignore[assignment]
 
     content_lm_post_result = await db.execute(
-        select(ContentLMPost).where(ContentLMPost.content_post_id == source_post_id)
+        select(ContentLMPost).where(
+            ContentLMPost.tenant_id == tenant_id,
+            ContentLMPost.content_post_id == source_post_id,
+        )
     )
     for lm_post_row in content_lm_post_result.scalars():
         lm_post_row.content_post_id = target_post_id  # type: ignore[assignment]
 
     publish_log_result = await db.execute(
-        select(ContentPublishLog).where(ContentPublishLog.post_id == source_post_id)
+        select(ContentPublishLog).where(
+            ContentPublishLog.tenant_id == tenant_id,
+            ContentPublishLog.post_id == source_post_id,
+        )
     )
     for publish_log_row in publish_log_result.scalars():
         publish_log_row.post_id = target_post_id  # type: ignore[assignment]
 
     engagement_session_result = await db.execute(
         select(ContentEngagementSession).where(
+            ContentEngagementSession.tenant_id == tenant_id,
             ContentEngagementSession.linked_post_id == source_post_id
         )
     )

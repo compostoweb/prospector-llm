@@ -365,6 +365,8 @@ async def sync_pending_steps_with_template(
         .join(Lead, Lead.id == CadenceStep.lead_id)
         .where(
             CadenceStep.cadence_id == cadence.id,
+            CadenceStep.tenant_id == cadence.tenant_id,
+            Lead.tenant_id == cadence.tenant_id,
             CadenceStep.status == StepStatus.PENDING,
             CadenceStep.sent_at.is_(None),
         )

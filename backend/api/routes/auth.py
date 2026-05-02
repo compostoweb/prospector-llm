@@ -464,6 +464,8 @@ async def login(
 
     # Verificação em tempo constante para evitar timing attack
     stored_hash = tenant.api_key_hash if tenant else _DUMMY_API_KEY_HASH
+    if stored_hash is None:
+        stored_hash = _DUMMY_API_KEY_HASH
     valid = _pwd_context.verify(form.password, stored_hash)
 
     if not valid or tenant is None:

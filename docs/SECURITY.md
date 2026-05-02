@@ -19,9 +19,15 @@ Ultima atualizacao: 2026-05-01
 
 ### Tenant Isolation
 
-- Banco reconciliado ate `alembic_version = 098`.
+- Banco reconciliado ate `alembic_version = 099`.
 - Auditoria de RLS criada para falhar em CI se novas tabelas multi-tenant ficarem sem policy.
 - Confirmacao operacional atual: `TENANT_TABLES = 49`, `MISSING_RLS = 0`.
+- Revisao de queries sensiveis reforcada em services de cadence, warmup, sandbox, batch Anthropic e voyager sync com filtro explicito por tenant.
+
+### Auditoria e CI
+
+- Trilha leve de auditoria ativa para eventos de auth, acoes administrativas e upload/delete de media do Content Hub.
+- Workflows de CI, auditoria RLS, dependency audit e secret scanning versionados no repositório.
 
 ### Logs e Dados Sensiveis
 
@@ -36,9 +42,8 @@ Ultima atualizacao: 2026-05-01
 
 ## Controles Que Ainda Faltam
 
-- Trilho de auditoria leve mais abrangente para eventos sensiveis e administrativos.
-- Revisao continua de queries com filtro explicito por `tenant_id`.
-- Workflows de CI com lint, typecheck, testes, auditoria RLS, dependency audit e secret scanning.
+- Revisao continua de novas queries com filtro explicito por `tenant_id`.
+- Acoplar os scripts de restore verification e object storage verification ao runner operacional diario.
 - Revisao final de exposicao operacional de Flower, Redis e Postgres.
 
 ## Regras Operacionais
@@ -52,5 +57,6 @@ Ultima atualizacao: 2026-05-01
 
 - Testar replay e expiracao de grants e tickets.
 - Rodar auditoria RLS e testes cross-tenant em CI.
+- Executar `backend/scripts/verify_restore_target.py` e `backend/scripts/verify_object_storage_restore.py` em drills de DR.
 - Executar build/test do frontend e da extensao em toda alteracao relevante.
 - Rodar `pip-audit`, `npm audit` e secret scanning em pipeline dedicado.
