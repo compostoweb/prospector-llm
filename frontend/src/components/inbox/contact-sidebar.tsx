@@ -42,8 +42,8 @@ import {
   AlertTriangle,
 } from "lucide-react"
 import Link from "next/link"
-import Image from "next/image"
 import { cn } from "@/lib/utils"
+import { InboxAvatar } from "@/components/inbox/inbox-avatar"
 
 interface ContactSidebarProps {
   chatId: string
@@ -108,20 +108,12 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
           <div className="space-y-4">
             {/* Attendee info */}
             <div className="flex flex-col items-center gap-2 pb-2">
-              {lead?.attendee_profile_picture_url ? (
-                <Image
-                  src={lead.attendee_profile_picture_url}
-                  alt={lead.attendee_name || "Contato"}
-                  width={64}
-                  height={64}
-                  unoptimized
-                  className="h-16 w-16 rounded-full object-cover"
-                />
-              ) : (
-                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-(--bg-overlay)">
-                  <User size={24} className="text-(--text-tertiary)" aria-hidden="true" />
-                </div>
-              )}
+              <InboxAvatar
+                src={lead?.attendee_profile_picture_url}
+                alt={lead?.attendee_name || "Contato"}
+                fallbackLabel={lead?.attendee_name}
+                className="h-16 w-16"
+              />
               <div className="text-center">
                 <div className="flex items-center justify-center gap-1.5">
                   <h4 className="text-base font-semibold text-(--text-primary)">
@@ -263,20 +255,12 @@ export function ContactSidebar({ chatId }: ContactSidebarProps) {
           <div className="space-y-4">
             {/* Avatar + Name & title */}
             <div className="flex flex-col items-center gap-2 pb-2">
-              {lead.attendee_profile_picture_url ? (
-                <Image
-                  src={lead.attendee_profile_picture_url}
-                  alt={lead.name || "Lead"}
-                  width={64}
-                  height={64}
-                  unoptimized
-                  className="h-16 w-16 rounded-full object-cover"
-                />
-              ) : (
-                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-(--bg-overlay)">
-                  <User size={24} className="text-(--text-tertiary)" aria-hidden="true" />
-                </div>
-              )}
+              <InboxAvatar
+                src={lead.attendee_profile_picture_url}
+                alt={lead.name || "Lead"}
+                fallbackLabel={lead.name ?? lead.attendee_name}
+                className="h-16 w-16"
+              />
               <div className="text-center">
                 <div className="flex items-center justify-center gap-1.5">
                   <h4 className="text-base font-semibold text-(--text-primary)">

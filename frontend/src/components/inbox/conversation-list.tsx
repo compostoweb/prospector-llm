@@ -2,9 +2,9 @@
 
 import { cn } from "@/lib/utils"
 import type { Conversation, InboxFilter } from "@/lib/api/hooks/use-inbox"
-import { MessageSquare, User, Search, X, RefreshCw } from "lucide-react"
-import Image from "next/image"
+import { MessageSquare, Search, X, RefreshCw } from "lucide-react"
 import { useRef } from "react"
+import { InboxAvatar } from "@/components/inbox/inbox-avatar"
 
 interface ConversationListProps {
   conversations: Conversation[]
@@ -167,20 +167,12 @@ export function ConversationList({
                   )}
                 >
                   {/* Avatar */}
-                  {avatarUrl ? (
-                    <Image
-                      src={avatarUrl}
-                      alt={displayName}
-                      width={40}
-                      height={40}
-                      unoptimized
-                      className="h-10 w-10 shrink-0 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-(--bg-overlay)">
-                      <User size={16} className="text-(--text-tertiary)" aria-hidden="true" />
-                    </div>
-                  )}
+                  <InboxAvatar
+                    src={avatarUrl}
+                    alt={displayName}
+                    fallbackLabel={displayName}
+                    className="h-10 w-10"
+                  />
 
                   <div className="min-w-0 flex-1">
                     {/* Row 1: Name + Date */}

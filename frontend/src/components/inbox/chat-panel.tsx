@@ -24,8 +24,8 @@ import {
   SmilePlus,
   AlertTriangle,
 } from "lucide-react"
-import Image from "next/image"
 import { EmptyState } from "@/components/shared/empty-state"
+import { InboxAvatar } from "@/components/inbox/inbox-avatar"
 
 interface ChatPanelProps {
   chatId: string
@@ -91,16 +91,12 @@ export function ChatPanel({ chatId, onToggleContact, showContact }: ChatPanelPro
       {/* Header */}
       <div className="flex h-12 items-center justify-between border-b border-(--border-default) bg-(--bg-surface) px-4">
         <div className="flex items-center gap-2">
-          {attendeeAvatar ? (
-            <Image
-              src={attendeeAvatar}
-              alt={attendeeName}
-              width={24}
-              height={24}
-              unoptimized
-              className="h-6 w-6 rounded-full object-cover"
-            />
-          ) : null}
+          <InboxAvatar
+            src={attendeeAvatar}
+            alt={attendeeName}
+            fallbackLabel={attendeeName}
+            className="h-6 w-6"
+          />
           <h3 className="text-sm font-semibold text-(--text-primary)">{attendeeName}</h3>
         </div>
         <button
@@ -163,21 +159,14 @@ export function ChatPanel({ chatId, onToggleContact, showContact }: ChatPanelPro
                     )}
                   >
                     {/* Avatar */}
-                    {!msg.is_own &&
-                      (attendeeAvatar ? (
-                        <Image
-                          src={attendeeAvatar}
-                          alt={msg.sender_name}
-                          width={28}
-                          height={28}
-                          unoptimized
-                          className="h-7 w-7 shrink-0 rounded-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-(--bg-overlay)">
-                          <User size={12} className="text-(--text-tertiary)" aria-hidden="true" />
-                        </div>
-                      ))}
+                    {!msg.is_own && (
+                      <InboxAvatar
+                        src={attendeeAvatar}
+                        alt={msg.sender_name}
+                        fallbackLabel={msg.sender_name}
+                        className="h-7 w-7"
+                      />
+                    )}
 
                     {/* Bubble + reaction trigger */}
                     <div className="relative max-w-[70%]">
