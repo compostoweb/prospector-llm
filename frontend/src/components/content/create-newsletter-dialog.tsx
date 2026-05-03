@@ -23,19 +23,16 @@ interface Props {
 
 export function CreateNewsletterDialog({ open, onOpenChange, onSubmit, isPending }: Props) {
   const [title, setTitle] = useState("")
-  const [centralTheme, setCentralTheme] = useState("")
-  const [editionNumber, setEditionNumber] = useState<string>("")
+  const [subtitle, setSubtitle] = useState("")
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     await onSubmit({
       title: title.trim(),
-      central_theme: centralTheme.trim() || null,
-      edition_number: editionNumber ? Number(editionNumber) : null,
+      subtitle: subtitle.trim() || null,
     })
     setTitle("")
-    setCentralTheme("")
-    setEditionNumber("")
+    setSubtitle("")
   }
 
   return (
@@ -56,23 +53,13 @@ export function CreateNewsletterDialog({ open, onOpenChange, onSubmit, isPending
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="theme">Tema central</Label>
+            <Label htmlFor="subtitle">Subtítulo</Label>
             <Textarea
-              id="theme"
-              value={centralTheme}
-              onChange={(e) => setCentralTheme(e.target.value)}
-              placeholder="Selecione um dos temas centrais (opcional)"
+              id="subtitle"
+              value={subtitle}
+              onChange={(e) => setSubtitle(e.target.value)}
+              placeholder="Subtítulo / hook curto (opcional)"
               rows={2}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="edition">Número da edição (deixe vazio para auto)</Label>
-            <Input
-              id="edition"
-              type="number"
-              min={1}
-              value={editionNumber}
-              onChange={(e) => setEditionNumber(e.target.value)}
             />
           </div>
           <DialogFooter>

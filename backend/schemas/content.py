@@ -244,6 +244,9 @@ class ContentSettingsUpdate(BaseModel):
     notion_database_id: str | None = Field(
         default=None, max_length=100, description="UUID do banco de dados Notion (extraido da URL)"
     )
+    notion_newsletter_database_id: str | None = Field(
+        default=None, max_length=100, description="UUID do banco Notion com as newsletters"
+    )
     notion_column_mappings: NotionColumnMappings | None = Field(
         default=None, description="Mapeamento de colunas Notion para campos internos"
     )
@@ -263,6 +266,7 @@ class ContentSettingsResponse(BaseModel):
         default=False, description="True se notion_api_key esta configurada"
     )
     notion_database_id: str | None
+    notion_newsletter_database_id: str | None = None
     notion_column_mappings: NotionColumnMappings | None = Field(
         default=None, description="Mapeamento de colunas Notion configurado pelo tenant"
     )
@@ -303,6 +307,7 @@ class ContentSettingsResponse(BaseModel):
                 author_voice=obj.author_voice,
                 notion_api_key_set=obj.notion_api_key is not None,
                 notion_database_id=obj.notion_database_id,
+                notion_newsletter_database_id=obj.notion_newsletter_database_id,
                 notion_column_mappings=mappings,
                 created_at=obj.created_at,
                 updated_at=obj.updated_at,
@@ -582,3 +587,32 @@ class NotionImportResult(BaseModel):
     skipped: int
     failed: int
     post_ids: list[str] = Field(default_factory=list, description="UUIDs dos ContentPost criados")
+
+
+# ── Newsletter Notion Import ──────────────────────────────────────────
+
+
+class NotionNewsletterPreview(BaseModel):
+    """Preview de uma page Notion de newsletter antes de importar."""
+
+    page_id: str
+    title: str
+    subtitle: str | None
+    edition_number: int | None
+    status_notion: str | None
+    scheduled_for: str | None
+    body_preview: str = Field(description="Primeiros 120 caracteres do corpo")
+    already_imported: bool = Field(default=False)
+
+
+class NotionNewsletterImportRequest(BaseModel):
+    page_ids: list[str] = Field(..., min_length=1)
+
+
+class NotionNewsletterImportResult(BaseModel):
+    imported: int
+    skipped: int
+    failed: int
+    newsletter_ids: list[str] = Field(
+        default_factory=list, description="UUIDs dos ContentNewsletter criados"
+    )

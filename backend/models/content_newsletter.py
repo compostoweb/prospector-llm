@@ -65,4 +65,10 @@ class ContentNewsletter(Base, TenantMixin, TimestampMixin):
     created_by: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
     notion_page_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
 
+    # Métricas manuais do LinkedIn Pulse (preenchidas pelo usuário)
+    pulse_views_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pulse_reactions_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pulse_comments_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pulse_reposts_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

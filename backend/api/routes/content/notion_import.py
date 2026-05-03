@@ -22,14 +22,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible
-from integrations.notion_client import DEFAULT_MAPPING, NotionClient, NotionMissingFieldsError
+from integrations.notion_client import DEFAULT_MAPPING, NotionClient, NotionMissingFieldsError, NotionNewsletterClient
 from models.content_post import ContentPost
+from models.content_newsletter import ContentNewsletter
 from models.content_settings import ContentSettings
 from schemas.content import (
     NotionColumnMappings,
     NotionDatabaseColumn,
     NotionImportRequest,
     NotionImportResult,
+    NotionNewsletterImportRequest,
+    NotionNewsletterImportResult,
+    NotionNewsletterPreview,
     NotionPostPreview,
 )
 
@@ -119,6 +123,7 @@ async def preview_notion_posts(
 
     mapping = _get_mapping(settings_obj)
 
+    assert settings_obj.notion_api_key and settings_obj.notion_database_id
     try:
         async with NotionClient(settings_obj.notion_api_key) as client:
             pages = await client.query_database(settings_obj.notion_database_id, mapping=mapping)
@@ -198,9 +203,10 @@ async def import_notion_posts(
     mapping = _get_mapping(settings_obj)
     status_column = mapping.get("status", "Status")
 
+    assert settings_obj.notion_api_key and settings_obj.notion_database_id
     try:
-        async with NotionClient(settings_obj.notion_api_key) as client:
-            all_pages = await client.query_database(settings_obj.notion_database_id, mapping=mapping)
+        async with NotionClient(settings_obj.notion_api_key) as client:  # type: ignore[arg-type]
+            all_pages = await client.query_database(settings_obj.notion_database_id, mapping=mapping)  # type: ignore[arg-type]
             pages_by_id = {p.page_id: p for p in all_pages}
 
             imported_count = 0
@@ -309,9 +315,10 @@ async def list_notion_columns(
     """
     settings_obj = await _get_notion_settings(tenant_id, db)
 
+    assert settings_obj.notion_api_key and settings_obj.notion_database_id
     try:
-        async with NotionClient(settings_obj.notion_api_key) as client:
-            columns = await client.get_database_properties(settings_obj.notion_database_id)
+        async with NotionClient(settings_obj.notion_api_key) as client:  # type: ignore[arg-type]
+            columns = await client.get_database_properties(settings_obj.notion_database_id)  # type: ignore[arg-type]
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 401:
             raise HTTPException(
@@ -362,3 +369,251 @@ async def save_notion_mappings(
         fields_mapped=list(mappings_data.keys()),
     )
     return {"ok": True, "fields_mapped": list(mappings_data.keys())}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Newsletter import helpers + endpoints
+# ─────────────────────────────────────────────────────────────────────
+
+
+async def _get_notion_newsletter_settings(
+    tenant_id: uuid.UUID,
+    db: AsyncSession,
+) -> ContentSettings:
+    """Busca settings e valida que notion_api_key + notion_newsletter_database_id estão configurados."""
+    result = await db.execute(
+        select(ContentSettings).where(ContentSettings.tenant_id == tenant_id)
+    )
+    settings_obj = result.scalar_one_or_none()
+
+    if settings_obj is None or not settings_obj.notion_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Integração Notion não configurada. "
+                "Adicione a API Key nas configurações do Content Hub."
+            ),
+        )
+    if not settings_obj.notion_newsletter_database_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Database ID de newsletters do Notion não configurado. "
+                "Adicione o ID do banco de newsletters nas configurações do Content Hub."
+            ),
+        )
+    return settings_obj
+
+
+async def _get_imported_newsletter_page_ids(
+    tenant_id: uuid.UUID,
+    db: AsyncSession,
+) -> set[str]:
+    """Retorna os notion_page_id de newsletters já importadas (e não deletadas) por este tenant."""
+    result = await db.execute(
+        select(ContentNewsletter.notion_page_id).where(
+            ContentNewsletter.tenant_id == tenant_id,
+            ContentNewsletter.notion_page_id.is_not(None),
+            ContentNewsletter.deleted_at.is_(None),
+        )
+    )
+    return {row[0] for row in result.fetchall() if row[0]}
+
+
+async def _get_next_edition_number(tenant_id: uuid.UUID, db: AsyncSession) -> int:
+    """Retorna o próximo número de edição para o tenant (excluindo deletados)."""
+    from sqlalchemy import func
+
+    result = await db.execute(
+        select(func.max(ContentNewsletter.edition_number)).where(
+            ContentNewsletter.tenant_id == tenant_id,
+            ContentNewsletter.deleted_at.is_(None),
+        )
+    )
+    max_num = result.scalar_one_or_none()
+    return (max_num or 0) + 1
+
+
+@router.get("/newsletter-preview", response_model=list[NotionNewsletterPreview])
+async def preview_notion_newsletters(
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> list[NotionNewsletterPreview]:
+    """
+    Lista as pages do banco de dados de newsletters Notion configurado.
+
+    Retorna flag already_imported=True para pages já importadas por este tenant.
+    """
+    settings_obj = await _get_notion_newsletter_settings(tenant_id, db)
+    imported_ids = await _get_imported_newsletter_page_ids(tenant_id, db)
+
+    assert settings_obj.notion_api_key is not None
+    assert settings_obj.notion_newsletter_database_id is not None
+    try:
+        async with NotionNewsletterClient(settings_obj.notion_api_key) as client:
+            pages = await client.query_newsletter_database(
+                settings_obj.notion_newsletter_database_id,
+            )
+    except NotionMissingFieldsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        if status_code in (403, 404):
+            detail = (
+                "Banco de dados de newsletters não encontrado ou sem permissão. "
+                "Abra o banco no Notion → menu '...' → 'Conectar a' → selecione sua integração."
+            )
+        else:
+            detail = f"Erro ao consultar Notion: {status_code}"
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=detail,
+        ) from exc
+
+    previews: list[NotionNewsletterPreview] = []
+    for page in pages:
+        if not page.title.strip():
+            continue
+        body_preview = (page.body[:120] + "…") if len(page.body) > 120 else page.body
+        previews.append(
+            NotionNewsletterPreview(
+                page_id=page.page_id,
+                title=page.title,
+                subtitle=page.subtitle,
+                edition_number=page.edition_number,
+                status_notion=page.status_notion,
+                scheduled_for=page.scheduled_for,
+                body_preview=body_preview,
+                already_imported=page.page_id in imported_ids,
+            )
+        )
+
+    previews.sort(key=lambda p: p.edition_number if p.edition_number is not None else 0)
+
+    logger.info(
+        "notion.newsletter_preview_fetched",
+        tenant_id=str(tenant_id),
+        total=len(previews),
+        already_imported=sum(1 for p in previews if p.already_imported),
+    )
+    return previews
+
+
+@router.post("/newsletter-import", response_model=NotionNewsletterImportResult)
+async def import_notion_newsletters(
+    body: NotionNewsletterImportRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> NotionNewsletterImportResult:
+    """
+    Importa as pages Notion selecionadas como ContentNewsletter (status=draft).
+
+    - Pages já importadas são contadas como skipped.
+    - Após importação bem-sucedida, atualiza o status no Notion para "Importado".
+    - Falhas individuais não abortam a importação.
+    - Se edition_number não estiver no Notion, atribui automaticamente o próximo número.
+    """
+    settings_obj = await _get_notion_newsletter_settings(tenant_id, db)
+    imported_ids = await _get_imported_newsletter_page_ids(tenant_id, db)
+
+    status_column = "Status"  # nome padrão; usa a coluna de status do banco de newsletters
+
+    assert settings_obj.notion_api_key is not None
+    assert settings_obj.notion_newsletter_database_id is not None
+    try:
+        async with NotionNewsletterClient(settings_obj.notion_api_key) as client:
+            all_pages = await client.query_newsletter_database(
+                settings_obj.notion_newsletter_database_id,
+            )
+            pages_by_id = {p.page_id: p for p in all_pages}
+
+            imported_count = 0
+            skipped_count = 0
+            failed_count = 0
+            created_ids: list[str] = []
+
+            next_edition = await _get_next_edition_number(tenant_id, db)
+
+            for page_id in body.page_ids:
+                if page_id in imported_ids:
+                    skipped_count += 1
+                    continue
+
+                page_data = pages_by_id.get(page_id)
+                if page_data is None:
+                    logger.warning(
+                        "notion.newsletter_import_page_not_found",
+                        tenant_id=str(tenant_id),
+                        page_id=page_id,
+                    )
+                    failed_count += 1
+                    continue
+
+                try:
+                    scheduled_dt: datetime | None = None
+                    if page_data.scheduled_for:
+                        scheduled_dt = datetime.fromisoformat(
+                            page_data.scheduled_for + "T12:00:00"
+                            if "T" not in page_data.scheduled_for
+                            else page_data.scheduled_for
+                        ).replace(tzinfo=UTC)
+
+                    edition_num = page_data.edition_number if page_data.edition_number is not None else next_edition
+                    if page_data.edition_number is None:
+                        next_edition += 1
+
+                    newsletter = ContentNewsletter(
+                        tenant_id=tenant_id,
+                        edition_number=edition_num,
+                        title=page_data.title or "Newsletter importada do Notion",
+                        subtitle=page_data.subtitle,
+                        body_markdown=page_data.body or "",
+                        body_html=page_data.body_html or "",
+                        status=page_data.status_notion or "draft",
+                        scheduled_for=scheduled_dt,
+                        notion_page_id=page_id,
+                    )
+                    db.add(newsletter)
+                    await db.flush()
+
+                    created_ids.append(str(newsletter.id))
+                    imported_count += 1
+
+                except Exception as exc:
+                    logger.error(
+                        "notion.newsletter_import_failed",
+                        tenant_id=str(tenant_id),
+                        page_id=page_id,
+                        error=str(exc),
+                    )
+                    failed_count += 1
+
+            await db.commit()
+
+    except NotionMissingFieldsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Erro ao consultar Notion: {exc.response.status_code}",
+        ) from exc
+
+    logger.info(
+        "notion.newsletters_imported",
+        tenant_id=str(tenant_id),
+        imported=imported_count,
+        skipped=skipped_count,
+        failed=failed_count,
+    )
+    return NotionNewsletterImportResult(
+        imported=imported_count,
+        skipped=skipped_count,
+        failed=failed_count,
+        newsletter_ids=created_ids,
+    )

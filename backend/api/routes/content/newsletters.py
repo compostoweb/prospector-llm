@@ -38,8 +38,10 @@ from api.dependencies import (
 )
 from core.file_security import detect_image_content_type, pick_image_extension
 from integrations.llm import LLMRegistry
+from integrations.notion_client import NotionNewsletterClient
 from models.content_article import ContentArticle
 from models.content_newsletter import ContentNewsletter
+from models.content_settings import ContentSettings
 from schemas.content_newsletter import (
     NewsletterCreate,
     NewsletterExportFormat,
@@ -511,7 +513,7 @@ async def mark_published(
     obj = await _get_or_404(nid, tenant_id, db)
     obj.status = "published"
     obj.linkedin_pulse_url = body.linkedin_pulse_url
-    obj.published_at = datetime.now(UTC)
+    obj.published_at = body.published_at if body.published_at is not None else datetime.now(UTC)
 
     if body.create_derived_article and obj.derived_article_id is None:
         article = ContentArticle(
@@ -535,6 +537,24 @@ async def mark_published(
         newsletter_id=str(nid),
         derived_article_id=str(obj.derived_article_id) if obj.derived_article_id else None,
     )
+
+    # Atualiza status no Notion para "Publicado" (silencia falhas)
+    if obj.notion_page_id:
+        try:
+            settings_result = await db.execute(
+                select(ContentSettings).where(ContentSettings.tenant_id == tenant_id)
+            )
+            settings_obj = settings_result.scalar_one_or_none()
+            if settings_obj and settings_obj.notion_api_key:
+                async with NotionNewsletterClient(settings_obj.notion_api_key) as notion:
+                    await notion.update_page_status(obj.notion_page_id, "Status", "Publicado")
+        except Exception as exc:
+            logger.warning(
+                "content.newsletter_notion_status_update_failed",
+                newsletter_id=str(nid),
+                error=str(exc),
+            )
+
     return NewsletterResponse.model_validate(obj)
 
 

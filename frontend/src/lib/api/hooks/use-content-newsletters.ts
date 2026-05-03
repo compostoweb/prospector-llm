@@ -66,45 +66,60 @@ export interface ContentNewsletter {
   edition_number: number
   title: string
   subtitle: string | null
-  central_theme: string | null
+  body_markdown: string | null
+  body_html: string | null
+  sections_payload: NewsletterFullPayload | Record<string, unknown> | null
+  cover_image_url: string | null
+  cover_image_s3_key: string | null
   status: NewsletterStatus
-  payload: NewsletterFullPayload | null
-  cover_url: string | null
-  cover_s3_key: string | null
-  read_time_min: number | null
-  word_count: number | null
   scheduled_for: string | null
   published_at: string | null
-  published_url: string | null
+  linkedin_pulse_url: string | null
   derived_article_id: string | null
   last_reminder_sent_at: string | null
-  llm_provider: string | null
-  llm_model: string | null
-  llm_temperature: number | null
-  generation_violations: string[] | null
+  created_by: string | null
+  notion_page_id: string | null
+  pulse_views_count: number | null
+  pulse_reactions_count: number | null
+  pulse_comments_count: number | null
+  pulse_reposts_count: number | null
+  deleted_at: string | null
   created_at: string
   updated_at: string
-  deleted_at: string | null
 }
 
 export interface NewsletterCreateInput {
-  edition_number?: number | null
   title: string
   subtitle?: string | null
-  central_theme?: string | null
-  payload?: NewsletterFullPayload | null
-  cover_url?: string | null
-  cover_s3_key?: string | null
+  body_markdown?: string | null
+  body_html?: string | null
+  sections_payload?: Record<string, unknown> | null
+  cover_image_url?: string | null
+  cover_image_s3_key?: string | null
   scheduled_for?: string | null
 }
 
 export interface NewsletterUpdateInput {
   title?: string
   subtitle?: string | null
-  central_theme?: string | null
-  payload?: NewsletterFullPayload | null
+  body_markdown?: string | null
+  body_html?: string | null
+  sections_payload?: Record<string, unknown> | null
   scheduled_for?: string | null
   status?: NewsletterStatus
+  linkedin_pulse_url?: string | null
+  pulse_views_count?: number | null
+  pulse_reactions_count?: number | null
+  pulse_comments_count?: number | null
+  pulse_reposts_count?: number | null
+}
+
+export interface NewsletterGenerateCoverInput {
+  prompt?: string | null
+  style?: "clean" | "with_text" | "infographic"
+  visual_direction?: string
+  aspect_ratio?: "4:5" | "1:1" | "16:9"
+  image_size?: "512" | "1K" | "2K" | "4K"
 }
 
 export interface NewsletterGenerateDraftInput {
@@ -347,6 +362,30 @@ export function useUploadNewsletterCover() {
   })
 }
 
+export function useGenerateNewsletterCover() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, input }: { id: string; input: NewsletterGenerateCoverInput }) => {
+      const res = await fetch(`${apiBase()}/api/content/newsletters/${id}/generate-cover`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.accessToken ?? ""}`,
+        },
+        body: JSON.stringify(input),
+      })
+      if (!res.ok) throw await buildApiError(res, "Erro ao gerar capa com IA")
+      return res.json() as Promise<ContentNewsletter>
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: newsletterKeys.all })
+      toast.success("Capa gerada com IA")
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+
 export function useScheduleNewsletter() {
   const { data: session } = useSession()
   const qc = useQueryClient()
@@ -377,12 +416,14 @@ export function useMarkNewsletterPublished() {
   return useMutation({
     mutationFn: async ({
       id,
-      published_url,
-      create_article,
+      linkedin_pulse_url,
+      create_derived_article,
+      published_at,
     }: {
       id: string
-      published_url?: string | null
-      create_article?: boolean
+      linkedin_pulse_url: string
+      create_derived_article?: boolean
+      published_at?: string | null
     }) => {
       const res = await fetch(`${apiBase()}/api/content/newsletters/${id}/mark-published`, {
         method: "POST",
@@ -391,8 +432,9 @@ export function useMarkNewsletterPublished() {
           Authorization: `Bearer ${session?.accessToken ?? ""}`,
         },
         body: JSON.stringify({
-          published_url: published_url ?? null,
-          create_article: create_article ?? true,
+          linkedin_pulse_url,
+          create_derived_article: create_derived_article ?? true,
+          ...(published_at ? { published_at } : {}),
         }),
       })
       if (!res.ok) throw await buildApiError(res, "Erro ao marcar publicado")
@@ -417,4 +459,71 @@ export async function exportNewsletter(
   })
   if (!res.ok) throw new Error("Erro ao exportar")
   return res.text()
+}
+
+// ── Notion Newsletter Import ──────────────────────────────────────────
+
+export interface NotionNewsletterPreview {
+  page_id: string
+  title: string
+  subtitle: string | null
+  edition_number: number | null
+  status_notion: string | null
+  scheduled_for: string | null
+  body_preview: string
+  already_imported: boolean
+}
+
+export interface NotionNewsletterImportResult {
+  imported: number
+  skipped: number
+  failed: number
+  newsletter_ids: string[]
+}
+
+export function useNotionNewsletterPreview(enabled: boolean) {
+  const { data: session } = useSession()
+  return useQuery({
+    queryKey: ["notion", "newsletter-preview"],
+    queryFn: async () => {
+      const res = await fetch(
+        `${apiBase()}/api/content/notion/newsletter-preview`,
+        { headers: { Authorization: `Bearer ${session?.accessToken ?? ""}` } },
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(
+          (err as { detail?: string }).detail ?? "Erro ao buscar newsletters do Notion",
+        )
+      }
+      return res.json() as Promise<NotionNewsletterPreview[]>
+    },
+    enabled: enabled && !!session?.accessToken,
+    staleTime: 0,
+  })
+}
+
+export function useImportNewslettersFromNotion() {
+  const { data: session } = useSession()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (pageIds: string[]) => {
+      const res = await fetch(`${apiBase()}/api/content/notion/newsletter-import`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.accessToken ?? ""}`,
+        },
+        body: JSON.stringify({ page_ids: pageIds }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(
+          (err as { detail?: string }).detail ?? "Erro ao importar newsletters do Notion",
+        )
+      }
+      return res.json() as Promise<NotionNewsletterImportResult>
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: newsletterKeys.all }),
+  })
 }

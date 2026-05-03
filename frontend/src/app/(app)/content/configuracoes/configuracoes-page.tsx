@@ -92,7 +92,7 @@ export default function ConfiguracoesPage() {
   }, [settings])
 
   // Notion form (api key nunca é pré-preenchida — só enviada se o usuário digitar)
-  const [notionForm, setNotionForm] = useState({ api_key: "", database_id: "" })
+  const [notionForm, setNotionForm] = useState({ api_key: "", database_id: "", newsletter_database_id: "" })
   const [notionDirty, setNotionDirty] = useState(false)
   const [showNotionKey, setShowNotionKey] = useState(false)
   const [mappingForm, setMappingForm] = useState<Partial<NotionColumnMappings>>({
@@ -102,7 +102,11 @@ export default function ConfiguracoesPage() {
   const [mappingDirty, setMappingDirty] = useState(false)
   useEffect(() => {
     if (!settings) return
-    setNotionForm((prev) => ({ ...prev, database_id: settings.notion_database_id ?? "" }))
+    setNotionForm((prev) => ({
+      ...prev,
+      database_id: settings.notion_database_id ?? "",
+      newsletter_database_id: settings.notion_newsletter_database_id ?? "",
+    }))
     if (settings.notion_column_mappings) {
       setMappingForm(settings.notion_column_mappings)
     }
@@ -116,6 +120,7 @@ export default function ConfiguracoesPage() {
   async function handleSaveNotion() {
     const payload: Record<string, string | null> = {
       notion_database_id: notionForm.database_id || null,
+      notion_newsletter_database_id: notionForm.newsletter_database_id || null,
     }
     // Só envia a chave se o usuário digitou algo novo
     if (notionForm.api_key) {
@@ -462,7 +467,7 @@ export default function ConfiguracoesPage() {
           </div>
 
           <div className="grid gap-1.5">
-            <Label htmlFor="notion_database_id">Database ID</Label>
+            <Label htmlFor="notion_database_id">Database ID — Posts</Label>
             <Input
               id="notion_database_id"
               value={notionForm.database_id}
@@ -476,12 +481,26 @@ export default function ConfiguracoesPage() {
               </code>
             </p>
           </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="notion_newsletter_database_id">Database ID — Newsletters</Label>
+            <Input
+              id="notion_newsletter_database_id"
+              value={notionForm.newsletter_database_id}
+              onChange={(e) => handleNotionChange("newsletter_database_id", e.target.value)}
+              placeholder="65ef0c50361b4e2b824a7fea2840fef1"
+            />
+            <p className="text-xs text-(--text-tertiary)">
+              UUID do banco Notion com as edições da newsletter.
+            </p>
+          </div>
         </div>
 
         {settings?.notion_api_key_set && settings.notion_database_id && (
           <div className="flex items-center gap-2 text-xs text-(--success-default)">
             <CheckCircle className="h-3.5 w-3.5 shrink-0" />
-            Notion configurado — botão &quot;Importar do Notion&quot; disponível na lista de posts.
+            Notion configurado — botão &quot;Importar do Notion&quot; disponível na lista de posts
+            {settings.notion_newsletter_database_id && " e newsletters"}.
           </div>
         )}
 

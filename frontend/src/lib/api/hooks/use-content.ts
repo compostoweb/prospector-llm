@@ -111,6 +111,7 @@ export interface ContentSettings {
   author_voice: string | null
   notion_api_key_set: boolean
   notion_database_id: string | null
+  notion_newsletter_database_id: string | null
   notion_column_mappings: NotionColumnMappings | null
   created_at: string
   updated_at: string
@@ -561,6 +562,7 @@ export function useUpdateContentSettings() {
       author_voice?: string | null
       notion_api_key?: string | null
       notion_database_id?: string | null
+      notion_newsletter_database_id?: string | null
     }) => {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/content/settings`, {
         method: "PUT",

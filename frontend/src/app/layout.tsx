@@ -5,6 +5,7 @@ import { ThemeProvider } from "next-themes"
 import { ReactQueryProvider } from "@/components/providers/react-query-provider"
 import { auth } from "@/lib/auth/config"
 import { Toaster } from "sonner"
+import "@mdxeditor/editor/style.css"
 import "@/styles/globals.css"
 
 // ── Fonte ─────────────────────────────────────────────────────────────

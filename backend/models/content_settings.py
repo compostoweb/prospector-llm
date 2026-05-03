@@ -70,3 +70,8 @@ class ContentSettings(Base, TenantMixin, TimestampMixin):
         nullable=True,
         comment="JSON: mapeamento colunas Notion -> campos ContentPost (campo_interno: nome_coluna_notion)",
     )
+    notion_newsletter_database_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="ID do banco de dados Notion com as newsletters (UUID da URL)",
+    )

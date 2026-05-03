@@ -110,6 +110,10 @@ class NewsletterUpdate(BaseModel):
     scheduled_for: datetime | None = None
     linkedin_pulse_url: str | None = None
     notion_page_id: str | None = None
+    pulse_views_count: int | None = None
+    pulse_reactions_count: int | None = None
+    pulse_comments_count: int | None = None
+    pulse_reposts_count: int | None = None
 
     @field_validator("scheduled_for")
     @classmethod
@@ -138,6 +142,10 @@ class NewsletterResponse(BaseModel):
     last_reminder_sent_at: datetime | None
     created_by: uuid.UUID | None
     notion_page_id: str | None
+    pulse_views_count: int | None
+    pulse_reactions_count: int | None
+    pulse_comments_count: int | None
+    pulse_reposts_count: int | None
     deleted_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -175,6 +183,10 @@ class NewsletterImproveSectionRequest(BaseModel):
 class NewsletterMarkPublishedRequest(BaseModel):
     linkedin_pulse_url: str = Field(..., min_length=8)
     create_derived_article: bool = Field(default=True)
+    published_at: datetime | None = Field(
+        default=None,
+        description="Data de publicação. Se None, usa datetime.now(UTC). Aceita datas passadas.",
+    )
 
 
 class NewsletterScheduleRequest(BaseModel):
