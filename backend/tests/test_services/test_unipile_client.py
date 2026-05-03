@@ -78,3 +78,44 @@ async def test_get_own_profile_uses_shorter_request_timeout(
         "timeout": _OWN_PROFILE_TIMEOUT,
     }
     assert isinstance(cast(dict[str, object], captured["kwargs"])["timeout"], httpx.Timeout)
+
+
+@pytest.mark.asyncio
+async def test_resolve_attendee_prefers_large_profile_picture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = UnipileClient()
+
+    class _RedisStub:
+        async def get(self, key: str) -> None:
+            return None
+
+        async def set(self, key: str, value: str, ex: int | None = None) -> None:
+            return None
+
+    class _Response:
+        status_code = 200
+
+        def json(self) -> dict[str, object]:
+            return {
+                "first_name": "Davi",
+                "last_name": "Bernardes",
+                "public_identifier": "davi-bernardes",
+                "profile_picture_url": "https://cdn.example.com/avatar-small.jpg",
+                "profile_picture_url_large": "https://cdn.example.com/avatar-large.jpg",
+            }
+
+    async def _fake_get(path: str, **kwargs: object) -> _Response:  # type: ignore[override]
+        return _Response()
+
+    monkeypatch.setattr(client, "_client", SimpleNamespace(get=_fake_get))
+
+    import core.redis_client as redis_module
+
+    monkeypatch.setattr(redis_module, "redis_client", _RedisStub())
+
+    attendee = await client._resolve_attendee("provider_123", "acc_123")
+
+    assert attendee.name == "Davi Bernardes"
+    assert attendee.profile_url == "https://www.linkedin.com/in/davi-bernardes"
+    assert attendee.profile_picture_url == "https://cdn.example.com/avatar-large.jpg"

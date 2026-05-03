@@ -40,6 +40,18 @@ _PREVIEW_CACHE_TTL = 300  # 5min for message previews
 _CHAT_LIST_CACHE_TTL = 120  # 2min — alinhado com refetchInterval do frontend
 
 
+def _extract_profile_picture_url(data: dict[str, Any]) -> str | None:
+    """Prefere a foto em maior resolução quando a Unipile a expõe."""
+
+    return (
+        data.get("profile_picture_url_large")
+        or data.get("profile_picture_url")
+        or data.get("picture_url")
+        or data.get("avatar_url")
+        or None
+    )
+
+
 class _LoopBoundAsyncClient:
     """Recria o AsyncClient por event loop para uso seguro em Celery."""
 
@@ -740,7 +752,7 @@ class UnipileClient:
             profile = {
                 "first_name": first,
                 "last_name": last,
-                "profile_picture_url": data.get("profile_picture_url"),
+                "profile_picture_url": _extract_profile_picture_url(data),
                 "public_identifier": public_id,
                 "headline": data.get("headline") or None,
                 "company": (data.get("work_experience") or [{}])[0].get("company")
