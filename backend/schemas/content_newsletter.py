@@ -191,3 +191,19 @@ class NewsletterScheduleRequest(BaseModel):
 class NewsletterExportFormat(BaseModel):
     format: Literal["markdown", "html"] = "markdown"
     content: str
+
+
+class NewsletterGenerateCoverRequest(BaseModel):
+    """Geração de capa via IA (Gemini Nano Banana)."""
+
+    prompt: str | None = Field(
+        default=None,
+        max_length=1000,
+        description=(
+            "Prompt customizado. Se vazio, usa título + tema central da edição."
+        ),
+    )
+    style: Literal["clean", "with_text", "infographic"] = "clean"
+    visual_direction: str = Field(default="auto", max_length=50)
+    aspect_ratio: Literal["4:5", "1:1", "16:9"] = "16:9"
+    image_size: Literal["512", "1K", "2K", "4K"] = "1K"

@@ -43,6 +43,7 @@ from models.content_newsletter import ContentNewsletter
 from schemas.content_newsletter import (
     NewsletterCreate,
     NewsletterExportFormat,
+    NewsletterGenerateCoverRequest,
     NewsletterGenerateDraftRequest,
     NewsletterImproveSectionRequest,
     NewsletterMarkPublishedRequest,
@@ -359,6 +360,85 @@ async def upload_cover(
     obj.cover_image_s3_key = key
     await db.commit()
     await db.refresh(obj)
+    return NewsletterResponse.model_validate(obj)
+
+
+@router.post("/{nid}/generate-cover", response_model=NewsletterResponse)
+async def generate_cover_with_ai(
+    nid: uuid.UUID,
+    body: NewsletterGenerateCoverRequest,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+    registry: LLMRegistry = Depends(get_llm_registry),
+) -> NewsletterResponse:
+    """
+    Gera a capa da newsletter via Gemini Nano Banana 2 e persiste em S3.
+    """
+    from integrations.s3_client import S3Client
+    from services.content import image_generator as image_generator_service
+
+    obj = await _get_or_404(nid, tenant_id, db)
+
+    base_prompt = (body.prompt or "").strip()
+    if not base_prompt:
+        # Fallback: título + tema central inferidos do payload
+        title = obj.title or f"Newsletter Operação Inteligente — Edição #{obj.edition_number}"
+        tema = ""
+        if isinstance(obj.sections_payload, dict):
+            tema_section = obj.sections_payload.get("section_tema_quinzena") or {}
+            if isinstance(tema_section, dict):
+                tema = str(tema_section.get("heading") or tema_section.get("body") or "")[:200]
+        base_prompt = f"{title}. {tema}".strip(". ").strip()
+
+    try:
+        image_bytes, prompt_used = await image_generator_service.generate_standalone_image(
+            prompt=base_prompt,
+            style=body.style,
+            registry=registry,
+            aspect_ratio=body.aspect_ratio,
+            visual_direction=body.visual_direction,
+            image_size=body.image_size,
+        )
+    except ValueError as exc:
+        logger.warning("content.newsletter_cover_generation_failed", error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Falha na geração da capa: {exc}",
+        ) from exc
+    except Exception as exc:
+        exc_str = str(exc)
+        logger.error("content.newsletter_cover_generation_error", error=exc_str)
+        if "429" in exc_str or "RESOURCE_EXHAUSTED" in exc_str:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Cota da API Gemini esgotada.",
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Erro ao gerar capa: {exc}",
+        ) from exc
+
+    s3 = S3Client()
+    key = f"newsletters/{tenant_id}/{nid}/cover-ai-{uuid.uuid4().hex}.png"
+    url = s3.upload_bytes(image_bytes, key, content_type="image/png")
+
+    if obj.cover_image_s3_key:
+        try:
+            s3.delete_object(obj.cover_image_s3_key)
+        except Exception:
+            pass
+
+    obj.cover_image_url = url
+    obj.cover_image_s3_key = key
+    await db.commit()
+    await db.refresh(obj)
+
+    logger.info(
+        "content.newsletter_cover_ai_generated",
+        newsletter_id=str(nid),
+        tenant_id=str(tenant_id),
+        prompt_chars=len(prompt_used),
+    )
     return NewsletterResponse.model_validate(obj)
 
 
