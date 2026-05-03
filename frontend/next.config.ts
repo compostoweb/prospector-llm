@@ -23,6 +23,18 @@ function buildCspHeader(): string {
   const appOrigin = toOrigin(readRequiredEnv("NEXT_PUBLIC_APP_URL"))
   const apiOrigin = toOrigin(readRequiredEnv("NEXT_PUBLIC_API_URL"))
   const wsOrigin = toOrigin(readRequiredEnv("NEXT_PUBLIC_WS_URL"))
+  const imageSrc = [
+    "'self'",
+    "data:",
+    "blob:",
+    apiOrigin,
+    "https://lh3.googleusercontent.com",
+    "https://media.licdn.com",
+    "https://media-exp1.licdn.com",
+    "https://media-exp2.licdn.com",
+    "https://media-exp3.licdn.com",
+    "https://media-exp4.licdn.com",
+  ]
   const connectSrc = [
     "'self'",
     appOrigin,
@@ -41,7 +53,7 @@ function buildCspHeader(): string {
     `form-action 'self' ${appOrigin} ${apiOrigin}`,
     `connect-src ${connectSrc.join(" ")}`,
     "font-src 'self' data:",
-    `img-src 'self' data: blob: ${apiOrigin} https://lh3.googleusercontent.com`,
+    `img-src ${imageSrc.join(" ")}`,
     `media-src 'self' blob: data: ${apiOrigin}`,
     "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
     "style-src 'self' 'unsafe-inline'",
@@ -93,6 +105,10 @@ const nextConfig: NextConfig = {
       {
         protocol: "https",
         hostname: "lh3.googleusercontent.com",
+      },
+      {
+        protocol: "https",
+        hostname: "media.licdn.com",
       },
     ],
   },

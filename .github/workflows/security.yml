@@ -8,6 +8,11 @@ on:
   pull_request:
   schedule:
     - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -38,6 +43,7 @@ jobs:
 
   backend-dependency-audit:
     name: Backend Dependency Audit
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -58,10 +64,11 @@ jobs:
           python -m pip install pip-audit
 
       - name: Run pip-audit
-        run: pip-audit
+        run: pip-audit --desc
 
   frontend-dependency-audit:
     name: Frontend Dependency Audit
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -83,6 +90,7 @@ jobs:
 
   extension-dependency-audit:
     name: Extension Dependency Audit
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     defaults:
       run:

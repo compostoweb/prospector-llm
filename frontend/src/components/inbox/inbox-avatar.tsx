@@ -5,12 +5,12 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { cn } from "@/lib/utils"
 
 interface InboxAvatarProps {
-  src?: string | null
+  src?: string | null | undefined
   alt: string
-  fallbackLabel?: string | null
-  className?: string
-  fallbackClassName?: string
-  iconClassName?: string
+  fallbackLabel?: string | null | undefined
+  className?: string | undefined
+  fallbackClassName?: string | undefined
+  iconClassName?: string | undefined
 }
 
 function getInitials(label?: string | null): string {
