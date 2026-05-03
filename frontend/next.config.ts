@@ -1,6 +1,12 @@
 import type { NextConfig } from "next"
 
-import { env } from "./src/env"
+function readRequiredEnv(name: "NEXT_PUBLIC_APP_URL" | "NEXT_PUBLIC_API_URL" | "NEXT_PUBLIC_WS_URL"): string {
+  const value = process.env[name]
+  if (!value) {
+    throw new Error(`Missing required environment variable in next.config.ts: ${name}`)
+  }
+  return value
+}
 
 function toOrigin(rawUrl: string): string {
   const url = new URL(rawUrl)
@@ -14,9 +20,9 @@ function toOrigin(rawUrl: string): string {
 }
 
 function buildCspHeader(): string {
-  const appOrigin = toOrigin(env.NEXT_PUBLIC_APP_URL)
-  const apiOrigin = toOrigin(env.NEXT_PUBLIC_API_URL)
-  const wsOrigin = toOrigin(env.NEXT_PUBLIC_WS_URL)
+  const appOrigin = toOrigin(readRequiredEnv("NEXT_PUBLIC_APP_URL"))
+  const apiOrigin = toOrigin(readRequiredEnv("NEXT_PUBLIC_API_URL"))
+  const wsOrigin = toOrigin(readRequiredEnv("NEXT_PUBLIC_WS_URL"))
   const connectSrc = [
     "'self'",
     appOrigin,
