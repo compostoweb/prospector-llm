@@ -28,6 +28,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
+from types import SimpleNamespace
 from typing import Any, Protocol, cast
 from urllib.parse import urlencode
 
@@ -74,6 +75,19 @@ class _PasswordContext(Protocol):
     def verify(self, secret: str, hashed_value: str) -> bool: ...
 
 
+def _ensure_bcrypt_metadata() -> None:
+    """Compat com bcrypt>=4.1, que removeu __about__ esperado pelo passlib 1.7.x."""
+
+    bcrypt_module = cast(Any, import_module("bcrypt"))
+    if getattr(bcrypt_module, "__about__", None) is not None:
+        return
+
+    version = getattr(bcrypt_module, "__version__", None)
+    if isinstance(version, str):
+        bcrypt_module.__about__ = SimpleNamespace(__version__=version)
+
+
+_ensure_bcrypt_metadata()
 _CryptContext = cast(Any, getattr(import_module("passlib.context"), "CryptContext"))
 _pwd_context: _PasswordContext = _CryptContext(schemes=["bcrypt"], deprecated="auto")
 _DUMMY_API_KEY_HASH = _pwd_context.hash("prospector-invalid-api-key")
