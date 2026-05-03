@@ -366,6 +366,14 @@ body {
   z-index: 2147483647 !important;
 }
 
+.app-tooltip {
+  color: var(--tooltip-text) !important;
+  background: linear-gradient(180deg, var(--tooltip-bg) 0%, var(--tooltip-bg-secondary) 100%) !important;
+  border-color: var(--tooltip-border) !important;
+  z-index: 2147483647 !important;
+  pointer-events: none;
+}
+
 .mdxeditor.newsletter-mdx-editor [role="toolbar"] button:hover,
 .mdxeditor.newsletter-mdx-editor [role="toolbar"] [role="button"]:hover {
   background: var(--newsletter-mdx-hover);

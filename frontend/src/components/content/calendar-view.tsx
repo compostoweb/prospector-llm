@@ -29,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { HoverBubble } from "@/components/ui/hover-bubble"
 
 interface CalendarViewProps {
   posts: ContentPost[]
@@ -106,7 +107,7 @@ export function CalendarView({ posts }: CalendarViewProps) {
   const isCurrentMonth = isSameDay(startOfMonth(currentMonth), startOfMonth(new Date()))
 
   return (
-    <TooltipProvider delayDuration={400}>
+    <TooltipProvider delayDuration={120} skipDelayDuration={0}>
       <div className="flex flex-col gap-4">
         {/* Header do mês */}
         <div className="flex items-center gap-2">
@@ -227,8 +228,56 @@ export function CalendarView({ posts }: CalendarViewProps) {
                   {/* Posts do dia */}
                   <div className="flex flex-col gap-0.5 overflow-y-auto flex-1 min-h-0">
                     {dayPosts.slice(0, 3).map((post) => (
-                      <Tooltip key={post.id}>
-                        <TooltipTrigger asChild>
+                      <HoverBubble
+                        key={post.id}
+                        side="right"
+                        align="start"
+                        sideOffset={10}
+                        className="w-full"
+                        contentClassName="max-w-64 flex flex-col gap-1"
+                        content={
+                          <>
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={cn(
+                                  "inline-block text-[10px] font-medium px-1.5 py-0.5 rounded",
+                                  STATUS_PILL[post.status as PostStatus] ?? STATUS_PILL.draft,
+                                )}
+                              >
+                                {STATUS_LABEL[post.status as PostStatus] ?? post.status}
+                              </span>
+                              {post.pillar && (
+                                <span className="text-[10px] opacity-70 capitalize">
+                                  {post.pillar === "authority"
+                                    ? "Autoridade"
+                                    : post.pillar === "case"
+                                      ? "Caso"
+                                      : "Visão"}
+                                </span>
+                              )}
+                            </div>
+                            {post.publish_date && (
+                              <p className="text-[11px] opacity-90">
+                                {format(
+                                  toZonedTime(post.publish_date, "America/Sao_Paulo"),
+                                  "dd/MM/yyyy 'às' HH:mm",
+                                  { locale: ptBR },
+                                )}
+                              </p>
+                            )}
+                            {post.character_count && (
+                              <p className="text-[11px] opacity-70">
+                                {post.character_count} caracteres
+                              </p>
+                            )}
+                            {post.hook_type && (
+                              <p className="text-[11px] opacity-70">
+                                Gancho: {post.hook_type.replace("_", " ")}
+                              </p>
+                            )}
+                          </>
+                        }
+                      >
                           <button
                             type="button"
                             onClick={() => setEditPost(post)}
@@ -255,49 +304,7 @@ export function CalendarView({ posts }: CalendarViewProps) {
                             )}
                             <span className="line-clamp-3 wrap-break-word">{post.title}</span>
                           </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="right" className="max-w-64 flex flex-col gap-1">
-                          <div className="flex items-center gap-1.5">
-                            <span
-                              className={cn(
-                                "inline-block text-[10px] font-medium px-1.5 py-0.5 rounded",
-                                STATUS_PILL[post.status as PostStatus] ?? STATUS_PILL.draft,
-                              )}
-                            >
-                              {STATUS_LABEL[post.status as PostStatus] ?? post.status}
-                            </span>
-                            {post.pillar && (
-                              <span className="text-[10px] opacity-70 capitalize">
-                                {post.pillar === "authority"
-                                  ? "Autoridade"
-                                  : post.pillar === "case"
-                                    ? "Caso"
-                                    : "Visão"}
-                              </span>
-                            )}
-                          </div>
-                          {post.publish_date && (
-                            <p className="text-[11px] opacity-90">
-                              📅{" "}
-                              {format(
-                                toZonedTime(post.publish_date, "America/Sao_Paulo"),
-                                "dd/MM/yyyy 'às' HH:mm",
-                                { locale: ptBR },
-                              )}
-                            </p>
-                          )}
-                          {post.character_count && (
-                            <p className="text-[11px] opacity-70">
-                              {post.character_count} caracteres
-                            </p>
-                          )}
-                          {post.hook_type && (
-                            <p className="text-[11px] opacity-70">
-                              Gancho: {post.hook_type.replace("_", " ")}
-                            </p>
-                          )}
-                        </TooltipContent>
-                      </Tooltip>
+                      </HoverBubble>
                     ))}
                     {dayPosts.length > 3 && (
                       <span className="text-[10px] text-(--text-tertiary) px-1">

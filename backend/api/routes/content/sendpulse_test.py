@@ -16,6 +16,7 @@ import structlog
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_effective_tenant_id, get_session_flexible
@@ -184,7 +185,16 @@ async def test_sendpulse_webhook(
         _apply_event_to_lm_lead(lm_lead, event_type=event_type, link_url=body.link_url)
         lead_updated = True
 
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        return TestWebhookResult(
+            status="ok",
+            lm_lead_updated=False,
+            event_stored=False,
+            message="Evento duplicado ignorado (payload idêntico já registrado).",
+        )
     await db.refresh(event)
 
     logger.info(

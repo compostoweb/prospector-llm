@@ -14,6 +14,7 @@ from typing import cast
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -124,7 +125,12 @@ async def sendpulse_webhook(
     if lm_lead is not None:
         _apply_event_to_lm_lead(lm_lead, event_type=event_type, link_url=link_url)
 
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        logger.info("webhook.sendpulse.duplicate_race", payload_hash=payload_hash)
+        return {"status": "duplicate"}
     logger.info(
         "webhook.sendpulse.processed",
         event_type=event_type,

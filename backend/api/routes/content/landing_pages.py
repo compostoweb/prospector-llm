@@ -33,6 +33,7 @@ from schemas.content_inbound import (
 )
 from services.content.lead_magnet_service import (
     build_public_landing_page_url,
+    queue_lm_delivery_email,
     queue_sendpulse_sync,
     recalculate_conversion_rate,
     update_landing_page_submission_stats,
@@ -100,6 +101,27 @@ async def _get_public_page_or_404(
             status_code=status.HTTP_404_NOT_FOUND, detail="Landing page não encontrada"
         )
     return cast(tuple[ContentLandingPage, ContentLeadMagnet], (row[0], row[1]))
+
+
+def _validate_capture_fields_for_type(
+    *,
+    lead_magnet_type: str,
+    body: LandingPagePublicCaptureRequest,
+) -> None:
+    missing: list[str] = []
+    if lead_magnet_type == "pdf" and not (body.company or "").strip():
+        missing.append("company")
+    if lead_magnet_type == "email_sequence":
+        if not (body.company or "").strip():
+            missing.append("company")
+        if not (body.role or "").strip():
+            missing.append("role")
+
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Campos obrigatórios ausentes: {', '.join(missing)}",
+        )
 
 
 @router.get("/{lead_magnet_id}", response_model=ContentLandingPageResponse)
@@ -380,6 +402,7 @@ async def capture_public_lead(
     db: AsyncSession = Depends(get_session_no_auth),
 ) -> LandingPagePublicCaptureResponse:
     landing_page, lead_magnet = await _get_public_page_or_404(db, slug=slug)
+    _validate_capture_fields_for_type(lead_magnet_type=lead_magnet.type, body=body)
     lm_lead, _, should_sync = await upsert_lm_capture(
         db,
         lead_magnet=lead_magnet,
@@ -408,9 +431,7 @@ async def capture_public_lead(
         await queue_sendpulse_sync(lm_lead)
 
     if lead_magnet.type != "calculator":
-        from services.notification import send_lead_magnet_delivery_email
-
-        await send_lead_magnet_delivery_email(lm_lead=lm_lead, lead_magnet=lead_magnet)
+        await queue_lm_delivery_email(lm_lead)
 
     logger.info(
         "content.landing_page.captured",

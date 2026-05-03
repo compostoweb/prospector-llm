@@ -174,6 +174,9 @@ class LeadMagnetMetricsResponse(BaseModel):
     lead_magnet_id: uuid.UUID
     total_leads_captured: int
     total_synced_to_sendpulse: int
+    total_sendpulse_pending: int
+    total_sendpulse_failed: int
+    total_sendpulse_skipped: int
     total_sequence_completed: int
     total_converted_via_email: int
     total_unsubscribed: int
@@ -183,6 +186,11 @@ class LeadMagnetMetricsResponse(BaseModel):
     landing_page_submissions: int
     landing_page_conversion_rate: float | None
     qualified_conversion_rate: float | None
+
+
+class SendPulseRetryResponse(BaseModel):
+    queued: int
+    skipped: int
 
 
 class ContentLMLeadConvertResponse(BaseModel):
@@ -264,9 +272,9 @@ class LandingPagePublicResponse(BaseModel):
 class LandingPagePublicCaptureRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=150)
     email: str = Field(..., min_length=5, max_length=255)
-    company: str = Field(..., min_length=1, max_length=150)
-    role: str = Field(..., min_length=1, max_length=150)
-    phone: str = Field(..., min_length=1, max_length=30)
+    company: str | None = Field(default=None, max_length=150)
+    role: str | None = Field(default=None, max_length=150)
+    phone: str | None = Field(default=None, max_length=30)
     linkedin_profile_url: str | None = Field(default=None, max_length=500)
     session_id: str | None = Field(default=None, max_length=100)
 

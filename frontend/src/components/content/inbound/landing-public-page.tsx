@@ -23,9 +23,21 @@ import type {
 
 interface Props {
   page: LandingPagePublicData
+  preview?: boolean
 }
 
-export default function LandingPublicPage({ page }: Props) {
+type CaptureField = {
+  key: keyof Pick<
+    LandingPagePublicCaptureInput,
+    "name" | "email" | "company" | "role" | "phone" | "linkedin_profile_url"
+  >
+  label: string
+  placeholder: string
+  type?: "email" | "text" | "tel" | "url"
+  required?: boolean
+}
+
+export default function LandingPublicPage({ page, preview = false }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [form, setForm] = useState<LandingPagePublicCaptureInput>({
@@ -40,6 +52,7 @@ export default function LandingPublicPage({ page }: Props) {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (preview) return
     setError(null)
     setIsSubmitting(true)
 
@@ -68,56 +81,36 @@ export default function LandingPublicPage({ page }: Props) {
     }
   }
 
+  const formFields = getCaptureFields(page.lead_magnet_type)
+
   // ── Shared form JSX ──────────────────────────────────────────────────────
   const sharedForm = (
     <form className="mt-6 space-y-3" onSubmit={handleSubmit}>
-      <Input
-        value={form.name}
-        onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-        placeholder="Seu nome"
-        required
-      />
-      <Input
-        type="email"
-        value={form.email}
-        onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
-        placeholder="Seu melhor e-mail"
-        required
-      />
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Input
-          value={form.company || ""}
-          onChange={(event) => setForm((current) => ({ ...current, company: event.target.value }))}
-          placeholder="Empresa"
-          required
-        />
-        <Input
-          value={form.role || ""}
-          onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}
-          placeholder="Cargo"
-          required
-        />
-      </div>
-      <Input
-        value={form.phone || ""}
-        onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))}
-        placeholder="WhatsApp ou telefone"
-        required
-      />
-      <Input
-        value={form.linkedin_profile_url || ""}
-        onChange={(event) =>
-          setForm((current) => ({ ...current, linkedin_profile_url: event.target.value }))
-        }
-        placeholder="LinkedIn opcional"
-      />
+      {formFields.map((field) => (
+        <label key={field.key} className="block space-y-1.5">
+          <span className="text-xs font-medium text-(--text-secondary)">
+            {field.label}
+            {!field.required && <span className="font-normal text-(--text-tertiary)"> opcional</span>}
+          </span>
+          <Input
+            type={field.type ?? "text"}
+            value={String(form[field.key] ?? "")}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, [field.key]: event.target.value }))
+            }
+            placeholder={field.placeholder}
+            required={field.required}
+            disabled={preview}
+          />
+        </label>
+      ))}
       {error && (
         <div className="rounded-2xl border border-(--danger)/30 bg-(--danger-subtle) px-3 py-2 text-sm text-(--danger-subtle-fg)">
           {error}
         </div>
       )}
-      <Button type="submit" className="w-full justify-between" disabled={isSubmitting}>
-        {isSubmitting ? "Enviando..." : page.cta_text || "Receber material"}
+      <Button type="submit" className="w-full justify-between" disabled={isSubmitting || preview}>
+        {preview ? "Preview sem envio" : isSubmitting ? "Enviando..." : page.cta_text || "Receber material"}
         <ArrowRight className="h-4 w-4" />
       </Button>
       <p className="text-xs leading-5 text-(--text-tertiary)">
@@ -587,4 +580,54 @@ export default function LandingPublicPage({ page }: Props) {
       </div>
     </div>
   )
+}
+
+function getCaptureFields(type: LandingPagePublicData["lead_magnet_type"]): CaptureField[] {
+  const base: CaptureField[] = [
+    {
+      key: "name",
+      label: "Nome",
+      placeholder: "Seu nome",
+      required: true,
+    },
+    {
+      key: "email",
+      label: "E-mail",
+      placeholder: "seu@email.com",
+      type: "email",
+      required: true,
+    },
+  ]
+
+  if (type === "link") {
+    return base
+  }
+
+  if (type === "pdf") {
+    return [
+      ...base,
+      {
+        key: "company",
+        label: "Empresa",
+        placeholder: "Nome da empresa",
+        required: true,
+      },
+    ]
+  }
+
+  return [
+    ...base,
+    {
+      key: "company",
+      label: "Empresa",
+      placeholder: "Nome da empresa",
+      required: true,
+    },
+    {
+      key: "role",
+      label: "Cargo",
+      placeholder: "Seu cargo",
+      required: true,
+    },
+  ]
 }

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 import structlog
 
@@ -24,11 +25,11 @@ logger = structlog.get_logger()
     default_retry_delay=60,
     queue="content",
 )
-def sync_lm_lead_to_sendpulse(self, lm_lead_id: str, tenant_id: str) -> dict:  # type: ignore[type-arg]
+def sync_lm_lead_to_sendpulse(self, lm_lead_id: str, tenant_id: str) -> dict[str, object]:
     return asyncio.run(_sync_lm_lead_async(lm_lead_id, tenant_id, self))
 
 
-async def _sync_lm_lead_async(lm_lead_id: str, tenant_id: str, task) -> dict:  # type: ignore[type-arg]
+async def _sync_lm_lead_async(lm_lead_id: str, tenant_id: str, task: Any) -> dict[str, object]:
     from sqlalchemy import select
 
     from core.database import get_worker_session
@@ -82,6 +83,13 @@ async def _sync_lm_lead_async(lm_lead_id: str, tenant_id: str, task) -> dict:  #
                 },
             )
             subscriber_id = _extract_subscriber_id(response)
+            if subscriber_id is None:
+                logger.warning(
+                    "content.lm_sync.subscriber_id_missing",
+                    lm_lead_id=lm_lead_id,
+                    tenant_id=tenant_id,
+                    list_id=lead_magnet.sendpulse_list_id,
+                )
 
             lm_lead.sendpulse_list_id = lead_magnet.sendpulse_list_id
             lm_lead.sendpulse_subscriber_id = subscriber_id
@@ -128,6 +136,8 @@ async def _sync_lm_lead_async(lm_lead_id: str, tenant_id: str, task) -> dict:  #
             )
             raise task.retry(exc=exc)
 
+    return {"status": "skipped", "reason": "session_unavailable"}
+
 
 def _extract_subscriber_id(response: dict) -> str | None:
     candidates = (
@@ -140,3 +150,64 @@ def _extract_subscriber_id(response: dict) -> str | None:
         if candidate:
             return str(candidate)
     return None
+
+
+@celery_app.task(
+    bind=True,
+    name="workers.content_lm_sync.send_lm_delivery_email",
+    max_retries=3,
+    default_retry_delay=90,
+    queue="content",
+)
+def send_lm_delivery_email(self, lm_lead_id: str, tenant_id: str) -> dict[str, object]:
+    return asyncio.run(_send_lm_delivery_email_async(lm_lead_id, tenant_id, self))
+
+
+async def _send_lm_delivery_email_async(
+    lm_lead_id: str,
+    tenant_id: str,
+    task: Any,
+) -> dict[str, object]:
+    from sqlalchemy import select
+
+    from core.database import get_worker_session
+    from models.content_lead_magnet import ContentLeadMagnet
+    from models.content_lm_lead import ContentLMLead
+    from services.notification import send_lead_magnet_delivery_email
+
+    tid = uuid.UUID(tenant_id)
+    lid = uuid.UUID(lm_lead_id)
+
+    async for db in get_worker_session(tid):
+        result = await db.execute(
+            select(ContentLMLead, ContentLeadMagnet)
+            .join(ContentLeadMagnet, ContentLeadMagnet.id == ContentLMLead.lead_magnet_id)
+            .where(ContentLMLead.id == lid, ContentLMLead.tenant_id == tid)
+        )
+        row = result.first()
+        if row is None:
+            logger.warning(
+                "content.lm_delivery.lead_not_found",
+                lm_lead_id=lm_lead_id,
+                tenant_id=tenant_id,
+            )
+            return {"status": "skipped", "reason": "not_found"}
+
+        lm_lead, lead_magnet = row
+        if lead_magnet.type == "calculator":
+            return {"status": "skipped", "reason": "calculator"}
+
+        sent = await send_lead_magnet_delivery_email(lm_lead=lm_lead, lead_magnet=lead_magnet)
+        if sent:
+            return {"status": "sent", "lm_lead_id": lm_lead_id}
+
+        exc = RuntimeError("Falha ao enviar email de entrega do lead magnet")
+        logger.error(
+            "content.lm_delivery.failed",
+            lm_lead_id=lm_lead_id,
+            tenant_id=tenant_id,
+            retries=task.request.retries,
+        )
+        raise task.retry(exc=exc)
+
+    return {"status": "skipped", "reason": "session_unavailable"}

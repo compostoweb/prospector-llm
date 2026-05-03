@@ -150,6 +150,9 @@ export interface LeadMagnetMetrics {
   lead_magnet_id: string
   total_leads_captured: number
   total_synced_to_sendpulse: number
+  total_sendpulse_pending: number
+  total_sendpulse_failed: number
+  total_sendpulse_skipped: number
   total_sequence_completed: number
   total_converted_via_email: number
   total_unsubscribed: number
@@ -159,6 +162,11 @@ export interface LeadMagnetMetrics {
   landing_page_submissions: number
   landing_page_conversion_rate: number | null
   qualified_conversion_rate: number | null
+}
+
+export interface SendPulseRetryResult {
+  queued: number
+  skipped: number
 }
 
 export interface LandingPagePublicData {

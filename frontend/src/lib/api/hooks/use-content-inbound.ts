@@ -13,6 +13,7 @@ import type {
   LeadMagnetMetrics,
   LeadMagnetPostLinkInput,
   LeadMagnetStatus,
+  SendPulseRetryResult,
 } from "@/lib/content-inbound/types"
 
 function buildAuthHeaders(accessToken?: string, includeJson = false): HeadersInit {
@@ -230,6 +231,52 @@ export function useConvertLeadMagnetLead() {
       queryClient.invalidateQueries({
         queryKey: contentInboundKeys.metrics(variables.leadMagnetId),
       })
+    },
+  })
+}
+
+export function useRetryLeadMagnetLeadSendPulse() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ leadMagnetId, lmLeadId }: { leadMagnetId: string; lmLeadId: string }) => {
+      const response = await fetch(
+        `${env.NEXT_PUBLIC_API_URL}/api/content/lead-magnets/${leadMagnetId}/leads/${lmLeadId}/retry-sendpulse`,
+        {
+          method: "POST",
+          headers: buildAuthHeaders(session?.accessToken),
+        },
+      )
+      return parseApiResponse<ContentLMLead>(response)
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: contentInboundKeys.leads(variables.leadMagnetId) })
+      queryClient.invalidateQueries({
+        queryKey: contentInboundKeys.metrics(variables.leadMagnetId),
+      })
+    },
+  })
+}
+
+export function useRetryFailedLeadMagnetSendPulse() {
+  const { data: session } = useSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (leadMagnetId: string) => {
+      const response = await fetch(
+        `${env.NEXT_PUBLIC_API_URL}/api/content/lead-magnets/${leadMagnetId}/sendpulse/retry-failed`,
+        {
+          method: "POST",
+          headers: buildAuthHeaders(session?.accessToken),
+        },
+      )
+      return parseApiResponse<SendPulseRetryResult>(response)
+    },
+    onSuccess: (_, leadMagnetId) => {
+      queryClient.invalidateQueries({ queryKey: contentInboundKeys.leads(leadMagnetId) })
+      queryClient.invalidateQueries({ queryKey: contentInboundKeys.metrics(leadMagnetId) })
     },
   })
 }

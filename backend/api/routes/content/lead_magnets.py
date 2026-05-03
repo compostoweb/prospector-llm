@@ -35,6 +35,7 @@ from schemas.content_inbound import (
     ContentLMPostCreate,
     ContentLMPostResponse,
     LeadMagnetMetricsResponse,
+    SendPulseRetryResponse,
 )
 from services.content.lead_magnet_service import (
     convert_lm_lead_to_prospect,
@@ -482,6 +483,78 @@ async def convert_captured_lead(
         tenant_id=str(tenant_id),
     )
     return ContentLMLeadConvertResponse(lm_lead_id=lm_lead.id, lead_id=lead.id)
+
+
+@router.post(
+    "/{lead_magnet_id}/leads/{lm_lead_id}/retry-sendpulse",
+    response_model=ContentLMLeadResponse,
+)
+async def retry_captured_lead_sendpulse(
+    lead_magnet_id: uuid.UUID,
+    lm_lead_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> ContentLMLeadResponse:
+    lead_magnet = await _get_lead_magnet_or_404(lead_magnet_id, tenant_id, db)
+    if not lead_magnet.sendpulse_list_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Configure o ID da lista SendPulse antes de reenfileirar o sync.",
+        )
+
+    lm_lead = await _get_lm_lead_or_404(lm_lead_id, lead_magnet_id, tenant_id, db)
+    lm_lead.sendpulse_list_id = lead_magnet.sendpulse_list_id
+    lm_lead.sendpulse_sync_status = "pending"
+    lm_lead.sendpulse_last_error = None
+    await db.commit()
+    await db.refresh(lm_lead)
+    await queue_sendpulse_sync(lm_lead)
+    logger.info(
+        "content.lead_magnet.sendpulse_retry_queued",
+        lead_magnet_id=str(lead_magnet_id),
+        lm_lead_id=str(lm_lead_id),
+        tenant_id=str(tenant_id),
+    )
+    return ContentLMLeadResponse.model_validate(lm_lead)
+
+
+@router.post("/{lead_magnet_id}/sendpulse/retry-failed", response_model=SendPulseRetryResponse)
+async def retry_failed_sendpulse_syncs(
+    lead_magnet_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(get_effective_tenant_id),
+    db: AsyncSession = Depends(get_session_flexible),
+) -> SendPulseRetryResponse:
+    lead_magnet = await _get_lead_magnet_or_404(lead_magnet_id, tenant_id, db)
+    if not lead_magnet.sendpulse_list_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Configure o ID da lista SendPulse antes de reenfileirar falhas.",
+        )
+
+    result = await db.execute(
+        select(ContentLMLead).where(
+            ContentLMLead.tenant_id == tenant_id,
+            ContentLMLead.lead_magnet_id == lead_magnet_id,
+            ContentLMLead.sendpulse_sync_status.in_(["failed", "skipped"]),
+        )
+    )
+    leads = list(result.scalars().all())
+    for lm_lead in leads:
+        lm_lead.sendpulse_list_id = lead_magnet.sendpulse_list_id
+        lm_lead.sendpulse_sync_status = "pending"
+        lm_lead.sendpulse_last_error = None
+
+    await db.commit()
+    for lm_lead in leads:
+        await queue_sendpulse_sync(lm_lead)
+
+    logger.info(
+        "content.lead_magnet.sendpulse_bulk_retry_queued",
+        lead_magnet_id=str(lead_magnet_id),
+        tenant_id=str(tenant_id),
+        queued=len(leads),
+    )
+    return SendPulseRetryResponse(queued=len(leads), skipped=0)
 
 
 @router.get("/{lead_magnet_id}/metrics", response_model=LeadMagnetMetricsResponse)

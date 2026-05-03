@@ -40,6 +40,9 @@ class LeadMagnetMetrics(TypedDict):
     lead_magnet_id: uuid.UUID
     total_leads_captured: int
     total_synced_to_sendpulse: int
+    total_sendpulse_pending: int
+    total_sendpulse_failed: int
+    total_sendpulse_skipped: int
     total_sequence_completed: int
     total_converted_via_email: int
     total_unsubscribed: int
@@ -68,6 +71,27 @@ async def get_lead_magnet_metrics(
             ContentLMLead.tenant_id == tenant_id,
             ContentLMLead.lead_magnet_id == lead_magnet_id,
             ContentLMLead.sendpulse_sync_status == "synced",
+        )
+    )
+    total_sendpulse_pending = await db.scalar(
+        select(func.count(ContentLMLead.id)).where(
+            ContentLMLead.tenant_id == tenant_id,
+            ContentLMLead.lead_magnet_id == lead_magnet_id,
+            ContentLMLead.sendpulse_sync_status.in_(["pending", "processing"]),
+        )
+    )
+    total_sendpulse_failed = await db.scalar(
+        select(func.count(ContentLMLead.id)).where(
+            ContentLMLead.tenant_id == tenant_id,
+            ContentLMLead.lead_magnet_id == lead_magnet_id,
+            ContentLMLead.sendpulse_sync_status == "failed",
+        )
+    )
+    total_sendpulse_skipped = await db.scalar(
+        select(func.count(ContentLMLead.id)).where(
+            ContentLMLead.tenant_id == tenant_id,
+            ContentLMLead.lead_magnet_id == lead_magnet_id,
+            ContentLMLead.sendpulse_sync_status == "skipped",
         )
     )
     total_sequence_completed = await db.scalar(
@@ -125,6 +149,9 @@ async def get_lead_magnet_metrics(
         "lead_magnet_id": lead_magnet_id,
         "total_leads_captured": int(total_leads_captured or 0),
         "total_synced_to_sendpulse": int(total_synced or 0),
+        "total_sendpulse_pending": int(total_sendpulse_pending or 0),
+        "total_sendpulse_failed": int(total_sendpulse_failed or 0),
+        "total_sendpulse_skipped": int(total_sendpulse_skipped or 0),
         "total_sequence_completed": int(total_sequence_completed or 0),
         "total_converted_via_email": int(total_converted_via_email or 0),
         "total_unsubscribed": int(total_unsubscribed or 0),
@@ -228,6 +255,15 @@ async def queue_sendpulse_sync(lm_lead: ContentLMLead) -> None:
     from workers.content_lm_sync import sync_lm_lead_to_sendpulse
 
     sync_lm_lead_to_sendpulse.apply_async(
+        args=[str(lm_lead.id), str(lm_lead.tenant_id)],
+        queue="content",
+    )
+
+
+async def queue_lm_delivery_email(lm_lead: ContentLMLead) -> None:
+    from workers.content_lm_sync import send_lm_delivery_email
+
+    send_lm_delivery_email.apply_async(
         args=[str(lm_lead.id), str(lm_lead.tenant_id)],
         queue="content",
     )

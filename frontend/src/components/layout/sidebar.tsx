@@ -8,6 +8,7 @@ import { useSession, signOut } from "next-auth/react"
 import {
   LayoutDashboard,
   Users,
+  UserRoundCog,
   GitBranch,
   Settings,
   Building2,
@@ -31,7 +32,7 @@ import { useNotificationsStore } from "@/store/notifications-store"
 import { ThemeToggle } from "@/components/layout/theme-toggle"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { HoverBubble } from "@/components/ui/hover-bubble"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -45,7 +46,7 @@ import {
 
 const navItems: Array<{ href: Route; label: string; icon: LucideIcon }> = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/equipe" as Route, label: "Equipe", icon: Users },
+  { href: "/equipe" as Route, label: "Equipe", icon: UserRoundCog },
   { href: "/leads/busca-linkedin", label: "Busca LinkedIn", icon: Search },
   { href: "/gerar-leads", label: "Gerar Leads", icon: Sparkles },
   { href: "/listas", label: "Listas", icon: List },
@@ -150,21 +151,20 @@ function SidebarNavItem({ active, collapsed, href, icon, kind, label }: SidebarN
   }
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>{content}</TooltipTrigger>
-      <TooltipContent
-        side="right"
-        sideOffset={14}
-        className="bg-[linear-gradient(135deg,color-mix(in_srgb,var(--bg-surface)_96%,white_4%),color-mix(in_srgb,var(--bg-surface)_88%,var(--accent-subtle)_12%))] text-(--text-primary)"
-      >
+    <HoverBubble
+      side="right"
+      sideOffset={14}
+      content={
         <div className="flex items-center gap-2">
           <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-(--accent)/10 text-(--accent)">
             <TooltipIcon size={14} aria-hidden="true" />
           </span>
           <span>{label}</span>
         </div>
-      </TooltipContent>
-    </Tooltip>
+      }
+    >
+      {content}
+    </HoverBubble>
   )
 }
 
@@ -223,10 +223,10 @@ export function Sidebar({ initialSidebarCollapsed = false }: SidebarProps) {
   )
 
   return (
-    <TooltipProvider delayDuration={110} skipDelayDuration={0} disableHoverableContent>
+    <>
       <aside
         className={cn(
-          "group relative flex h-full flex-col border-r border-(--border-default) bg-(--bg-surface)",
+          "group relative z-40 flex h-full shrink-0 flex-col border-r border-(--border-default) bg-(--bg-surface)",
           hydrated && "transition-[width] duration-200",
           collapsed ? "w-16" : "w-56",
         )}
@@ -428,6 +428,6 @@ export function Sidebar({ initialSidebarCollapsed = false }: SidebarProps) {
           </div>
         </div>
       </aside>
-    </TooltipProvider>
+    </>
   )
 }

@@ -20,9 +20,10 @@ const TooltipContent = React.forwardRef<
         boxShadow: "var(--tooltip-shadow)",
         background:
           "linear-gradient(180deg, var(--tooltip-bg) 0%, var(--tooltip-bg-secondary) 100%)",
+        zIndex: 2147483647,
       }}
       className={cn(
-        "z-50 max-w-72 overflow-hidden rounded-[14px] border px-3 py-2 text-sm leading-snug font-medium tracking-[-0.01em] backdrop-blur-md",
+        "app-tooltip z-50 max-w-72 overflow-hidden rounded-[14px] border px-3 py-2 text-sm leading-snug font-medium tracking-[-0.01em] backdrop-blur-md",
         "border-(--tooltip-border) text-(--tooltip-text) ring-1 ring-white/55",
         "origin-[--radix-tooltip-content-transform-origin] duration-150",
         "data-[state=open]:animate-in data-[state=closed]:animate-out",

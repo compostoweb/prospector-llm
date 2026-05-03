@@ -122,9 +122,9 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.04);
   --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255, 255, 255, 0.05);
-  --tooltip-bg: rgba(255, 255, 255, 0.98);
-  --tooltip-bg-secondary: rgba(245, 244, 240, 0.96);
-  --tooltip-text: #1a1a18;
-  --tooltip-border: rgba(111, 196, 255, 0.4);
-  --tooltip-shadow: 0 20px 42px rgba(0, 0, 0, 0.24), 0 0 0 1px rgba(111, 196, 255, 0.2), 0 0 26px rgba(73, 181, 255, 0.28);
+  --tooltip-bg: rgba(28, 28, 26, 0.98);
+  --tooltip-bg-secondary: rgba(17, 17, 16, 0.98);
+  --tooltip-text: #eeeee8;
+  --tooltip-border: rgba(111, 196, 255, 0.32);
+  --tooltip-shadow: 0 20px 42px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(111, 196, 255, 0.18), 0 0 24px rgba(73, 181, 255, 0.16);
 }

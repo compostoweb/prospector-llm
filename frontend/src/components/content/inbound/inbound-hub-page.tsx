@@ -7,6 +7,7 @@ import {
   ArrowRight,
   BarChart3,
   Copy,
+  Eye,
   ExternalLink,
   FileDown,
   FileSearch,
@@ -25,10 +26,12 @@ import {
   Wifi,
   X,
   Zap,
+  type LucideIcon,
 } from "lucide-react"
 import Link from "next/link"
 import { toast } from "sonner"
 import { env } from "@/env"
+import LandingPublicPage from "@/components/content/inbound/landing-public-page"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -60,6 +63,8 @@ import {
   useLandingPage,
   useLeadMagnetLeads,
   useLeadMagnetMetrics,
+  useRetryFailedLeadMagnetSendPulse,
+  useRetryLeadMagnetLeadSendPulse,
   useTestSendPulseConnection,
   useTestSendPulseWebhook,
   useUpdateContentLeadMagnet,
@@ -78,6 +83,7 @@ import type {
   ContentLandingPageUpsertInput,
   ContentLeadMagnetCreateInput,
   ContentLeadMagnetUpdateInput,
+  LandingPagePublicData,
   LeadMagnetStatus,
   LeadMagnetType,
 } from "@/lib/content-inbound/types"
@@ -117,6 +123,8 @@ export default function InboundHubPage() {
   const improveField = useImproveLandingPageField()
   const pdfPreviewUrlMutation = useLeadMagnetPdfPreviewUrl()
   const emailPreviewMutation = useLeadMagnetEmailPreview()
+  const retryLeadSendPulse = useRetryLeadMagnetLeadSendPulse()
+  const retryFailedSendPulse = useRetryFailedLeadMagnetSendPulse()
   const testConnection = useTestSendPulseConnection()
   const testWebhook = useTestSendPulseWebhook()
   const pdfInputRef = useRef<HTMLInputElement>(null)
@@ -167,6 +175,7 @@ export default function InboundHubPage() {
     html: string
     subject: string
   } | null>(null)
+  const [landingPreviewOpen, setLandingPreviewOpen] = useState(false)
 
   const leadMagnets = useMemo(() => leadMagnetsQuery.data ?? [], [leadMagnetsQuery.data])
   const selectedLeadMagnet = leadMagnets.find((item) => item.id === selectedLeadMagnetId) ?? null
@@ -283,6 +292,21 @@ export default function InboundHubPage() {
       totalCaptured,
     }
   }, [leadMagnets])
+  const syncHealth = useMemo(() => {
+    const configuredListId = leadMagnetForm.sendpulse_list_id ?? selectedLeadMagnet?.sendpulse_list_id
+    const pending = metricsQuery.data?.total_sendpulse_pending ?? 0
+    const failed = metricsQuery.data?.total_sendpulse_failed ?? 0
+    const skipped = metricsQuery.data?.total_sendpulse_skipped ?? 0
+    const synced = metricsQuery.data?.total_synced_to_sendpulse ?? 0
+
+    return {
+      configured: Boolean(configuredListId?.trim()),
+      pending,
+      failed,
+      skipped,
+      synced,
+    }
+  }, [leadMagnetForm.sendpulse_list_id, metricsQuery.data, selectedLeadMagnet])
 
   const publicUrl = landingPageQuery.data?.slug
     ? `${env.NEXT_PUBLIC_APP_URL}/lm/${landingPageQuery.data.slug}`
@@ -290,6 +314,40 @@ export default function InboundHubPage() {
   const calculatorUrl = selectedLeadMagnetId
     ? `${env.NEXT_PUBLIC_APP_URL}/lm/calculadora?lead_magnet_id=${selectedLeadMagnetId}`
     : null
+  const landingPreviewData = useMemo<LandingPagePublicData | null>(() => {
+    if (!selectedLeadMagnet) return null
+    const slug = slugify(landingPageForm.slug || selectedLeadMagnet.title || "lead-magnet")
+    const leadMagnetType = (leadMagnetForm.type ?? selectedLeadMagnet.type) as LeadMagnetType
+    return {
+      id: landingPageQuery.data?.id ?? "preview",
+      lead_magnet_id: selectedLeadMagnet.id,
+      lead_magnet_type: leadMagnetType,
+      lead_magnet_title: leadMagnetForm.title || selectedLeadMagnet.title,
+      lead_magnet_description: normalizeNullableText(
+        leadMagnetForm.description ?? selectedLeadMagnet.description,
+      ),
+      file_url: normalizeNullableText(leadMagnetForm.file_url ?? selectedLeadMagnet.file_url),
+      cta_text: normalizeNullableText(leadMagnetForm.cta_text ?? selectedLeadMagnet.cta_text),
+      slug,
+      title: landingPageForm.title || leadMagnetForm.title || selectedLeadMagnet.title,
+      subtitle: normalizeNullableText(landingPageForm.subtitle),
+      hero_image_url: normalizeNullableText(landingPageForm.hero_image_url),
+      benefits: (landingPageForm.benefits ?? []).map((item) => item.trim()).filter(Boolean),
+      social_proof_count: Number(landingPageForm.social_proof_count || 0),
+      author_bio: normalizeNullableText(landingPageForm.author_bio),
+      author_photo_url: normalizeNullableText(landingPageForm.author_photo_url),
+      meta_title: normalizeNullableText(landingPageForm.meta_title),
+      meta_description: normalizeNullableText(landingPageForm.meta_description),
+      publisher_name: normalizeNullableText(landingPageForm.publisher_name),
+      features:
+        (landingPageForm.features ?? []).filter(
+          (feature) => feature.title.trim() || feature.description.trim(),
+        ) || null,
+      expected_result: normalizeNullableText(landingPageForm.expected_result),
+      badge_text: normalizeNullableText(landingPageForm.badge_text),
+      public_url: `${env.NEXT_PUBLIC_APP_URL}/lm/${slug}`,
+    }
+  }, [landingPageForm, landingPageQuery.data?.id, leadMagnetForm, selectedLeadMagnet])
   const launchHref = selectedLeadMagnet
     ? `/content/gerar?${new URLSearchParams({
         contentGoal: "lead_magnet_launch",
@@ -429,6 +487,32 @@ export default function InboundHubPage() {
       toast.success("Lead convertido para prospeccao")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Falha ao converter lead")
+    }
+  }
+
+  async function handleRetryLeadSendPulse(lmLeadId: string) {
+    if (!selectedLeadMagnetId) {
+      return
+    }
+
+    try {
+      await retryLeadSendPulse.mutateAsync({ leadMagnetId: selectedLeadMagnetId, lmLeadId })
+      toast.success("Sync SendPulse reenfileirado")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao reenfileirar sync")
+    }
+  }
+
+  async function handleRetryFailedSendPulse() {
+    if (!selectedLeadMagnetId) {
+      return
+    }
+
+    try {
+      const result = await retryFailedSendPulse.mutateAsync(selectedLeadMagnetId)
+      toast.success(`${result.queued} lead(s) reenfileirado(s) para o SendPulse`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao reenfileirar falhas")
     }
   }
 
@@ -623,6 +707,15 @@ export default function InboundHubPage() {
         </div>
         {selectedLeadMagnet && publicUrl && (
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setLandingPreviewOpen(true)}
+              disabled={!landingPreviewData}
+            >
+              <Eye className="h-4 w-4" />
+              Preview LP
+            </Button>
             <Button variant="outline" size="sm" onClick={() => void handleCopyPublicUrl()}>
               <Copy className="h-4 w-4" />
               Copiar link
@@ -645,25 +738,72 @@ export default function InboundHubPage() {
           </div>
         )}
         {selectedLeadMagnet && !publicUrl && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-destructive hover:bg-destructive/10"
-            onClick={() => void handleDeleteLeadMagnet()}
-            disabled={deleteLeadMagnet.isPending}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setLandingPreviewOpen(true)}
+              disabled={!landingPreviewData}
+            >
+              <Eye className="h-4 w-4" />
+              Preview LP
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:bg-destructive/10"
+              onClick={() => void handleDeleteLeadMagnet()}
+              disabled={deleteLeadMagnet.isPending}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
         )}
       </div>
+
+      {selectedLeadMagnet && (
+        <div className="grid gap-3 lg:grid-cols-3">
+          <HealthCard
+            icon={Activity}
+            label="Status do ativo"
+            title={statusLabel(selectedLeadMagnet.status)}
+            description={`${typeLabel(selectedLeadMagnet.type)} · ${selectedLeadMagnet.total_leads_captured} captura(s)`}
+            variant={statusVariant(selectedLeadMagnet.status)}
+          />
+          <HealthCard
+            icon={ExternalLink}
+            label="Landing page"
+            title={landingPageForm.published ? "Publicada" : "Em rascunho"}
+            description={
+              landingPageForm.published
+                ? publicUrl || "URL pública será gerada ao salvar"
+                : "Use o preview antes de ativar a rota pública"
+            }
+            variant={landingPageForm.published ? "success" : "warning"}
+          />
+          <HealthCard
+            icon={Wifi}
+            label="SendPulse"
+            title={sendPulseHealthTitle(syncHealth)}
+            description={sendPulseHealthDescription(syncHealth)}
+            variant={sendPulseHealthVariant(syncHealth)}
+          />
+        </div>
+      )}
 
       {/* ─── Painel principal ─── */}
       {!selectedLeadMagnet ? (
         <Card>
-          <CardContent className="flex min-h-60 items-center justify-center text-sm text-(--text-secondary)">
-            {leadMagnets.length === 0
-              ? "Crie seu primeiro lead magnet para começar."
-              : "Selecione um lead magnet acima para continuar."}
+          <CardContent className="p-6">
+            <EmptyState
+              icon={FileDown}
+              title={leadMagnets.length === 0 ? "Crie seu primeiro lead magnet" : "Escolha um ativo"}
+              description={
+                leadMagnets.length === 0
+                  ? "Comece cadastrando um PDF, link, sequência ou calculadora para conectar LP, captura e SendPulse."
+                  : "Selecione um lead magnet acima para ver métricas, configurar a LP e acompanhar as capturas."
+              }
+            />
           </CardContent>
         </Card>
       ) : (
@@ -721,6 +861,14 @@ export default function InboundHubPage() {
                         value={String(metricsQuery.data.total_synced_to_sendpulse)}
                       />
                       <MetricCard
+                        label="Sync pendente"
+                        value={String(metricsQuery.data.total_sendpulse_pending)}
+                      />
+                      <MetricCard
+                        label="Falhas SendPulse"
+                        value={String(metricsQuery.data.total_sendpulse_failed)}
+                      />
+                      <MetricCard
                         label="Views LP"
                         value={String(metricsQuery.data.landing_page_views)}
                       />
@@ -743,6 +891,16 @@ export default function InboundHubPage() {
                         }
                       />
                     </div>
+                    {metricsQuery.data.total_leads_captured === 0 &&
+                      metricsQuery.data.landing_page_views === 0 && (
+                        <div className="mt-5">
+                          <EmptyState
+                            icon={BarChart3}
+                            title="Funil ainda sem tráfego"
+                            description="Use o preview para revisar a promessa, publique a LP e conecte o launch post para iniciar o baseline de conversão."
+                          />
+                        </div>
+                      )}
                   </CardContent>
                 </Card>
               )}
@@ -1480,6 +1638,14 @@ export default function InboundHubPage() {
                     </Button>
                     <Button
                       variant="outline"
+                      onClick={() => setLandingPreviewOpen(true)}
+                      disabled={!landingPreviewData}
+                    >
+                      <Eye className="h-4 w-4" />
+                      Preview antes de publicar
+                    </Button>
+                    <Button
+                      variant="outline"
                       onClick={() => void handleCopyPublicUrl()}
                       disabled={!publicUrl}
                     >
@@ -1515,9 +1681,31 @@ export default function InboundHubPage() {
                     <Loader2 className="h-5 w-5 animate-spin text-(--text-tertiary)" />
                   </div>
                 ) : (leadsQuery.data ?? []).length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-(--border-default) bg-(--bg-overlay) p-6 text-center text-sm text-(--text-secondary)">
-                    Nenhuma captura registrada ainda para este lead magnet.
-                  </div>
+                  <EmptyState
+                    icon={UserPlus}
+                    title="Nenhuma captura ainda"
+                    description="Publique a LP, distribua o link no launch post ou copie a URL para testar o primeiro cadastro."
+                    action={
+                      <div className="flex flex-wrap justify-center gap-2">
+                        <Button
+                          variant="outline"
+                          onClick={() => setLandingPreviewOpen(true)}
+                          disabled={!landingPreviewData}
+                        >
+                          <Eye className="h-4 w-4" />
+                          Ver preview
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => void handleCopyPublicUrl()}
+                          disabled={!publicUrl}
+                        >
+                          <Copy className="h-4 w-4" />
+                          Copiar LP
+                        </Button>
+                      </div>
+                    }
+                  />
                 ) : (
                   <div className="overflow-x-auto rounded-lg border border-(--border-default) bg-(--bg-surface) shadow-(--shadow-sm)">
                     <table className="min-w-full divide-y divide-(--border-subtle)">
@@ -1564,9 +1752,31 @@ export default function InboundHubPage() {
                             </td>
                             <td className="px-4 py-3">
                               <div className="flex flex-col gap-1">
-                                <Badge variant={syncVariant(lead.sendpulse_sync_status)}>
-                                  {lead.sendpulse_sync_status}
-                                </Badge>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <Badge variant={syncVariant(lead.sendpulse_sync_status)}>
+                                    {lead.sendpulse_sync_status}
+                                  </Badge>
+                                  {lead.sendpulse_sync_status === "failed" && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 px-2 text-xs"
+                                      onClick={() => void handleRetryLeadSendPulse(lead.id)}
+                                      disabled={retryLeadSendPulse.isPending}
+                                    >
+                                      <Zap className="h-3 w-3" />
+                                      Retry
+                                    </Button>
+                                  )}
+                                </div>
+                                {lead.sendpulse_last_error && (
+                                  <span
+                                    className="max-w-56 truncate text-xs text-(--danger)"
+                                    title={lead.sendpulse_last_error}
+                                  >
+                                    {lead.sendpulse_last_error}
+                                  </span>
+                                )}
                                 <span className="text-xs text-(--text-tertiary)">
                                   {lead.sequence_status}
                                 </span>
@@ -1982,6 +2192,41 @@ export default function InboundHubPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
+                  <div className="grid gap-3 sm:grid-cols-4">
+                    <MetricCard label="Sincronizados" value={String(syncHealth.synced)} />
+                    <MetricCard label="Pendentes" value={String(syncHealth.pending)} />
+                    <MetricCard label="Falhas" value={String(syncHealth.failed)} />
+                    <MetricCard label="Ignorados" value={String(syncHealth.skipped)} />
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-(--border-subtle) bg-(--bg-overlay) p-4">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-(--text-primary)">
+                        Retry de falhas SendPulse
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-(--text-secondary)">
+                        Reenfileira leads com status failed ou skipped depois que a lista estiver
+                        configurada.
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={() => void handleRetryFailedSendPulse()}
+                      disabled={
+                        retryFailedSendPulse.isPending ||
+                        !syncHealth.configured ||
+                        syncHealth.failed + syncHealth.skipped === 0
+                      }
+                    >
+                      {retryFailedSendPulse.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Zap className="h-4 w-4" />
+                      )}
+                      Reenfileirar falhas
+                    </Button>
+                  </div>
+
                   <div className="space-y-3">
                     <p className="text-sm font-medium text-(--text-primary)">Testar credenciais</p>
                     <Button
@@ -2196,6 +2441,27 @@ export default function InboundHubPage() {
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-(--text-secondary)">
                 Carregando...
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Landing Page Preview Dialog */}
+      <Dialog open={landingPreviewOpen} onOpenChange={setLandingPreviewOpen}>
+        <DialogContent className="flex h-[92vh] max-w-6xl flex-col p-0">
+          <DialogHeader className="shrink-0 border-b border-(--border-default) px-6 py-4">
+            <DialogTitle>Preview da landing page</DialogTitle>
+            <DialogDescription>
+              Visualização local com os campos atuais. O formulário fica desativado no preview.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto bg-(--bg-page)">
+            {landingPreviewData ? (
+              <LandingPublicPage page={landingPreviewData} preview />
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-(--text-secondary)">
+                Selecione um lead magnet para visualizar a landing page.
               </div>
             )}
           </div>
@@ -2476,8 +2742,95 @@ function MetricCard({ label, value }: MetricCardProps) {
   )
 }
 
+interface EmptyStateProps {
+  icon: LucideIcon
+  title: string
+  description: string
+  action?: React.ReactNode
+}
+
+function EmptyState({ icon: Icon, title, description, action }: EmptyStateProps) {
+  return (
+    <div className="rounded-3xl border border-dashed border-(--border-default) bg-(--bg-overlay) p-6 text-center">
+      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-(--accent-subtle) text-(--accent-subtle-fg)">
+        <Icon className="h-5 w-5" />
+      </div>
+      <p className="mt-4 text-sm font-semibold text-(--text-primary)">{title}</p>
+      <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-(--text-secondary)">
+        {description}
+      </p>
+      {action && <div className="mt-4">{action}</div>}
+    </div>
+  )
+}
+
+interface HealthCardProps {
+  icon: LucideIcon
+  label: string
+  title: string
+  description: string
+  variant: "default" | "warning" | "neutral" | "success" | "danger" | "outline"
+}
+
+function HealthCard({ icon: Icon, label, title, description, variant }: HealthCardProps) {
+  return (
+    <div className="rounded-3xl border border-(--border-default) bg-(--bg-surface) p-4 shadow-(--shadow-sm)">
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-(--accent-subtle) text-(--accent-subtle-fg)">
+          <Icon className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-(--text-tertiary)">
+              {label}
+            </p>
+            <Badge variant={variant}>{title}</Badge>
+          </div>
+          <p className="mt-2 truncate text-sm text-(--text-secondary)" title={description}>
+            {description}
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+interface SendPulseHealth {
+  configured: boolean
+  pending: number
+  failed: number
+  skipped: number
+  synced: number
+}
+
+function sendPulseHealthTitle(health: SendPulseHealth): string {
+  if (!health.configured) return "Sem lista"
+  if (health.failed > 0) return "Com falhas"
+  if (health.skipped > 0) return "Ignorados"
+  if (health.pending > 0) return "Pendências"
+  return "Operacional"
+}
+
+function sendPulseHealthDescription(health: SendPulseHealth): string {
+  if (!health.configured) return "Configure o ID da lista antes de publicar campanhas"
+  if (health.failed > 0) return `${health.failed} falha(s), ${health.pending} pendente(s)`
+  if (health.skipped > 0) return `${health.skipped} lead(s) sem sync ativo`
+  if (health.pending > 0) return `${health.pending} lead(s) aguardando sync`
+  return `${health.synced} lead(s) sincronizado(s)`
+}
+
+function sendPulseHealthVariant(
+  health: SendPulseHealth,
+): "default" | "warning" | "neutral" | "success" | "danger" | "outline" {
+  if (!health.configured) return "neutral"
+  if (health.failed > 0) return "danger"
+  if (health.skipped > 0) return "warning"
+  if (health.pending > 0) return "warning"
+  return "success"
+}
+
 interface QuickLinkCardProps {
-  icon: typeof Sparkles
+  icon: LucideIcon
   title: string
   description: string
   href: string
