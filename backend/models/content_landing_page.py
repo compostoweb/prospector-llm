@@ -45,6 +45,7 @@ class ContentLandingPage(Base, TenantMixin, TimestampMixin):
     features: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
     expected_result: Mapped[str | None] = mapped_column(Text, nullable=True)
     badge_text: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    form_fields: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
     published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     total_views: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     total_submissions: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")

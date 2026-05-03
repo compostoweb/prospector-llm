@@ -32,6 +32,7 @@ import Link from "next/link"
 import { toast } from "sonner"
 import { env } from "@/env"
 import LandingPublicPage from "@/components/content/inbound/landing-public-page"
+import PdfPreviewViewer from "@/components/content/inbound/pdf-preview-viewer"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -83,6 +84,8 @@ import type {
   ContentLandingPageUpsertInput,
   ContentLeadMagnetCreateInput,
   ContentLeadMagnetUpdateInput,
+  LandingPageFormField,
+  LandingPageFormFieldKey,
   LandingPagePublicData,
   LeadMagnetStatus,
   LeadMagnetType,
@@ -109,6 +112,20 @@ const EVENT_TYPE_OPTIONS: Array<{ value: TestWebhookInput["event_type"]; label: 
   { value: "click", label: "click" },
   { value: "unsubscribe", label: "unsubscribe" },
   { value: "sequence_completed", label: "sequence_completed" },
+]
+
+const FORM_FIELD_OPTIONS: Array<{
+  key: LandingPageFormFieldKey
+  label: string
+  description: string
+  locked?: boolean
+}> = [
+  { key: "name", label: "Nome", description: "Identificação básica", locked: true },
+  { key: "email", label: "E-mail", description: "Entrega e nutrição", locked: true },
+  { key: "company", label: "Empresa", description: "Qualificação B2B" },
+  { key: "role", label: "Cargo", description: "Segmentação da sequência" },
+  { key: "phone", label: "WhatsApp", description: "Contato comercial opcional" },
+  { key: "linkedin_profile_url", label: "LinkedIn", description: "Contexto profissional opcional" },
 ]
 
 export default function InboundHubPage() {
@@ -151,6 +168,7 @@ export default function InboundHubPage() {
     meta_description: "",
     publisher_name: "",
     badge_text: "",
+    form_fields: getDefaultFormFields("pdf"),
     features: [
       {
         title: "Diagnóstico prático",
@@ -169,7 +187,7 @@ export default function InboundHubPage() {
   })
   const [activeAiField, setActiveAiField] = useState<string | null>(null)
   const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false)
-  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null)
+  const [pdfPreviewData, setPdfPreviewData] = useState<Uint8Array | null>(null)
   const [emailPreviewOpen, setEmailPreviewOpen] = useState(false)
   const [emailPreviewData, setEmailPreviewData] = useState<{
     html: string
@@ -218,7 +236,7 @@ export default function InboundHubPage() {
       ...current,
       list_id: selectedLeadMagnet.sendpulse_list_id ?? "",
     }))
-    setPdfPreviewUrl(null)
+    resetPdfPreviewData()
     setEmailPreviewData(null)
   }, [selectedLeadMagnet])
 
@@ -242,6 +260,7 @@ export default function InboundHubPage() {
         meta_description: landingPage.meta_description,
         publisher_name: landingPage.publisher_name,
         badge_text: landingPage.badge_text,
+        form_fields: landingPage.form_fields ?? getDefaultFormFields(selectedLeadMagnet.type),
         features: landingPage.features ?? [
           { title: "", description: "" },
           { title: "", description: "" },
@@ -265,6 +284,7 @@ export default function InboundHubPage() {
       meta_description: selectedLeadMagnet.description,
       publisher_name: "",
       badge_text: "",
+      form_fields: getDefaultFormFields(selectedLeadMagnet.type),
       features: [
         {
           title: "Diagnóstico prático",
@@ -345,6 +365,7 @@ export default function InboundHubPage() {
         ) || null,
       expected_result: normalizeNullableText(landingPageForm.expected_result),
       badge_text: normalizeNullableText(landingPageForm.badge_text),
+      form_fields: normalizeFormFields(landingPageForm.form_fields),
       public_url: `${env.NEXT_PUBLIC_APP_URL}/lm/${slug}`,
     }
   }, [landingPageForm, landingPageQuery.data?.id, leadMagnetForm, selectedLeadMagnet])
@@ -355,6 +376,10 @@ export default function InboundHubPage() {
         theme: selectedLeadMagnet.title,
       }).toString()}`
     : "/content/gerar"
+
+  function resetPdfPreviewData() {
+    setPdfPreviewData(null)
+  }
 
   async function handleTestConnection() {
     setConnectionResult(null)
@@ -459,6 +484,7 @@ export default function InboundHubPage() {
                 )
               : null,
           expected_result: normalizeNullableText(landingPageForm.expected_result),
+          form_fields: normalizeFormFields(landingPageForm.form_fields),
           published: Boolean(landingPageForm.published),
           social_proof_count: Number(landingPageForm.social_proof_count || 0),
         },
@@ -467,6 +493,33 @@ export default function InboundHubPage() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Falha ao salvar landing page")
     }
+  }
+
+  function handleToggleFormField(key: LandingPageFormFieldKey, enabled: boolean) {
+    setLandingPageForm((current) => {
+      const fields = normalizeFormFields(current.form_fields)
+      if (!enabled) {
+        return { ...current, form_fields: fields.filter((field) => field.key !== key) }
+      }
+      if (fields.some((field) => field.key === key)) {
+        return current
+      }
+      return {
+        ...current,
+        form_fields: [...fields, { key, required: key === "name" || key === "email" }],
+      }
+    })
+  }
+
+  function handleToggleFormFieldRequired(key: LandingPageFormFieldKey, required: boolean) {
+    setLandingPageForm((current) => ({
+      ...current,
+      form_fields: normalizeFormFields(current.form_fields).map((field) =>
+        field.key === key
+          ? { ...field, required: key === "name" || key === "email" ? true : required }
+          : field,
+      ),
+    }))
   }
 
   async function handleCopyPublicUrl() {
@@ -1093,7 +1146,7 @@ export default function InboundHubPage() {
                               const result = await pdfPreviewUrlMutation.mutateAsync(
                                 selectedLeadMagnet.id,
                               )
-                              setPdfPreviewUrl(result.url)
+                              setPdfPreviewData(result.pdfBytes.slice())
                               setPdfPreviewOpen(true)
                             } catch {
                               toast.error("Não foi possível gerar o preview")
@@ -1573,6 +1626,53 @@ export default function InboundHubPage() {
                     />
                   </Field>
 
+                  <Field label="Campos do formulário">
+                    <div className="space-y-2 rounded-2xl border border-(--border-subtle) bg-(--bg-overlay) p-3">
+                      {FORM_FIELD_OPTIONS.map((option) => {
+                        const configuredField = normalizeFormFields(landingPageForm.form_fields).find(
+                          (field) => field.key === option.key,
+                        )
+                        const enabled = Boolean(configuredField)
+                        const required = option.locked || Boolean(configuredField?.required)
+                        return (
+                          <div
+                            key={option.key}
+                            className="flex flex-col gap-2 rounded-xl border border-(--border-subtle) bg-(--bg-surface) p-3 sm:flex-row sm:items-center sm:justify-between"
+                          >
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-(--text-primary)">
+                                {option.label}
+                              </p>
+                              <p className="text-xs text-(--text-tertiary)">{option.description}</p>
+                            </div>
+                            <div className="flex items-center gap-4">
+                              <label className="flex items-center gap-2 text-xs text-(--text-secondary)">
+                                <Switch
+                                  checked={enabled}
+                                  disabled={option.locked}
+                                  onCheckedChange={(checked) =>
+                                    handleToggleFormField(option.key, checked)
+                                  }
+                                />
+                                Usar
+                              </label>
+                              <label className="flex items-center gap-2 text-xs text-(--text-secondary)">
+                                <Switch
+                                  checked={required}
+                                  disabled={!enabled || option.locked}
+                                  onCheckedChange={(checked) =>
+                                    handleToggleFormFieldRequired(option.key, checked)
+                                  }
+                                />
+                                Obrigatório
+                              </label>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </Field>
+
                   <button
                     type="button"
                     onClick={() =>
@@ -1633,7 +1733,11 @@ export default function InboundHubPage() {
                       onClick={() => void handleSaveLandingPage()}
                       disabled={upsertLandingPage.isPending || landingPageQuery.isLoading}
                     >
-                      <Save className="h-4 w-4" />
+                      {upsertLandingPage.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Save className="h-4 w-4" />
+                      )}
                       Salvar landing page
                     </Button>
                     <Button
@@ -2421,7 +2525,7 @@ export default function InboundHubPage() {
         open={pdfPreviewOpen}
         onOpenChange={(open) => {
           setPdfPreviewOpen(open)
-          if (!open) setPdfPreviewUrl(null)
+          if (!open) resetPdfPreviewData()
         }}
       >
         <DialogContent className="flex h-[85vh] max-w-5xl flex-col p-0">
@@ -2432,11 +2536,10 @@ export default function InboundHubPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 px-6 pb-6">
-            {pdfPreviewUrl ? (
-              <iframe
-                src={pdfPreviewUrl}
-                className="h-full w-full rounded-lg border border-(--border-default)"
-                title="Preview do PDF"
+            {pdfPreviewData ? (
+              <PdfPreviewViewer
+                fileData={pdfPreviewData}
+                className="rounded-lg border border-(--border-default)"
               />
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-(--text-secondary)">
@@ -2941,6 +3044,43 @@ function syncVariant(status: string): "default" | "warning" | "danger" | "succes
     default:
       return "default"
   }
+}
+
+function getDefaultFormFields(type: LeadMagnetType): LandingPageFormField[] {
+  const base: LandingPageFormField[] = [
+    { key: "name", required: true },
+    { key: "email", required: true },
+  ]
+
+  if (type === "link") {
+    return base
+  }
+
+  if (type === "pdf") {
+    return [...base, { key: "company", required: true }]
+  }
+
+  return [...base, { key: "company", required: true }, { key: "role", required: true }]
+}
+
+function normalizeFormFields(
+  fields: LandingPageFormField[] | null | undefined,
+): LandingPageFormField[] {
+  const normalized: LandingPageFormField[] = []
+  const seen = new Set<LandingPageFormFieldKey>()
+
+  for (const field of fields ?? []) {
+    if (seen.has(field.key)) continue
+    normalized.push({
+      key: field.key,
+      required: field.key === "name" || field.key === "email" ? true : Boolean(field.required),
+    })
+    seen.add(field.key)
+  }
+
+  if (!seen.has("name")) normalized.unshift({ key: "name", required: true })
+  if (!seen.has("email")) normalized.splice(1, 0, { key: "email", required: true })
+  return normalized
 }
 
 function originLabel(origin: string): string {

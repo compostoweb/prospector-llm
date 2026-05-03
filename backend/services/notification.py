@@ -627,6 +627,7 @@ def build_lead_magnet_delivery_email_html(
     email_headline_override: str | None = None,
     email_body_text_override: str | None = None,
     email_cta_label_override: str | None = None,
+    force_inline_logo: bool = False,
 ) -> dict[str, str]:
     """Constrói o HTML do email de entrega sem enviar. Usado para preview no hub."""
     title = html.escape(lead_magnet_title or "Material")
@@ -684,7 +685,9 @@ def build_lead_magnet_delivery_email_html(
     )
     logo_bytes = load_composto_web_logo_primary_white_bg_bytes()
     if logo_bytes:
-        if settings.COMPOSTO_WEB_LOGO_EMAIL_URL:
+        if force_inline_logo:
+            logo_src: str = f"data:image/webp;base64,{base64.b64encode(logo_bytes).decode('ascii')}"
+        elif settings.COMPOSTO_WEB_LOGO_EMAIL_URL:
             logo_src: str = settings.COMPOSTO_WEB_LOGO_EMAIL_URL
         else:
             _api_url = settings.API_PUBLIC_URL.rstrip("/")

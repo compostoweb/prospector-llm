@@ -292,3 +292,28 @@ async def test_logo_inline_base64_quando_localhost(monkeypatch: pytest.MonkeyPat
     await notification.send_lead_magnet_delivery_email(lm_lead=lead, lead_magnet=lm)
 
     assert "data:image/webp;base64," in str(captured["html"])
+
+
+async def test_preview_force_inline_logo_ignora_url_remota(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        notification,
+        "load_composto_web_logo_primary_white_bg_bytes",
+        lambda: b"fake-logo-bytes",
+    )
+    monkeypatch.setattr(
+        notification.settings,
+        "COMPOSTO_WEB_LOGO_EMAIL_URL",
+        "https://cdn.example.com/logo.webp",
+        raising=False,
+    )
+
+    built = notification.build_lead_magnet_delivery_email_html(
+        lead_magnet_type="pdf",
+        lead_magnet_title="Teste",
+        lead_magnet_file_url="https://cdn.example.com/material.pdf",
+        lead_magnet_cta_text=None,
+        force_inline_logo=True,
+    )
+
+    assert "data:image/webp;base64," in built["html"]
+    assert "https://cdn.example.com/logo.webp" not in built["html"]

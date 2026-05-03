@@ -1,5 +1,12 @@
 export type LeadMagnetType = "pdf" | "calculator" | "email_sequence" | "link"
 export type LeadMagnetStatus = "draft" | "active" | "paused" | "archived"
+export type LandingPageFormFieldKey =
+  | "name"
+  | "email"
+  | "company"
+  | "role"
+  | "phone"
+  | "linkedin_profile_url"
 export type LMDistributionType = "comment" | "dm" | "link_bio"
 export type LMLeadOrigin =
   | "linkedin_comment"
@@ -92,6 +99,7 @@ export interface ContentLandingPage {
   features: Array<{ title: string; description: string }> | null
   expected_result: string | null
   badge_text: string | null
+  form_fields?: LandingPageFormField[] | null
   published: boolean
   total_views: number
   total_submissions: number
@@ -115,7 +123,13 @@ export interface ContentLandingPageUpsertInput {
   features?: Array<{ title: string; description: string }> | null
   expected_result?: string | null
   badge_text?: string | null
+  form_fields?: LandingPageFormField[] | null
   published?: boolean
+}
+
+export interface LandingPageFormField {
+  key: LandingPageFormFieldKey
+  required: boolean
 }
 
 export interface ContentLMLead {
@@ -191,6 +205,7 @@ export interface LandingPagePublicData {
   features: Array<{ title: string; description: string }> | null
   expected_result: string | null
   badge_text: string | null
+  form_fields?: LandingPageFormField[] | null
   public_url: string
 }
 

@@ -22,6 +22,7 @@ from models.content_lead_magnet import ContentLeadMagnet
 from schemas.content_inbound import (
     ContentLandingPageResponse,
     ContentLandingPageUpsert,
+    LandingPageFormField,
     LandingPagePublicCaptureRequest,
     LandingPagePublicCaptureResponse,
     LandingPagePublicResponse,
@@ -44,6 +45,30 @@ from services.llm_config import resolve_tenant_llm_config
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/landing-pages", tags=["Content Hub — Landing Pages"])
+
+_DEFAULT_FORM_FIELDS_BY_TYPE: dict[str, list[LandingPageFormField]] = {
+    "link": [
+        LandingPageFormField(key="name", required=True),
+        LandingPageFormField(key="email", required=True),
+    ],
+    "pdf": [
+        LandingPageFormField(key="name", required=True),
+        LandingPageFormField(key="email", required=True),
+        LandingPageFormField(key="company", required=True),
+    ],
+    "email_sequence": [
+        LandingPageFormField(key="name", required=True),
+        LandingPageFormField(key="email", required=True),
+        LandingPageFormField(key="company", required=True),
+        LandingPageFormField(key="role", required=True),
+    ],
+    "calculator": [
+        LandingPageFormField(key="name", required=True),
+        LandingPageFormField(key="email", required=True),
+        LandingPageFormField(key="company", required=True),
+        LandingPageFormField(key="role", required=True),
+    ],
+}
 
 
 async def _get_lead_magnet_or_404(
@@ -106,22 +131,48 @@ async def _get_public_page_or_404(
 def _validate_capture_fields_for_type(
     *,
     lead_magnet_type: str,
+    form_fields: list[dict] | None,
     body: LandingPagePublicCaptureRequest,
 ) -> None:
     missing: list[str] = []
-    if lead_magnet_type == "pdf" and not (body.company or "").strip():
-        missing.append("company")
-    if lead_magnet_type == "email_sequence":
-        if not (body.company or "").strip():
-            missing.append("company")
-        if not (body.role or "").strip():
-            missing.append("role")
+    configured_fields = _resolve_form_fields(lead_magnet_type=lead_magnet_type, form_fields=form_fields)
+    for field in configured_fields:
+        if field.key in {"name", "email"}:
+            continue
+        if field.required and not (getattr(body, field.key) or "").strip():
+            missing.append(field.key)
 
     if missing:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Campos obrigatórios ausentes: {', '.join(missing)}",
         )
+
+
+def _resolve_form_fields(
+    *,
+    lead_magnet_type: str,
+    form_fields: list[dict] | None,
+) -> list[LandingPageFormField]:
+    if not form_fields:
+        return _DEFAULT_FORM_FIELDS_BY_TYPE.get(
+            lead_magnet_type,
+            _DEFAULT_FORM_FIELDS_BY_TYPE["pdf"],
+        )
+
+    resolved: list[LandingPageFormField] = []
+    seen: set[str] = set()
+    for raw_field in form_fields:
+        field = LandingPageFormField.model_validate(raw_field)
+        if field.key in seen:
+            continue
+        resolved.append(field)
+        seen.add(field.key)
+
+    for required_key in ("name", "email"):
+        if required_key not in seen:
+            resolved.insert(0 if required_key == "name" else 1, LandingPageFormField(key=required_key, required=True))
+    return resolved
 
 
 @router.get("/{lead_magnet_id}", response_model=ContentLandingPageResponse)
@@ -218,6 +269,10 @@ async def get_public_landing_page(
         features=landing_page.features,
         expected_result=landing_page.expected_result,
         badge_text=landing_page.badge_text,
+        form_fields=_resolve_form_fields(
+            lead_magnet_type=lead_magnet.type,
+            form_fields=landing_page.form_fields,
+        ),
         public_url=build_public_landing_page_url(landing_page.slug),
     )
 
@@ -402,7 +457,11 @@ async def capture_public_lead(
     db: AsyncSession = Depends(get_session_no_auth),
 ) -> LandingPagePublicCaptureResponse:
     landing_page, lead_magnet = await _get_public_page_or_404(db, slug=slug)
-    _validate_capture_fields_for_type(lead_magnet_type=lead_magnet.type, body=body)
+    _validate_capture_fields_for_type(
+        lead_magnet_type=lead_magnet.type,
+        form_fields=landing_page.form_fields,
+        body=body,
+    )
     lm_lead, _, should_sync = await upsert_lm_capture(
         db,
         lead_magnet=lead_magnet,

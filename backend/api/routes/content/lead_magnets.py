@@ -353,6 +353,7 @@ async def get_email_preview(
         email_body_text_override=lead_magnet.email_body_text,
         email_cta_label_override=lead_magnet.email_cta_label,
         contact_name="João Silva",
+        force_inline_logo=True,
     )
 
 

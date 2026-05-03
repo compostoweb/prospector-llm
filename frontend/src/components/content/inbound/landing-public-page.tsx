@@ -17,6 +17,8 @@ import { CompostoWebBrandLogo } from "@/components/content/inbound/composto-web-
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type {
+  LandingPageFormField,
+  LandingPageFormFieldKey,
   LandingPagePublicCaptureInput,
   LandingPagePublicData,
 } from "@/lib/content-inbound/types"
@@ -27,14 +29,20 @@ interface Props {
 }
 
 type CaptureField = {
-  key: keyof Pick<
-    LandingPagePublicCaptureInput,
-    "name" | "email" | "company" | "role" | "phone" | "linkedin_profile_url"
-  >
+  key: LandingPageFormFieldKey
   label: string
   placeholder: string
   type?: "email" | "text" | "tel" | "url"
   required?: boolean
+}
+
+const FIELD_CONFIG: Record<LandingPageFormFieldKey, Omit<CaptureField, "key" | "required">> = {
+  name: { label: "Nome", placeholder: "Seu nome" },
+  email: { label: "E-mail", placeholder: "seu@email.com", type: "email" },
+  company: { label: "Empresa", placeholder: "Nome da empresa" },
+  role: { label: "Cargo", placeholder: "Seu cargo" },
+  phone: { label: "WhatsApp", placeholder: "WhatsApp ou telefone", type: "tel" },
+  linkedin_profile_url: { label: "LinkedIn", placeholder: "URL do perfil", type: "url" },
 }
 
 export default function LandingPublicPage({ page, preview = false }: Props) {
@@ -81,7 +89,7 @@ export default function LandingPublicPage({ page, preview = false }: Props) {
     }
   }
 
-  const formFields = getCaptureFields(page.lead_magnet_type)
+  const formFields = getCaptureFields(page.lead_magnet_type, page.form_fields)
 
   // ── Shared form JSX ──────────────────────────────────────────────────────
   const sharedForm = (
@@ -582,21 +590,27 @@ export default function LandingPublicPage({ page, preview = false }: Props) {
   )
 }
 
-function getCaptureFields(type: LandingPagePublicData["lead_magnet_type"]): CaptureField[] {
+function getCaptureFields(
+  type: LandingPagePublicData["lead_magnet_type"],
+  configuredFields: LandingPageFormField[] | null | undefined,
+): CaptureField[] {
+  const mapField = (field: LandingPageFormField): CaptureField => ({
+    key: field.key,
+    required: field.key === "name" || field.key === "email" ? true : field.required,
+    ...FIELD_CONFIG[field.key],
+  })
+
+  if (configuredFields && configuredFields.length > 0) {
+    const fields = configuredFields.map(mapField)
+    const keys = new Set(fields.map((field) => field.key))
+    if (!keys.has("name")) fields.unshift(mapField({ key: "name", required: true }))
+    if (!keys.has("email")) fields.splice(1, 0, mapField({ key: "email", required: true }))
+    return fields
+  }
+
   const base: CaptureField[] = [
-    {
-      key: "name",
-      label: "Nome",
-      placeholder: "Seu nome",
-      required: true,
-    },
-    {
-      key: "email",
-      label: "E-mail",
-      placeholder: "seu@email.com",
-      type: "email",
-      required: true,
-    },
+    mapField({ key: "name", required: true }),
+    mapField({ key: "email", required: true }),
   ]
 
   if (type === "link") {
@@ -606,28 +620,13 @@ function getCaptureFields(type: LandingPagePublicData["lead_magnet_type"]): Capt
   if (type === "pdf") {
     return [
       ...base,
-      {
-        key: "company",
-        label: "Empresa",
-        placeholder: "Nome da empresa",
-        required: true,
-      },
+      mapField({ key: "company", required: true }),
     ]
   }
 
   return [
     ...base,
-    {
-      key: "company",
-      label: "Empresa",
-      placeholder: "Nome da empresa",
-      required: true,
-    },
-    {
-      key: "role",
-      label: "Cargo",
-      placeholder: "Seu cargo",
-      required: true,
-    },
+    mapField({ key: "company", required: true }),
+    mapField({ key: "role", required: true }),
   ]
 }

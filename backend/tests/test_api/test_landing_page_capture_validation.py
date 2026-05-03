@@ -18,12 +18,12 @@ def _capture(**overrides: object) -> LandingPagePublicCaptureRequest:
 
 
 def test_link_capture_accepts_name_and_email_only() -> None:
-    _validate_capture_fields_for_type(lead_magnet_type="link", body=_capture())
+    _validate_capture_fields_for_type(lead_magnet_type="link", form_fields=None, body=_capture())
 
 
 def test_pdf_capture_requires_company() -> None:
     with pytest.raises(HTTPException) as exc_info:
-        _validate_capture_fields_for_type(lead_magnet_type="pdf", body=_capture())
+        _validate_capture_fields_for_type(lead_magnet_type="pdf", form_fields=None, body=_capture())
 
     assert exc_info.value.status_code == 422
     assert "company" in str(exc_info.value.detail)
@@ -31,7 +31,11 @@ def test_pdf_capture_requires_company() -> None:
 
 def test_email_sequence_capture_requires_company_and_role() -> None:
     with pytest.raises(HTTPException) as exc_info:
-        _validate_capture_fields_for_type(lead_magnet_type="email_sequence", body=_capture())
+        _validate_capture_fields_for_type(
+            lead_magnet_type="email_sequence",
+            form_fields=None,
+            body=_capture(),
+        )
 
     assert exc_info.value.status_code == 422
     assert "company" in str(exc_info.value.detail)
@@ -41,5 +45,33 @@ def test_email_sequence_capture_requires_company_and_role() -> None:
 def test_email_sequence_capture_accepts_required_fields() -> None:
     _validate_capture_fields_for_type(
         lead_magnet_type="email_sequence",
+        form_fields=None,
         body=_capture(company="Empresa Demo", role="Diretor"),
     )
+
+
+def test_custom_lp_form_fields_override_type_defaults() -> None:
+    _validate_capture_fields_for_type(
+        lead_magnet_type="email_sequence",
+        form_fields=[
+            {"key": "name", "required": True},
+            {"key": "email", "required": True},
+        ],
+        body=_capture(),
+    )
+
+
+def test_custom_lp_required_phone_is_validated() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        _validate_capture_fields_for_type(
+            lead_magnet_type="link",
+            form_fields=[
+                {"key": "name", "required": True},
+                {"key": "email", "required": True},
+                {"key": "phone", "required": True},
+            ],
+            body=_capture(),
+        )
+
+    assert exc_info.value.status_code == 422
+    assert "phone" in str(exc_info.value.detail)

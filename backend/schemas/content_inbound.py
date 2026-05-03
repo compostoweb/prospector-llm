@@ -14,6 +14,14 @@ from pydantic import BaseModel, Field, field_validator
 
 LeadMagnetType: TypeAlias = Literal["pdf", "calculator", "email_sequence", "link"]
 LeadMagnetStatus: TypeAlias = Literal["draft", "active", "paused", "archived"]
+LandingPageFormFieldKey: TypeAlias = Literal[
+    "name",
+    "email",
+    "company",
+    "role",
+    "phone",
+    "linkedin_profile_url",
+]
 LMPostType: TypeAlias = Literal["launch", "relaunch", "reminder"]
 LMDistributionType: TypeAlias = Literal["comment", "dm", "link_bio"]
 LMLeadOrigin: TypeAlias = Literal[
@@ -198,6 +206,11 @@ class ContentLMLeadConvertResponse(BaseModel):
     lead_id: uuid.UUID
 
 
+class LandingPageFormField(BaseModel):
+    key: LandingPageFormFieldKey
+    required: bool = False
+
+
 class ContentLandingPageUpsert(BaseModel):
     slug: str = Field(..., min_length=2, max_length=100)
     title: str = Field(..., min_length=2, max_length=255)
@@ -213,6 +226,7 @@ class ContentLandingPageUpsert(BaseModel):
     features: list[dict] | None = None
     expected_result: str | None = None
     badge_text: str | None = Field(default=None, max_length=500)
+    form_fields: list[LandingPageFormField] | None = None
     published: bool = False
 
 
@@ -236,6 +250,7 @@ class ContentLandingPageResponse(BaseModel):
     features: list[dict] | None
     expected_result: str | None
     badge_text: str | None
+    form_fields: list[LandingPageFormField] | None
     published: bool
     total_views: int
     total_submissions: int
@@ -266,6 +281,7 @@ class LandingPagePublicResponse(BaseModel):
     features: list[dict] | None
     expected_result: str | None
     badge_text: str | None
+    form_fields: list[LandingPageFormField] | None
     public_url: str
 
 

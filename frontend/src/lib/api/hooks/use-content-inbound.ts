@@ -1,7 +1,7 @@
 "use client"
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useSession } from "next-auth/react"
+import { getSession, useSession } from "next-auth/react"
 import { env } from "@/env"
 import type {
   ContentLandingPage,
@@ -550,14 +550,37 @@ export function useLeadMagnetPdfPreviewUrl() {
 
   return useMutation({
     mutationFn: async (leadMagnetId: string) => {
+      const activeSession = session ?? (await getSession())
+      if (!activeSession?.accessToken) {
+        throw new Error("Sessão expirada. Faça login novamente para ver o preview do PDF.")
+      }
+
       const response = await fetch(
         `${env.NEXT_PUBLIC_API_URL}/api/content/lead-magnets/${leadMagnetId}/pdf-preview-url`,
         {
           method: "GET",
-          headers: buildAuthHeaders(session?.accessToken),
+          headers: buildAuthHeaders(activeSession.accessToken),
         },
       )
-      return parseApiResponse<{ url: string }>(response)
+      const payload = await parseApiResponse<{ url: string }>(response)
+
+      const fileResponse = await fetch(payload.url, {
+        headers: { Accept: "application/pdf" },
+      })
+
+      if (!fileResponse.ok) {
+        throw new Error("Não foi possível carregar o PDF para preview")
+      }
+
+      const contentType = fileResponse.headers.get("content-type") ?? ""
+      if (!contentType.toLowerCase().includes("pdf")) {
+        throw new Error("O arquivo retornado para preview não é um PDF válido")
+      }
+
+      const pdfBytes = new Uint8Array(await fileResponse.arrayBuffer())
+      return {
+        pdfBytes,
+      }
     },
   })
 }
@@ -567,11 +590,15 @@ export function useLeadMagnetEmailPreview() {
 
   return useMutation({
     mutationFn: async (leadMagnetId: string) => {
+      const activeSession = session ?? (await getSession())
+      if (!activeSession?.accessToken) {
+        throw new Error("Sessão expirada. Faça login novamente para ver o preview do e-mail.")
+      }
       const response = await fetch(
         `${env.NEXT_PUBLIC_API_URL}/api/content/lead-magnets/${leadMagnetId}/email-preview`,
         {
           method: "GET",
-          headers: buildAuthHeaders(session?.accessToken),
+          headers: buildAuthHeaders(activeSession.accessToken),
         },
       )
       return parseApiResponse<{ html: string; subject: string }>(response)
